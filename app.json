@@ -5,11 +5,13 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "efoods",
+    "scheme": "ebuy",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "owner": "ghosty_xx",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ebuy.app",
+      "associatedDomains": ["applinks:ebuy.com"]
     },
     "android": {
       "adaptiveIcon": {
@@ -18,8 +20,18 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.ebuy.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            { "scheme": "https", "host": "ebuy.com" },
+            { "scheme": "ebuy" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "static",
@@ -34,15 +46,36 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
-          "dark": {
-            "backgroundColor": "#000000"
-          }
+          "dark": { "backgroundColor": "#000000" }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#f5b342"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "dcd9458a-36cb-4f88-bd22-b53a99e1332b"
+      },
+      "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBV2o8BxigxaF0nKA4Bi1YjvpqaYBWVjvk",
+      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "ebuy-ea84b.firebaseapp.com",
+      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "ebuy-ea84b",
+      "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "ebuy-ea84b.firebasestorage.app",
+      "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "309665605080",
+      "EXPO_PUBLIC_FIREBASE_APP_ID": "1:309665605080:web:ab295750343c0cc42d3ead",
+      "EXPO_PUBLIC_PROJECT_ID": "G-VM017RKW5Q",
+      "EXPO_PUBLIC_APP_DOMAIN": "ebuy.com",
+      "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
+      "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
     }
   }
 }
