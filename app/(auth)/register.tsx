@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -13,6 +13,7 @@ import {
 import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
+import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 
 export default function RegisterScreen() {
   const [displayName, setDisplayName] = useState('');
@@ -20,11 +21,27 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const { loading, signUp, error, clearError } = useAuth();
+  const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
 
-  // Clear error when user starts typing
-  useEffect(() => {
+  const handleDisplayNameChange = (value: string) => {
     if (error) clearError();
-  }, [displayName, email, password, confirmPassword]);
+    setDisplayName(value);
+  };
+
+  const handleEmailChange = (value: string) => {
+    if (error) clearError();
+    setEmail(value);
+  };
+
+  const handlePasswordChange = (value: string) => {
+    if (error) clearError();
+    setPassword(value);
+  };
+
+  const handleConfirmPasswordChange = (value: string) => {
+    if (error) clearError();
+    setConfirmPassword(value);
+  };
 
   const handleRegister = async () => {
     if (!displayName.trim() || !email.trim() || !password.trim()) {
@@ -78,14 +95,14 @@ export default function RegisterScreen() {
             style={styles.input}
             placeholder="Full name"
             value={displayName}
-            onChangeText={setDisplayName}
+            onChangeText={handleDisplayNameChange}
             editable={!loading}
           />
           <TextInput
             style={styles.input}
             placeholder="Email"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={handleEmailChange}
             autoCapitalize="none"
             keyboardType="email-address"
             editable={!loading}
@@ -94,7 +111,7 @@ export default function RegisterScreen() {
             style={styles.input}
             placeholder="Password"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={handlePasswordChange}
             secureTextEntry
             editable={!loading}
           />
@@ -102,7 +119,7 @@ export default function RegisterScreen() {
             style={styles.input}
             placeholder="Confirm password"
             value={confirmPassword}
-            onChangeText={setConfirmPassword}
+            onChangeText={handleConfirmPasswordChange}
             secureTextEntry
             editable={!loading}
           />
@@ -111,13 +128,17 @@ export default function RegisterScreen() {
             <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create account'}</Text>
           </TouchableOpacity>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Or sign up with</Text>
-            <View style={styles.dividerLine} />
-          </View>
+          {googleSignInAvailable ? (
+            <>
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>Or sign up with</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
-          <GoogleSignInButton />
+              <GoogleSignInButton />
+            </>
+          ) : null}
 
           <Link href="/(auth)/login" style={styles.link}>
             Already have an account? Sign in

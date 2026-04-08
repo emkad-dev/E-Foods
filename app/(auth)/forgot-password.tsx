@@ -1,17 +1,18 @@
-import { useState, useEffect } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Link } from 'expo-router';
+import { useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Link, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { resetPassword, error, clearError } = useAuth();
+  const router = useRouter();
 
-  // Clear error when user starts typing
-  useEffect(() => {
+  const handleEmailChange = (value: string) => {
     if (error) clearError();
-  }, [email]);
+    setEmail(value);
+  };
 
   const handleResetPassword = async () => {
     if (!email.trim()) {
@@ -25,7 +26,7 @@ export default function ForgotPasswordScreen() {
       Alert.alert('Reset email sent', 'Open the link in your inbox to choose a new password.', [
         {
           text: 'Back to login',
-          onPress: () => setEmail(''),
+          onPress: () => router.replace('/(auth)/login'),
         },
       ]);
     } catch (error: any) {
@@ -36,7 +37,11 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.title}>Reset your password</Text>
       <Text style={styles.copy}>We will email you a secure link to finish resetting your password.</Text>
 
@@ -46,7 +51,7 @@ export default function ForgotPasswordScreen() {
         style={styles.input}
         placeholder="Email"
         value={email}
-        onChangeText={setEmail}
+        onChangeText={handleEmailChange}
         autoCapitalize="none"
         keyboardType="email-address"
         editable={!submitting}
@@ -59,13 +64,17 @@ export default function ForgotPasswordScreen() {
       <Link href="/(auth)/login" style={styles.link}>
         Back to login
       </Link>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
+    backgroundColor: '#fff',
     flex: 1,
+  },
+  container: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },

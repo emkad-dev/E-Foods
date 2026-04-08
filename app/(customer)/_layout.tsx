@@ -1,11 +1,12 @@
 import { FontAwesome } from '@expo/vector-icons';
-import { Redirect, Tabs } from 'expo-router';
+import { Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
+import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 
 export default function CustomerLayout() {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
   usePushNotifications();
 
   if (loading) {
@@ -14,10 +15,6 @@ export default function CustomerLayout() {
         <ActivityIndicator size="large" color="#f5b342" />
       </View>
     );
-  }
-
-  if (!user || user.role !== 'customer') {
-    return <Redirect href="/(auth)/login" />;
   }
 
   return (
@@ -37,16 +34,18 @@ export default function CustomerLayout() {
         }}
       />
       <Tabs.Screen
-        name="search"
+        name="cart"
         options={{
-          title: 'Search',
-          tabBarIcon: ({ color }) => <FontAwesome name="search" size={24} color={color} />,
+          title: 'Cart',
+          headerShown: true,
+          headerRight: () => <AuthHeaderActions />,
+          tabBarIcon: ({ color }) => <FontAwesome name="shopping-cart" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="orders"
         options={{
-          title: 'Orders',
+          title: 'Order',
           tabBarIcon: ({ color }) => <FontAwesome name="list" size={24} color={color} />,
         }}
       />
@@ -57,8 +56,28 @@ export default function CustomerLayout() {
           tabBarIcon: ({ color }) => <FontAwesome name="user" size={24} color={color} />,
         }}
       />
-      <Tabs.Screen name="cart" options={{ href: null, headerShown: true, title: 'Cart' }} />
-      <Tabs.Screen name="promotions" options={{ href: null, headerShown: true, title: 'Promotions' }} />
+      <Tabs.Screen
+        name="search"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="promotions"
+        options={{
+          href: null,
+          headerShown: true,
+          title: 'Promotions',
+          headerRight: () => <AuthHeaderActions />,
+        }}
+      />
+      <Tabs.Screen
+        name="delivery-location"
+        options={{
+          href: null,
+          headerShown: false,
+        }}
+      />
     </Tabs>
   );
 }

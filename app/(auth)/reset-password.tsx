@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { confirmPasswordReset } from 'firebase/auth';
 import { auth } from '../../src/services/firebase/config';
@@ -59,7 +59,11 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.title}>Choose a new password</Text>
       <Text style={styles.copy}>Set a fresh password for your account and then sign back in.</Text>
 
@@ -89,13 +93,17 @@ export default function ResetPasswordScreen() {
       <Link href="/(auth)/login" style={styles.link}>
         Back to login
       </Link>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
+    backgroundColor: '#fff',
     flex: 1,
+  },
+  container: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },

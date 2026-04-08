@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, reload } from 'firebase/auth';
 import { router } from 'expo-router';
-import Constants from 'expo-constants';
+import type { UserDocument } from '../domain/entities';
+import { DEFAULT_APP_ROLE } from '../domain/roles';
 import { auth, db } from '../services/firebase/config';
+import { appEnv } from '../config/env';
 import {
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
@@ -11,21 +13,16 @@ import {
   signInWithEmail,
   signOutUser,
   signInWithGoogle,
-} from '../services/firebase/auth';
+} 
+from '../services/firebase/auth';
 import {
   getUserDocument,
   createUserDocument,
   updateUserDocument,
-} from '../services/firebase/firestore';
+} 
+from '../services/firebase/firestore';
 
-export type User = {
-  uid: string;
-  email: string;
-  role: 'customer' | 'restaurant' | 'dispatch';
-  emailVerified: boolean;
-  displayName?: string;
-  photoURL?: string;
-} | null;
+export type User = UserDocument | null;
 
 type SignUpResult = {
   verificationEmailSent: boolean;
@@ -40,7 +37,7 @@ interface AuthContextType {
   signInWithGoogle: (idToken: string) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  reloadUser: () => Promise<void>;
+  reloadUser: () => Promise<boolean>;
   sendVerificationEmail: () => Promise<void>;
   clearError: () => void;
 }
@@ -51,9 +48,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  * Get the app domain from environment variables for action code settings
  */
 const getActionCodeSettings = (path: string) => {
-  const appDomain = Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN || 'ebuy.com';
   return {
-    url: `https://${appDomain}/${path}`,
+    url: `https://${appEnv.appDomain}/${path}`,
   };
 };
 
@@ -82,23 +78,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               role: userData.role,
               displayName: userData.displayName,
               photoURL: userData.photoURL,
+              createdAt: userData.createdAt,
+              updatedAt: userData.updatedAt,
+              expoPushToken: userData.expoPushToken,
+              pushTokenUpdatedAt: userData.pushTokenUpdatedAt,
             });
           } else {
             // Create user document if it doesn't exist
             await createUserDocument(db, firebaseUser.uid, {
               email: firebaseUser.email ?? '',
               emailVerified: firebaseUser.emailVerified,
-              role: 'customer',
+              role: DEFAULT_APP_ROLE,
             });
 
             setUser({
               uid: firebaseUser.uid,
               email: firebaseUser.email ?? '',
               emailVerified: firebaseUser.emailVerified,
-              role: 'customer',
+              role: DEFAULT_APP_ROLE,
+              createdAt: new Date().toISOString(),
             });
           }
-        } else {
+        } 
+        else {
           setUser(null);
         }
       } catch (err) {
@@ -111,7 +113,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return unsubscribe;
-  }, []);
+  }, 
+  []);
 
   const signUp = async (email: string, password: string, userData?: any): Promise<SignUpResult> => {
     setLoading(true);
@@ -124,28 +127,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Create user document in Firestore
       await createUserDocument(db, firebaseUser.uid, {
         email: firebaseUser.email ?? '',
-        role: 'customer',
+        role: DEFAULT_APP_ROLE,
         emailVerified: false,
         ...userData,
       });
 
       // Send verification email
       try {
-        const verifyPath = Constants.expoConfig?.extra?.EXPO_PUBLIC_VERIFY_EMAIL_PATH || 'verify-email';
         await sendVerificationEmailWithFallback(
           firebaseUser,
-          getActionCodeSettings(verifyPath)
+          getActionCodeSettings(appEnv.verifyEmailPath)
         );
         return { verificationEmailSent: true };
-      } catch (verificationError) {
+      } 
+      catch (verificationError) {
         console.warn('Account created, but verification email could not be sent:', verificationError);
         return { verificationEmailSent: false };
       }
-    } catch (err: any) {
+    } 
+    
+    catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);
       throw new Error(formattedError);
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
   };
@@ -156,11 +162,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       await signInWithEmail(auth, email, password);
-    } catch (err: any) {
+    } 
+    catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);
       throw new Error(formattedError);
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
   };
@@ -182,21 +190,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           email: firebaseUser.email ?? '',
           displayName: firebaseUser.displayName ?? undefined,
           photoURL: firebaseUser.photoURL ?? undefined,
-          role: 'customer',
+          role: DEFAULT_APP_ROLE,
           emailVerified: firebaseUser.emailVerified,
         });
-      } else {
+      } 
+      else {
         // Existing user - update profile if needed
         await updateUserDocument(db, firebaseUser.uid, {
           displayName: firebaseUser.displayName ?? undefined,
           photoURL: firebaseUser.photoURL ?? undefined,
         });
       }
-    } catch (err: any) {
+    } 
+    catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);
       throw new Error(formattedError);
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
   };
@@ -209,11 +220,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await signOutUser(auth);
       setUser(null);
       router.replace('/(auth)/login');
-    } catch (err: any) {
+    } 
+    catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);
       throw new Error(formattedError);
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
   };
@@ -222,41 +235,49 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const resetPath = Constants.expoConfig?.extra?.EXPO_PUBLIC_RESET_PASSWORD_PATH || 'reset-password';
       await sendPasswordResetEmailWithFallback(
         auth,
         email,
-        getActionCodeSettings(resetPath)
+        getActionCodeSettings(appEnv.resetPasswordPath)
       );
-    } catch (err: any) {
+    } 
+    catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);
       throw new Error(formattedError);
     }
   };
 
-  const reloadUser = async (): Promise<void> => {
-    if (!auth.currentUser) return;
+  const reloadUser = async (): Promise<boolean> => {
+    if (!auth.currentUser) {
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
+    }
 
     try {
       await reload(auth.currentUser);
+      const emailVerified = auth.currentUser.emailVerified;
 
       setUser((currentUser) =>
         currentUser
           ? {
               ...currentUser,
-              emailVerified: auth.currentUser?.emailVerified ?? currentUser.emailVerified,
+              emailVerified,
             }
           : currentUser
       );
 
       // Update Firestore if email is now verified
-      if (auth.currentUser.emailVerified) {
+      if (emailVerified) {
         await updateUserDocument(db, auth.currentUser.uid, {
           emailVerified: true,
         }).catch((err) => console.error('Error updating email verification status:', err));
       }
-    } catch (err) {
+
+      return emailVerified;
+    } 
+    catch (err) {
       console.error('Error reloading user:', err);
       setError('Failed to reload user data');
       throw err;
@@ -265,26 +286,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const sendVerificationEmail = async (): Promise<void> => {
     if (!auth.currentUser) {
-      setError('No user is currently signed in');
-      return;
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
     }
 
     try {
-      const verifyPath = Constants.expoConfig?.extra?.EXPO_PUBLIC_VERIFY_EMAIL_PATH || 'verify-email';
       await sendVerificationEmailWithFallback(
         auth.currentUser,
-        getActionCodeSettings(verifyPath)
+        getActionCodeSettings(appEnv.verifyEmailPath)
       );
-    } catch (err: any) {
+    } 
+    catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);
       throw new Error(formattedError);
     }
   };
 
-  const clearError = (): void => {
+  const clearError = useCallback((): void => {
     setError(null);
-  };
+  }, []);
 
   return (
     <AuthContext.Provider

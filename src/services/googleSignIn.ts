@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { appEnv } from '../config/env';
 
 const PLACEHOLDER_WEB_CLIENT_ID = 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com';
 
@@ -17,13 +18,21 @@ type GoogleSigninModule = {
 };
 
 let cachedModule: GoogleSigninModule | null | undefined;
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
 const loadGoogleSigninModule = (): GoogleSigninModule | null => {
   if (cachedModule !== undefined) {
     return cachedModule;
   }
 
+  if (isExpoGo) {
+    cachedModule = null;
+    return cachedModule;
+  }
+
   try {
+    // This native module is only available in Android/iOS builds.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     cachedModule = require('@react-native-google-signin/google-signin')
       .GoogleSignin as GoogleSigninModule;
   } catch {
@@ -34,7 +43,7 @@ const loadGoogleSigninModule = (): GoogleSigninModule | null => {
 };
 
 const getConfiguredWebClientId = (): string | null => {
-  const rawValue = Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+  const rawValue = appEnv.googleWebClientId;
 
   if (typeof rawValue !== 'string') {
     return null;
@@ -52,6 +61,10 @@ const getConfiguredWebClientId = (): string | null => {
 export const getGoogleSignInUnavailableMessage = (): string | null => {
   if (Platform.OS === 'web') {
     return 'This Google Sign-In setup only supports native Android and iOS builds.';
+  }
+
+  if (isExpoGo) {
+    return 'Google Sign-In is not available in Expo Go. Use a development build or rebuild the native app with "npx expo run:android" or "npx expo run:ios".';
   }
 
   if (!loadGoogleSigninModule()) {

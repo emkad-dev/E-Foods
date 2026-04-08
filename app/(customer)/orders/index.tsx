@@ -3,13 +3,18 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View }
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { useAuth } from '../../../src/contexts/AuthContext';
+import { formatOrderStatusLabel, getOrderStatusColor } from '../../../src/domain/orders';
 import { db } from '../../../src/services/firebase/config';
 
 type Order = {
   id: string;
   restaurantName: string;
   total: number;
+  pricing?: {
+    total: number;
+  };
   status: string;
   createdAt: any;
 };
@@ -21,7 +26,11 @@ export default function OrdersList() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
 
     const ordersQuery = query(
       collection(db, 'orders'),
@@ -45,6 +54,17 @@ export default function OrdersList() {
     return unsubscribe;
   }, [user]);
 
+  if (!user) {
+    return (
+      <View style={styles.promptContainer}>
+        <AuthPromptCard
+          title="Sign in to track orders"
+          message="Your current and past orders will show up here once you sign in."
+        />
+      </View>
+    );
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -61,21 +81,6 @@ export default function OrdersList() {
     );
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return '#f5b342';
-      case 'preparing':
-        return '#5D3FD3';
-      case 'ready':
-        return '#00C851';
-      case 'delivered':
-        return '#4CAF50';
-      default:
-        return '#999';
-    }
-  };
-
   return (
     <FlatList
       data={orders}
@@ -85,9 +90,11 @@ export default function OrdersList() {
           <TouchableOpacity style={styles.orderCard} onPress={() => router.push(`/orders/${item.id}`)}>
             <View style={styles.orderHeader}>
               <Text style={styles.restaurantName}>{item.restaurantName}</Text>
-              <Text style={[styles.status, { color: getStatusColor(item.status) }]}>{item.status.toUpperCase()}</Text>
+              <Text style={[styles.status, { color: getOrderStatusColor(item.status) }]}>
+                {formatOrderStatusLabel(item.status).toUpperCase()}
+              </Text>
             </View>
-            <Text style={styles.total}>${item.total.toFixed(2)}</Text>
+            <Text style={styles.total}>${(item.pricing?.total ?? item.total).toFixed(2)}</Text>
             <Text style={styles.date}>
               {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'Updating...'}
             </Text>
@@ -104,6 +111,7 @@ const styles = StyleSheet.create({
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { fontSize: 18, color: '#666' },
   list: { padding: 16 },
+  promptContainer: { flex: 1, justifyContent: 'center', padding: 20 },
   orderCard: { backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 12, elevation: 2 },
   orderHeader: { flexDirection: 'row', justifyContent: 'space-between' },
   restaurantName: { fontSize: 16, fontWeight: 'bold' },

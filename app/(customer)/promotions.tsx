@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const promotions = [
   { title: 'Free delivery', copy: 'Available on selected restaurants this week.' },
@@ -8,7 +8,7 @@ const promotions = [
 
 export default function PromotionsScreen() {
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Promotions</Text>
       {promotions.map((promotion) => (
         <View key={promotion.title} style={styles.card}>
@@ -16,14 +16,18 @@ export default function PromotionsScreen() {
           <Text style={styles.cardCopy}>{promotion.copy}</Text>
         </View>
       ))}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     backgroundColor: '#fff',
     flex: 1,
+  },
+  container: {
+    backgroundColor: '#fff',
+    flexGrow: 1,
     padding: 20,
   },
   title: {

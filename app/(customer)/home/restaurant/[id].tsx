@@ -3,8 +3,10 @@ import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableO
 import Animated, { FadeIn, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
+import { useAuth } from '../../../../src/contexts/AuthContext';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { db } from '../../../../src/services/firebase/config';
+import { promptForAuth } from '../../../../src/utils/authPrompt';
 
 type MenuItem = {
   id: string;
@@ -24,6 +26,7 @@ export default function RestaurantDetail() {
   const [restaurant, setRestaurant] = useState<any>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
   const { addItem, items, restaurantId: cartRestaurantId } = useCart();
   const router = useRouter();
 
@@ -54,6 +57,14 @@ export default function RestaurantDetail() {
   }, [id]);
 
   const handleAddToCart = (item: MenuItem) => {
+    if (!user) {
+      promptForAuth({
+        title: 'Sign in to add items',
+        message: 'Create an account or sign in before adding meals to your cart.',
+      });
+      return;
+    }
+
     if (cartRestaurantId && cartRestaurantId !== id) {
       Alert.alert(
         'Replace cart?',

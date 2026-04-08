@@ -1,6 +1,8 @@
 // src/hooks/useCustomerOrder.ts
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
+import type { AddressRecord, OrderPriceBreakdown, OrderPaymentSummary } from '../domain/entities';
+import type { FulfillmentType } from '../domain/orders';
 import { db } from '../services/firebase/config';
 
 export type Order = {
@@ -10,25 +12,43 @@ export type Order = {
   customerId: string;
   items: any[];
   total: number;
-  status: 'pending' | 'preparing' | 'ready' | 'delivered';
+  status: string;
   createdAt: any;
-  deliveryAddress: string;
-  // ...
+  deliveryAddress?: string | null;
+  deliveryLocation?: AddressRecord | null;
+  fulfillmentType?: FulfillmentType;
+  pricing?: OrderPriceBreakdown;
+  payment?: OrderPaymentSummary;
 };
 
-export const useCustomerOrder = (orderId: string) => {
+export const useCustomerOrder = (orderId: string, customerId: string | null) => {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!orderId) return;
+    if (!orderId || !customerId) {
+      setOrder(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
 
     const unsubscribe = onSnapshot(
       doc(db, 'orders', orderId),
       (docSnapshot) => {
         if (docSnapshot.exists()) {
-          setOrder({ id: docSnapshot.id, ...docSnapshot.data() } as Order);
+          const data = docSnapshot.data() as Order;
+
+          if (data.customerId !== customerId) {
+            setOrder(null);
+            setError('Order not found');
+          } else {
+            setOrder({ ...data, id: docSnapshot.id });
+            setError(null);
+          }
         } else {
           setError('Order not found');
         }
@@ -41,7 +61,7 @@ export const useCustomerOrder = (orderId: string) => {
     );
 
     return unsubscribe;
-  }, [orderId]);
+  }, [customerId, orderId]);
 
   return { order, loading, error };
 };

@@ -1,23 +1,27 @@
 import { Link } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 
 export default function NotFoundScreen() {
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.title}>This screen does not exist.</Text>
       <Text style={styles.copy}>Use the link below to get back to the app.</Text>
       <Link href="/(customer)/home" style={styles.link}>
         Go to home
       </Link>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: '#fff',
+    flex: 1,
+  },
   container: {
     alignItems: 'center',
     backgroundColor: '#fff',
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },

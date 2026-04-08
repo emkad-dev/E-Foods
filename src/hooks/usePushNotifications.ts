@@ -1,21 +1,15 @@
+import Constants from 'expo-constants';
 import { useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
 import { doc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
+import { appEnv } from '../config/env';
 import { db } from '../services/firebase/config';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
 export const usePushNotifications = () => {
   const { user } = useAuth();
@@ -24,6 +18,19 @@ export const usePushNotifications = () => {
   const registrationAttempted = useRef(false);
 
   useEffect(() => {
+    if (isExpoGo) {
+      return;
+    }
+
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+
     const registerForPushNotifications = async () => {
       if (!user || registrationAttempted.current) return;
       registrationAttempted.current = true;
@@ -47,7 +54,7 @@ export const usePushNotifications = () => {
           return;
         }
 
-        const projectId = Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID;
+        const projectId = appEnv.projectId;
         if (!projectId) {
           console.error('Project ID not found in app config');
           return;

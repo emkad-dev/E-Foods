@@ -39,16 +39,15 @@ function RootLayoutNav() {
   useEffect(() => {
     if (loading) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
     const inCustomerGroup = segments[0] === '(customer)';
     const currentScreen = segments[1];
 
-    if (!user && !inAuthGroup) {
-      router.replace('/(auth)/login');
+    if (!user) {
+      if (currentScreen === 'verify-email') {
+        router.replace('/(auth)/login');
+      }
       return;
     }
-
-    if (!user) return;
 
     if (!user.emailVerified && currentScreen !== 'verify-email') {
       router.replace('/(auth)/verify-email');
@@ -72,7 +71,6 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  // Configure Google Sign-In at app startup
   useEffect(() => {
     const result = configureGoogleSignIn();
 

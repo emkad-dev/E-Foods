@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 
@@ -11,8 +11,8 @@ export default function VerifyEmailScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    if (error) clearError();
-  }, []);
+    clearError();
+  }, [clearError]);
 
   useEffect(() => {
     if (user?.emailVerified) {
@@ -23,12 +23,13 @@ export default function VerifyEmailScreen() {
   const handleRefreshStatus = async () => {
     setChecking(true);
     try {
-      await reloadUser();
-      if (user?.emailVerified) {
-        Alert.alert('Success', 'Your email has been verified!');
-      } else {
-        Alert.alert('Not verified yet', 'Please complete the verification link sent to your email.');
-      }
+      const emailVerified = await reloadUser();
+      Alert.alert(
+        emailVerified ? 'Success' : 'Not verified yet',
+        emailVerified
+          ? 'Your email has been verified!'
+          : 'Please complete the verification link sent to your email.'
+      );
     } catch (error: any) {
       Alert.alert('Unable to refresh status', error.message);
     } finally {
@@ -60,7 +61,7 @@ export default function VerifyEmailScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Verify your email</Text>
       <Text style={styles.copy}>
         We sent a verification link to {user?.email}. Confirm it, then come back here to continue.
@@ -79,13 +80,17 @@ export default function VerifyEmailScreen() {
       <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={signingOut}>
         <Text style={styles.signOutText}>{signingOut ? 'Signing out...' : 'Sign out'}</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
+    backgroundColor: '#fff',
     flex: 1,
+  },
+  container: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },

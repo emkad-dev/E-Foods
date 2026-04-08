@@ -1,22 +1,44 @@
 // src/services/firebase/config.ts
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FirebaseAuth from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import { firebaseEnv } from '../../config/env';
 
 const firebaseConfig = {
-  apiKey: Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_API_KEY,
-  authDomain: Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_APP_ID,
+  apiKey: firebaseEnv.apiKey,
+  authDomain: firebaseEnv.authDomain,
+  projectId: firebaseEnv.projectId,
+  storageBucket: firebaseEnv.storageBucket,
+  messagingSenderId: firebaseEnv.messagingSenderId,
+  appId: firebaseEnv.appId,
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+const { getAuth, initializeAuth } = FirebaseAuth;
+const getReactNativePersistence = (
+  FirebaseAuth as typeof FirebaseAuth & {
+    getReactNativePersistence?: (storage: typeof AsyncStorage) => unknown;
+  }
+).getReactNativePersistence;
 
-export const auth = getAuth(app);
+const createAuth = () => {
+  if (Platform.OS === 'web' || !getReactNativePersistence) {
+    return getAuth(app);
+  }
+
+  try {
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage) as never,
+    });
+  } catch {
+    return getAuth(app);
+  }
+};
+
+export const auth = createAuth();
 export const db = getFirestore(app);
 export const storage = getStorage(app);
