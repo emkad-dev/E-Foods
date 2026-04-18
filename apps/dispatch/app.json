@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "E-Fooders",
+    "slug": "ebuy-dispatch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "../customer/assets/images/icon.png",
+    "scheme": "ebuy-dispatch",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ebuy.dispatch"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF3D4",
+        "foregroundImage": "../customer/assets/images/android-icon-foreground.png",
+        "backgroundImage": "../customer/assets/images/android-icon-background.png",
+        "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
+      },
+      "package": "com.ebuy.dispatch"
+    },
+    "web": {
+      "favicon": "../customer/assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "../customer/assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "autolinkingModuleResolution": true
+    }
+  }
+}

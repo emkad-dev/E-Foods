@@ -1,50 +1,110 @@
-# Welcome to your Expo app 👋
+# EBuy Platform
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This repository now uses a multi-app Expo layout so the customer, partner, and dispatch products can live in one repo while running as separate apps.
 
-## Get started
+## App layout
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```text
+apps/
+  customer/   Current customer ordering app
+  partner/    Restaurant partner shell
+  dispatch/   Rider and dispatch shell
+packages/
+  ...         Shared packages can be added here later
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Local development
 
-## Learn more
+Run each app on a different Metro port from the repo root:
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+npm run dev:customer
+npm run dev:partner
+npm run dev:dispatch
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Default ports:
 
-## Join the community
+- Dispatch: `8081`
+- Partner: `8082`
+- Customer: `8084`
 
-Join our community of developers creating universal apps.
+These defaults are intentional so the installed dev builds do not fight over the same Metro port.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Current state
+
+- `apps/customer` contains the migrated customer app.
+- `apps/partner` is a minimal shell ready for partner dashboard work.
+- `apps/dispatch` is a minimal shell ready for dispatch and rider flow work.
+- The old top-level app folders are still present as a safety fallback while the migration settles.
+
+## Next step after this migration
+
+Refresh the workspace install when you're ready:
+
+```bash
+npm install
+```
+
+That will regenerate the lockfile for the new monorepo shape and make the workspace metadata fully up to date.
+
+## Firestore Rules Deploy Flow
+
+The repo already points Firebase CLI at the Firestore rules file in [`firebase.json`](/c:/Users/emkad/EBuy/E-Foods/firebase.json) and the rules live in [`firestore.rules`](/c:/Users/emkad/EBuy/E-Foods/firestore.rules).
+
+### One-time setup
+
+1. Install Firebase CLI if you do not already have it:
+
+```bash
+npm install -g firebase-tools
+```
+
+2. Sign in:
+
+```bash
+firebase login
+```
+
+3. Connect this repo to your Firebase project:
+
+Option A: copy [` .firebaserc.example`](/c:/Users/emkad/EBuy/E-Foods/.firebaserc.example) to `.firebaserc` and replace `your-firebase-project-id` with the real project id.
+
+Option B: skip `.firebaserc` and pass the project each time with `FIREBASE_PROJECT_ID`.
+
+### Deploy commands
+
+If `.firebaserc` exists:
+
+```bash
+npm run firebase:rules:deploy
+```
+
+If you prefer using an environment variable on Windows `cmd`:
+
+```cmd
+set FIREBASE_PROJECT_ID=your-firebase-project-id&& npm run firebase:rules:deploy:project
+```
+
+If you want extra CLI detail while checking the deploy:
+
+```bash
+npm run firebase:rules:dryrun
+```
+
+### Recommended exact flow
+
+```bash
+firebase login
+copy .firebaserc.example .firebaserc
+```
+
+Then edit `.firebaserc` and run:
+
+```bash
+npm run firebase:rules:deploy
+```
+
+### Important note
+
+Deploying these rules makes the Firestore security rules live. It does not publish the mobile apps to the Play Store or App Store.

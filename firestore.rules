@@ -1,0 +1,96 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserExists() {
+      return signedIn() && currentUserDoc().exists();
+    }
+
+    function currentUserRole() {
+      return currentUserDoc().data.role;
+    }
+
+    function hasRole(role) {
+      return currentUserExists() && currentUserRole() == role;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function restaurantDoc(restaurantId) {
+      return get(/databases/$(database)/documents/restaurants/$(restaurantId));
+    }
+
+    function ownsRestaurant(restaurantId) {
+      return hasRole('restaurant') &&
+        restaurantDoc(restaurantId).exists() &&
+        restaurantDoc(restaurantId).data.ownerId == request.auth.uid;
+    }
+
+    function keepsRoleStable() {
+      return !('role' in resource.data) || request.resource.data.role == resource.data.role;
+    }
+
+    function keepsOrderOwnershipStable() {
+      return request.resource.data.customerId == resource.data.customerId &&
+        request.resource.data.restaurantId == resource.data.restaurantId;
+    }
+
+    // Note:
+    // These rules cover identity, role, and document ownership.
+    // To hard-enforce one-device sessions at the database layer, move sensitive writes
+    // through Cloud Functions or include a request-bound session proof that rules can verify.
+
+    match /users/{userId} {
+      allow create: if isOwner(userId) && request.resource.data.uid == userId;
+      allow read: if isOwner(userId);
+      allow update: if isOwner(userId) &&
+        request.resource.data.uid == userId &&
+        keepsRoleStable();
+      allow delete: if false;
+    }
+
+    match /restaurants/{restaurantId} {
+      allow read: if true;
+      allow create: if hasRole('restaurant') &&
+        request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if ownsRestaurant(restaurantId);
+    }
+
+    match /orders/{orderId} {
+      allow create: if hasRole('customer') &&
+        request.resource.data.customerId == request.auth.uid;
+
+      allow read: if signedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        ownsRestaurant(resource.data.restaurantId) ||
+        hasRole('dispatch')
+      );
+
+      allow update: if (
+        hasRole('dispatch') ||
+        ownsRestaurant(resource.data.restaurantId)
+      ) && keepsOrderOwnershipStable();
+
+      allow delete: if false;
+    }
+
+    match /dispatchProfiles/{profileId} {
+      allow read: if hasRole('dispatch');
+      allow create, update, delete: if hasRole('dispatch');
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
