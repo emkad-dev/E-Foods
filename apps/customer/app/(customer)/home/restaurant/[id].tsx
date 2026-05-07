@@ -7,6 +7,10 @@ import { useAuth } from '../../../../src/contexts/AuthContext';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { db } from '../../../../src/services/firebase/config';
 import { promptForAuth } from '../../../../src/utils/authPrompt';
+import {
+  type DiscoveryRestaurant,
+  isRestaurantVisibleToCustomers,
+} from '../../../../src/utils/restaurantAvailability';
 
 type MenuItem = {
   id: string;
@@ -58,7 +62,16 @@ export default function RestaurantDetail() {
           items: (category.items ?? []).filter((item) => item.isAvailable !== false),
         }));
 
-        setRestaurant({ id: docSnap.id, ...data });
+        const nextRestaurant = { id: docSnap.id, ...data } as DiscoveryRestaurant;
+
+        if (!isRestaurantVisibleToCustomers(nextRestaurant)) {
+          setRestaurant(null);
+          setMenu([]);
+          setLoading(false);
+          return;
+        }
+
+        setRestaurant(nextRestaurant);
         setMenu(nextMenu.filter((category) => category.items.length > 0));
         setLoading(false);
       },

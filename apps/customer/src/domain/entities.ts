@@ -26,6 +26,10 @@ export interface UserDocument extends DocumentData {
   pushTokenUpdatedAt?: string;
   activeSessionId?: string | null;
   activeSessionUpdatedAt?: string | null;
+  accountDisabled?: boolean;
+  disabledAt?: string | null;
+  disabledByUid?: string | null;
+  lastPrivilegedRole?: AppRole | null;
   createdAt: string;
   updatedAt?: string;
 }
@@ -87,6 +91,12 @@ export interface OrderPaymentSummary extends DocumentData {
   method: PaymentMethod;
   status: PaymentStatus;
   reference?: string | null;
+  processor?: string | null;
+  capturedAmount?: number;
+  refundAmount?: number;
+  lastEvent?: string | null;
+  paidAt?: unknown | null;
+  refundedAt?: unknown | null;
 }
 
 export interface OrderAssignmentSummary extends DocumentData {
@@ -121,5 +131,9 @@ export interface OrderDocument extends DocumentData {
   pricing: OrderPriceBreakdown;
   payment: OrderPaymentSummary;
   assignment?: OrderAssignmentSummary | null;
+  cancellation?: {
+    actor?: string | null;
+    refundRate?: number | null;
+  } | null;
   timeline?: OrderTimeline;
 }

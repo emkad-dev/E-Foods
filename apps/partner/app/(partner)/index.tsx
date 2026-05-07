@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
     padding: 22,
   },
   eyebrow: {
-    color: partnerTheme.textSoft,
+    color: partnerTheme.heroSoft,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 1,
@@ -139,13 +139,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: partnerTheme.text,
+    color: '#fffdf8',
     fontSize: 28,
     fontWeight: '800',
     marginBottom: 12,
   },
   copy: {
-    color: partnerTheme.textMuted,
+    color: '#e7dbc7',
     fontSize: 16,
     lineHeight: 24,
   },
@@ -156,7 +156,9 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.border,
     borderRadius: 20,
+    borderWidth: 1,
     padding: 16,
     width: '31.5%',
   },
@@ -186,7 +188,9 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.border,
     borderRadius: 20,
+    borderWidth: 1,
     marginTop: 12,
     padding: 18,
   },
@@ -203,7 +207,9 @@ const styles = StyleSheet.create({
   },
   orderCard: {
     backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.border,
     borderRadius: 20,
+    borderWidth: 1,
     marginTop: 12,
     padding: 18,
   },

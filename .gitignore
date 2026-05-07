@@ -5,6 +5,7 @@ node_modules/
 
 # Expo
 .expo/
+.expo-temp/
 dist/
 web-build/
 expo-env.d.ts
@@ -32,6 +33,9 @@ yarn-error.*
 
 # local build caches
 .gradle-user/
+run-logs/
+android-build.log
+android-run-*.log
 
 # macOS
 .DS_Store
@@ -40,6 +44,8 @@ yarn-error.*
 # local env files
 .env
 .env*.local
+functions/.env
+apps/*/.env
 
 # typescript
 *.tsbuildinfo

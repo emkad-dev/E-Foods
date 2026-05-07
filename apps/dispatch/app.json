@@ -38,6 +38,14 @@
     "experiments": {
       "typedRoutes": true,
       "autolinkingModuleResolution": true
+    },
+    "extra": {
+      "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBV2o8BxigxaF0nKA4Bi1YjvpqaYBWVjvk",
+      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "ebuy-ea84b.firebaseapp.com",
+      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "ebuy-ea84b",
+      "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "ebuy-ea84b.firebasestorage.app",
+      "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "309665605080",
+      "EXPO_PUBLIC_FIREBASE_APP_ID": "1:309665605080:web:ab295750343c0cc42d3ead"
     }
   }
 }

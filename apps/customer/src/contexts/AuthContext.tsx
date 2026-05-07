@@ -2,25 +2,30 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { onAuthStateChanged, reload } from 'firebase/auth';
 import { router } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import type { UserDocument } from '../domain/entities';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
-import { auth, db } from '../services/firebase/config';
+import { auth, db, functions } from '../services/firebase/config';
 import { appEnv } from '../config/env';
 import {
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
   formatAuthError,
   createUserWithEmail,
+  getUserRoleClaim,
   signInWithEmail,
   signOutUser,
   signInWithGoogle,
 } 
 from '../services/firebase/auth';
 import {
+  clearStoredUserProfile,
   clearStoredSessionId,
   createSessionId,
+  getStoredUserProfile,
   getStoredSessionId,
   storeSessionId,
+  storeUserProfile,
 } from '../services/firebase/session';
 import {
   getUserDocument,
@@ -28,6 +33,7 @@ import {
   updateUserDocument,
 } 
 from '../services/firebase/firestore';
+import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
 
 export type User = UserDocument | null;
 
@@ -44,6 +50,7 @@ interface AuthContextType {
   signInWithGoogle: (idToken: string) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
   reloadUser: () => Promise<boolean>;
   sendVerificationEmail: () => Promise<void>;
   clearError: () => void;
@@ -51,7 +58,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
+const CUSTOMER_ACCESS_ERROR = 'This account does not have customer access.';
 const SESSION_CONFLICT_ERROR = 'This account was signed in on another device. Sign in again here if you want to continue on this device.';
+const AUTH_SYNC_BACKEND_NOT_READY_ERROR =
+  'Customer auth sync is not available yet. Deploy the latest Firebase Functions and try again.';
 
 const isFirestoreOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -66,9 +76,26 @@ const isFirestoreOfflineError = (error: unknown) => {
   );
 };
 
+const isMissingAuthSyncCallableError = (error: unknown) => {
+  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
+  const errorMessage =
+    typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
+
+  return (
+    errorCode === 'not-found' ||
+    errorCode === 'functions/not-found' ||
+    errorMessage.includes('syncuserclaims') ||
+    errorMessage.includes('function') && errorMessage.includes('not found')
+  );
+};
+
 const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
   if (isFirestoreOfflineError(error)) {
     return NO_INTERNET_ERROR;
+  }
+
+  if (isMissingAuthSyncCallableError(error)) {
+    return AUTH_SYNC_BACKEND_NOT_READY_ERROR;
   }
 
   if (typeof error === 'object' && error !== null && 'code' in error) {
@@ -96,6 +123,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const clearLocalUserState = useCallback(async () => {
+    await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
+  }, []);
+
+  const syncCustomerRoleClaim = useCallback(async () => {
+    const callable = httpsCallable(functions, 'syncUserClaims');
+    await callable({});
+
+    if (!auth.currentUser) {
+      return null;
+    }
+
+    return getUserRoleClaim(auth.currentUser, true);
+  }, []);
+
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
 
@@ -109,18 +151,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const releaseSingleDeviceSession = useCallback(async (userId?: string | null) => {
     const localSessionId = await getStoredSessionId();
 
-    if (userId && localSessionId) {
-      const userDocument = await getUserDocument(db, userId);
+    try {
+      if (userId && localSessionId) {
+        const userDocument = await getUserDocument(db, userId);
 
-      if (userDocument?.activeSessionId === localSessionId) {
-        await updateUserDocument(db, userId, {
-          activeSessionId: null,
-          activeSessionUpdatedAt: new Date().toISOString(),
-        });
+        if (userDocument?.activeSessionId === localSessionId) {
+          await updateUserDocument(db, userId, {
+            activeSessionId: null,
+            activeSessionUpdatedAt: new Date().toISOString(),
+          });
+        }
       }
+    } catch (releaseError) {
+      if (!isFirestoreOfflineError(releaseError)) {
+        console.warn('Unable to release customer session in Firestore:', releaseError);
+      }
+    } finally {
+      await clearStoredSessionId();
     }
-
-    await clearStoredSessionId();
   }, []);
 
   const syncSingleDeviceSession = useCallback(async (userDocument: UserDocument) => {
@@ -128,7 +176,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const remoteSessionId = userDocument.activeSessionId ?? null;
 
     if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
-      await clearStoredSessionId();
+      await clearLocalUserState();
       await signOutUser(auth);
       setUser(null);
       setError(SESSION_CONFLICT_ERROR);
@@ -140,7 +188,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     return true;
-  }, []);
+  }, [clearLocalUserState]);
 
   /**
    * Listen for authentication state changes and sync with Firestore
@@ -150,56 +198,91 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(true);
       try {
         if (firebaseUser) {
-          // Get user data from Firestore
-          const userData = await getUserDocument(db, firebaseUser.uid);
+          let userData = await getUserDocument(db, firebaseUser.uid);
 
-          if (userData) {
-            const nextUser: UserDocument = {
-              ...userData,
-              uid: firebaseUser.uid,
-              email: firebaseUser.email ?? '',
-              emailVerified: firebaseUser.emailVerified,
-            };
-
-            const sessionIsValid = await syncSingleDeviceSession(nextUser);
-
-            if (!sessionIsValid) {
-              return;
-            }
-
-            // User document exists, use it
-            setUser(nextUser);
-          } else {
-            // Create user document if it doesn't exist
+          if (!userData) {
             await createUserDocument(db, firebaseUser.uid, {
               email: firebaseUser.email ?? '',
               emailVerified: firebaseUser.emailVerified,
               role: DEFAULT_APP_ROLE,
             });
-
-            setUser({
+            userData = {
               uid: firebaseUser.uid,
               email: firebaseUser.email ?? '',
               emailVerified: firebaseUser.emailVerified,
               role: DEFAULT_APP_ROLE,
               createdAt: new Date().toISOString(),
-            });
+            };
           }
+
+          let claimRole = await getUserRoleClaim(firebaseUser);
+
+          if (!claimRole) {
+            claimRole = await syncCustomerRoleClaim();
+          }
+
+          if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+            await clearLocalUserState();
+            await signOutUser(auth);
+            setUser(null);
+            setError(CUSTOMER_ACCESS_ERROR);
+            return;
+          }
+
+          const nextUser: UserDocument = {
+            ...userData,
+            uid: firebaseUser.uid,
+            email: firebaseUser.email ?? userData.email ?? '',
+            emailVerified: firebaseUser.emailVerified,
+            role: DEFAULT_APP_ROLE,
+          };
+
+          const sessionIsValid = await syncSingleDeviceSession(nextUser);
+
+          if (!sessionIsValid) {
+            return;
+          }
+
+          setUser(nextUser);
+          await storeUserProfile(nextUser);
         } 
         else {
           setUser(null);
+          await clearLocalUserState();
         }
       } catch (err) {
+        if (firebaseUser && isFirestoreOfflineError(err)) {
+          const cachedUser = await getStoredUserProfile<UserDocument>();
+
+          if (cachedUser?.uid === firebaseUser.uid) {
+            const fallbackUser: UserDocument = {
+              ...cachedUser,
+              uid: firebaseUser.uid,
+              email: firebaseUser.email ?? cachedUser.email,
+              emailVerified: firebaseUser.emailVerified,
+            };
+
+            const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
+
+            if (sessionIsValid) {
+              setUser(fallbackUser);
+              setError(NO_INTERNET_ERROR);
+              return;
+            }
+          }
+        }
+
         console.error('Error syncing user authentication state:', err);
         setError(getCustomerAuthErrorMessage(err, 'Failed to load user data'));
         setUser(null);
+        await clearStoredUserProfile();
       } finally {
         setLoading(false);
       }
     });
 
     return unsubscribe;
-  }, [syncSingleDeviceSession]);
+  }, [clearLocalUserState, syncCustomerRoleClaim, syncSingleDeviceSession]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -210,37 +293,64 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       doc(db, 'users', user.uid),
       async (userSnapshot) => {
         if (!userSnapshot.exists()) {
-          await clearStoredSessionId();
+          await clearLocalUserState();
           await signOutUser(auth);
           setUser(null);
           return;
         }
 
         const nextUser = userSnapshot.data() as UserDocument;
+        const currentFirebaseUser = auth.currentUser;
+        if (!currentFirebaseUser) {
+          await clearLocalUserState();
+          setUser(null);
+          return;
+        }
+
+        const claimRole = await getUserRoleClaim(currentFirebaseUser);
+        if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+          await clearLocalUserState();
+          await signOutUser(auth);
+          setUser(null);
+          setError(CUSTOMER_ACCESS_ERROR);
+          return;
+        }
+
         const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
         if (!sessionIsValid) {
           return;
         }
 
-        setUser((currentUser) =>
-          currentUser
-            ? {
-                ...currentUser,
-                ...nextUser,
-                email: auth.currentUser?.email ?? nextUser.email,
-                emailVerified: auth.currentUser?.emailVerified ?? nextUser.emailVerified,
-              }
-            : currentUser
-        );
+        setUser((currentUser) => {
+          if (!currentUser) {
+            return currentUser;
+          }
+
+          const resolvedUser = {
+            ...currentUser,
+            ...nextUser,
+            email: auth.currentUser?.email ?? nextUser.email,
+            emailVerified: auth.currentUser?.emailVerified ?? nextUser.emailVerified,
+            role: DEFAULT_APP_ROLE,
+          };
+
+          void storeUserProfile(resolvedUser);
+          return resolvedUser;
+        });
       },
       (snapshotError) => {
+        if (isFirestoreOfflineError(snapshotError)) {
+          setError(NO_INTERNET_ERROR);
+          return;
+        }
+
         console.error('Error watching customer session:', snapshotError);
       }
     );
 
     return unsubscribe;
-  }, [syncSingleDeviceSession, user?.uid]);
+  }, [clearLocalUserState, syncSingleDeviceSession, user?.uid]);
 
   const signUp = async (email: string, password: string, userData?: any): Promise<SignUpResult> => {
     setLoading(true);
@@ -257,6 +367,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         emailVerified: false,
         ...userData,
       });
+
+      await syncCustomerRoleClaim();
 
       await startSingleDeviceSession(firebaseUser.uid);
 
@@ -290,6 +402,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const firebaseUser = await signInWithEmail(auth, email, password);
+      let claimRole = await getUserRoleClaim(firebaseUser);
+
+      if (!claimRole) {
+        claimRole = await syncCustomerRoleClaim();
+      }
+
+      if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+        await clearLocalUserState();
+        await signOutUser(auth);
+        setUser(null);
+        setError(CUSTOMER_ACCESS_ERROR);
+        throw new Error(CUSTOMER_ACCESS_ERROR);
+      }
+
       await startSingleDeviceSession(firebaseUser.uid);
     } 
     catch (err: any) {
@@ -322,8 +448,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               role: DEFAULT_APP_ROLE,
               emailVerified: firebaseUser.emailVerified,
             });
+        await syncCustomerRoleClaim();
       } 
       else {
+        let claimRole = await getUserRoleClaim(firebaseUser);
+
+        if (!claimRole) {
+          claimRole = await syncCustomerRoleClaim();
+        }
+
+        if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+          await clearLocalUserState();
+          await signOutUser(auth);
+          setUser(null);
+          setError(CUSTOMER_ACCESS_ERROR);
+          throw new Error(CUSTOMER_ACCESS_ERROR);
+        }
+
         // Existing user - update profile if needed
         await updateUserDocument(db, firebaseUser.uid, {
           displayName: firebaseUser.displayName ?? undefined,
@@ -350,6 +491,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       await releaseSingleDeviceSession(auth.currentUser?.uid);
       await signOutUser(auth);
+      await clearLocalUserState();
       setUser(null);
       router.replace('/(auth)/login');
     } 
@@ -359,6 +501,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       throw new Error(formattedError);
     } 
     finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteAccount = async (): Promise<void> => {
+    if (!auth.currentUser) {
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await deleteOwnCustomerAccount();
+      await signOutUser(auth).catch(() => undefined);
+      await clearLocalUserState();
+      setUser(null);
+      router.replace('/(auth)/login');
+    } catch (err: any) {
+      const formattedError = getCustomerAuthErrorMessage(err, 'Unable to delete this account');
+      setError(formattedError);
+      throw new Error(formattedError);
+    } finally {
       setLoading(false);
     }
   };
@@ -451,6 +618,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         signInWithGoogle: signInWithGoogleAuth,
         signOut,
         resetPassword,
+        deleteAccount,
         reloadUser,
         sendVerificationEmail,
         clearError,

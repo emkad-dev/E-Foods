@@ -42,7 +42,7 @@ export default function DispatchLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: 'Rider',
         }}
       />
       <Tabs.Screen

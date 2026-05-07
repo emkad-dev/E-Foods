@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "EBuy Admin",
+    "slug": "ebuy-admin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "../customer/assets/images/icon.png",
+    "scheme": "ebuy-admin",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ebuy.admin"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "../customer/assets/images/android-icon-foreground.png",
+        "backgroundImage": "../customer/assets/images/android-icon-background.png",
+        "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
+      },
+      "package": "com.ebuy.admin"
+    },
+    "web": {
+      "favicon": "../customer/assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "../customer/assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "autolinkingModuleResolution": true
+    },
+    "extra": {
+      "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBV2o8BxigxaF0nKA4Bi1YjvpqaYBWVjvk",
+      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "ebuy-ea84b.firebaseapp.com",
+      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "ebuy-ea84b",
+      "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "ebuy-ea84b.firebasestorage.app",
+      "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "309665605080",
+      "EXPO_PUBLIC_FIREBASE_APP_ID": "1:309665605080:web:ab295750343c0cc42d3ead"
+    }
+  }
+}

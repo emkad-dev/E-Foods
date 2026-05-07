@@ -14,6 +14,7 @@ import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
+import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
   const [displayName, setDisplayName] = useState('');
@@ -152,7 +153,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   keyboardAvoider: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.background,
   },
   scrollContent: {
     flexGrow: 1,
@@ -164,34 +165,36 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   title: {
-    color: '#111',
+    color: customerTheme.text,
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 8,
   },
   copy: {
-    color: '#666',
+    color: customerTheme.textMuted,
     fontSize: 16,
     marginBottom: 24,
   },
   errorText: {
-    color: '#d32f2f',
+    color: customerTheme.danger,
     marginBottom: 16,
     textAlign: 'center',
     fontSize: 14,
   },
   input: {
-    borderColor: '#ddd',
-    borderRadius: 10,
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 12,
     borderWidth: 1,
     height: 50,
     marginBottom: 14,
     paddingHorizontal: 16,
+    color: customerTheme.text,
   },
   button: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
-    borderRadius: 10,
+    backgroundColor: customerTheme.accent,
+    borderRadius: 12,
     marginTop: 8,
     paddingVertical: 15,
   },
@@ -201,11 +204,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   link: {
-    color: '#5D3FD3',
+    color: customerTheme.link,
     marginTop: 18,
     textAlign: 'center',
   },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
-  dividerText: { marginHorizontal: 10, color: '#666', fontSize: 14 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: customerTheme.border },
+  dividerText: { marginHorizontal: 10, color: customerTheme.textMuted, fontSize: 14 },
 });

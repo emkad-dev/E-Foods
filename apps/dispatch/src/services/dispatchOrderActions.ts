@@ -1,18 +1,8 @@
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db } from './firebase/config';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase/config';
 
-const getOrderRef = (orderId: string) => doc(db, 'orders', orderId);
-
-export const acceptDispatchOrder = async (orderId: string, timeline: Record<string, unknown> | null) => {
-  await updateDoc(getOrderRef(orderId), {
-    status: 'accepted',
-    timeline: {
-      ...(timeline ?? {}),
-      acceptedAt: serverTimestamp(),
-    },
-    updatedAt: serverTimestamp(),
-  });
-};
+const dispatchAssignOrderCourier = httpsCallable(functions, 'dispatchAssignOrderCourier');
+const dispatchUpdateOrderStatus = httpsCallable(functions, 'dispatchUpdateOrderStatus');
 
 export const assignDispatchCourier = async (
   orderId: string,
@@ -20,41 +10,49 @@ export const assignDispatchCourier = async (
     id: string;
     name: string;
   },
-  assignment: {
+  _assignment: {
     courierId?: string | null;
     courierName?: string | null;
     dispatchId?: string | null;
   } | null
 ) => {
-  await updateDoc(getOrderRef(orderId), {
-    assignment: {
-      ...(assignment ?? {}),
-      courierId: courier.id,
-      courierName: courier.name,
-      dispatchId: 'dispatch-alpha',
-    },
-    updatedAt: serverTimestamp(),
+  await dispatchAssignOrderCourier({
+    courierId: courier.id,
+    orderId,
   });
 };
 
-export const markDispatchOrderPickedUp = async (orderId: string, timeline: Record<string, unknown> | null) => {
-  await updateDoc(getOrderRef(orderId), {
-    status: 'picked_up',
-    timeline: {
-      ...(timeline ?? {}),
-      pickedUpAt: serverTimestamp(),
-    },
-    updatedAt: serverTimestamp(),
+export const markDispatchOrderPickedUp = async (orderId: string, _timeline: Record<string, unknown> | null) => {
+  await dispatchUpdateOrderStatus({
+    action: 'picked_up',
+    orderId,
   });
 };
 
-export const markDispatchOrderDelivered = async (orderId: string, timeline: Record<string, unknown> | null) => {
-  await updateDoc(getOrderRef(orderId), {
-    status: 'delivered',
-    timeline: {
-      ...(timeline ?? {}),
-      deliveredAt: serverTimestamp(),
-    },
-    updatedAt: serverTimestamp(),
+export const markDispatchOrderOnTheWay = async (orderId: string, _timeline: Record<string, unknown> | null) => {
+  await dispatchUpdateOrderStatus({
+    action: 'on_the_way',
+    orderId,
+  });
+};
+
+export const markDispatchOrderDelivered = async (orderId: string, _timeline: Record<string, unknown> | null) => {
+  await dispatchUpdateOrderStatus({
+    action: 'delivered',
+    orderId,
+  });
+};
+
+export const markDispatchOrderFailed = async (orderId: string, _timeline: Record<string, unknown> | null) => {
+  await dispatchUpdateOrderStatus({
+    action: 'failed_delivery',
+    orderId,
+  });
+};
+
+export const escalateDispatchOrder = async (orderId: string, _timeline: Record<string, unknown> | null) => {
+  await dispatchUpdateOrderStatus({
+    action: 'escalate',
+    orderId,
   });
 };

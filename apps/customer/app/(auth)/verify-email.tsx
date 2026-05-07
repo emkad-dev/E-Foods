@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { customerTheme } from '../../src/theme/palette';
 
 export default function VerifyEmailScreen() {
   const { user, reloadUser, sendVerificationEmail, signOut, error, clearError } = useAuth();
@@ -86,7 +87,7 @@ export default function VerifyEmailScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.background,
     flex: 1,
   },
   container: {
@@ -95,26 +96,26 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    color: '#111',
+    color: customerTheme.text,
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 12,
   },
   copy: {
-    color: '#666',
+    color: customerTheme.textMuted,
     fontSize: 16,
     lineHeight: 24,
     marginBottom: 28,
   },
   errorText: {
-    color: '#d32f2f',
+    color: customerTheme.danger,
     marginBottom: 16,
     textAlign: 'center',
     fontSize: 14,
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
     borderRadius: 10,
     marginBottom: 12,
     paddingVertical: 15,
@@ -126,14 +127,15 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: 'center',
-    borderColor: '#f5b342',
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.accent,
     borderRadius: 10,
     borderWidth: 1,
     marginBottom: 12,
     paddingVertical: 15,
   },
   secondaryText: {
-    color: '#9a6400',
+    color: customerTheme.accentStrong,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -142,7 +144,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   signOutText: {
-    color: '#5D3FD3',
+    color: customerTheme.link,
     fontSize: 15,
     fontWeight: '600',
   },

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../services/firebase/config';
+import { getDispatchOrderDetail } from '../services/dispatchReadModel';
 
 export type DispatchOrderDetail = {
   id: string;
@@ -23,6 +22,7 @@ export type DispatchOrderDetail = {
     quantity?: number;
   }[];
   payment?: {
+    method?: string | null;
     status?: string | null;
   } | null;
   pricing?: {
@@ -32,6 +32,14 @@ export type DispatchOrderDetail = {
   status?: string | null;
   timeline?: Record<string, unknown> | null;
   total?: number | null;
+  events?: {
+    actorUid?: string | null;
+    createdAt?: string | null;
+    details?: Record<string, unknown> | null;
+    eventType: string;
+    id: string;
+    note?: string | null;
+  }[];
 };
 
 export const useDispatchOrder = (orderId: string) => {
@@ -47,32 +55,42 @@ export const useDispatchOrder = (orderId: string) => {
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'orders', orderId),
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          setOrder(null);
-          setError('Order not found');
-          setLoading(false);
+    let cancelled = false;
+
+    const loadOrder = async () => {
+      try {
+        const nextData = await getDispatchOrderDetail(orderId);
+
+        if (cancelled) {
           return;
         }
 
-        setOrder({
-          id: snapshot.id,
-          ...snapshot.data(),
-        } as DispatchOrderDetail);
+        setOrder(nextData.order as DispatchOrderDetail);
         setError(null);
-        setLoading(false);
-      },
-      (nextError) => {
+      } catch (nextError: any) {
+        if (cancelled) {
+          return;
+        }
+
         console.error('Error loading dispatch order:', nextError);
         setOrder(null);
-        setError(nextError.message);
-        setLoading(false);
+        setError(nextError.message ?? 'Order not found');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    );
+    };
 
-    return unsubscribe;
+    void loadOrder();
+    const interval = setInterval(() => {
+      void loadOrder();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [orderId]);
 
   return { error, loading, order };

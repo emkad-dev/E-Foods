@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "runtime": "nodejs22",
+    "source": "functions"
+  },
   "firestore": {
     "rules": "firestore.rules"
   }

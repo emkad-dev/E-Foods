@@ -1,32 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { db } from '../services/firebase/config';
+import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
+import { getDispatchDeliveryQueue } from '../services/dispatchReadModel';
 
-export type DispatchOrder = {
-  id: string;
-  createdAt?: {
-    toDate?: () => Date;
-  } | null;
-  customerId?: string;
-  deliveryAddress?: string | null;
-  deliveryLocation?: {
-    address?: string | null;
-    shortAddress?: string | null;
-    note?: string | null;
-  } | null;
-  fulfillmentType?: string | null;
-  items?: { quantity?: number }[];
-  payment?: {
-    status?: string | null;
-  } | null;
-  pricing?: {
-    total?: number | null;
-  } | null;
-  restaurantName?: string | null;
-  status?: string | null;
-  total?: number | null;
-};
+export type DispatchOrder = OrderDocument;
 
 export const useDispatchOrders = () => {
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
@@ -34,28 +11,41 @@ export const useDispatchOrders = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(
-      ordersQuery,
-      (snapshot) => {
-        const nextOrders = snapshot.docs.map((docSnapshot) => ({
-          id: docSnapshot.id,
-          ...docSnapshot.data(),
-        })) as DispatchOrder[];
+    const loadOrders = async () => {
+      try {
+        const nextData = await getDispatchDeliveryQueue();
 
-        setOrders(nextOrders);
+        if (cancelled) {
+          return;
+        }
+
+        setOrders(nextData.orders as DispatchOrder[]);
         setError(null);
-        setLoading(false);
-      },
-      (nextError) => {
-        console.error('Error loading dispatch orders:', nextError);
-        setError(nextError.message);
-        setLoading(false);
-      }
-    );
+      } catch (nextError: any) {
+        if (cancelled) {
+          return;
+        }
 
-    return unsubscribe;
+        console.error('Error loading dispatch orders:', nextError);
+        setError(nextError.message ?? 'Unable to load dispatch orders right now.');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadOrders();
+    const interval = setInterval(() => {
+      void loadOrders();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const deliveryOrders = useMemo(

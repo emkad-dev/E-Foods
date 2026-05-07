@@ -1,5 +1,5 @@
-import { collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { db } from './firebase/config';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase/config';
 
 export type PartnerRestaurantProfileInput = {
   restaurantId?: string | null;
@@ -17,7 +17,6 @@ export type PartnerRestaurantProfileInput = {
   deliveryRadiusKm?: number | null;
   supportsPickup: boolean;
   supportsDelivery: boolean;
-  isPublished: boolean;
   isOpen: boolean;
 };
 
@@ -35,64 +34,30 @@ export type PartnerMenuCategoryInput = {
   items: PartnerMenuItemInput[];
 };
 
+type PartnerRestaurantProfileResult = {
+  id: string;
+  name: string;
+};
+
 export const savePartnerRestaurantProfile = async (input: PartnerRestaurantProfileInput) => {
-  const restaurantRef = input.restaurantId
-    ? doc(db, 'restaurants', input.restaurantId)
-    : doc(collection(db, 'restaurants'));
+  const callable = httpsCallable(functions, 'upsertPartnerRestaurantProfile');
+  const result = await callable(input);
+  return result.data as PartnerRestaurantProfileResult;
+};
 
-  await setDoc(
-    restaurantRef,
-    {
-      ownerId: input.userId,
-      name: input.name.trim(),
-      description: input.description?.trim() || '',
-      image: input.image?.trim() || '',
-      cuisine: input.cuisine?.trim() || '',
-      deliveryTime: input.deliveryTime?.trim() || '',
-      minOrder: input.minOrder ?? 0,
-      deliveryFee: input.deliveryFee ?? 0,
-      address: input.address?.trim() || '',
-      latitude: input.latitude ?? null,
-      longitude: input.longitude ?? null,
-      location:
-        input.latitude !== null &&
-        input.latitude !== undefined &&
-        input.longitude !== null &&
-        input.longitude !== undefined
-          ? {
-              latitude: input.latitude,
-              longitude: input.longitude,
-            }
-          : null,
-      deliveryRadiusKm: input.deliveryRadiusKm ?? null,
-      supportsPickup: input.supportsPickup,
-      supportsDelivery: input.supportsDelivery,
-      isPublished: input.isPublished,
-      isOpen: input.isOpen,
-      updatedAt: serverTimestamp(),
-      ...(input.restaurantId ? {} : { createdAt: serverTimestamp() }),
-    },
-    { merge: true }
-  );
-
-  return {
-    id: restaurantRef.id,
-    name: input.name.trim(),
-  };
+export const linkPartnerRestaurant = async (restaurantId: string) => {
+  const callable = httpsCallable(functions, 'claimPartnerRestaurantLink');
+  const result = await callable({ restaurantId });
+  return result.data as PartnerRestaurantProfileResult;
 };
 
 export const savePartnerRestaurantMenu = async (
   restaurantId: string,
-  menu: PartnerMenuCategoryInput[],
-  userId?: string
+  menu: PartnerMenuCategoryInput[]
 ) => {
-  await setDoc(
-    doc(db, 'restaurants', restaurantId),
-    {
-      menu,
-      ...(userId ? { ownerId: userId } : {}),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  const callable = httpsCallable(functions, 'upsertPartnerRestaurantMenu');
+  await callable({
+    menu,
+    restaurantId,
+  });
 };

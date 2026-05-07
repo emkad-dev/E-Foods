@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { customerTheme } from '../theme/palette';
 
 type AuthPromptCardProps = {
   title: string;
@@ -27,21 +28,21 @@ export default function AuthPromptCard({ title, message }: AuthPromptCardProps) 
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff8ea',
-    borderColor: '#f3d8a5',
+    backgroundColor: customerTheme.surfaceMuted,
+    borderColor: customerTheme.border,
     borderRadius: 18,
     borderWidth: 1,
     padding: 20,
   },
   title: {
-    color: '#3b2b0f',
+    color: customerTheme.text,
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 8,
     textAlign: 'center',
   },
   message: {
-    color: '#6a5630',
+    color: customerTheme.textMuted,
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 18,
@@ -52,7 +53,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryButton: {
-    borderColor: '#c6aa75',
+    borderColor: customerTheme.border,
     borderRadius: 999,
     borderWidth: 1,
     marginRight: 10,
@@ -60,12 +61,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   secondaryText: {
-    color: '#7a5b23',
+    color: customerTheme.accentStrong,
     fontSize: 14,
     fontWeight: '700',
   },
   primaryButton: {
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
     borderRadius: 999,
     paddingHorizontal: 18,
     paddingVertical: 12,

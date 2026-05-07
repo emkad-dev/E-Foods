@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AppRole {
+  customer
+  restaurant
+  dispatch
+  admin
+}
+
+enum RestaurantApprovalStatus {
+  pending
+  approved
+  unpublished
+}
+
+model UserAccount {
+  uid                    String               @id
+  email                  String
+  displayName            String?
+  emailVerified          Boolean              @default(false)
+  roleDisplay            AppRole?
+  activeSessionId        String?
+  activeSessionUpdatedAt DateTime?
+  restaurantId           String?
+  restaurantName         String?
+  restaurantLinkedAt     DateTime?
+  restaurantLinkSource   String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  roles                  UserRole[]
+  assignedRoles          UserRole[]           @relation("RoleAssignedBy")
+  ownedRestaurants       RestaurantRecord[]   @relation("RestaurantOwner")
+  approvedRestaurants    RestaurantApproval[] @relation("ApprovalActor")
+  auditLogs              AdminAuditLog[]      @relation("AuditActor")
+}
+
+model UserRole {
+  id           String      @id @default(cuid())
+  userId       String
+  role         AppRole
+  restaurantId String?
+  assignedByUid String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         UserAccount @relation(fields: [userId], references: [uid], onDelete: Cascade)
+  assignedBy   UserAccount? @relation("RoleAssignedBy", fields: [assignedByUid], references: [uid], onDelete: SetNull)
+
+  @@unique([userId, role])
+  @@index([role])
+  @@index([restaurantId])
+}
+
+model RestaurantRecord {
+  id               String              @id
+  ownerId          String?
+  name             String
+  nameKey          String?
+  cuisine          String?
+  address          String?
+  description      String?
+  image            String?
+  deliveryFee      Float?
+  deliveryRadiusKm Float?
+  deliveryTime     String?
+  latitude         Float?
+  longitude        Float?
+  minOrder         Float?
+  supportsDelivery Boolean             @default(true)
+  supportsPickup   Boolean             @default(true)
+  isOpen           Boolean             @default(true)
+  isPublished      Boolean             @default(false)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  owner            UserAccount?        @relation("RestaurantOwner", fields: [ownerId], references: [uid], onDelete: SetNull)
+  approval         RestaurantApproval?
+  orders           CustomerOrder[]
+}
+
+model RestaurantApproval {
+  id            String                   @id @default(cuid())
+  restaurantId  String                   @unique
+  status        RestaurantApprovalStatus @default(pending)
+  approvedByUid String?
+  approvedAt    DateTime?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  restaurant    RestaurantRecord         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  approvedBy    UserAccount?             @relation("ApprovalActor", fields: [approvedByUid], references: [uid], onDelete: SetNull)
+
+  @@index([status])
+}
+
+model CustomerOrder {
+  id               String             @id
+  customerId       String
+  restaurantId     String
+  restaurantName   String
+  status           String
+  fulfillmentType  String
+  pricing          Json
+  payment          Json
+  deliveryAddress  String?
+  deliveryLocation Json?
+  cancellation     Json?
+  timeline         Json?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  restaurant       RestaurantRecord   @relation(fields: [restaurantId], references: [id], onDelete: Restrict)
+  items            OrderItem[]
+  assignment       DeliveryAssignment?
+  deliveryEvents   DeliveryEvent[]
+
+  @@index([customerId])
+  @@index([restaurantId])
+  @@index([status])
+}
+
+model OrderItem {
+  id             Int           @id @default(autoincrement())
+  orderId        String
+  itemId         String
+  name           String
+  price          Float
+  quantity       Int
+  restaurantId   String
+  restaurantName String
+  order          CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model DeliveryAssignment {
+  orderId      String        @id
+  dispatchId   String?
+  courierId    String?
+  courierName  String?
+  assignedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  order        CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([dispatchId])
+  @@index([courierId])
+}
+
+model DispatchRiderRecord {
+  id             String   @id
+  displayName    String
+  status         String
+  zone           String
+  vehicleType    String
+  acceptanceRate Float?
+  activeLoad     Int      @default(0)
+  completedTrips Int      @default(0)
+  latitude       Float?
+  longitude      Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+  @@index([zone])
+}
+
+model DeliveryEvent {
+  id        String        @id @default(cuid())
+  orderId    String
+  eventType String
+  actorUid  String?
+  note      String?
+  details   Json?
+  createdAt DateTime      @default(now())
+  order     CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([eventType])
+  @@index([actorUid])
+}
+
+model IdempotencyRecord {
+  key       String   @id
+  scope     String
+  actorUid  String
+  response  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([actorUid, scope])
+}
+
+model AdminAuditLog {
+  id         String       @id @default(cuid())
+  actorUid   String?
+  action     String
+  targetType String
+  targetId   String?
+  details    Json?
+  createdAt  DateTime     @default(now())
+  actor      UserAccount? @relation("AuditActor", fields: [actorUid], references: [uid], onDelete: SetNull)
+
+  @@index([actorUid])
+  @@index([action])
+  @@index([targetType])
+}

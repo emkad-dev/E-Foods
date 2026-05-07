@@ -3,10 +3,10 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "node ../../node_modules/expo/bin/cli start --port 8084",
-    "android": "node ../../node_modules/expo/bin/cli run:android --port 8084",
+    "start": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../node_modules/expo/bin/cli start --port 8084",
+    "android": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../node_modules/expo/bin/cli run:android --port 8084",
     "ios": "node ../../node_modules/expo/bin/cli run:ios",
-    "web": "node ../../node_modules/expo/bin/cli start --web",
+    "web": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../node_modules/expo/bin/cli start --web",
     "lint": "node ../../node_modules/expo/bin/cli lint"
   },
   "dependencies": {

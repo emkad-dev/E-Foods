@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
+import { customerTheme } from '../../src/theme/palette';
 
 export default function CustomerLayout() {
   const { loading } = useAuth();
@@ -11,8 +12,8 @@ export default function CustomerLayout() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#f5b342" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: customerTheme.background }}>
+        <ActivityIndicator size="large" color={customerTheme.accent} />
       </View>
     );
   }
@@ -20,9 +21,9 @@ export default function CustomerLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#f5b342',
-        tabBarInactiveTintColor: '#888',
-        tabBarStyle: { backgroundColor: '#fff' },
+        tabBarActiveTintColor: customerTheme.accentStrong,
+        tabBarInactiveTintColor: customerTheme.textMuted,
+        tabBarStyle: { backgroundColor: customerTheme.surface, borderTopColor: customerTheme.border },
         headerShown: false,
       }}
     >
@@ -54,12 +55,6 @@ export default function CustomerLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color }) => <FontAwesome name="user" size={24} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="search"
-        options={{
-          href: null,
         }}
       />
       <Tabs.Screen

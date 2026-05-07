@@ -67,15 +67,16 @@ export const createUserDocument = async (
   userData: Partial<User>
 ): Promise<void> => {
   try {
+    const { role: _ignoredRole, ...safeUserData } = userData;
     const userDoc: User = {
       uid: userId,
-      email: userData.email || '',
-      role: userData.role || 'customer',
-      emailVerified: userData.emailVerified || false,
-      displayName: userData.displayName,
-      photoURL: userData.photoURL,
+      email: safeUserData.email || '',
+      role: 'customer',
+      emailVerified: safeUserData.emailVerified || false,
+      displayName: safeUserData.displayName,
+      photoURL: safeUserData.photoURL,
       createdAt: new Date().toISOString(),
-      ...userData,
+      ...safeUserData,
     };
 
     await setDoc(doc(db, 'users', userId), userDoc);
@@ -94,9 +95,22 @@ export const updateUserDocument = async (
   updates: Partial<User>
 ): Promise<void> => {
   try {
+    const {
+      role: _ignoredRole,
+      restaurantId: _ignoredRestaurantId,
+      restaurantName: _ignoredRestaurantName,
+      restaurantLinkedAt: _ignoredRestaurantLinkedAt,
+      restaurantLinkSource: _ignoredRestaurantLinkSource,
+      ...safeUpdates
+    } = updates as Partial<User> & {
+      restaurantId?: string;
+      restaurantName?: string;
+      restaurantLinkedAt?: string;
+      restaurantLinkSource?: string;
+    };
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
-      ...updates,
+      ...safeUpdates,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {

@@ -4,6 +4,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { confirmPasswordReset } from 'firebase/auth';
 import { auth } from '../../src/services/firebase/config';
 import { formatAuthError } from '../../src/services/firebase/auth';
+import { customerTheme } from '../../src/theme/palette';
 
 export default function ResetPasswordScreen() {
   const params = useLocalSearchParams<{ oobCode?: string | string[] }>();
@@ -99,7 +100,7 @@ export default function ResetPasswordScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.background,
     flex: 1,
   },
   container: {
@@ -108,33 +109,35 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    color: '#111',
+    color: customerTheme.text,
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 8,
   },
   copy: {
-    color: '#666',
+    color: customerTheme.textMuted,
     fontSize: 16,
     marginBottom: 24,
   },
   errorText: {
-    color: '#d32f2f',
+    color: customerTheme.danger,
     marginBottom: 16,
     textAlign: 'center',
     fontSize: 14,
   },
   input: {
-    borderColor: '#ddd',
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
     borderRadius: 10,
     borderWidth: 1,
     height: 50,
     marginBottom: 14,
     paddingHorizontal: 16,
+    color: customerTheme.text,
   },
   button: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
     borderRadius: 10,
     paddingVertical: 15,
   },
@@ -144,7 +147,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   link: {
-    color: '#5D3FD3',
+    color: customerTheme.link,
     marginTop: 18,
     textAlign: 'center',
   },

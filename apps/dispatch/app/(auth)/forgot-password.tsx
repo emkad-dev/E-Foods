@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -73,7 +74,7 @@ export default function DispatchForgotPasswordScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#111315',
+    backgroundColor: dispatchTheme.background,
     flex: 1,
   },
   content: {
@@ -82,14 +83,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   hero: {
-    backgroundColor: '#1a1f22',
-    borderColor: '#2a2f34',
+    backgroundColor: dispatchTheme.hero,
+    borderColor: dispatchTheme.heroSecondary,
     borderRadius: 28,
     borderWidth: 1,
     padding: 24,
   },
   eyebrow: {
-    color: '#d5ff3f',
+    color: dispatchTheme.accentSoft,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 1,
@@ -97,36 +98,36 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: '#f6f7f8',
+    color: dispatchTheme.cream,
     fontSize: 31,
     fontWeight: '800',
   },
   copy: {
-    color: '#b6bcc4',
+    color: '#d6dfeb',
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,
   },
   formCard: {
-    backgroundColor: '#181c1f',
-    borderColor: '#2a2f34',
+    backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 26,
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
   },
   errorText: {
-    color: '#ff7b6b',
+    color: dispatchTheme.danger,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 10,
   },
   input: {
-    backgroundColor: '#0f1214',
-    borderColor: '#31363b',
+    backgroundColor: dispatchTheme.cream,
+    borderColor: dispatchTheme.border,
     borderRadius: 16,
     borderWidth: 1,
-    color: '#f6f7f8',
+    color: dispatchTheme.text,
     fontSize: 15,
     marginTop: 8,
     minHeight: 54,
@@ -134,18 +135,18 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: '#d5ff3f',
+    backgroundColor: dispatchTheme.accent,
     borderRadius: 18,
     marginTop: 18,
     paddingVertical: 16,
   },
   primaryButtonText: {
-    color: '#13160d',
+    color: '#ffffff',
     fontSize: 15,
     fontWeight: '800',
   },
   link: {
-    color: '#d5ff3f',
+    color: dispatchTheme.accentStrong,
     marginTop: 16,
     textAlign: 'center',
   },

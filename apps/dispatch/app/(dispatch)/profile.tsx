@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -14,7 +14,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import {
-  createDispatchRider,
   type DispatchRiderDraft,
   updateDispatchRider,
 } from '../../src/services/dispatchRiderActions';
@@ -36,30 +35,41 @@ const settingsGroups = [
 ];
 
 const statusOptions = ['Available', 'Delivering', 'Pickup delayed', 'Offline'];
-const vehicleOptions = ['Bike', 'Car', 'Van'];
-
 const createDefaultDraft = (): DispatchRiderDraft => ({
   acceptanceRate: 85,
   activeLoad: 0,
   completedTrips: 0,
+  latitude: null,
+  longitude: null,
   name: '',
   status: 'Available',
   vehicleType: 'Bike',
   zone: '',
 });
 
+const parseOptionalCoordinate = (value: string) => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsedValue = Number.parseFloat(trimmed);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+};
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
+  const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { error, riders } = useDispatchRiders();
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
   const [saving, setSaving] = useState(false);
-
-  const selectedRider = useMemo(
-    () => riders.find((rider) => rider.id === selectedRiderId) ?? null,
-    [riders, selectedRiderId]
+  const currentRider = useMemo(
+    () => (user ? riders.find((rider) => rider.id === user.uid) ?? null : null),
+    [riders, user]
   );
+
   const mapProvider = useMemo(
     () => (Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined),
     []
@@ -101,6 +111,8 @@ export default function ProfileScreen() {
       acceptanceRate: 85,
       activeLoad: rider.activeLoadCount,
       completedTrips: rider.completedTripsCount,
+      latitude: rider.hasPreciseLocation ? rider.latitude : null,
+      longitude: rider.hasPreciseLocation ? rider.longitude : null,
       name: rider.name,
       status: rider.status,
       vehicleType: rider.vehicleType,
@@ -109,6 +121,11 @@ export default function ProfileScreen() {
   };
 
   const resetForm = () => {
+    if (currentRider) {
+      populateDraftFromRider(currentRider.id);
+      return;
+    }
+
     setSelectedRiderId(null);
     setDraft(createDefaultDraft());
   };
@@ -121,27 +138,24 @@ export default function ProfileScreen() {
   };
 
   const handleSaveRider = async () => {
+    if (!user?.uid || !currentRider) {
+      Alert.alert('Profile unavailable', 'Your rider profile has to be provisioned by admin approval before you can update it.');
+      return;
+    }
+
     if (!draft.name.trim() || !draft.zone.trim()) {
-      Alert.alert('Missing details', 'Enter the rider name and zone before saving.');
+      Alert.alert('Missing details', 'Enter your rider name and zone before saving.');
       return;
     }
 
     setSaving(true);
 
     try {
-      if (selectedRiderId) {
-        await updateDispatchRider(selectedRiderId, {
-          ...draft,
-          name: draft.name.trim(),
-          zone: draft.zone.trim(),
-        });
-      } else {
-        await createDispatchRider({
-          ...draft,
-          name: draft.name.trim(),
-          zone: draft.zone.trim(),
-        });
-      }
+      await updateDispatchRider(user.uid, {
+        ...draft,
+        name: draft.name.trim(),
+        zone: draft.zone.trim(),
+      });
 
       resetForm();
     } catch (nextError: any) {
@@ -159,37 +173,69 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete rider account',
+      'Dispatch accounts with active assignments cannot remove themselves. When delivery work or roster ownership still exists, admin offboarding is required instead.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccount();
+            } catch (nextError: any) {
+              Alert.alert('Delete blocked', nextError.message ?? 'Unable to delete this account right now.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  useEffect(() => {
+    if (currentRider && selectedRiderId !== currentRider.id) {
+      populateDraftFromRider(currentRider.id);
+    }
+  }, [currentRider, selectedRiderId]);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>E-Fooders</Text>
-        <Text style={styles.title}>Operations center Alpha</Text>
+        <Text style={styles.title}>My rider status</Text>
         <Text style={styles.copy}>
-          This is where dispatch settings, handoff policies, and team controls live for the people moving orders every day.
+          Keep your live rider status, zone, and coordinates current here. Team visibility stays below, but provisioning and offboarding remain admin-controlled.
         </Text>
       </View>
 
       <View style={styles.groupCard}>
         <View style={styles.sectionHeader}>
           <View style={styles.sectionHeaderCopy}>
-            <Text style={styles.groupTitle}>Rider management</Text>
-            <Text style={styles.groupSubtitle}>Create and edit live `dispatchProfiles` records from inside dispatch.</Text>
+            <Text style={styles.groupTitle}>My rider profile</Text>
+            <Text style={styles.groupSubtitle}>
+              Admin approval creates rider records. From here you can keep your own live dispatch status and location current.
+            </Text>
           </View>
           <TouchableOpacity style={styles.secondaryAction} onPress={resetForm}>
-            <Text style={styles.secondaryActionText}>New rider</Text>
+            <Text style={styles.secondaryActionText}>Reset</Text>
           </TouchableOpacity>
         </View>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {!currentRider ? (
+          <Text style={styles.helperText}>
+            Your rider record is not ready yet. Wait for admin approval before trying to update live dispatch status.
+          </Text>
+        ) : null}
 
         <View style={styles.formGroup}>
           <Text style={styles.fieldLabel}>Rider name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Sadiq A."
-            value={draft.name}
-            onChangeText={(value) => updateDraft('name', value)}
-          />
+          <View style={styles.readOnlyInput}>
+            <Text style={styles.readOnlyValue}>{currentRider?.name ?? 'Pending admin setup'}</Text>
+            <Text style={styles.readOnlyHint}>Admin-managed identity field</Text>
+          </View>
         </View>
 
         <View style={styles.formGroup}>
@@ -205,21 +251,17 @@ export default function ProfileScreen() {
         <View style={styles.inlineGroup}>
           <View style={styles.inlineField}>
             <Text style={styles.fieldLabel}>Trips today</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="number-pad"
-              value={String(draft.completedTrips)}
-              onChangeText={(value) => updateDraft('completedTrips', Number.parseInt(value || '0', 10) || 0)}
-            />
+            <View style={styles.readOnlyInput}>
+              <Text style={styles.readOnlyValue}>{currentRider?.completedTrips ?? '0'}</Text>
+              <Text style={styles.readOnlyHint}>Dispatch-managed metric</Text>
+            </View>
           </View>
           <View style={styles.inlineField}>
             <Text style={styles.fieldLabel}>Active load</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="number-pad"
-              value={String(draft.activeLoad)}
-              onChangeText={(value) => updateDraft('activeLoad', Number.parseInt(value || '0', 10) || 0)}
-            />
+            <View style={styles.readOnlyInput}>
+              <Text style={styles.readOnlyValue}>{currentRider?.activeLoad ?? '0 orders'}</Text>
+              <Text style={styles.readOnlyHint}>Dispatch-managed metric</Text>
+            </View>
           </View>
         </View>
 
@@ -248,25 +290,37 @@ export default function ProfileScreen() {
 
         <View style={styles.formGroup}>
           <Text style={styles.fieldLabel}>Vehicle</Text>
-          <View style={styles.chipRow}>
-            {vehicleOptions.map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={[styles.chip, draft.vehicleType === option ? styles.chipActive : null]}
-                onPress={() => updateDraft('vehicleType', option)}
-              >
-                <Text style={[styles.chipText, draft.vehicleType === option ? styles.chipTextActive : null]}>
-                  {option}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.readOnlyInput}>
+            <Text style={styles.readOnlyValue}>{currentRider?.vehicleType ?? 'Pending admin setup'}</Text>
+            <Text style={styles.readOnlyHint}>Vehicle class is set during approval</Text>
           </View>
         </View>
 
-        <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving}>
-          <Text style={styles.primaryActionText}>
-            {saving ? 'Saving rider...' : selectedRider ? 'Update rider' : 'Create rider'}
-          </Text>
+        <View style={styles.inlineGroup}>
+          <View style={styles.inlineField}>
+            <Text style={styles.fieldLabel}>Latitude</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="decimal-pad"
+              placeholder="6.5244"
+              value={draft.latitude === null || draft.latitude === undefined ? '' : String(draft.latitude)}
+              onChangeText={(value) => updateDraft('latitude', parseOptionalCoordinate(value))}
+            />
+          </View>
+          <View style={styles.inlineField}>
+            <Text style={styles.fieldLabel}>Longitude</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="decimal-pad"
+              placeholder="3.3792"
+              value={draft.longitude === null || draft.longitude === undefined ? '' : String(draft.longitude)}
+              onChangeText={(value) => updateDraft('longitude', parseOptionalCoordinate(value))}
+            />
+          </View>
+        </View>
+
+        <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving || !currentRider}>
+          <Text style={styles.primaryActionText}>{saving ? 'Saving rider...' : 'Update my rider profile'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -303,22 +357,21 @@ export default function ProfileScreen() {
 
       <View style={styles.groupCard}>
         <Text style={styles.groupTitle}>Live rider records</Text>
-        <Text style={styles.groupSubtitle}>Tap any rider to load their profile into the editor above.</Text>
+        <Text style={styles.groupSubtitle}>Roster view only. Rider provisioning and other rider records are admin-managed.</Text>
         {riders.length === 0 ? (
           <Text style={styles.emptyText}>No rider profiles yet.</Text>
         ) : (
           riders.map((rider) => (
-            <TouchableOpacity
+            <View
               key={rider.id}
               style={[styles.riderCard, selectedRiderId === rider.id ? styles.riderCardActive : null]}
-              onPress={() => populateDraftFromRider(rider.id)}
             >
               <View>
                 <Text style={styles.riderName}>{rider.name}</Text>
                 <Text style={styles.riderMeta}>{`${rider.zone} - ${rider.status} - ${rider.vehicleType}`}</Text>
               </View>
               <Text style={styles.riderLoad}>{rider.activeLoad}</Text>
-            </TouchableOpacity>
+            </View>
           ))
         )}
       </View>
@@ -336,9 +389,14 @@ export default function ProfileScreen() {
 
       <View style={styles.groupCard}>
         <Text style={styles.groupTitle}>Session</Text>
-        <Text style={styles.groupSubtitle}>Sign out of the dispatch board on this device.</Text>
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+        <Text style={styles.groupSubtitle}>
+          Sign out when you are done on this device. Delete is only for rider accounts that are no longer tied to live assignments.
+        </Text>
+        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={authLoading}>
           <Text style={styles.signOutButtonText}>Sign out</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} disabled={authLoading}>
+          <Text style={styles.deleteButtonText}>Delete account</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -373,14 +431,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   copy: {
-    color: '#f7ead8',
+    color: '#d6dfeb',
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,
   },
   groupCard: {
     backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 22,
+    borderWidth: 1,
     marginTop: 14,
     padding: 18,
   },
@@ -510,6 +570,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  helperText: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 8,
+  },
   mapCard: {
     borderColor: dispatchTheme.border,
     borderRadius: 20,
@@ -580,6 +646,19 @@ const styles = StyleSheet.create({
   },
   signOutButtonText: {
     color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  deleteButton: {
+    alignItems: 'center',
+    borderColor: dispatchTheme.danger,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 12,
+    paddingVertical: 15,
+  },
+  deleteButtonText: {
+    color: dispatchTheme.danger,
     fontSize: 15,
     fontWeight: '800',
   },

@@ -2,6 +2,7 @@
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  getIdTokenResult,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -15,6 +16,11 @@ export interface AuthError {
   code: string;
   message: string;
 }
+
+export type AuthRole = 'customer' | 'restaurant' | 'dispatch' | 'admin';
+
+const isAuthRole = (value: unknown): value is AuthRole =>
+  value === 'customer' || value === 'restaurant' || value === 'dispatch' || value === 'admin';
 
 /**
  * Firebase action code configuration errors that require fallback handling
@@ -63,6 +69,15 @@ export const signInWithEmail = async (
  */
 export const signOutUser = async (auth: Auth): Promise<void> => {
   await signOut(auth);
+};
+
+export const getUserRoleClaim = async (
+  firebaseUser: FirebaseAuthUser,
+  forceRefresh = false
+): Promise<AuthRole | null> => {
+  const tokenResult = await getIdTokenResult(firebaseUser, forceRefresh);
+  const role = tokenResult.claims?.role;
+  return isAuthRole(role) ? role : null;
 };
 
 /**

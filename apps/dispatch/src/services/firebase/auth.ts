@@ -1,11 +1,18 @@
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
+  getIdTokenResult,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   type Auth,
   type User as FirebaseUser,
 } from 'firebase/auth';
+
+export type AuthRole = 'customer' | 'restaurant' | 'dispatch' | 'admin';
+
+const isAuthRole = (value: unknown): value is AuthRole =>
+  value === 'customer' || value === 'restaurant' || value === 'dispatch' || value === 'admin';
 
 export const createUserWithEmail = async (auth: Auth, email: string, password: string): Promise<FirebaseUser> => {
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -21,8 +28,18 @@ export const signOutUser = async (auth: Auth): Promise<void> => {
   await signOut(auth);
 };
 
+export const deleteUserAccount = async (user: FirebaseUser): Promise<void> => {
+  await deleteUser(user);
+};
+
 export const sendPasswordReset = async (auth: Auth, email: string): Promise<void> => {
   await sendPasswordResetEmail(auth, email);
+};
+
+export const getUserRoleClaim = async (user: FirebaseUser, forceRefresh = false): Promise<AuthRole | null> => {
+  const tokenResult = await getIdTokenResult(user, forceRefresh);
+  const role = tokenResult.claims?.role;
+  return isAuthRole(role) ? role : null;
 };
 
 export const formatAuthError = (error: any): string => {

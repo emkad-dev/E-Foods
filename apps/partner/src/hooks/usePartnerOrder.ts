@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
 import { usePartnerRestaurant } from './usePartnerRestaurant';
-import { db } from '../services/firebase/config';
 import type { PartnerOrder } from './usePartnerOrders';
+import { getPartnerRestaurantOrder } from '../services/partnerReadModel';
 
 export const usePartnerOrder = (orderId: string | null | undefined) => {
   const { restaurant } = usePartnerRestaurant();
@@ -17,32 +16,42 @@ export const usePartnerOrder = (orderId: string | null | undefined) => {
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'orders', orderId),
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          setOrder(null);
-          setError('Order not found');
-          setLoading(false);
+    let cancelled = false;
+
+    const loadOrder = async () => {
+      try {
+        const nextData = await getPartnerRestaurantOrder(orderId);
+
+        if (cancelled) {
           return;
         }
 
-        setOrder({
-          id: snapshot.id,
-          ...snapshot.data(),
-        } as PartnerOrder);
+        setOrder(nextData.order as PartnerOrder);
         setError(null);
-        setLoading(false);
-      },
-      (nextError) => {
+      } catch (nextError: any) {
+        if (cancelled) {
+          return;
+        }
+
         console.error('Error loading partner order:', nextError);
         setOrder(null);
-        setError(nextError.message);
-        setLoading(false);
+        setError(nextError.message ?? 'Order not found');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    );
+    };
 
-    return unsubscribe;
+    void loadOrder();
+    const interval = setInterval(() => {
+      void loadOrder();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [orderId]);
 
   const hasAccess = useMemo(() => {
@@ -50,15 +59,7 @@ export const usePartnerOrder = (orderId: string | null | undefined) => {
       return true;
     }
 
-    if (order.restaurantId && order.restaurantId === restaurant.id) {
-      return true;
-    }
-
-    if (order.restaurantName && restaurant.name) {
-      return order.restaurantName.trim().toLowerCase() === restaurant.name.trim().toLowerCase();
-    }
-
-    return false;
+    return order.restaurantId === restaurant.id;
   }, [order, restaurant]);
 
   return {

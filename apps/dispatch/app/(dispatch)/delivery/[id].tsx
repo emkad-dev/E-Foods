@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,12 +10,15 @@ import {
 import { useDispatchOrder } from '../../../src/hooks/useDispatchOrder';
 import { useDispatchRiders } from '../../../src/hooks/useDispatchRiders';
 import {
-  acceptDispatchOrder,
   assignDispatchCourier,
+  escalateDispatchOrder,
+  markDispatchOrderFailed,
   markDispatchOrderDelivered,
+  markDispatchOrderOnTheWay,
   markDispatchOrderPickedUp,
 } from '../../../src/services/dispatchOrderActions';
 import { dispatchTheme } from '../../../src/theme/palette';
+import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
 
 export default function DispatchDeliveryDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -22,18 +26,54 @@ export default function DispatchDeliveryDetailScreen() {
   const insets = useSafeAreaInsets();
   const { error, loading, order } = useDispatchOrder(id as string);
   const { error: ridersError, loading: ridersLoading, riders } = useDispatchRiders();
+  const rawDeliveryLocation = order?.deliveryLocation as
+    | { latitude?: number; longitude?: number; address?: string | null; shortAddress?: string | null; note?: string | null }
+    | null
+    | undefined;
+  const deliveryCoordinates = useMemo(
+    () =>
+      typeof rawDeliveryLocation?.latitude === 'number' && typeof rawDeliveryLocation?.longitude === 'number'
+        ? {
+            latitude: rawDeliveryLocation.latitude,
+            longitude: rawDeliveryLocation.longitude,
+          }
+        : null,
+    [rawDeliveryLocation?.latitude, rawDeliveryLocation?.longitude]
+  );
+  const ridersByDistance = useMemo(
+    () =>
+      [...riders]
+        .map((rider) => {
+          const distanceKm =
+            deliveryCoordinates && rider.hasPreciseLocation
+              ? calculateDistanceKm(
+                  { latitude: rider.latitude, longitude: rider.longitude },
+                  deliveryCoordinates
+                )
+              : null;
 
-  const handleAcceptOrder = async () => {
-    if (!order) {
-      return;
-    }
+          return {
+            ...rider,
+            distanceKm,
+          };
+        })
+        .sort((left, right) => {
+          if (left.distanceKm === null && right.distanceKm === null) {
+            return left.name.localeCompare(right.name);
+          }
 
-    try {
-      await acceptDispatchOrder(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      Alert.alert('Update failed', nextError.message ?? 'Could not accept this order.');
-    }
-  };
+          if (left.distanceKm === null) {
+            return 1;
+          }
+
+          if (right.distanceKm === null) {
+            return -1;
+          }
+
+          return left.distanceKm - right.distanceKm;
+        }),
+    [deliveryCoordinates, riders]
+  );
 
   const handleAssignRider = async (courier: { id: string; name: string }) => {
     if (!order) {
@@ -71,6 +111,42 @@ export default function DispatchDeliveryDetailScreen() {
     }
   };
 
+  const handleMarkOnTheWay = async () => {
+    if (!order) {
+      return;
+    }
+
+    try {
+      await markDispatchOrderOnTheWay(order.id, order.timeline ?? null);
+    } catch (nextError: any) {
+      Alert.alert('Update failed', nextError.message ?? 'Could not mark this order on the way.');
+    }
+  };
+
+  const handleMarkFailed = async () => {
+    if (!order) {
+      return;
+    }
+
+    try {
+      await markDispatchOrderFailed(order.id, order.timeline ?? null);
+    } catch (nextError: any) {
+      Alert.alert('Update failed', nextError.message ?? 'Could not mark this delivery as failed.');
+    }
+  };
+
+  const handleEscalate = async () => {
+    if (!order) {
+      return;
+    }
+
+    try {
+      await escalateDispatchOrder(order.id, order.timeline ?? null);
+    } catch (nextError: any) {
+      Alert.alert('Escalation failed', nextError.message ?? 'Could not escalate this delivery.');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -94,10 +170,28 @@ export default function DispatchDeliveryDetailScreen() {
 
   const normalizedStatus = normalizeOrderStatus(order.status);
   const assignedCourier = order.assignment?.courierName ?? 'Not assigned yet';
-  const canAccept = normalizedStatus === 'placed';
-  const canConfirmPickup = ['accepted', 'preparing', 'ready_for_pickup'].includes(normalizedStatus);
-  const canMarkDelivered = ['picked_up', 'on_the_way'].includes(normalizedStatus);
-
+  const hasAssignedCourier = Boolean(order.assignment?.courierId);
+  const canAssignRider = ['accepted', 'preparing', 'ready_for_pickup'].includes(normalizedStatus);
+  const canConfirmPickup = normalizedStatus === 'ready_for_pickup' && hasAssignedCourier;
+  const canMarkOnTheWay = normalizedStatus === 'picked_up' && hasAssignedCourier;
+  const canMarkDelivered = ['picked_up', 'on_the_way'].includes(normalizedStatus) && hasAssignedCourier;
+  const canMarkFailed = ['picked_up', 'on_the_way'].includes(normalizedStatus) && hasAssignedCourier;
+  const canEscalate = !['cancelled', 'delivered', 'failed_delivery', 'rejected'].includes(normalizedStatus);
+  const assignmentHelperCopy =
+    normalizedStatus === 'placed'
+      ? 'Wait for the restaurant to accept this order before assigning a rider.'
+      : ['accepted', 'preparing', 'ready_for_pickup'].includes(normalizedStatus)
+        ? deliveryCoordinates
+          ? 'Assign a rider once dispatch is ready. Riders closest to this drop-off are shown first.'
+          : 'Assign a rider once dispatch is ready to cover this delivery.'
+        : hasAssignedCourier
+          ? 'Courier assignment is locked once pickup has been confirmed.'
+          : 'Courier assignment is unavailable for this delivery state.';
+  const pickupHelperCopy = !hasAssignedCourier
+    ? 'Assign a rider before confirming pickup.'
+    : normalizedStatus !== 'ready_for_pickup'
+      ? 'Pickup stays locked until the restaurant marks the order ready.'
+      : 'Confirm pickup once the assigned rider has collected the order.';
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
       <View style={styles.hero}>
@@ -120,7 +214,9 @@ export default function DispatchDeliveryDetailScreen() {
         <Text style={styles.detailLine}>
           Total: ${(order.pricing?.total ?? order.total ?? 0).toFixed(2)}
         </Text>
-        <Text style={styles.detailLine}>Payment: {order.payment?.status ?? 'pending'}</Text>
+        <Text style={styles.detailLine}>
+          Payment: {order.payment?.method ?? 'cash'} | {order.payment?.status ?? 'pending'}
+        </Text>
         <Text style={styles.detailLine}>Assigned rider: {assignedCourier}</Text>
         <Text style={styles.detailLine}>
           Address: {order.deliveryAddress ?? order.deliveryLocation?.address ?? 'Customer address pending'}
@@ -143,22 +239,21 @@ export default function DispatchDeliveryDetailScreen() {
 
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Dispatch actions</Text>
-        <View style={styles.actionsRow}>
-          <TouchableOpacity
-            style={[styles.actionButton, !canAccept ? styles.actionButtonDisabled : null]}
-            onPress={handleAcceptOrder}
-            disabled={!canAccept}
-          >
-            <Text style={styles.actionButtonText}>Accept order</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, !canConfirmPickup ? styles.actionButtonDisabled : null]}
-            onPress={handleMarkPickedUp}
-            disabled={!canConfirmPickup}
-          >
-            <Text style={styles.actionButtonText}>Confirm pickup</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.actionHelper}>{pickupHelperCopy}</Text>
+        <TouchableOpacity
+          style={[styles.actionButton, !canConfirmPickup ? styles.actionButtonDisabled : null]}
+          onPress={handleMarkPickedUp}
+          disabled={!canConfirmPickup}
+        >
+          <Text style={styles.actionButtonText}>Confirm pickup</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, !canMarkOnTheWay ? styles.actionButtonDisabled : null]}
+          onPress={handleMarkOnTheWay}
+          disabled={!canMarkOnTheWay}
+        >
+          <Text style={styles.actionButtonText}>Mark on the way</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionButton, styles.deliverButton, !canMarkDelivered ? styles.actionButtonDisabled : null]}
           onPress={handleMarkDelivered}
@@ -166,36 +261,73 @@ export default function DispatchDeliveryDetailScreen() {
         >
           <Text style={styles.actionButtonText}>Mark delivered</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.warningButton, !canMarkFailed ? styles.actionButtonDisabled : null]}
+          onPress={handleMarkFailed}
+          disabled={!canMarkFailed}
+        >
+          <Text style={styles.actionButtonText}>Mark failed delivery</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.escalateButton, !canEscalate ? styles.actionButtonDisabled : null]}
+          onPress={handleEscalate}
+          disabled={!canEscalate}
+        >
+          <Text style={styles.actionButtonText}>Escalate for manual intervention</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Assign rider</Text>
-        <Text style={styles.assignCopy}>Tap a rider to write the assignment into the order document.</Text>
+        <Text style={styles.assignCopy}>{assignmentHelperCopy}</Text>
         {ridersError ? <Text style={styles.assignError}>{ridersError}</Text> : null}
         {ridersLoading ? (
           <Text style={styles.assignLoading}>Loading riders...</Text>
-        ) : riders.length === 0 ? (
+        ) : ridersByDistance.length === 0 ? (
           <Text style={styles.assignEmpty}>
-            No rider documents found in `dispatchProfiles` yet.
+            No rider records are available yet. Create riders from the dispatch management side first.
           </Text>
         ) : (
-          riders.map((rider) => {
+          ridersByDistance.map((rider) => {
             const isAssigned = order.assignment?.courierId === rider.id;
 
             return (
               <TouchableOpacity
                 key={rider.id}
-                style={[styles.riderCard, isAssigned ? styles.riderCardAssigned : null]}
+                style={[
+                  styles.riderCard,
+                  isAssigned ? styles.riderCardAssigned : null,
+                  !canAssignRider ? styles.riderCardDisabled : null,
+                ]}
                 onPress={() => handleAssignRider({ id: rider.id, name: rider.name })}
+                disabled={!canAssignRider}
               >
                 <View>
                   <Text style={styles.riderName}>{rider.name}</Text>
-                  <Text style={styles.riderMeta}>{`${rider.zone} - ${rider.status} - ${rider.vehicleType}`}</Text>
+                  <Text style={styles.riderMeta}>
+                    {`${rider.zone} - ${rider.status} - ${rider.vehicleType}`}
+                    {rider.distanceKm !== null ? ` - ${rider.distanceKm.toFixed(1)} km away` : ''}
+                  </Text>
                 </View>
                 <Text style={styles.riderTrips}>{rider.completedTrips} trips</Text>
               </TouchableOpacity>
             );
           })
+        )}
+      </View>
+
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>Delivery event history</Text>
+        {order.events && order.events.length > 0 ? (
+          order.events.map((event) => (
+            <View key={event.id} style={styles.eventRow}>
+              <Text style={styles.eventTitle}>{event.eventType.replace(/_/g, ' ')}</Text>
+              <Text style={styles.eventMeta}>{event.createdAt ?? 'Time pending sync'}</Text>
+              {event.note ? <Text style={styles.eventNote}>{event.note}</Text> : null}
+            </View>
+          ))
+        ) : (
+          <Text style={styles.assignEmpty}>No dispatch events have been recorded yet.</Text>
         )}
       </View>
     </ScrollView>
@@ -330,21 +462,28 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
-  actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  actionHelper: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
   },
   actionButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
     borderRadius: 16,
-    flex: 1,
-    marginRight: 10,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
   deliverButton: {
-    marginRight: 0,
+    marginTop: 10,
+  },
+  warningButton: {
+    backgroundColor: '#b45309',
+    marginTop: 10,
+  },
+  escalateButton: {
+    backgroundColor: '#7c2d12',
     marginTop: 10,
   },
   actionButtonDisabled: {
@@ -391,6 +530,9 @@ const styles = StyleSheet.create({
   riderCardAssigned: {
     backgroundColor: dispatchTheme.accentSoft,
   },
+  riderCardDisabled: {
+    opacity: 0.5,
+  },
   riderName: {
     color: dispatchTheme.text,
     fontSize: 15,
@@ -405,5 +547,27 @@ const styles = StyleSheet.create({
     color: dispatchTheme.accentStrong,
     fontSize: 13,
     fontWeight: '800',
+  },
+  eventRow: {
+    borderTopColor: dispatchTheme.border,
+    borderTopWidth: 1,
+    paddingVertical: 12,
+  },
+  eventTitle: {
+    color: dispatchTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
+    textTransform: 'capitalize',
+  },
+  eventMeta: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  eventNote: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
   },
 });

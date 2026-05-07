@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerLoginScreen() {
   const insets = useSafeAreaInsets();
@@ -93,7 +94,7 @@ export default function PartnerLoginScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#fff9f0',
+    backgroundColor: partnerTheme.background,
     flex: 1,
   },
   content: {
@@ -102,14 +103,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   hero: {
-    backgroundColor: '#fff4dc',
-    borderColor: '#f3d8a5',
+    backgroundColor: partnerTheme.hero,
+    borderColor: partnerTheme.hero,
     borderRadius: 28,
     borderWidth: 1,
     padding: 24,
   },
   eyebrow: {
-    color: '#9a6400',
+    color: partnerTheme.heroSoft,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 1,
@@ -117,36 +118,36 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: '#1f2937',
+    color: '#fffdf8',
     fontSize: 31,
     fontWeight: '800',
   },
   copy: {
-    color: '#6b7280',
+    color: '#e7dbc7',
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,
   },
   formCard: {
-    backgroundColor: '#ffffff',
-    borderColor: '#f1e0bf',
+    backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.border,
     borderRadius: 26,
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
   },
   errorText: {
-    color: '#d32f2f',
+    color: partnerTheme.danger,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 10,
   },
   input: {
-    backgroundColor: '#fffdf8',
-    borderColor: '#e6dfd1',
+    backgroundColor: partnerTheme.cream,
+    borderColor: partnerTheme.border,
     borderRadius: 16,
     borderWidth: 1,
-    color: '#1f2937',
+    color: partnerTheme.text,
     fontSize: 15,
     marginTop: 14,
     minHeight: 54,
@@ -154,7 +155,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
+    backgroundColor: partnerTheme.accent,
     borderRadius: 18,
     marginTop: 18,
     paddingVertical: 16,
@@ -165,12 +166,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   link: {
-    color: '#9a6400',
+    color: partnerTheme.accentStrong,
     marginTop: 16,
     textAlign: 'center',
   },
   linkSecondary: {
-    color: '#6b7280',
+    color: partnerTheme.textMuted,
     marginTop: 12,
     textAlign: 'center',
   },

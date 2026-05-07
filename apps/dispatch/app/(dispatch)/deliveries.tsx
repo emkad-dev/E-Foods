@@ -1,14 +1,24 @@
+import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { formatOrderStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
+import { formatOrderStatusLabel, getOrderStatusColor, isTerminalOrderStatus } from '../../src/domain/orders';
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DeliveriesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { activeDeliveryOrders, error, loading } = useDispatchOrders();
+  const { activeDeliveryOrders, deliveredCount, error, loading, orders } = useDispatchOrders();
+  const [selectedView, setSelectedView] = useState<'live' | 'history'>('live');
+  const completedDeliveryOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) => (order.fulfillmentType ?? 'delivery') === 'delivery' && isTerminalOrderStatus(order.status)
+      ),
+    [orders]
+  );
+  const visibleOrders = selectedView === 'live' ? activeDeliveryOrders : completedDeliveryOrders;
 
   if (loading) {
     return (
@@ -27,27 +37,36 @@ export default function DeliveriesScreen() {
       </Text>
 
       <View style={styles.filterRow}>
-        <View style={[styles.filterChip, styles.filterChipActive]}>
-          <Text style={styles.filterChipActiveText}>Live now</Text>
-        </View>
-        <View style={styles.filterChip}>
-          <Text style={styles.filterChipText}>At restaurant</Text>
-        </View>
-        <View style={styles.filterChip}>
-          <Text style={styles.filterChipText}>On route</Text>
-        </View>
+        <TouchableOpacity
+          style={[styles.filterChip, selectedView === 'live' ? styles.filterChipActive : null]}
+          onPress={() => setSelectedView('live')}
+        >
+          <Text style={selectedView === 'live' ? styles.filterChipActiveText : styles.filterChipText}>
+            Live now ({activeDeliveryOrders.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, selectedView === 'history' ? styles.filterChipActive : null]}
+          onPress={() => setSelectedView('history')}
+        >
+          <Text style={selectedView === 'history' ? styles.filterChipActiveText : styles.filterChipText}>
+            History ({completedDeliveryOrders.length || deliveredCount})
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {activeDeliveryOrders.length === 0 ? (
+      {visibleOrders.length === 0 ? (
         <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No dispatch queue yet</Text>
+          <Text style={styles.emptyTitle}>{selectedView === 'live' ? 'No dispatch queue yet' : 'No completed deliveries yet'}</Text>
           <Text style={styles.emptyCopy}>
-            Once customer delivery orders hit Firestore, they will appear here for assignment and tracking.
+            {selectedView === 'live'
+              ? 'Once customer delivery orders hit Firestore, they will appear here for assignment and tracking.'
+              : 'Completed, failed, and cancelled delivery orders will appear here as dispatch history.'}
           </Text>
         </View>
         ) : (
-        activeDeliveryOrders.map((order) => (
+        visibleOrders.map((order) => (
           <TouchableOpacity
             key={order.id}
             style={styles.card}

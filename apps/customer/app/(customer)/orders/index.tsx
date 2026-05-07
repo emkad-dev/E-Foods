@@ -5,7 +5,11 @@ import { useRouter } from 'expo-router';
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { useAuth } from '../../../src/contexts/AuthContext';
-import { formatOrderStatusLabel, getOrderStatusColor } from '../../../src/domain/orders';
+import {
+  formatOrderStatusLabel,
+  formatPaymentStatusLabel,
+  getOrderStatusColor,
+} from '../../../src/domain/orders';
 import { db } from '../../../src/services/firebase/config';
 
 type Order = {
@@ -14,6 +18,10 @@ type Order = {
   total: number;
   pricing?: {
     total: number;
+  };
+  payment?: {
+    method?: string;
+    status?: string;
   };
   status: string;
   createdAt: any;
@@ -95,6 +103,9 @@ export default function OrdersList() {
               </Text>
             </View>
             <Text style={styles.total}>${(item.pricing?.total ?? item.total).toFixed(2)}</Text>
+            <Text style={styles.payment}>
+              {formatPaymentStatusLabel(item.payment?.status ?? 'pending', item.payment?.method)}
+            </Text>
             <Text style={styles.date}>
               {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'Updating...'}
             </Text>
@@ -117,5 +128,6 @@ const styles = StyleSheet.create({
   restaurantName: { fontSize: 16, fontWeight: 'bold' },
   status: { fontSize: 14, fontWeight: '600' },
   total: { fontSize: 18, fontWeight: 'bold', marginTop: 8, color: '#f5b342' },
+  payment: { color: '#6b7280', fontSize: 13, marginTop: 4 },
   date: { fontSize: 12, color: '#999', marginTop: 4 },
 });

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -66,7 +67,7 @@ export default function PartnerForgotPasswordScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#fff9f0',
+    backgroundColor: partnerTheme.background,
     flex: 1,
   },
   content: {
@@ -75,35 +76,35 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    color: '#1f2937',
+    color: partnerTheme.text,
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 8,
   },
   copy: {
-    color: '#6b7280',
+    color: partnerTheme.textMuted,
     fontSize: 16,
     marginBottom: 24,
   },
   errorText: {
-    color: '#d32f2f',
+    color: partnerTheme.danger,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
   },
   input: {
-    backgroundColor: '#fffdf8',
-    borderColor: '#e6dfd1',
+    backgroundColor: partnerTheme.cream,
+    borderColor: partnerTheme.border,
     borderRadius: 16,
     borderWidth: 1,
-    color: '#1f2937',
+    color: partnerTheme.text,
     fontSize: 15,
     minHeight: 54,
     paddingHorizontal: 16,
   },
   button: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
+    backgroundColor: partnerTheme.accent,
     borderRadius: 18,
     marginTop: 18,
     paddingVertical: 16,
@@ -114,7 +115,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   link: {
-    color: '#9a6400',
+    color: partnerTheme.accentStrong,
     marginTop: 16,
     textAlign: 'center',
   },

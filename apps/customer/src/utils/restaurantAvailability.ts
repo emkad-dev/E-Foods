@@ -134,7 +134,14 @@ export const isRestaurantVisibleToCustomers = (restaurant: DiscoveryRestaurant) 
     return false;
   }
 
-  if (restaurant.isPublished === false) {
+  if (restaurant.isPublished !== true) {
+    return false;
+  }
+
+  if (
+    restaurant.approvalStatus &&
+    restaurant.approvalStatus !== 'approved'
+  ) {
     return false;
   }
 

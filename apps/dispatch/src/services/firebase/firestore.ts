@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, type Firestore } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, type Firestore } from 'firebase/firestore';
 import type { UserDocument } from '../../domain/entities';
 
 export const getUserDocument = async (db: Firestore, userId: string): Promise<UserDocument | null> => {
@@ -16,15 +16,21 @@ export const createUserDocument = async (
   userId: string,
   userData: Partial<UserDocument>
 ): Promise<void> => {
+  const { role: requestedRole, ...safeUserData } = userData;
+
+  if (requestedRole && requestedRole !== 'dispatch') {
+    throw new Error('Dispatch profiles must be provisioned with the dispatch role.');
+  }
+
   const userDocument: UserDocument = {
     uid: userId,
-    email: userData.email || '',
-    role: userData.role || 'dispatch',
-    emailVerified: userData.emailVerified || false,
-    displayName: userData.displayName,
-    photoURL: userData.photoURL,
+    email: safeUserData.email || '',
+    role: 'dispatch',
+    emailVerified: safeUserData.emailVerified || false,
+    displayName: safeUserData.displayName,
+    photoURL: safeUserData.photoURL,
     createdAt: new Date().toISOString(),
-    ...userData,
+    ...safeUserData,
   };
 
   await setDoc(doc(db, 'users', userId), userDocument);
@@ -36,21 +42,12 @@ export const updateUserDocument = async (
   updates: Partial<UserDocument>
 ): Promise<void> => {
   const currentSnapshot = await getDoc(doc(db, 'users', userId));
-  const currentData = currentSnapshot.exists() ? (currentSnapshot.data() as UserDocument) : null;
+  if (!currentSnapshot.exists()) {
+    throw new Error('Dispatch profile does not exist. Ask an admin to provision this account before updating it.');
+  }
 
-  await setDoc(
-    doc(db, 'users', userId),
-    {
-      ...(currentData ?? {
-        uid: userId,
-        email: updates.email ?? '',
-        role: updates.role ?? 'dispatch',
-        emailVerified: updates.emailVerified ?? false,
-        createdAt: new Date().toISOString(),
-      }),
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    },
-    { merge: true }
-  );
+  await updateDoc(doc(db, 'users', userId), {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
 };

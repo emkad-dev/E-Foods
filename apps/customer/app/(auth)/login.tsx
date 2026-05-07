@@ -4,6 +4,7 @@ import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
+import { customerTheme } from '../../src/theme/palette';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -86,15 +87,24 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: '#fff', flex: 1 },
+  screen: { backgroundColor: customerTheme.background, flex: 1 },
   container: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  errorText: { color: '#d32f2f', marginBottom: 16, textAlign: 'center', fontSize: 14 },
-  input: { height: 50, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 16, marginBottom: 16 },
-  button: { backgroundColor: '#f5b342', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 16 },
+  title: { color: customerTheme.text, fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  errorText: { color: customerTheme.danger, marginBottom: 16, textAlign: 'center', fontSize: 14 },
+  input: {
+    height: 50,
+    borderWidth: 1,
+    borderColor: customerTheme.border,
+    backgroundColor: customerTheme.surface,
+    color: customerTheme.text,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  button: { backgroundColor: customerTheme.accent, padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 16 },
   buttonText: { color: '#fff', fontWeight: 'bold' },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
-  dividerText: { marginHorizontal: 10, color: '#666', fontSize: 14 },
-  link: { marginTop: 12, color: '#5D3FD3', textAlign: 'center' },
+  dividerLine: { flex: 1, height: 1, backgroundColor: customerTheme.border },
+  dividerText: { marginHorizontal: 10, color: customerTheme.textMuted, fontSize: 14 },
+  link: { marginTop: 12, color: customerTheme.link, textAlign: 'center' },
 });

@@ -6,20 +6,18 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function currentUserDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
-
-    function currentUserExists() {
-      return signedIn() && currentUserDoc().exists();
-    }
-
-    function currentUserRole() {
-      return currentUserDoc().data.role;
+    function tokenRole() {
+      return signedIn() && request.auth.token.role is string
+        ? request.auth.token.role
+        : null;
     }
 
     function hasRole(role) {
-      return currentUserExists() && currentUserRole() == role;
+      return tokenRole() == role;
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
     }
 
     function isOwner(userId) {
@@ -37,7 +35,69 @@ service cloud.firestore {
     }
 
     function keepsRoleStable() {
-      return !('role' in resource.data) || request.resource.data.role == resource.data.role;
+      return (
+        ('role' in resource.data) == ('role' in request.resource.data) &&
+        (!('role' in resource.data) || request.resource.data.role == resource.data.role)
+      );
+    }
+
+    function hasOnlyUserFields() {
+      return request.resource.data.keys().hasOnly([
+        'uid',
+        'email',
+        'role',
+        'emailVerified',
+        'displayName',
+        'phoneNumber',
+        'partnerApplicationStatus',
+        'partnerApplicationReviewedAt',
+        'partnerApplicationRejectionReason',
+        'dispatchApplicationStatus',
+        'dispatchApplicationReviewedAt',
+        'dispatchApplicationRejectionReason',
+        'photoURL',
+        'expoPushToken',
+        'pushTokenUpdatedAt',
+        'restaurantId',
+        'restaurantName',
+        'restaurantLinkedAt',
+        'restaurantLinkSource',
+        'activeSessionId',
+        'activeSessionUpdatedAt',
+        'accountDisabled',
+        'disabledAt',
+        'disabledByUid',
+        'lastPrivilegedRole',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function keepsOffboardingStateStable() {
+      return (
+        ('accountDisabled' in resource.data) == ('accountDisabled' in request.resource.data) &&
+        (!('accountDisabled' in resource.data) || request.resource.data.accountDisabled == resource.data.accountDisabled)
+      ) && (
+        ('disabledAt' in resource.data) == ('disabledAt' in request.resource.data) &&
+        (!('disabledAt' in resource.data) || request.resource.data.disabledAt == resource.data.disabledAt)
+      ) && (
+        ('disabledByUid' in resource.data) == ('disabledByUid' in request.resource.data) &&
+        (!('disabledByUid' in resource.data) || request.resource.data.disabledByUid == resource.data.disabledByUid)
+      ) && (
+        ('lastPrivilegedRole' in resource.data) == ('lastPrivilegedRole' in request.resource.data) &&
+        (!('lastPrivilegedRole' in resource.data) || request.resource.data.lastPrivilegedRole == resource.data.lastPrivilegedRole)
+      );
+    }
+
+    function isCustomerProfileCreate(userId) {
+      return isOwner(userId) &&
+        request.resource.data.uid == userId &&
+        request.resource.data.role == 'customer' &&
+        !('restaurantId' in request.resource.data) &&
+        !('restaurantName' in request.resource.data) &&
+        !('restaurantLinkedAt' in request.resource.data) &&
+        !('restaurantLinkSource' in request.resource.data) &&
+        hasOnlyUserFields();
     }
 
     function keepsOrderOwnershipStable() {
@@ -45,48 +105,114 @@ service cloud.firestore {
         request.resource.data.restaurantId == resource.data.restaurantId;
     }
 
+    function keepsRestaurantLinkStable() {
+      return (
+        ('restaurantId' in resource.data) == ('restaurantId' in request.resource.data) &&
+        (!('restaurantId' in resource.data) || request.resource.data.restaurantId == resource.data.restaurantId)
+      ) && (
+        ('restaurantName' in resource.data) == ('restaurantName' in request.resource.data) &&
+        (!('restaurantName' in resource.data) || request.resource.data.restaurantName == resource.data.restaurantName)
+      ) && (
+        ('restaurantLinkedAt' in resource.data) == ('restaurantLinkedAt' in request.resource.data) &&
+        (!('restaurantLinkedAt' in resource.data) || request.resource.data.restaurantLinkedAt == resource.data.restaurantLinkedAt)
+      ) && (
+        ('restaurantLinkSource' in resource.data) == ('restaurantLinkSource' in request.resource.data) &&
+        (!('restaurantLinkSource' in resource.data) || request.resource.data.restaurantLinkSource == resource.data.restaurantLinkSource)
+      );
+    }
+
+    function keepsRestaurantOwnershipStable() {
+      return !('ownerId' in resource.data) ||
+        request.resource.data.ownerId == resource.data.ownerId;
+    }
+
+    function keepsRestaurantPublishStateStable() {
+      return (
+        ('isPublished' in resource.data) == ('isPublished' in request.resource.data) &&
+        (!('isPublished' in resource.data) || request.resource.data.isPublished == resource.data.isPublished)
+      );
+    }
+
+    function hasOnlyDispatchProfileFields() {
+      return request.resource.data.keys().hasOnly([
+        'acceptanceRate',
+        'activeLoad',
+        'completedTrips',
+        'createdAt',
+        'currentAddress',
+        'displayName',
+        'latitude',
+        'longitude',
+        'phoneNumber',
+        'region',
+        'status',
+        'updatedAt',
+        'vehicleType',
+        'zone'
+      ]);
+    }
+
+    function keepsDispatchProfileAdminFieldsStable() {
+      return request.resource.data.displayName == resource.data.displayName &&
+        request.resource.data.vehicleType == resource.data.vehicleType &&
+        request.resource.data.phoneNumber == resource.data.phoneNumber &&
+        request.resource.data.region == resource.data.region &&
+        request.resource.data.acceptanceRate == resource.data.acceptanceRate &&
+        request.resource.data.activeLoad == resource.data.activeLoad &&
+        request.resource.data.completedTrips == resource.data.completedTrips &&
+        request.resource.data.createdAt == resource.data.createdAt;
+    }
+
     // Note:
-    // These rules cover identity, role, and document ownership.
-    // To hard-enforce one-device sessions at the database layer, move sensitive writes
-    // through Cloud Functions or include a request-bound session proof that rules can verify.
+    // Sensitive order writes now flow through callable Cloud Functions so the server can
+    // validate transitions, ownership, and pricing before mutating `orders`.
+    // Session enforcement for privileged roles still benefits from a server-verified proof.
 
     match /users/{userId} {
-      allow create: if isOwner(userId) && request.resource.data.uid == userId;
-      allow read: if isOwner(userId);
-      allow update: if isOwner(userId) &&
+      allow create: if isAdmin() || isCustomerProfileCreate(userId);
+      allow read: if isAdmin() || isOwner(userId);
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        hasOnlyUserFields() &&
         request.resource.data.uid == userId &&
-        keepsRoleStable();
+        keepsRoleStable() &&
+        keepsOffboardingStateStable() &&
+        keepsRestaurantLinkStable()
+      );
       allow delete: if false;
     }
 
     match /restaurants/{restaurantId} {
       allow read: if true;
-      allow create: if hasRole('restaurant') &&
-        request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if ownsRestaurant(restaurantId);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        ownsRestaurant(restaurantId) &&
+        keepsRestaurantOwnershipStable() &&
+        keepsRestaurantPublishStateStable()
+      );
+      allow delete: if isAdmin() || ownsRestaurant(restaurantId);
     }
 
     match /orders/{orderId} {
-      allow create: if hasRole('customer') &&
-        request.resource.data.customerId == request.auth.uid;
-
       allow read: if signedIn() && (
+        isAdmin() ||
         resource.data.customerId == request.auth.uid ||
         ownsRestaurant(resource.data.restaurantId) ||
         hasRole('dispatch')
       );
 
-      allow update: if (
-        hasRole('dispatch') ||
-        ownsRestaurant(resource.data.restaurantId)
-      ) && keepsOrderOwnershipStable();
-
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     match /dispatchProfiles/{profileId} {
-      allow read: if hasRole('dispatch');
-      allow create, update, delete: if hasRole('dispatch');
+      allow read: if isAdmin() || hasRole('dispatch');
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        hasRole('dispatch') &&
+        isOwner(profileId) &&
+        hasOnlyDispatchProfileFields() &&
+        keepsDispatchProfileAdminFieldsStable()
+      );
     }
 
     match /{document=**} {

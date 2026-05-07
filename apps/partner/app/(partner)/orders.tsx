@@ -52,7 +52,7 @@ export default function PartnerOrdersScreen() {
               </View>
             </View>
             <Text style={styles.orderMeta}>
-              {order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0} items ·{' '}
+              {order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0} items {'·'}{' '}
               {(order.fulfillmentType ?? 'delivery').toUpperCase()}
             </Text>
             <Text style={styles.orderMeta}>Total ${(order.pricing?.total ?? order.total ?? 0).toFixed(2)}</Text>

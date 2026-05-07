@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { customerTheme } from '../../src/theme/palette';
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
@@ -70,7 +71,7 @@ export default function ForgotPasswordScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.background,
     flex: 1,
   },
   container: {
@@ -79,33 +80,35 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    color: '#111',
+    color: customerTheme.text,
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 8,
   },
   copy: {
-    color: '#666',
+    color: customerTheme.textMuted,
     fontSize: 16,
     marginBottom: 24,
   },
   errorText: {
-    color: '#d32f2f',
+    color: customerTheme.danger,
     marginBottom: 16,
     textAlign: 'center',
     fontSize: 14,
   },
   input: {
-    borderColor: '#ddd',
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
     borderRadius: 10,
     borderWidth: 1,
     height: 50,
     marginBottom: 16,
     paddingHorizontal: 16,
+    color: customerTheme.text,
   },
   button: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
     borderRadius: 10,
     paddingVertical: 15,
   },
@@ -115,7 +118,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   link: {
-    color: '#5D3FD3',
+    color: customerTheme.link,
     marginTop: 18,
     textAlign: 'center',
   },

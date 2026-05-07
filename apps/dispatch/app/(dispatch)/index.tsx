@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   copy: {
-    color: '#f7ead8',
+    color: '#d6dfeb',
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,
@@ -259,7 +259,9 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 22,
+    borderWidth: 1,
     marginBottom: 12,
     padding: 18,
     width: '48.2%',
@@ -302,7 +304,9 @@ const styles = StyleSheet.create({
   },
   deliveryCard: {
     backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 24,
+    borderWidth: 1,
     marginTop: 14,
     padding: 18,
   },
@@ -370,7 +374,9 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 24,
+    borderWidth: 1,
     marginTop: 14,
     padding: 20,
   },
@@ -387,7 +393,7 @@ const styles = StyleSheet.create({
   },
   alertCard: {
     backgroundColor: dispatchTheme.warningSoft,
-    borderColor: '#e8c79f',
+    borderColor: '#ebcf9e',
     borderRadius: 22,
     borderWidth: 1,
     marginTop: 12,
@@ -406,7 +412,9 @@ const styles = StyleSheet.create({
   },
   neutralCard: {
     backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 22,
+    borderWidth: 1,
     marginTop: 12,
     padding: 16,
   },
@@ -424,7 +432,9 @@ const styles = StyleSheet.create({
   zoneRow: {
     alignItems: 'flex-start',
     backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
     borderRadius: 22,
+    borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 12,

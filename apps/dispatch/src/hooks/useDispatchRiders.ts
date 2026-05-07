@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { db } from '../services/firebase/config';
+import { getDispatchRiders as getDispatchRidersReadModel } from '../services/dispatchReadModel';
 import { resolveDispatchRiderCoordinate } from '../utils/dispatchRiderLocation';
 
 export type DispatchRider = {
@@ -120,28 +119,46 @@ export const useDispatchRiders = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const ridersQuery = query(collection(db, 'dispatchProfiles'), orderBy('updatedAt', 'desc'));
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(
-      ridersQuery,
-      (snapshot) => {
-        const nextRiders = snapshot.docs.map((docSnapshot) =>
-          normalizeDispatchRider(docSnapshot.id, docSnapshot.data() as Record<string, unknown>)
+    const loadRiders = async () => {
+      try {
+        const nextData = await getDispatchRidersReadModel();
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextRiders = nextData.riders.map((rider) =>
+          normalizeDispatchRider(rider.id, rider as unknown as Record<string, unknown>)
         );
 
         setRiders(nextRiders);
         setError(null);
-        setLoading(false);
-      },
-      (nextError) => {
+      } catch (nextError: any) {
+        if (cancelled) {
+          return;
+        }
+
         console.error('Error loading dispatch riders:', nextError);
         setRiders([]);
-        setError(nextError.message);
-        setLoading(false);
+        setError(nextError.message ?? 'Unable to load dispatch riders right now.');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    );
+    };
 
-    return unsubscribe;
+    void loadRiders();
+    const interval = setInterval(() => {
+      void loadRiders();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const onlineRiders = useMemo(

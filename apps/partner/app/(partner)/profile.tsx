@@ -26,8 +26,8 @@ const toNumberOrNull = (value: string) => {
 
 export default function PartnerProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { linkRestaurant, signOut, user } = useAuth();
-  const { error, loading, restaurant, restaurants } = usePartnerRestaurant();
+  const { deleteAccount, linkRestaurant, loading: authLoading, signOut, user } = useAuth();
+  const { claimableRestaurants, error, loading, restaurant, restaurants, requiresVerifiedLink } = usePartnerRestaurant();
   const [savingProfile, setSavingProfile] = useState(false);
   const [name, setName] = useState('');
   const [cuisine, setCuisine] = useState('');
@@ -42,7 +42,6 @@ export default function PartnerProfileScreen() {
   const [deliveryRadiusKm, setDeliveryRadiusKm] = useState('');
   const [supportsDelivery, setSupportsDelivery] = useState(true);
   const [supportsPickup, setSupportsPickup] = useState(true);
-  const [isPublished, setIsPublished] = useState(false);
   const [isOpen, setIsOpen] = useState(true);
 
   const sortedRestaurants = [...restaurants].sort((left, right) => left.name.localeCompare(right.name));
@@ -71,13 +70,12 @@ export default function PartnerProfileScreen() {
     );
     setSupportsDelivery(restaurant?.supportsDelivery !== false);
     setSupportsPickup(restaurant?.supportsPickup !== false);
-    setIsPublished(restaurant?.isPublished === true);
     setIsOpen(restaurant?.isOpen !== false);
   }, [restaurant, user?.displayName]);
 
   const handleLinkRestaurant = async (restaurantId: string, restaurantName: string) => {
     try {
-      await linkRestaurant(restaurantId, restaurantName);
+      await linkRestaurant(restaurantId);
       Alert.alert('Restaurant linked', `${restaurantName} is now connected to this partner account.`);
     } catch (nextError: any) {
       Alert.alert('Link failed', nextError.message ?? 'Unable to link this restaurant right now.');
@@ -114,17 +112,16 @@ export default function PartnerProfileScreen() {
         deliveryRadiusKm: toNumberOrNull(deliveryRadiusKm),
         supportsDelivery,
         supportsPickup,
-        isPublished,
         isOpen,
       });
 
       if (user.restaurantId !== savedRestaurant.id) {
-        await linkRestaurant(savedRestaurant.id, savedRestaurant.name);
+        await linkRestaurant(savedRestaurant.id);
       }
 
       Alert.alert(
         user.restaurantId || restaurant?.id ? 'Store updated' : 'Store created',
-        `${savedRestaurant.name} is ready for customer discovery and partner menu management.`
+        `${savedRestaurant.name} is saved for partner menu management. Customer visibility stays pending until admin approval.`
       );
     } catch (nextError: any) {
       Alert.alert('Save failed', nextError.message ?? 'Unable to save store details right now.');
@@ -141,11 +138,48 @@ export default function PartnerProfileScreen() {
     }
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete partner account',
+      'Partner accounts tied to a restaurant may need admin offboarding instead of self-removal so ownership and order history stay traceable.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccount();
+            } catch (nextError: any) {
+              Alert.alert('Delete blocked', nextError.message ?? 'Unable to delete this account right now.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
       <Text style={styles.title}>Store setup</Text>
-      <Text style={styles.subtitle}>Create the restaurant record customers and dispatch will rely on.</Text>
+      <Text style={styles.subtitle}>Run the partner side from one place: your business identity, store setup, approval state, and linked restaurant record.</Text>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Partner account</Text>
+        <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
+        <Text style={styles.metaLine}>Role: {user?.role ?? 'restaurant'}</Text>
+        <Text style={styles.metaLine}>Email verified: {user?.emailVerified ? 'Yes' : 'No'}</Text>
+        <Text style={styles.metaLine}>Linked restaurant: {user?.restaurantName ?? restaurant?.name ?? 'Not linked yet'}</Text>
+        <Text style={styles.metaLine}>Single-device session: {user?.activeSessionId ? 'Active' : 'Idle'}</Text>
+      </View>
+      {requiresVerifiedLink ? (
+        <View style={styles.warningCard}>
+          <Text style={styles.warningTitle}>Verified link needed</Text>
+          <Text style={styles.warningCopy}>
+            We found a restaurant owned by this account, but your partner profile is not explicitly linked yet. Confirm the link below so future access stays pinned to the correct restaurant ID.
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Restaurant details</Text>
@@ -219,14 +253,11 @@ export default function PartnerProfileScreen() {
             thumbColor={supportsPickup ? partnerTheme.accent : '#f3f4f6'}
           />
         </View>
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Publish store to customers</Text>
-          <Switch
-            value={isPublished}
-            onValueChange={setIsPublished}
-            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-            thumbColor={isPublished ? partnerTheme.accent : '#f3f4f6'}
-          />
+        <View style={styles.approvalNotice}>
+          <Text style={styles.approvalNoticeTitle}>Admin approval required</Text>
+          <Text style={styles.approvalNoticeCopy}>
+            Customer visibility is now strictly admin-controlled. Partners can update store details here, but only the admin approvals app can publish or unpublish a restaurant.
+          </Text>
         </View>
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>Store open now</Text>
@@ -249,10 +280,15 @@ export default function PartnerProfileScreen() {
         <Text style={styles.cardTitle}>Current publishing state</Text>
         <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
         <Text style={styles.metaLine}>Linked restaurant ID: {user?.restaurantId ?? restaurant?.id ?? 'Not linked yet'}</Text>
+        <Text style={styles.metaLine}>Link source: {user?.restaurantLinkSource ?? 'Not recorded yet'}</Text>
+        <Text style={styles.metaLine}>Link confirmed at: {user?.restaurantLinkedAt ?? 'Not recorded yet'}</Text>
         <Text style={styles.metaLine}>Menu categories: {restaurant?.menu?.length ?? 0}</Text>
         <Text style={styles.metaLine}>
           Listed items: {restaurant?.menu?.reduce((sum, category) => sum + (category.items?.length ?? 0), 0) ?? 0}
         </Text>
+        <Text style={styles.metaLine}>Approval status: {restaurant?.approvalStatus ?? 'pending'}</Text>
+        <Text style={styles.metaLine}>Approved at: {restaurant?.approvedAt ?? 'Awaiting admin review'}</Text>
+        <Text style={styles.metaLine}>Approved by: {restaurant?.approvedByUid ?? 'Awaiting admin review'}</Text>
         <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
         <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
       </View>
@@ -260,30 +296,44 @@ export default function PartnerProfileScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Restaurant linking</Text>
         <Text style={styles.helperText}>
-          Link this partner account to an existing restaurant doc, or create a fresh one above and it will link automatically.
+          Claim an unowned restaurant doc, or create a fresh one above and it will link automatically.
         </Text>
         {sortedRestaurants.length === 0 ? (
           <Text style={styles.metaLine}>No restaurant documents are available yet.</Text>
+        ) : claimableRestaurants.length === 0 ? (
+          <Text style={styles.metaLine}>Every existing restaurant is already managed by another partner account.</Text>
         ) : null}
         {sortedRestaurants.map((candidate) => {
           const isLinked = (user?.restaurantId ?? restaurant?.id) === candidate.id;
+          const claimedByAnotherPartner = Boolean(candidate.ownerId && candidate.ownerId !== user?.uid);
+          const ownedByThisPartner = Boolean(candidate.ownerId && candidate.ownerId === user?.uid);
 
           return (
-            <View key={candidate.id} style={[styles.restaurantRow, isLinked ? styles.restaurantRowActive : null]}>
+            <View
+              key={candidate.id}
+              style={[
+                styles.restaurantRow,
+                isLinked ? styles.restaurantRowActive : null,
+                claimedByAnotherPartner ? styles.restaurantRowDisabled : null,
+              ]}
+            >
               <View style={styles.restaurantMeta}>
                 <Text style={styles.restaurantName}>{candidate.name}</Text>
                 <Text style={styles.restaurantInfo}>
                   {candidate.cuisine ?? 'Cuisine not set'} | {candidate.address ?? 'Address not set'}
                 </Text>
                 <Text style={styles.restaurantId}>ID: {candidate.id}</Text>
+                <Text style={styles.restaurantId}>
+                  Ownership: {claimedByAnotherPartner ? 'Managed by another partner' : ownedByThisPartner ? 'Owned by this account' : 'Available to claim'}
+                </Text>
               </View>
               <TouchableOpacity
                 style={[styles.linkButton, isLinked ? styles.linkButtonActive : null]}
                 onPress={() => handleLinkRestaurant(candidate.id, candidate.name)}
-                disabled={loading || isLinked}
+                disabled={loading || isLinked || claimedByAnotherPartner}
               >
                 <Text style={[styles.linkButtonText, isLinked ? styles.linkButtonTextActive : null]}>
-                  {isLinked ? 'Linked' : 'Link'}
+                  {isLinked ? 'Linked' : claimedByAnotherPartner ? 'Unavailable' : 'Claim'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -291,9 +341,26 @@ export default function PartnerProfileScreen() {
         })}
       </View>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleSignOut} disabled={loading || savingProfile}>
-        <Text style={styles.secondaryButtonText}>Sign out</Text>
-      </TouchableOpacity>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Account access</Text>
+        <Text style={styles.helperText}>
+          Sign out when you are done on this device. If you want this partner account removed entirely, use delete. The backend will block self-removal when admin-controlled business records are still attached.
+        </Text>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={handleSignOut}
+          disabled={loading || savingProfile || authLoading}
+        >
+          <Text style={styles.secondaryButtonText}>Sign out</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={handleDeleteAccount}
+          disabled={loading || savingProfile || authLoading}
+        >
+          <Text style={styles.deleteButtonText}>Delete account</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
@@ -323,9 +390,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 12,
   },
+  warningCard: {
+    backgroundColor: partnerTheme.warningSoft,
+    borderColor: '#efcf96',
+    borderRadius: 18,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 16,
+  },
+  warningTitle: {
+    color: partnerTheme.warning,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  warningCopy: {
+    color: partnerTheme.textSoft,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 8,
+  },
   card: {
     backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.border,
     borderRadius: 20,
+    borderWidth: 1,
     marginTop: 14,
     padding: 18,
   },
@@ -392,6 +480,25 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 10,
   },
+  approvalNotice: {
+    backgroundColor: partnerTheme.warningSoft,
+    borderColor: '#efcf96',
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 14,
+  },
+  approvalNoticeTitle: {
+    color: partnerTheme.warning,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  approvalNoticeCopy: {
+    color: partnerTheme.textSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
   restaurantRow: {
     alignItems: 'center',
     borderColor: partnerTheme.border,
@@ -405,6 +512,9 @@ const styles = StyleSheet.create({
   restaurantRowActive: {
     backgroundColor: partnerTheme.accentSoft,
     borderColor: partnerTheme.accent,
+  },
+  restaurantRowDisabled: {
+    opacity: 0.55,
   },
   restaurantMeta: {
     flex: 1,
@@ -448,11 +558,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.accentStrong,
     borderRadius: 16,
-    marginTop: 22,
+    marginTop: 8,
     paddingVertical: 14,
   },
   secondaryButtonText: {
     color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  deleteButton: {
+    alignItems: 'center',
+    borderColor: partnerTheme.danger,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 12,
+    paddingVertical: 14,
+  },
+  deleteButtonText: {
+    color: partnerTheme.danger,
     fontSize: 15,
     fontWeight: '800',
   },

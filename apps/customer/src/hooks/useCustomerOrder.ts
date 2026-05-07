@@ -1,20 +1,16 @@
-// src/hooks/useCustomerOrder.ts
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import type { AddressRecord, OrderPriceBreakdown, OrderPaymentSummary } from '../domain/entities';
+import type {
+  AddressRecord,
+  OrderPriceBreakdown,
+  OrderPaymentSummary,
+  OrderDocument,
+} from '../domain/entities';
 import type { FulfillmentType } from '../domain/orders';
 import { db } from '../services/firebase/config';
 
-export type Order = {
+export type Order = OrderDocument & {
   id: string;
-  restaurantId: string;
-  restaurantName: string;
-  customerId: string;
-  items: any[];
-  total: number;
-  status: string;
-  createdAt: any;
-  deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
   fulfillmentType?: FulfillmentType;
   pricing?: OrderPriceBreakdown;

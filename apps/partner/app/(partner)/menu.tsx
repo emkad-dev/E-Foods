@@ -72,7 +72,10 @@ export default function PartnerMenuScreen() {
       const itemId = editingItemId ?? `${toSlug(itemName)}-${Date.now()}`;
       const nextMenu: PartnerMenuCategoryInput[] = [...menu].map((menuCategory) => ({
         category: menuCategory.category,
-        items: [...menuCategory.items],
+        items: menuCategory.items.map((item) => ({
+          ...item,
+          description: item.description ?? '',
+        })),
       }));
       const categoryIndex = nextMenu.findIndex(
         (menuCategory) => menuCategory.category.trim().toLowerCase() === normalizedCategory.toLowerCase()
@@ -102,7 +105,7 @@ export default function PartnerMenuScreen() {
         });
       }
 
-      await savePartnerRestaurantMenu(restaurant.id, nextMenu, user.uid);
+      await savePartnerRestaurantMenu(restaurant.id, nextMenu);
       resetForm();
       Alert.alert('Menu saved', `${nextItem.name} is now available in ${normalizedCategory}.`);
     } catch (nextError: any) {
@@ -112,7 +115,17 @@ export default function PartnerMenuScreen() {
     }
   };
 
-  const handleEditItem = (categoryName: string, item: PartnerMenuCategoryInput['items'][number]) => {
+  const handleEditItem = (
+    categoryName: string,
+    item: {
+      description?: string;
+      id: string;
+      image?: string;
+      isAvailable?: boolean;
+      name: string;
+      price: number;
+    }
+  ) => {
     setEditingItemId(item.id);
     setCategory(categoryName);
     setItemName(item.name);
@@ -133,17 +146,28 @@ export default function PartnerMenuScreen() {
       const nextMenu = menu
         .map((menuCategory) => {
           if (menuCategory.category !== categoryName) {
-            return menuCategory;
+            return {
+              category: menuCategory.category,
+              items: menuCategory.items.map((item) => ({
+                ...item,
+                description: item.description ?? '',
+              })),
+            };
           }
 
           return {
             ...menuCategory,
-            items: menuCategory.items.filter((item) => item.id !== itemId),
+            items: menuCategory.items
+              .filter((item) => item.id !== itemId)
+              .map((item) => ({
+                ...item,
+                description: item.description ?? '',
+              })),
           };
         })
         .filter((menuCategory) => menuCategory.items.length > 0);
 
-      await savePartnerRestaurantMenu(restaurant.id, nextMenu, user.uid);
+      await savePartnerRestaurantMenu(restaurant.id, nextMenu);
 
       if (editingItemId === itemId) {
         resetForm();

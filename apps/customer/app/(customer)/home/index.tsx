@@ -25,6 +25,7 @@ import {
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
 } from '../../../src/utils/restaurantAvailability';
+import { customerTheme } from '../../../src/theme/palette';
 
 type Restaurant = DiscoveryRestaurant & {
   image: string;
@@ -115,7 +116,7 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#f5b342" />
+        <ActivityIndicator size="large" color={customerTheme.accent} />
       </View>
     );
   }
@@ -128,11 +129,11 @@ export default function HomeScreen() {
         ListHeaderComponent={
           <>
             <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.searchContainer}>
-              <View style={[styles.searchBar, { borderColor: '#5D3FD3' }]}>
+              <View style={styles.searchBar}>
                 <TextInput
                   style={styles.searchInput}
                   placeholder="Search food or cuisine"
-                  placeholderTextColor="#999"
+                  placeholderTextColor={customerTheme.textMuted}
                   value={search}
                   onChangeText={setSearch}
                   returnKeyType="search"
@@ -268,11 +269,11 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f8f8' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: customerTheme.background },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: customerTheme.background },
   list: { padding: 12, paddingBottom: 28 },
   searchContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.surface,
     borderRadius: 20,
     marginBottom: 20,
     padding: 16,
@@ -281,10 +282,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 24,
     borderWidth: 1,
+    borderColor: customerTheme.border,
+    backgroundColor: customerTheme.surfaceMuted,
     flexDirection: 'row',
     paddingHorizontal: 6,
   },
   searchInput: {
+    color: customerTheme.text,
     flex: 1,
     fontSize: 16,
     height: 44,
@@ -298,19 +302,19 @@ const styles = StyleSheet.create({
     width: 36,
   },
   searchActionActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: customerTheme.accent,
   },
   searchActionIdle: {
-    backgroundColor: '#bfd1ff',
+    backgroundColor: customerTheme.accentSoft,
   },
   graphicsSection: { marginBottom: 20 },
   restaurantHeader: { marginBottom: 12 },
-  sectionTitle: { color: '#111827', fontSize: 22, fontWeight: '800' },
-  sectionCopy: { color: '#6b7280', fontSize: 14, lineHeight: 20, marginTop: 4 },
+  sectionTitle: { color: customerTheme.text, fontSize: 22, fontWeight: '800' },
+  sectionCopy: { color: customerTheme.textMuted, fontSize: 14, lineHeight: 20, marginTop: 4 },
   graphicsRow: { paddingRight: 12 },
   graphicsCard: {
-    backgroundColor: '#fff8e8',
-    borderColor: '#f0dbab',
+    backgroundColor: customerTheme.surfaceStrong,
+    borderColor: customerTheme.border,
     borderRadius: 18,
     borderWidth: 1,
     marginRight: 12,
@@ -319,28 +323,28 @@ const styles = StyleSheet.create({
     width: GRAPHICS_CARD_WIDTH,
   },
   graphicsCardEyebrow: {
-    color: '#8a6442',
+    color: customerTheme.accentStrong,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.4,
     marginBottom: 10,
     textTransform: 'uppercase',
   },
-  graphicsCardTitle: { color: '#332414', fontSize: 20, fontWeight: '800' },
-  graphicsCardCopy: { color: '#6f5b3e', fontSize: 14, lineHeight: 20, marginTop: 8 },
+  graphicsCardTitle: { color: customerTheme.text, fontSize: 20, fontWeight: '800' },
+  graphicsCardCopy: { color: customerTheme.textMuted, fontSize: 14, lineHeight: 20, marginTop: 8 },
   graphicsCardFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 'auto', paddingTop: 18 },
-  graphicsCardMeta: { color: '#8a6442', fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
-  card: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 16, overflow: 'hidden', elevation: 3 },
+  graphicsCardMeta: { color: customerTheme.accentStrong, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  card: { backgroundColor: customerTheme.surface, borderRadius: 16, marginBottom: 16, overflow: 'hidden', elevation: 3 },
   image: { width: '100%', height: 150 },
   imageFallback: {
     alignItems: 'center',
-    backgroundColor: '#fdecc8',
+    backgroundColor: customerTheme.surfaceStrong,
     height: 150,
     justifyContent: 'center',
     width: '100%',
   },
   imageFallbackText: {
-    color: '#8a5a12',
+    color: customerTheme.accentStrong,
     fontSize: 42,
     fontWeight: '800',
   },
@@ -350,45 +354,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  name: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  name: { fontSize: 18, fontWeight: 'bold', color: customerTheme.text },
   availabilityBadge: {
-    backgroundColor: '#fff3d4',
+    backgroundColor: customerTheme.accentTint,
     borderRadius: 999,
     marginLeft: 10,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   availabilityBadgeText: {
-    color: '#8a5a12',
+    color: customerTheme.accentStrong,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
   },
-  cuisine: { fontSize: 14, color: '#666', marginTop: 4 },
+  cuisine: { fontSize: 14, color: customerTheme.textMuted, marginTop: 4 },
   details: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  rating: { fontSize: 14, color: '#f5b342' },
-  time: { fontSize: 14, color: '#666' },
-  emptyState: { alignItems: 'center', backgroundColor: '#fff', borderRadius: 18, padding: 24 },
-  emptyTitle: { color: '#111827', fontSize: 18, fontWeight: '700' },
-  emptyCopy: { color: '#6b7280', fontSize: 14, lineHeight: 20, marginTop: 8, textAlign: 'center' },
+  rating: { fontSize: 14, color: customerTheme.accentStrong },
+  time: { fontSize: 14, color: customerTheme.textMuted },
+  emptyState: { alignItems: 'center', backgroundColor: customerTheme.surface, borderRadius: 18, padding: 24 },
+  emptyTitle: { color: customerTheme.text, fontSize: 18, fontWeight: '700' },
+  emptyCopy: { color: customerTheme.textMuted, fontSize: 14, lineHeight: 20, marginTop: 8, textAlign: 'center' },
   unavailableSection: {
     marginTop: 8,
   },
   unavailableTitle: {
-    color: '#111827',
+    color: customerTheme.text,
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 6,
   },
   unavailableCopy: {
-    color: '#6b7280',
+    color: customerTheme.textMuted,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 14,
   },
   unavailableCard: {
-    backgroundColor: '#fff5f5',
-    borderColor: '#fecaca',
+    backgroundColor: customerTheme.dangerSoft,
+    borderColor: '#f3c3bf',
     borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
@@ -405,20 +409,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   unavailableBadge: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#f7cfc8',
     borderRadius: 999,
     marginLeft: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   unavailableBadgeText: {
-    color: '#b91c1c',
+    color: '#9e2f2f',
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
   },
   unavailableMeta: {
-    color: '#991b1b',
+    color: '#9e2f2f',
     fontSize: 12,
     lineHeight: 18,
     marginTop: 8,
