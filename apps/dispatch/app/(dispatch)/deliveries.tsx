@@ -63,7 +63,7 @@ export default function DeliveriesScreen() {
           <Text style={styles.emptyTitle}>{selectedView === 'live' ? 'No dispatch queue yet' : 'No completed deliveries yet'}</Text>
           <Text style={styles.emptyCopy}>
             {selectedView === 'live'
-              ? 'Once customer delivery orders hit Firestore, they will appear here for assignment and tracking.'
+              ? 'Once customer delivery orders are placed, they will appear here for assignment and tracking.'
               : 'Completed, failed, and cancelled delivery orders will appear here as dispatch history.'}
           </Text>
         </View>

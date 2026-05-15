@@ -42,7 +42,7 @@ export default function DispatchForgotPasswordScreen() {
         <Text style={styles.eyebrow}>E-Fooders</Text>
         <Text style={styles.title}>Reset dispatch password</Text>
         <Text style={styles.copy}>
-          Enter your dispatch email and we will send you a password reset link through Firebase Auth.
+          Enter your dispatch email and we will send you a password reset link.
         </Text>
       </View>
 

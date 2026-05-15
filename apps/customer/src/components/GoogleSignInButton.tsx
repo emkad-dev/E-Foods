@@ -31,8 +31,6 @@ export default function GoogleSignInButton() {
     setSigningIn(true);
     try {
       const idToken = await signInWithGoogleIdToken();
-
-      const idToken = await signInWithGoogleIdToken();
       await signInWithGoogle(idToken);
       
       // Redirect to home page after successful sign-in

@@ -39,7 +39,7 @@ export default function PartnerForgotPasswordScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.title}>Reset partner password</Text>
-      <Text style={styles.copy}>Enter your partner email and we will send you a Firebase reset link.</Text>
+      <Text style={styles.copy}>Enter your partner email and we will send you a password reset link.</Text>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
