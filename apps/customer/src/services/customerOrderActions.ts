@@ -1,10 +1,9 @@
-import { httpsCallable } from 'firebase/functions';
 import type { CartItem, DeliveryLocation } from '../contexts/CartContext';
 import type { CheckoutPaymentMethod, FulfillmentType } from '../domain/orders';
-import { functions } from './firebase/config';
+import { callCustomerBackendRpc } from './backendRpc';
 
 export const PREPAID_CHECKOUT_DISABLED_MESSAGE =
-  'Card and wallet payments are coming soon. Use cash for now while payment service is still being set up.';
+  'Wallet payments are still coming soon. Use card, bank transfer, or cash for now.';
 
 type PlaceCustomerOrderInput = {
   deliveryLocation: DeliveryLocation | null;
@@ -22,8 +21,17 @@ type PlaceCustomerOrderResult = {
   total: number;
 };
 
-const createIdempotencyKey = () =>
-  `cust-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+type InitializeCustomerPaymentResult = {
+  accessCode?: string | null;
+  authorizationUrl: string;
+  orderId: string;
+  paymentStatus: string;
+  reference: string;
+  status: string;
+  total: number;
+};
+
+const createIdempotencyKey = () => `cust-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 export const placeCustomerOrder = async ({
   deliveryLocation,
@@ -33,12 +41,11 @@ export const placeCustomerOrder = async ({
   restaurantId,
   tipAmount,
 }: PlaceCustomerOrderInput): Promise<PlaceCustomerOrderResult> => {
-  if (paymentMethod === 'card' || paymentMethod === 'wallet') {
+  if (paymentMethod !== 'cash') {
     throw new Error(PREPAID_CHECKOUT_DISABLED_MESSAGE);
   }
 
-  const callable = httpsCallable(functions, 'placeCustomerOrder');
-  const result = await callable({
+  return callCustomerBackendRpc<PlaceCustomerOrderResult>('placeCustomerOrder', {
     deliveryLocation,
     fulfillmentType,
     idempotencyKey: createIdempotencyKey(),
@@ -50,9 +57,43 @@ export const placeCustomerOrder = async ({
     restaurantId,
     tipAmount,
   });
-
-  return result.data as PlaceCustomerOrderResult;
 };
+
+export const initializeCustomerPayment = async ({
+  deliveryLocation,
+  fulfillmentType,
+  items,
+  paymentMethod,
+  restaurantId,
+  tipAmount,
+}: PlaceCustomerOrderInput): Promise<InitializeCustomerPaymentResult> => {
+  if (!['card', 'bank_transfer'].includes(paymentMethod)) {
+    throw new Error(PREPAID_CHECKOUT_DISABLED_MESSAGE);
+  }
+
+  return callCustomerBackendRpc<InitializeCustomerPaymentResult>('initializeCustomerPayment', {
+    deliveryLocation,
+    fulfillmentType,
+    idempotencyKey: createIdempotencyKey(),
+    items: items.map((item) => ({
+      id: item.id,
+      quantity: item.quantity,
+    })),
+    paymentMethod,
+    restaurantId,
+    tipAmount,
+  });
+};
+
+type RefreshCustomerPaymentStatusResult = {
+  gatewayStatus: string;
+  orderId: string;
+  paymentStatus: string;
+  status: string;
+};
+
+export const refreshCustomerPaymentStatus = async (orderId: string): Promise<RefreshCustomerPaymentStatusResult> =>
+  callCustomerBackendRpc<RefreshCustomerPaymentStatusResult>('refreshCustomerPaymentStatus', { orderId });
 
 type CancelCustomerOrderResult = {
   orderId: string;
@@ -60,8 +101,5 @@ type CancelCustomerOrderResult = {
   status: string;
 };
 
-export const cancelCustomerOrder = async (orderId: string): Promise<CancelCustomerOrderResult> => {
-  const callable = httpsCallable(functions, 'cancelCustomerOrder');
-  const result = await callable({ orderId });
-  return result.data as CancelCustomerOrderResult;
-};
+export const cancelCustomerOrder = async (orderId: string): Promise<CancelCustomerOrderResult> =>
+  callCustomerBackendRpc<CancelCustomerOrderResult>('cancelCustomerOrder', { orderId });

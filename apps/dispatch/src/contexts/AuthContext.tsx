@@ -1,17 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
   createUserWithEmail,
-  deleteUserAccount,
   getUserRoleClaim,
   signInWithEmail,
   signOutUser,
   formatAuthError,
   sendPasswordReset,
-} from '../services/firebase/auth';
-import { auth, db } from '../services/firebase/config';
+} from '../services/supabase/auth';
+import { supabase } from '../services/supabase/config';
+import { devAuthEnv } from '../config/env';
 import { submitDispatchApplication, type DispatchApplicationInput } from '../services/dispatchApplications';
 import { deleteOwnAccount as deleteOwnDispatchAccount } from '../services/accountManagement';
 import {
@@ -22,8 +21,8 @@ import {
   getStoredSessionId,
   storeSessionId,
   storeUserProfile,
-} from '../services/firebase/session';
-import { getUserDocument, updateUserDocument } from '../services/firebase/firestore';
+} from '../services/session';
+import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 
 type AuthContextType = {
   user: UserDocument | null;
@@ -42,15 +41,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const DISPATCH_ACCESS_ERROR = 'This account does not have dispatch access.';
 const MISSING_PROFILE_ERROR = 'No dispatch profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
-const SESSION_CONFLICT_ERROR = 'This account was signed in on another device. Sign in again here if you want to continue on this device.';
+const SESSION_CONFLICT_ERROR =
+  'This account was signed in on another device. Sign in again here if you want to continue on this device.';
 const DISPATCH_APPLICATION_PENDING_MESSAGE =
   'Your rider application has been submitted. Wait for admin approval before signing into the dispatch board.';
 const DISPATCH_APPLICATION_REJECTED_FALLBACK =
   'Your rider application was reviewed but not approved yet. Contact the operations team and update your details before trying again.';
 const DISPATCH_SIGNUP_ROLLBACK_ERROR =
   'Your rider application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the operations team.';
+const DEV_AUTH_BYPASS_MESSAGE = 'Dev auth bypass is enabled. Dispatch auth actions are paused for this app session.';
 
-const isFirestoreOfflineError = (error: unknown) => {
+const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
   const errorMessage =
     typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
@@ -64,7 +65,7 @@ const isFirestoreOfflineError = (error: unknown) => {
 };
 
 const getDispatchAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isFirestoreOfflineError(error)) {
+  if (isProfileOfflineError(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -105,32 +106,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
 
-  const rollbackPendingApplicant = useCallback(async (userId: string) => {
+  useEffect(() => {
+    if (!devAuthEnv.enabled) {
+      return;
+    }
+
+    const mockUser: UserDocument = {
+      uid: devAuthEnv.uid,
+      email: devAuthEnv.email,
+      emailVerified: true,
+      role: 'dispatch',
+      displayName: 'Dev Dispatcher',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      dispatchApplicationStatus: 'approved',
+    };
+
+    setUser(mockUser);
+    setError(null);
+    setLoading(false);
+    void storeUserProfile(mockUser);
+  }, []);
+
+  const rollbackPendingApplicant = useCallback(async () => {
     pendingApplicantUidRef.current = null;
 
     try {
-      const currentUser = auth.currentUser;
-
-      if (currentUser?.uid === userId) {
-        await deleteUserAccount(currentUser);
-      } else if (currentUser) {
-        await signOutUser(auth);
-      }
-
+      await deleteOwnDispatchAccount();
+      await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
       return true;
     } catch (rollbackError) {
       console.error('Failed to rollback dispatch applicant signup:', rollbackError);
-
-      try {
-        if (auth.currentUser?.uid === userId) {
-          await signOutUser(auth);
-        }
-      } catch (signOutError) {
-        console.error('Failed to sign out after dispatch signup rollback error:', signOutError);
-      }
-
       await clearLocalUserState();
       setUser(null);
       return false;
@@ -140,7 +148,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
 
-    await updateUserDocument(db, userId, {
+    await updateUserDocument(userId, {
       activeSessionId: sessionId,
       activeSessionUpdatedAt: new Date().toISOString(),
     });
@@ -152,18 +160,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       if (userId && localSessionId) {
-        const userDocument = await getUserDocument(db, userId);
+        const userDocument = await getUserDocument(userId);
 
         if (userDocument?.activeSessionId === localSessionId) {
-          await updateUserDocument(db, userId, {
+          await updateUserDocument(userId, {
             activeSessionId: null,
             activeSessionUpdatedAt: new Date().toISOString(),
           });
         }
       }
     } catch (releaseError) {
-      if (!isFirestoreOfflineError(releaseError)) {
-        console.warn('Unable to release dispatch session in Firestore:', releaseError);
+      if (!isProfileOfflineError(releaseError)) {
+        console.warn('Unable to release dispatch session in Supabase:', releaseError);
       }
     } finally {
       await clearStoredSessionId();
@@ -176,7 +184,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
       await clearLocalUserState();
-      await signOutUser(auth);
+      await signOutUser(supabase);
       setUser(null);
       setError(SESSION_CONFLICT_ERROR);
       return false;
@@ -189,67 +197,87 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return true;
   }, [clearLocalUserState]);
 
+  const buildNextUser = useCallback(
+    async (authUser: SupabaseAuthUser) => {
+      const claimRole = await getUserRoleClaim(authUser);
+      const userDocument = await getUserDocument(authUser.id);
+
+      if (claimRole !== 'dispatch') {
+        if (pendingApplicantUidRef.current === authUser.id) {
+          return null;
+        }
+
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(getDispatchAccessStateMessage(userDocument));
+        return null;
+      }
+
+      if (!userDocument) {
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(MISSING_PROFILE_ERROR);
+        return null;
+      }
+
+      return {
+        ...userDocument,
+        uid: authUser.id,
+        email: authUser.email ?? userDocument.email,
+        emailVerified: Boolean(authUser.email_confirmed_at),
+        role: claimRole,
+      } satisfies UserDocument;
+    },
+    [clearLocalUserState]
+  );
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    if (devAuthEnv.enabled) {
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
       setLoading(true);
 
       try {
-        if (!firebaseUser) {
+        const authUser = session?.user ?? null;
+
+        if (!authUser) {
           setUser(null);
           await clearLocalUserState();
           return;
         }
 
-        const claimRole = await getUserRoleClaim(firebaseUser);
-        if (claimRole !== 'dispatch') {
-          if (pendingApplicantUidRef.current === firebaseUser.uid) {
-            return;
-          }
+        const nextUser = await buildNextUser(authUser);
 
-          const userDocument = await getUserDocument(db, firebaseUser.uid);
-
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(getDispatchAccessStateMessage(userDocument));
+        if (!nextUser) {
           return;
         }
 
-        const userDocument = await getUserDocument(db, firebaseUser.uid);
-
-        if (!userDocument) {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(MISSING_PROFILE_ERROR);
-          return;
-        }
-
-        const sessionIsValid = await syncSingleDeviceSession(userDocument);
+        const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
         if (!sessionIsValid) {
           return;
         }
 
-        const nextUser: UserDocument = {
-          ...userDocument,
-          email: firebaseUser.email ?? userDocument.email,
-          emailVerified: firebaseUser.emailVerified,
-          role: claimRole,
-        };
-
         setUser(nextUser);
         await storeUserProfile(nextUser);
       } catch (nextError) {
-        if (firebaseUser && isFirestoreOfflineError(nextError)) {
+        const authUser = session?.user ?? null;
+        if (authUser && isProfileOfflineError(nextError)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
-          if (cachedUser?.uid === firebaseUser.uid && cachedUser.role === 'dispatch') {
+          if (cachedUser?.uid === authUser.id && cachedUser.role === 'dispatch') {
             const fallbackUser: UserDocument = {
               ...cachedUser,
-              uid: firebaseUser.uid,
-              email: firebaseUser.email ?? cachedUser.email,
-              emailVerified: firebaseUser.emailVerified,
+              uid: authUser.id,
+              email: authUser.email ?? cachedUser.email,
+              emailVerified: Boolean(authUser.email_confirmed_at),
+              role: 'dispatch',
             };
 
             const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
@@ -272,86 +300,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    return unsubscribe;
-  }, [clearLocalUserState, rollbackPendingApplicant, syncSingleDeviceSession]);
+    return () => subscription.unsubscribe();
+  }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  useEffect(() => {
-    if (!user?.uid) {
+  const signUp = async (email: string, password: string, userData: DispatchApplicationInput) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'users', user.uid),
-      async (userSnapshot) => {
-        if (!userSnapshot.exists()) {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          return;
-        }
-
-        const nextUser = userSnapshot.data() as UserDocument;
-        const currentFirebaseUser = auth.currentUser;
-        if (!currentFirebaseUser) {
-          await clearLocalUserState();
-          setUser(null);
-          return;
-        }
-
-        const claimRole = await getUserRoleClaim(currentFirebaseUser);
-        if (claimRole !== 'dispatch') {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(DISPATCH_ACCESS_ERROR);
-          return;
-        }
-
-        const sessionIsValid = await syncSingleDeviceSession(nextUser);
-
-        if (!sessionIsValid) {
-          return;
-        }
-
-        setUser((currentUser) => {
-          if (!currentUser) {
-            return currentUser;
-          }
-
-          const resolvedUser = {
-            ...currentUser,
-            ...nextUser,
-            email: auth.currentUser?.email ?? nextUser.email,
-            emailVerified: auth.currentUser?.emailVerified ?? nextUser.emailVerified,
-            role: claimRole,
-          };
-
-          void storeUserProfile(resolvedUser);
-          return resolvedUser;
-        });
-      },
-      (snapshotError) => {
-        if (isFirestoreOfflineError(snapshotError)) {
-          setError(NO_INTERNET_ERROR);
-          return;
-        }
-
-        console.error('Error watching dispatch session:', snapshotError);
-      }
-    );
-
-    return unsubscribe;
-  }, [clearLocalUserState, syncSingleDeviceSession, user?.uid]);
-
-  const signUp = async (email: string, password: string, userData: DispatchApplicationInput) => {
     setLoading(true);
     setError(null);
     let applicantUid: string | null = null;
 
     try {
-      const firebaseUser = await createUserWithEmail(auth, email, password);
-      applicantUid = firebaseUser.uid;
-      pendingApplicantUidRef.current = firebaseUser.uid;
+      const authUser = await createUserWithEmail(supabase, email, password);
+      applicantUid = authUser.id;
+      pendingApplicantUidRef.current = authUser.id;
+
+      await createUserDocument(authUser.id, {
+        email: authUser.email ?? email,
+        emailVerified: Boolean(authUser.email_confirmed_at),
+        role: 'customer',
+      });
 
       await submitDispatchApplication({
         ...userData,
@@ -362,7 +333,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       await clearLocalUserState();
-      await signOutUser(auth);
+      await signOutUser(supabase);
       setUser(null);
       setError(DISPATCH_APPLICATION_PENDING_MESSAGE);
     } catch (nextError: any) {
@@ -372,7 +343,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           : getDispatchAuthErrorMessage(nextError, 'Unable to sign up');
 
       if (applicantUid) {
-        const rollbackSucceeded = await rollbackPendingApplicant(applicantUid);
+        const rollbackSucceeded = await rollbackPendingApplicant();
 
         if (!rollbackSucceeded) {
           nextMessage = DISPATCH_SIGNUP_ROLLBACK_ERROR;
@@ -388,34 +359,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      const firebaseUser = await signInWithEmail(auth, email, password);
-      const claimRole = await getUserRoleClaim(firebaseUser);
+      const authUser = await signInWithEmail(supabase, email, password);
+      const claimRole = await getUserRoleClaim(authUser);
 
       if (claimRole !== 'dispatch') {
-        const userDocument = await getUserDocument(db, firebaseUser.uid);
+        const userDocument = await getUserDocument(authUser.id);
         await clearLocalUserState();
-        await signOutUser(auth);
+        await signOutUser(supabase);
         setUser(null);
         const nextMessage = getDispatchAccessStateMessage(userDocument);
         setError(nextMessage);
         throw new Error(nextMessage);
       }
 
-      const userDocument = await getUserDocument(db, firebaseUser.uid);
+      const userDocument = await getUserDocument(authUser.id);
 
       if (!userDocument) {
         await clearLocalUserState();
-        await signOutUser(auth);
+        await signOutUser(supabase);
         setUser(null);
         setError(MISSING_PROFILE_ERROR);
         throw new Error(MISSING_PROFILE_ERROR);
       }
 
-      await startSingleDeviceSession(firebaseUser.uid);
+      await startSingleDeviceSession(authUser.id);
     } catch (nextError: any) {
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign in');
       setError(nextMessage);
@@ -426,11 +402,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      await sendPasswordReset(auth, email);
+      await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);
@@ -441,16 +422,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      await releaseSingleDeviceSession(auth.currentUser?.uid);
-      await signOutUser(auth);
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      await releaseSingleDeviceSession(authUser?.id);
+      await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);
     } catch (nextError: any) {
-      const nextMessage = nextError?.code ? formatAuthError(nextError) : nextError?.message ?? 'Unable to sign out';
+      const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign out');
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -459,7 +448,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const deleteAccount = async () => {
-    if (!auth.currentUser) {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser) {
       const message = 'No user is currently signed in';
       setError(message);
       throw new Error(message);
@@ -470,7 +468,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       await deleteOwnDispatchAccount();
-      await signOutUser(auth).catch(() => undefined);
+      await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
     } catch (nextError: any) {

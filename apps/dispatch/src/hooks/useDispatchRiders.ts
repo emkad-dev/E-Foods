@@ -14,9 +14,11 @@ export type DispatchRider = {
   completedTrips: string;
   hasPreciseLocation: boolean;
   id: string;
+  lga: string | null;
   latitude: number;
   longitude: number;
   name: string;
+  region: string | null;
   status: string;
   vehicleType: string;
   zone: string;
@@ -87,7 +89,9 @@ const normalizeDispatchRider = (id: string, data: Record<string, unknown>): Disp
   const acceptanceRate = getNumberValue(data.acceptanceRate, data.acceptance, data.acceptancePercentage);
   const activeLoadCount = getNumberValue(data.activeLoad, data.currentLoad, data.activeOrders) ?? 0;
   const badge = getBadgeForStatus(status);
-  const zone = getTextValue(data.zone, data.currentZone, data.baseZone, data.locationLabel) ?? 'Unassigned zone';
+  const region = getTextValue(data.region, data.state, data.zone, data.currentZone, data.baseZone);
+  const lga = getTextValue(data.lga, data.localGovernmentArea, data.currentAddress);
+  const zone = lga && region ? `${lga}, ${region}` : region ?? lga ?? 'Unassigned coverage area';
   const coordinate = resolveDispatchRiderCoordinate(data, zone);
 
   return {
@@ -102,11 +106,13 @@ const normalizeDispatchRider = (id: string, data: Record<string, unknown>): Disp
     completedTrips: String(completedTrips),
     hasPreciseLocation: coordinate.isPrecise,
     id,
+    lga,
     latitude: coordinate.latitude,
     longitude: coordinate.longitude,
     name:
       getTextValue(data.displayName, data.name, data.fullName, data.riderName) ??
       `Rider ${id.slice(-4)}`,
+    region,
     status,
     vehicleType: getTextValue(data.vehicleType, data.vehicle, data.transportMode) ?? 'Bike',
     zone,
@@ -129,7 +135,7 @@ export const useDispatchRiders = () => {
           return;
         }
 
-        const nextRiders = nextData.riders.map((rider) =>
+        const nextRiders = nextData.riders.map((rider: { id: string } & Record<string, unknown>) =>
           normalizeDispatchRider(rider.id, rider as unknown as Record<string, unknown>)
         );
 

@@ -1,7 +1,10 @@
 import { Tabs } from 'expo-router';
+import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchLayout() {
+  usePushNotifications();
+
   return (
     <Tabs
       screenOptions={{

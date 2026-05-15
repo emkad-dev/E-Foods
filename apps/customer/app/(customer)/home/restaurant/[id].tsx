@@ -2,10 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../../../src/contexts/AuthContext';
 import { useCart } from '../../../../src/contexts/CartContext';
-import { db } from '../../../../src/services/firebase/config';
+import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
 import { promptForAuth } from '../../../../src/utils/authPrompt';
 import {
   type DiscoveryRestaurant,
@@ -45,44 +44,46 @@ export default function RestaurantDetail() {
       setLoading(false);
       return;
     }
+    let active = true;
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'restaurants', id),
-      (docSnap) => {
-        if (!docSnap.exists()) {
-          setRestaurant(null);
-          setMenu([]);
-          setLoading(false);
+    const loadRestaurant = async () => {
+      try {
+        const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(id);
+
+        if (!active) {
           return;
         }
 
-        const data = docSnap.data();
-        const nextMenu = ((data.menu as MenuCategory[] | undefined) ?? []).map((category) => ({
+        if (!nextRestaurant || !isRestaurantVisibleToCustomers(nextRestaurant as DiscoveryRestaurant)) {
+          setRestaurant(null);
+          setMenu([]);
+          return;
+        }
+
+        const nextMenu = (((nextRestaurant.menu as MenuCategory[] | undefined) ?? []).map((category) => ({
           category: category.category,
           items: (category.items ?? []).filter((item) => item.isAvailable !== false),
-        }));
+        })));
 
-        const nextRestaurant = { id: docSnap.id, ...data } as DiscoveryRestaurant;
-
-        if (!isRestaurantVisibleToCustomers(nextRestaurant)) {
-          setRestaurant(null);
-          setMenu([]);
-          setLoading(false);
-          return;
-        }
-
-        setRestaurant(nextRestaurant);
+        setRestaurant(nextRestaurant as DiscoveryRestaurant);
         setMenu(nextMenu.filter((category) => category.items.length > 0));
-        setLoading(false);
-      },
-      (error) => {
+      } catch (error) {
         console.error('Error fetching restaurant:', error);
         Alert.alert('Error', 'Could not load restaurant details');
-        setLoading(false);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
       }
-    );
+    };
 
-    return unsubscribe;
+    loadRestaurant();
+    const interval = setInterval(loadRestaurant, 30000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [id]);
 
   const handleAddToCart = (item: MenuItem) => {
@@ -192,7 +193,7 @@ export default function RestaurantDetail() {
               <View style={styles.itemInfo}>
                 <Text style={styles.itemName}>{menuItem.name}</Text>
                 {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
-                <Text style={styles.itemPrice}>${menuItem.price.toFixed(2)}</Text>
+                <Text style={styles.itemPrice}>₦{menuItem.price.toFixed(2)}</Text>
               </View>
               <TouchableOpacity
                 style={[

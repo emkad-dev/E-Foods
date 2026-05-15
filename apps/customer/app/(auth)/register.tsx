@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import AuthPasswordField from '../../src/components/AuthPasswordField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 import { customerTheme } from '../../src/theme/palette';
@@ -108,20 +109,17 @@ export default function RegisterScreen() {
             keyboardType="email-address"
             editable={!loading}
           />
-          <TextInput
-            style={styles.input}
+          <AuthPasswordField
             placeholder="Password"
             value={password}
             onChangeText={handlePasswordChange}
-            secureTextEntry
             editable={!loading}
+            showHint
           />
-          <TextInput
-            style={styles.input}
+          <AuthPasswordField
             placeholder="Confirm password"
             value={confirmPassword}
             onChangeText={handleConfirmPasswordChange}
-            secureTextEntry
             editable={!loading}
           />
 
@@ -187,7 +185,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     height: 50,
-    marginBottom: 14,
     paddingHorizontal: 16,
     color: customerTheme.text,
   },

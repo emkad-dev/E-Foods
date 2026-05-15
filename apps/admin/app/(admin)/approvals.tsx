@@ -302,7 +302,7 @@ export default function AdminApprovalsScreen() {
               <View style={styles.meta}>
                 <Text style={styles.name}>{application.displayName}</Text>
                 <Text style={styles.copy}>
-                  {application.vehicleType} | {application.region}
+                  {application.vehicleType} | {application.lga}, {application.region}
                 </Text>
               </View>
               <AdminStatusBadge label={application.status} tone={application.status === 'approved' ? 'success' : application.status === 'rejected' ? 'danger' : 'warning'} />
@@ -310,7 +310,8 @@ export default function AdminApprovalsScreen() {
 
             <Text style={styles.detailLine}>Email: {application.email}</Text>
             <Text style={styles.detailLine}>Phone: {application.phoneNumber}</Text>
-            <Text style={styles.detailLine}>Location: {application.latitude.toFixed(5)}, {application.longitude.toFixed(5)}</Text>
+            <Text style={styles.detailLine}>Coverage base: {application.lga}, {application.region}</Text>
+            <Text style={styles.detailLine}>Fallback map pin: {application.latitude.toFixed(5)}, {application.longitude.toFixed(5)}</Text>
             <Text style={styles.detailLine}>Address hint: {application.currentAddress ?? 'Not provided'}</Text>
             <Text style={styles.detailLine}>Submitted: {application.submittedAt}</Text>
             <Text style={styles.detailLine}>Reviewed: {application.reviewedAt ?? 'Waiting on admin review'}</Text>

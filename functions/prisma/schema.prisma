@@ -25,10 +25,24 @@ model UserAccount {
   uid                    String               @id
   email                  String
   displayName            String?
+  phoneNumber            String?
+  photoURL               String?
   emailVerified          Boolean              @default(false)
   roleDisplay            AppRole?
+  partnerApplicationStatus String?
+  partnerApplicationReviewedAt DateTime?
+  partnerApplicationRejectionReason String?
+  dispatchApplicationStatus String?
+  dispatchApplicationReviewedAt DateTime?
+  dispatchApplicationRejectionReason String?
+  expoPushToken          String?
+  pushTokenUpdatedAt     DateTime?
   activeSessionId        String?
   activeSessionUpdatedAt DateTime?
+  accountDisabled        Boolean              @default(false)
+  disabledAt             DateTime?
+  disabledByUid          String?
+  lastPrivilegedRole     AppRole?
   restaurantId           String?
   restaurantName         String?
   restaurantLinkedAt     DateTime?
@@ -39,6 +53,8 @@ model UserAccount {
   assignedRoles          UserRole[]           @relation("RoleAssignedBy")
   ownedRestaurants       RestaurantRecord[]   @relation("RestaurantOwner")
   approvedRestaurants    RestaurantApproval[] @relation("ApprovalActor")
+  approvedPartnerApplications PartnerApplicationRecord[] @relation("PartnerApplicationReviewer")
+  approvedDispatchApplications DispatchApplicationRecord[] @relation("DispatchApplicationReviewer")
   auditLogs              AdminAuditLog[]      @relation("AuditActor")
 }
 
@@ -67,12 +83,14 @@ model RestaurantRecord {
   address          String?
   description      String?
   image            String?
+  menu             Json?
   deliveryFee      Float?
   deliveryRadiusKm Float?
   deliveryTime     String?
   latitude         Float?
   longitude        Float?
   minOrder         Float?
+  paystackSubaccountCode String?
   supportsDelivery Boolean             @default(true)
   supportsPickup   Boolean             @default(true)
   isOpen           Boolean             @default(true)
@@ -98,6 +116,56 @@ model RestaurantApproval {
   @@index([status])
 }
 
+model PartnerApplicationRecord {
+  id              String       @id
+  uid             String       @unique
+  email           String
+  contactName     String
+  phoneNumber     String
+  restaurantName  String
+  cuisine         String
+  address         String
+  description     String?
+  latitude        Float?
+  longitude       Float?
+  deliveryTime    String?
+  status          String
+  restaurantId    String?
+  submittedAt     DateTime
+  reviewedAt      DateTime?
+  approvedByUid   String?
+  rejectionReason String?
+  updatedAt       DateTime     @updatedAt
+  approvedBy      UserAccount? @relation("PartnerApplicationReviewer", fields: [approvedByUid], references: [uid], onDelete: SetNull)
+
+  @@index([status])
+  @@index([submittedAt])
+}
+
+model DispatchApplicationRecord {
+  id              String       @id
+  uid             String       @unique
+  email           String
+  displayName     String
+  phoneNumber     String
+  region          String
+  lga             String
+  vehicleType     String
+  currentAddress  String?
+  latitude        Float?
+  longitude       Float?
+  status          String
+  submittedAt     DateTime
+  reviewedAt      DateTime?
+  approvedByUid   String?
+  rejectionReason String?
+  updatedAt       DateTime     @updatedAt
+  approvedBy      UserAccount? @relation("DispatchApplicationReviewer", fields: [approvedByUid], references: [uid], onDelete: SetNull)
+
+  @@index([status])
+  @@index([submittedAt])
+}
+
 model CustomerOrder {
   id               String             @id
   customerId       String
@@ -117,7 +185,42 @@ model CustomerOrder {
   items            OrderItem[]
   assignment       DeliveryAssignment?
   deliveryEvents   DeliveryEvent[]
+  paymentTransactions PaymentTransaction[]
 
+  @@index([customerId])
+  @@index([restaurantId])
+  @@index([status])
+}
+
+model PaymentTransaction {
+  id                   String        @id @default(cuid())
+  orderId              String
+  customerId           String
+  restaurantId         String
+  provider             String
+  method               String
+  reference            String        @unique
+  currency             String
+  amount               Float
+  status               String
+  accessCode           String?
+  authorizationUrl     String?
+  externalTransactionId String?
+  channel              String?
+  gatewayStatus        String?
+  lastError            String?
+  paidAt               DateTime?
+  failedAt             DateTime?
+  verifiedAt           DateTime?
+  splitSubaccountCode  String?
+  initializeResponse   Json?
+  verificationResponse Json?
+  webhookEvent         Json?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  order                CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
   @@index([customerId])
   @@index([restaurantId])
   @@index([status])
@@ -156,6 +259,10 @@ model DispatchRiderRecord {
   displayName    String
   status         String
   zone           String
+  region         String?
+  lga            String?
+  phoneNumber    String?
+  currentAddress String?
   vehicleType    String
   acceptanceRate Float?
   activeLoad     Int      @default(0)

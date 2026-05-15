@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useRouter } from 'expo-router';
 import {
   Alert,
@@ -12,10 +12,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AuthPasswordField from '../../src/components/AuthPasswordField';
+import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { dispatchTheme } from '../../src/theme/palette';
 
-const regionOptions = ['Yaba', 'Lekki', 'Victoria Island', 'Ikoyi', 'Surulere', 'Mainland', 'Lagos Island'] as const;
 const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
 
 export default function DispatchRegisterScreen() {
@@ -26,11 +28,12 @@ export default function DispatchRegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [region, setRegion] = useState<(typeof regionOptions)[number]>('Yaba');
+  const [region, setRegion] = useState<(typeof nigeriaStateOptions)[number]>('Lagos');
+  const lgaOptions = useMemo(() => getLgaOptionsForState(region), [region]);
+  const [lga, setLga] = useState('');
+  const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
   const [vehicleType, setVehicleType] = useState<(typeof vehicleOptions)[number]>('Bike');
   const [currentAddress, setCurrentAddress] = useState('');
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
 
   const canSubmit = useMemo(
     () =>
@@ -39,11 +42,19 @@ export default function DispatchRegisterScreen() {
           email.trim() &&
           password.trim() &&
           phoneNumber.trim() &&
-          latitude.trim() &&
-          longitude.trim()
+          lga.trim()
       ),
-    [displayName, email, password, phoneNumber, latitude, longitude]
+    [displayName, email, password, phoneNumber, lga]
   );
+
+  useEffect(() => {
+    if (lgaOptions.length === 0) {
+      setLga('');
+      return;
+    }
+
+    setLga((currentLga) => (lgaOptions.includes(currentLga) ? currentLga : lgaOptions[0]));
+  }, [lgaOptions]);
 
   const handleFieldChange = (setter: (value: string) => void) => (value: string) => {
     if (error) {
@@ -54,16 +65,8 @@ export default function DispatchRegisterScreen() {
   };
 
   const handleRegister = async () => {
-    const parsedLatitude = Number.parseFloat(latitude);
-    const parsedLongitude = Number.parseFloat(longitude);
-
     if (!canSubmit) {
       Alert.alert('Missing details', 'Complete every rider detail before submitting your dispatch application.');
-      return;
-    }
-
-    if (!Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
-      Alert.alert('Invalid location', 'Use valid numeric coordinates for the rider location.');
       return;
     }
 
@@ -71,8 +74,7 @@ export default function DispatchRegisterScreen() {
       await signUp(email.trim(), password, {
         currentAddress: currentAddress.trim() || undefined,
         displayName: displayName.trim(),
-        latitude: parsedLatitude,
-        longitude: parsedLongitude,
+        lga,
         phoneNumber: phoneNumber.trim(),
         region,
         vehicleType,
@@ -98,7 +100,7 @@ export default function DispatchRegisterScreen() {
           <Text style={styles.eyebrow}>E-Fooders</Text>
           <Text style={styles.title}>Apply as a dispatch rider</Text>
           <Text style={styles.copy}>
-            Share the rider details ops needs: name, phone, region, vehicle, and your current base location. The admin team approves each rider before they can dispatch orders.
+            Share the rider details ops needs: name, phone, state, LGA, vehicle, and your current base location. The admin team approves each rider before they can dispatch orders.
           </Text>
         </View>
 
@@ -123,14 +125,12 @@ export default function DispatchRegisterScreen() {
             onChangeText={handleFieldChange(setEmail)}
             editable={!loading}
           />
-          <TextInput
-            style={styles.input}
+          <AuthPasswordField
             placeholder="Password"
-            placeholderTextColor="#8e8e8e"
-            secureTextEntry
             value={password}
             onChangeText={handleFieldChange(setPassword)}
             editable={!loading}
+            showHint
           />
           <TextInput
             style={styles.input}
@@ -142,19 +142,33 @@ export default function DispatchRegisterScreen() {
             editable={!loading}
           />
 
-          <Text style={styles.sectionLabel}>Dispatch region</Text>
-          <View style={styles.optionRow}>
-            {regionOptions.map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={[styles.chip, region === option ? styles.chipActive : null]}
-                onPress={() => setRegion(option)}
-                disabled={loading}
-              >
-                <Text style={[styles.chipText, region === option ? styles.chipTextActive : null]}>{option}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={styles.sectionLabel}>Dispatch state</Text>
+          <CompactOptionPicker
+            label="Dispatch state"
+            selectedValue={region}
+            options={nigeriaStateOptions}
+            isOpen={openPicker === 'state'}
+            onToggle={() => setOpenPicker((current) => (current === 'state' ? null : 'state'))}
+            onSelect={(value) => {
+              setRegion(value as (typeof nigeriaStateOptions)[number]);
+              setOpenPicker(null);
+            }}
+            disabled={loading}
+          />
+
+          <Text style={styles.sectionLabel}>Local government area</Text>
+          <CompactOptionPicker
+            label="Local government area"
+            selectedValue={lga}
+            options={lgaOptions}
+            isOpen={openPicker === 'lga'}
+            onToggle={() => setOpenPicker((current) => (current === 'lga' ? null : 'lga'))}
+            onSelect={(value) => {
+              setLga(value);
+              setOpenPicker(null);
+            }}
+            disabled={loading}
+          />
 
           <Text style={styles.sectionLabel}>Vehicle type</Text>
           <View style={styles.optionRow}>
@@ -172,36 +186,15 @@ export default function DispatchRegisterScreen() {
 
           <TextInput
             style={styles.input}
-            placeholder="Current location / landmark"
+            placeholder="Current landmark or pickup base"
             placeholderTextColor="#8e8e8e"
             value={currentAddress}
             onChangeText={handleFieldChange(setCurrentAddress)}
             editable={!loading}
           />
 
-          <View style={styles.coordinateRow}>
-            <TextInput
-              style={[styles.input, styles.coordinateInput]}
-              placeholder="Latitude"
-              placeholderTextColor="#8e8e8e"
-              keyboardType="decimal-pad"
-              value={latitude}
-              onChangeText={handleFieldChange(setLatitude)}
-              editable={!loading}
-            />
-            <TextInput
-              style={[styles.input, styles.coordinateInput]}
-              placeholder="Longitude"
-              placeholderTextColor="#8e8e8e"
-              keyboardType="decimal-pad"
-              value={longitude}
-              onChangeText={handleFieldChange(setLongitude)}
-              editable={!loading}
-            />
-          </View>
-
           <Text style={styles.helperText}>
-            Admin approval is required before this rider appears on the dispatch board. These coordinates will later help ops pick the closest rider to a delivery.
+            Admin approval is required before this rider appears on the dispatch board. The selected state and LGA become the rider base, and we use that base for location fallback until live tracking is added.
           </Text>
 
           <TouchableOpacity
@@ -316,13 +309,6 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#ffffff',
-  },
-  coordinateRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  coordinateInput: {
-    flex: 1,
   },
   helperText: {
     color: dispatchTheme.textMuted,

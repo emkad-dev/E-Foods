@@ -1,100 +1,110 @@
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { router } from 'expo-router';
 import { Platform } from 'react-native';
-import { doc, updateDoc } from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
 import { appEnv } from '../config/env';
-import { db } from '../services/firebase/config';
+import { useAuth } from '../contexts/AuthContext';
+import { updateUserDocument } from '../services/supabase/profile';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
+
+type NotificationData = {
+  orderId?: string;
+  path?: string;
+  type?: string;
+};
+
+const routeFromNotification = (data: NotificationData) => {
+  if (typeof data.path === 'string' && data.path.trim()) {
+    router.push(data.path as never);
+    return;
+  }
+
+  if (data.type === 'order_update' && data.orderId) {
+    router.push(`/orders/${data.orderId}`);
+  }
+};
 
 export const usePushNotifications = () => {
   const { user } = useAuth();
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
-  const registrationAttempted = useRef(false);
+  const registeredUserId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isExpoGo) {
+    if (isExpoGo || Platform.OS === 'web') {
       return;
     }
 
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
       }),
     });
 
     const registerForPushNotifications = async () => {
-      if (!user || registrationAttempted.current) return;
-      registrationAttempted.current = true;
+      if (!user || registeredUserId.current === user.uid) {
+        return;
+      }
 
       try {
         if (!Device.isDevice) {
-          alert('Push notifications require a physical device');
+          console.warn('Push notifications require a physical device.');
           return;
         }
 
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-
-        if (existingStatus !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
+        const { status: finalStatus } =
+          existingStatus === 'granted'
+            ? { status: existingStatus }
+            : await Notifications.requestPermissionsAsync();
 
         if (finalStatus !== 'granted') {
-          console.log('Failed to get push token: permission denied');
+          console.warn('Push notification permission was not granted.');
           return;
         }
 
         const projectId = appEnv.projectId;
         if (!projectId) {
-          console.error('Project ID not found in app config');
+          console.error('EXPO project id is missing. Push registration skipped.');
           return;
         }
 
         const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-
-        await updateDoc(doc(db, 'users', user.uid), {
+        await updateUserDocument(user.uid, {
           expoPushToken: token,
           pushTokenUpdatedAt: new Date().toISOString(),
         });
+        registeredUserId.current = user.uid;
 
         if (Platform.OS === 'android') {
           await Notifications.setNotificationChannelAsync('default', {
             name: 'default',
             importance: Notifications.AndroidImportance.MAX,
+            lightColor: '#FFB347',
             vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#FF231F7C',
           });
         }
       } catch (error) {
-        console.error('Error registering push notifications:', error);
+        console.error('Push registration failed.', error);
       }
     };
 
     if (user) {
       void registerForPushNotifications();
+    } else {
+      registeredUserId.current = null;
     }
 
-    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('Notification received:', notification);
-    });
+    notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      const { data } = response.notification.request.content;
-      if (data?.type === 'order_update' && data?.orderId) {
-        router.push(`/orders/${data.orderId}`);
-      } else if (data?.type === 'promotion') {
-        router.push('/promotions');
-      }
+      routeFromNotification((response.notification.request.content.data ?? {}) as NotificationData);
     });
 
     return () => {

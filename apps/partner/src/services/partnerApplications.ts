@@ -1,5 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callPartnerBackendRpc } from './backendRpc';
 
 export type PartnerApplicationInput = {
   address: string;
@@ -13,16 +12,9 @@ export type PartnerApplicationInput = {
   restaurantName: string;
 };
 
-const submitPartnerApplicationCallable = httpsCallable<
-  PartnerApplicationInput,
-  {
+export const submitPartnerApplication = async (input: PartnerApplicationInput) =>
+  callPartnerBackendRpc<{
     status: 'pending';
     submittedAt: string;
     targetUid: string;
-  }
->(functions, 'submitPartnerApplication');
-
-export const submitPartnerApplication = async (input: PartnerApplicationInput) => {
-  const result = await submitPartnerApplicationCallable(input);
-  return result.data;
-};
+  }>('submitPartnerApplication', input);

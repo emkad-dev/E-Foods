@@ -16,6 +16,8 @@ packages/
 
 ## Local development
 
+Use `Node 22` for this repo. The Functions workspace explicitly targets Firebase Functions on Node 22, and the Expo/RN tooling in this monorepo is more stable there than on Node 25.
+
 Run each app on a different Metro port from the repo root:
 
 ```bash
@@ -34,6 +36,39 @@ Default ports:
 
 These defaults are intentional so the installed dev builds do not fight over the same Metro port.
 
+### Temporary dev auth bypass
+
+If you want to inspect app flow without signing in, you can temporarily enable one shared bypass for all apps.
+
+Copy [`.env.apps.example`](/c:/Users/emkad/EBuy/E-Foods/.env.apps.example) to `.env.apps` in the repo root, then set:
+
+```bash
+EXPO_PUBLIC_DEV_AUTH_BYPASS=true
+```
+
+Optional overrides:
+
+```bash
+EXPO_PUBLIC_DEV_AUTH_EMAIL=dev@example.com
+EXPO_PUBLIC_DEV_AUTH_UID=dev-user
+```
+
+Each app will inject its own mock role when this flag is on:
+
+- customer -> `customer`
+- partner -> `restaurant`
+- dispatch -> `dispatch`
+- admin -> `admin`
+
+Auth actions become safe no-ops while bypass is enabled, so remember to turn the flag back off when you want to test real sign-in again.
+
+The Expo start scripts now load `.env.apps` automatically for:
+
+- `npm run dev:customer`
+- `npm run dev:partner`
+- `npm run dev:dispatch`
+- `npm run dev:admin`
+
 ## Current state
 
 - `apps/customer` has discovery, cart, delivery location, cash checkout, and order tracking.
@@ -42,6 +77,32 @@ These defaults are intentional so the installed dev builds do not fight over the
 - `apps/admin` has access oversight, restaurant approvals, in-app first-admin bootstrap, and staff-account provisioning.
 - `functions/` contains the trusted backend logic, claim-based auth checks, and SQL sync/read paths.
 - `packages/domain` centralizes shared role, entity, and order types used across the apps.
+
+## Notification matrix
+
+Push delivery now uses Expo tokens stored in `UserAccount.expoPushToken`, with Supabase Edge functions as the event source.
+
+- Customer:
+  - order paid
+  - partner status updates
+  - rider assigned
+  - rider pickup / on-the-way / delivered
+- Partner:
+  - new cash order
+  - paid order confirmed
+  - customer cancellation
+  - delivery progress updates
+- Dispatch:
+  - dispatch application decision
+  - rider delivery assignment
+  - delivery cancellation
+  - pickup-ready order handoff
+- Admin:
+  - new partner applications
+  - new dispatch applications
+  - manual notification testing through the `notifications` Edge function
+
+Notification tap routes are path-driven, so each app can deep-link directly into its order, approvals, access, or profile surface from the push payload.
 
 ## Backend model
 
@@ -53,7 +114,14 @@ Today the stack is:
 - `Cloud Functions` for trusted mutations and protected read APIs
 - `Postgres via Prisma` for authority records, approvals, operational orders, riders, and audit/event history
 
-Payment provider integration is intentionally not live yet. Card and wallet remain blocked until that work is completed properly.
+Paystack phase 1 is now implemented in code for `card` and `bank transfer` checkout:
+
+- customer checkout initializes a Paystack transaction from Functions
+- the order stays out of partner/dispatch operations until online payment is verified
+- a Paystack webhook or manual refresh confirms payment and marks the order trusted
+- `wallet` remains intentionally blocked for now
+
+This still needs env setup plus Functions/rules deployment before it becomes live in Firebase.
 
 ## First admin bootstrap
 
@@ -63,6 +131,9 @@ Set:
 
 ```bash
 BOOTSTRAP_ADMIN_EMAILS=admin@example.com
+PAYSTACK_SECRET_KEY=sk_test_your_secret_key_here
+PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxx
+PAYSTACK_CALLBACK_URL=https://your-web-app-or-confirmation-page.example.com/payment-return
 ```
 
 Then sign in with that Firebase Auth account and call the `bootstrapFirstAdmin` function once. After the first admin exists, normal admin-managed role assignment should be used instead.
@@ -131,6 +202,9 @@ DIRECT_URL=postgresql://USER.PROJECT_REF:URL_ENCODED_PASSWORD@REGION.pooler.supa
 # DIRECT_URL=postgresql://USER:URL_ENCODED_PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres?sslmode=require
 
 BOOTSTRAP_ADMIN_EMAILS=admin@example.com
+PAYSTACK_SECRET_KEY=sk_test_your_secret_key_here
+PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxx
+PAYSTACK_CALLBACK_URL=https://your-web-app-or-confirmation-page.example.com/payment-return
 ```
 
 The checked-in example lives in [`functions/.env.example`](/c:/Users/emkad/EBuy/E-Foods/functions/.env.example).
@@ -148,122 +222,41 @@ npx prisma migrate deploy
 
 Apply the SQL migration with your preferred Prisma migration command in the environment that hosts Postgres.
 
-## Firestore Rules Deploy Flow
-
-The repo already points Firebase CLI at the Firestore rules file in [`firebase.json`](/c:/Users/emkad/EBuy/E-Foods/firebase.json) and the rules live in [`firestore.rules`](/c:/Users/emkad/EBuy/E-Foods/firestore.rules).
-
-### One-time setup
-
-1. Install Firebase CLI if you do not already have it:
-
-```bash
-npm install -g firebase-tools
-```
-
-2. Sign in:
-
-```bash
-firebase login
-```
-
-3. Connect this repo to your Firebase project:
-
-Option A: copy [` .firebaserc.example`](/c:/Users/emkad/EBuy/E-Foods/.firebaserc.example) to `.firebaserc` and replace `your-firebase-project-id` with the real project id.
-
-Option B: skip `.firebaserc` and pass the project each time with `FIREBASE_PROJECT_ID`.
-
-### Deploy commands
-
-If `.firebaserc` exists:
-
-```bash
-npm run firebase:rules:deploy
-```
-
-If you prefer using an environment variable on Windows `cmd`:
-
-```cmd
-set FIREBASE_PROJECT_ID=your-firebase-project-id&& npm run firebase:rules:deploy:project
-```
-
-If you want extra CLI detail while checking the deploy:
-
-```bash
-npm run firebase:rules:dryrun
-```
-
-### Recommended exact flow
-
-```bash
-firebase login
-copy .firebaserc.example .firebaserc
-```
-
-Then edit `.firebaserc` and run:
-
-```bash
-npm run firebase:rules:deploy
-```
-
 ## Important notes
 
-- Deploying Firestore rules makes the security rules live. It does not publish the mobile apps.
-- Deploying functions is required before the new SQL-backed read models, role bootstrap, rider APIs, and hardened mutation guards are live.
-- If `DATABASE_URL` is missing in the deployed Functions environment, SQL-backed callables will fail by design rather than silently falling back to weaker authority paths.
+- Apply Supabase database migrations before relying on newly added SQL-backed records and views in production.
+- If `DATABASE_URL` is missing in the environment that runs Prisma migrations, SQL-backed features will fail by design rather than silently falling back to weaker authority paths.
 
-## Exact follow-up if you are skipping billing for now
+## Exact follow-up
 
-You can still prepare almost everything locally, but the backend will not fully go live until billing is enabled on the Firebase project.
+The repo has been cut over on the app side, but two backend items still need to be finished before the migration is complete.
 
 Do these next:
 
-1. Create the Firebase project and turn on:
-   - Authentication
-   - Firestore Database
-   - Cloud Functions
-
-2. Create a Postgres database and keep the connection strings ready as:
-
-```bash
-DATABASE_URL=postgresql://USER.PROJECT_REF:PASSWORD@REGION.pooler.supabase.com:6543/postgres?pgbouncer=true
-DIRECT_URL=postgresql://USER.PROJECT_REF:PASSWORD@REGION.pooler.supabase.com:5432/postgres
-```
-
-3. Copy the Firebase project id into `.firebaserc` from `.firebaserc.example`.
-
-4. Set Functions environment values before deploy:
-   - `DATABASE_URL`
-   - `BOOTSTRAP_ADMIN_EMAILS`
-
-5. Apply the Prisma migration flow against the Postgres database from `functions/`.
-
-6. Install Firebase CLI and sign in:
-
-```bash
-firebase login
-```
-
-7. When you are ready to stop skipping billing, do this exact release order:
-
-```bash
-firebase deploy --only functions
-firebase deploy --only firestore:rules
-```
-
-8. Restart the four apps and run the sandbox loop:
+1. Turn `EXPO_PUBLIC_DEV_AUTH_BYPASS` back off in `.env.apps` so real auth is restored.
+2. Add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL` to `functions/.env` and the live backend environment before resuming payment testing.
+3. Get `npm run db:migrate:deploy` through against Supabase so the authored Prisma migrations are actually applied to the live database.
+4. Confirm the latest SQL migrations are live, especially:
+   - `RestaurantRecord.menu` for customer discovery and restaurant detail
+   - `DispatchRiderRecord.region`, `DispatchRiderRecord.lga`, `DispatchRiderRecord.phoneNumber`, and `DispatchRiderRecord.currentAddress` for the native dispatch rider path
+5. Apply the latest application-record migration (`20260514_application_records`) on the live Supabase database before using the native approval and offboarding flows in production.
+6. Remove the remaining legacy Firebase-hosted backend path once the native Supabase functions or SQL/RPC replacements are live.
+7. Rerun the full sandbox flow end to end:
    - bootstrap first admin
    - provision partner and dispatch
    - create restaurant and menu
    - approve restaurant
    - create rider
-   - place customer cash order
+   - place customer order
    - move order through partner and dispatch to delivered
 
 ### Exact reminder
 
-If you skip billing now, remember to come back and do these four things in this order:
+Before you move on, the tracked backlog is:
 
-1. enable Firebase billing / Blaze
-2. deploy Functions
-3. deploy Firestore rules
-4. rerun the full sandbox flow end to end
+1. revert `EXPO_PUBLIC_DEV_AUTH_BYPASS` in `.env.apps`
+2. add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL`
+3. fix `npm run db:migrate:deploy` on Supabase and apply the live migrations
+4. confirm the new `DispatchRiderRecord` SQL fields are applied live
+5. apply the latest application-record migration (`20260514_application_records`) on Supabase before using the native approval and offboarding flows live
+6. rerun the full sandbox flow end to end

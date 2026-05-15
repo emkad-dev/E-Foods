@@ -1,22 +1,19 @@
 {
   "name": "ebuy-functions",
   "private": true,
-  "main": "index.js",
   "engines": {
     "node": "22"
   },
   "scripts": {
-    "lint": "node --check index.js",
+    "lint": "node --check sql.js && node --check scripts/db-doctor.js && node --check scripts/prisma-migrate-deploy.cjs",
     "postinstall": "prisma generate",
     "db:doctor": "node scripts/db-doctor.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:deploy": "node scripts/prisma-migrate-deploy.cjs",
     "prisma:validate": "prisma validate"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
-    "firebase-admin": "^13.0.0",
-    "firebase-functions": "^6.0.1",
     "prisma": "^6.16.2"
   }
 }

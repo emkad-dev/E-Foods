@@ -6,14 +6,10 @@ export const PAYMENT_METHODS = [
   'card',
   'wallet',
   'bank_transfer',
-  'paypal',
-  'apple_pay',
-  'google_pay',
-  'pos',
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-export const CHECKOUT_PAYMENT_METHODS = ['card', 'wallet', 'cash'] as const;
+export const CHECKOUT_PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'wallet'] as const;
 export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHODS)[number];
 
 export const PAYMENT_STATUSES = ['pending', 'authorized', 'paid', 'failed', 'refunded'] as const;
@@ -135,29 +131,21 @@ export const isTerminalOrderStatus = (status: string | null | undefined): boolea
 
 export const formatPaymentMethodLabel = (method: string | null | undefined) => {
   switch (method) {
+    case 'cash':
+      return 'Cash';
     case 'card':
       return 'Card';
     case 'wallet':
       return 'Wallet';
     case 'bank_transfer':
       return 'Bank transfer';
-    case 'apple_pay':
-      return 'Apple Pay';
-    case 'google_pay':
-      return 'Google Pay';
-    case 'cash':
-      return 'Cash';
-    case 'paypal':
-      return 'PayPal';
-    case 'pos':
-      return 'POS';
     default:
       return method ? method.charAt(0).toUpperCase() + method.slice(1).replace(/_/g, ' ') : 'Payment';
   }
 };
 
 export const isPrepaidPaymentMethod = (method: string | null | undefined) => {
-  return ['card', 'wallet', 'bank_transfer', 'paypal', 'apple_pay', 'google_pay'].includes(method ?? '');
+  return ['card', 'wallet', 'bank_transfer'].includes(method ?? '');
 };
 
 export const formatPaymentStatusLabel = (status: string | null | undefined, method?: string | null) => {
@@ -193,5 +181,7 @@ export const getCustomerRefundPolicyLabel = (status: string | null | undefined) 
     return '50% refund';
   }
 
-  return 'Not cancellable';
+  if (['picked_up', 'on_the_way'].includes(normalizedStatus)) {
+    return 'Not cancellable';
+  }
 };

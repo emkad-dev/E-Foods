@@ -1,10 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
-import { doc, onSnapshot } from 'firebase/firestore';
+import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
-import { formatAuthError, getUserRoleClaim, sendPasswordReset, signInWithEmail, signOutUser } from '../services/firebase/auth';
-import { auth, db, functions } from '../services/firebase/config';
+import { formatAuthError, getUserRoleClaim, sendPasswordReset, signInWithEmail, signOutUser } from '../services/supabase/auth';
+import { supabase } from '../services/supabase/config';
+import { callAdminBackendRpc } from '../services/backendRpc';
+import { devAuthEnv } from '../config/env';
 import {
   clearStoredSessionId,
   clearStoredUserProfile,
@@ -13,8 +13,8 @@ import {
   getStoredUserProfile,
   storeSessionId,
   storeUserProfile,
-} from '../services/firebase/session';
-import { getUserDocument, updateUserDocument } from '../services/firebase/firestore';
+} from '../services/session';
+import { getUserDocument, updateUserDocument } from '../services/supabase/profile';
 
 type AuthContextType = {
   user: UserDocument | null;
@@ -32,10 +32,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const ADMIN_ACCESS_ERROR = 'This account does not have admin access.';
 const MISSING_PROFILE_ERROR = 'No admin profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
-const SESSION_CONFLICT_ERROR = 'This admin account was signed in on another device. Sign in again here if you want to continue on this device.';
+const SESSION_CONFLICT_ERROR =
+  'This admin account was signed in on another device. Sign in again here if you want to continue on this device.';
 const BOOTSTRAP_WAIT_MESSAGE = 'Preparing first admin access...';
+const DEV_AUTH_BYPASS_MESSAGE = 'Dev auth bypass is enabled. Admin auth actions are paused for this app session.';
 
-const isFirestoreOfflineError = (error: unknown) => {
+const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
   const errorMessage =
     typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
@@ -49,7 +51,7 @@ const isFirestoreOfflineError = (error: unknown) => {
 };
 
 const getAdminAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isFirestoreOfflineError(error)) {
+  if (isProfileOfflineError(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -74,10 +76,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
 
+  useEffect(() => {
+    if (!devAuthEnv.enabled) {
+      return;
+    }
+
+    const mockUser: UserDocument = {
+      uid: devAuthEnv.uid,
+      email: devAuthEnv.email,
+      emailVerified: true,
+      role: 'admin',
+      displayName: 'Dev Admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setUser(mockUser);
+    setError(null);
+    setLoading(false);
+    void storeUserProfile(mockUser);
+  }, []);
+
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
 
-    await updateUserDocument(db, userId, {
+    await updateUserDocument(userId, {
       activeSessionId: sessionId,
       activeSessionUpdatedAt: new Date().toISOString(),
     });
@@ -89,18 +112,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       if (userId && localSessionId) {
-        const userDocument = await getUserDocument(db, userId);
+        const userDocument = await getUserDocument(userId);
 
         if (userDocument?.activeSessionId === localSessionId) {
-          await updateUserDocument(db, userId, {
+          await updateUserDocument(userId, {
             activeSessionId: null,
             activeSessionUpdatedAt: new Date().toISOString(),
           });
         }
       }
     } catch (releaseError) {
-      if (!isFirestoreOfflineError(releaseError)) {
-        console.warn('Unable to release admin session in Firestore:', releaseError);
+      if (!isProfileOfflineError(releaseError)) {
+        console.warn('Unable to release admin session in Supabase:', releaseError);
       }
     } finally {
       await clearStoredSessionId();
@@ -113,7 +136,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
       await clearLocalUserState();
-      await signOutUser(auth);
+      await signOutUser(supabase);
       setUser(null);
       setError(SESSION_CONFLICT_ERROR);
       return false;
@@ -126,66 +149,89 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return true;
   }, [clearLocalUserState]);
 
+  const buildNextUser = useCallback(
+    async (authUser: SupabaseAuthUser) => {
+      const claimRole = await getUserRoleClaim(authUser);
+
+      if (claimRole !== 'admin') {
+        if (bootstrapInProgressRef.current) {
+          setError(BOOTSTRAP_WAIT_MESSAGE);
+          return null;
+        }
+
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(ADMIN_ACCESS_ERROR);
+        return null;
+      }
+
+      const userDocument = await getUserDocument(authUser.id);
+
+      if (!userDocument) {
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(MISSING_PROFILE_ERROR);
+        return null;
+      }
+
+      return {
+        ...userDocument,
+        uid: authUser.id,
+        email: authUser.email ?? userDocument.email,
+        emailVerified: Boolean(authUser.email_confirmed_at),
+        role: claimRole,
+      } satisfies UserDocument;
+    },
+    [clearLocalUserState]
+  );
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    if (devAuthEnv.enabled) {
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
       setLoading(true);
 
       try {
-        if (!firebaseUser) {
+        const authUser = session?.user ?? null;
+
+        if (!authUser) {
           setUser(null);
           await clearLocalUserState();
           return;
         }
 
-        const claimRole = await getUserRoleClaim(firebaseUser);
-        if (claimRole !== 'admin') {
-          if (bootstrapInProgressRef.current) {
-            setError(BOOTSTRAP_WAIT_MESSAGE);
-            return;
-          }
+        const nextUser = await buildNextUser(authUser);
 
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(ADMIN_ACCESS_ERROR);
+        if (!nextUser) {
           return;
         }
 
-        const userDocument = await getUserDocument(db, firebaseUser.uid);
-
-        if (!userDocument) {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(MISSING_PROFILE_ERROR);
-          return;
-        }
-
-        const sessionIsValid = await syncSingleDeviceSession(userDocument);
+        const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
         if (!sessionIsValid) {
           return;
         }
 
-        const nextUser: UserDocument = {
-          ...userDocument,
-          email: firebaseUser.email ?? userDocument.email,
-          emailVerified: firebaseUser.emailVerified,
-          role: claimRole,
-        };
-
         setUser(nextUser);
         await storeUserProfile(nextUser);
       } catch (nextError) {
-        if (firebaseUser && isFirestoreOfflineError(nextError)) {
+        const authUser = session?.user ?? null;
+        if (authUser && isProfileOfflineError(nextError)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
-          if (cachedUser?.uid === firebaseUser.uid && cachedUser.role === 'admin') {
+          if (cachedUser?.uid === authUser.id && cachedUser.role === 'admin') {
             const fallbackUser: UserDocument = {
               ...cachedUser,
-              uid: firebaseUser.uid,
-              email: firebaseUser.email ?? cachedUser.email,
-              emailVerified: firebaseUser.emailVerified,
+              uid: authUser.id,
+              email: authUser.email ?? cachedUser.email,
+              emailVerified: Boolean(authUser.email_confirmed_at),
+              role: 'admin',
             };
 
             const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
@@ -208,109 +254,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    return unsubscribe;
-  }, [clearLocalUserState, syncSingleDeviceSession]);
+    return () => subscription.unsubscribe();
+  }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  useEffect(() => {
-    if (!user?.uid) {
+  const signIn = async (email: string, password: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'users', user.uid),
-      async (userSnapshot) => {
-        if (!userSnapshot.exists()) {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          return;
-        }
-
-        const nextUser = userSnapshot.data() as UserDocument;
-        const currentFirebaseUser = auth.currentUser;
-        if (!currentFirebaseUser) {
-          await clearLocalUserState();
-          setUser(null);
-          return;
-        }
-
-        const claimRole = await getUserRoleClaim(currentFirebaseUser);
-        if (claimRole !== 'admin') {
-          if (bootstrapInProgressRef.current) {
-            setError(BOOTSTRAP_WAIT_MESSAGE);
-            return;
-          }
-
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(ADMIN_ACCESS_ERROR);
-          return;
-        }
-
-        const sessionIsValid = await syncSingleDeviceSession(nextUser);
-
-        if (!sessionIsValid) {
-          return;
-        }
-
-        setUser((currentUser) => {
-          if (!currentUser) {
-            return currentUser;
-          }
-
-          const resolvedUser = {
-            ...currentUser,
-            ...nextUser,
-            email: auth.currentUser?.email ?? nextUser.email,
-            emailVerified: auth.currentUser?.emailVerified ?? nextUser.emailVerified,
-            role: claimRole,
-          };
-
-          void storeUserProfile(resolvedUser);
-          return resolvedUser;
-        });
-      },
-      (snapshotError) => {
-        if (isFirestoreOfflineError(snapshotError)) {
-          setError(NO_INTERNET_ERROR);
-          return;
-        }
-
-        console.error('Error watching admin session:', snapshotError);
-      }
-    );
-
-    return unsubscribe;
-  }, [clearLocalUserState, syncSingleDeviceSession, user?.uid]);
-
-  const signIn = async (email: string, password: string) => {
     setLoading(true);
     setError(null);
 
     try {
-      const firebaseUser = await signInWithEmail(auth, email, password);
-      const claimRole = await getUserRoleClaim(firebaseUser);
+      const authUser = await signInWithEmail(supabase, email, password);
+      const claimRole = await getUserRoleClaim(authUser);
 
       if (claimRole !== 'admin') {
         await clearLocalUserState();
-        await signOutUser(auth);
+        await signOutUser(supabase);
         setUser(null);
         setError(ADMIN_ACCESS_ERROR);
         throw new Error(ADMIN_ACCESS_ERROR);
       }
 
-      const userDocument = await getUserDocument(db, firebaseUser.uid);
+      const userDocument = await getUserDocument(authUser.id);
 
       if (!userDocument) {
         await clearLocalUserState();
-        await signOutUser(auth);
+        await signOutUser(supabase);
         setUser(null);
         setError(MISSING_PROFILE_ERROR);
         throw new Error(MISSING_PROFILE_ERROR);
       }
 
-      await startSingleDeviceSession(firebaseUser.uid);
+      await startSingleDeviceSession(authUser.id);
     } catch (nextError: any) {
       const nextMessage = getAdminAuthErrorMessage(nextError, 'Unable to sign in');
       setError(nextMessage);
@@ -321,46 +299,54 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const bootstrapFirstAdmin = async (email: string, password: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       bootstrapInProgressRef.current = true;
-      const firebaseUser = await signInWithEmail(auth, email, password);
-      const bootstrapCallable = httpsCallable<Record<string, never>, { role: string }>(functions, 'bootstrapFirstAdmin');
-      await bootstrapCallable({});
-      const claimRole = await getUserRoleClaim(firebaseUser, true);
+      await signInWithEmail(supabase, email, password);
+      await callAdminBackendRpc<{ role: string }>('bootstrapFirstAdmin');
+      await supabase.auth.refreshSession();
+
+      const {
+        data: { user: refreshedUser },
+      } = await supabase.auth.getUser();
+
+      if (!refreshedUser) {
+        throw new Error('Bootstrap completed, but the session could not be refreshed.');
+      }
+
+      const claimRole = await getUserRoleClaim(refreshedUser);
 
       if (claimRole !== 'admin') {
         throw new Error('Bootstrap completed, but the admin claim has not refreshed yet. Sign in again in a moment.');
       }
 
-      const userDocument = await getUserDocument(db, firebaseUser.uid);
+      const userDocument = await getUserDocument(refreshedUser.id);
 
       if (!userDocument) {
         throw new Error(MISSING_PROFILE_ERROR);
       }
 
-      await startSingleDeviceSession(firebaseUser.uid);
+      await startSingleDeviceSession(refreshedUser.id);
 
       const nextUser: UserDocument = {
         ...userDocument,
-        email: firebaseUser.email ?? userDocument.email,
-        emailVerified: firebaseUser.emailVerified,
+        uid: refreshedUser.id,
+        email: refreshedUser.email ?? userDocument.email,
+        emailVerified: Boolean(refreshedUser.email_confirmed_at),
         role: claimRole,
       };
 
       setUser(nextUser);
       await storeUserProfile(nextUser);
     } catch (nextError: any) {
-      if (auth.currentUser) {
-        try {
-          await signOutUser(auth);
-        } catch (signOutError) {
-          console.warn('Unable to clear partial bootstrap session:', signOutError);
-        }
-      }
-
+      await signOutUser(supabase).catch(() => undefined);
       const nextMessage = getAdminAuthErrorMessage(nextError, 'Unable to bootstrap the first admin account');
       setError(nextMessage);
       throw new Error(nextMessage);
@@ -371,11 +357,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      await sendPasswordReset(auth, email);
+      await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getAdminAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);
@@ -386,12 +377,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      await releaseSingleDeviceSession(auth.currentUser?.uid);
-      await signOutUser(auth);
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      await releaseSingleDeviceSession(authUser?.id);
+      await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);
     } catch (nextError: any) {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { dispatchTheme } from '../../src/theme/palette';
 
@@ -68,14 +69,12 @@ export default function DispatchLoginScreen() {
           onChangeText={handleEmailChange}
           editable={!loading}
         />
-        <TextInput
-          style={styles.input}
+        <AuthPasswordField
           placeholder="Password"
-          placeholderTextColor="#8e8e8e"
-          secureTextEntry
           value={password}
           onChangeText={handlePasswordChange}
           editable={!loading}
+          showHint
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>

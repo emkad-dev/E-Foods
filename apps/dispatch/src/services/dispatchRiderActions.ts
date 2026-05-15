@@ -1,29 +1,22 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callDispatchBackendRpc } from './backendRpc';
 
 export type DispatchRiderDraft = {
   acceptanceRate: number | null;
   activeLoad: number;
   completedTrips: number;
-  latitude?: number | null;
-  longitude?: number | null;
+  lga: string;
   name: string;
   status: string;
   vehicleType: string;
   zone: string;
 };
 
-const upsertDispatchRiderProfileCallable = httpsCallable<
-  DispatchRiderDraft & { riderId?: string },
-  { rider: Record<string, unknown> }
->(functions, 'upsertDispatchRiderProfile');
-
 export const createDispatchRider = async (draft: DispatchRiderDraft) => {
-  await upsertDispatchRiderProfileCallable(draft);
+  await callDispatchBackendRpc('upsertDispatchRiderProfile', draft);
 };
 
 export const updateDispatchRider = async (riderId: string, draft: DispatchRiderDraft) => {
-  await upsertDispatchRiderProfileCallable({
+  await callDispatchBackendRpc('upsertDispatchRiderProfile', {
     riderId,
     ...draft,
   });

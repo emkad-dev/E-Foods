@@ -1,32 +1,20 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callPartnerBackendRpc } from './backendRpc';
 
-const partnerUpdateOrderStatus = httpsCallable(functions, 'partnerUpdateOrderStatus');
-
-export const acceptPartnerOrder = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await partnerUpdateOrderStatus({
-    action: 'accept',
+const updatePartnerOrderStatus = async (orderId: string, action: string) => {
+  await callPartnerBackendRpc('partnerUpdateOrderStatus', {
+    action,
     orderId,
   });
 };
 
-export const markPartnerOrderPreparing = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await partnerUpdateOrderStatus({
-    action: 'preparing',
-    orderId,
-  });
-};
+export const acceptPartnerOrder = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updatePartnerOrderStatus(orderId, 'accept');
 
-export const markPartnerOrderReady = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await partnerUpdateOrderStatus({
-    action: 'ready',
-    orderId,
-  });
-};
+export const markPartnerOrderPreparing = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updatePartnerOrderStatus(orderId, 'preparing');
 
-export const rejectPartnerOrder = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await partnerUpdateOrderStatus({
-    action: 'reject',
-    orderId,
-  });
-};
+export const markPartnerOrderReady = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updatePartnerOrderStatus(orderId, 'ready');
+
+export const rejectPartnerOrder = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updatePartnerOrderStatus(orderId, 'reject');

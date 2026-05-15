@@ -1,0 +1,98 @@
+export const nigeriaStateOptions = [
+  'Abia',
+  'Adamawa',
+  'Akwa Ibom',
+  'Anambra',
+  'Bauchi',
+  'Bayelsa',
+  'Benue',
+  'Borno',
+  'Cross River',
+  'Delta',
+  'Ebonyi',
+  'Edo',
+  'Ekiti',
+  'Enugu',
+  'Federal Capital Territory',
+  'Gombe',
+  'Imo',
+  'Jigawa',
+  'Kaduna',
+  'Kano',
+  'Katsina',
+  'Kebbi',
+  'Kogi',
+  'Kwara',
+  'Lagos',
+  'Nasarawa',
+  'Niger',
+  'Ogun',
+  'Ondo',
+  'Osun',
+  'Oyo',
+  'Plateau',
+  'Rivers',
+  'Sokoto',
+  'Taraba',
+  'Yobe',
+  'Zamfara',
+] as const;
+
+export type NigeriaState = (typeof nigeriaStateOptions)[number];
+
+type StateCoordinate = {
+  aliases: string[];
+  latitude: number;
+  longitude: number;
+  name: NigeriaState;
+};
+
+export const nigeriaStateCoordinates: StateCoordinate[] = [
+  { name: 'Abia', aliases: ['abia'], latitude: 5.532, longitude: 7.486 },
+  { name: 'Adamawa', aliases: ['adamawa'], latitude: 9.326, longitude: 12.398 },
+  { name: 'Akwa Ibom', aliases: ['akwa ibom', 'akwa-ibom'], latitude: 5.037, longitude: 7.912 },
+  { name: 'Anambra', aliases: ['anambra'], latitude: 6.21, longitude: 7.067 },
+  { name: 'Bauchi', aliases: ['bauchi'], latitude: 10.315, longitude: 9.844 },
+  { name: 'Bayelsa', aliases: ['bayelsa'], latitude: 4.926, longitude: 6.267 },
+  { name: 'Benue', aliases: ['benue'], latitude: 7.731, longitude: 8.539 },
+  { name: 'Borno', aliases: ['borno'], latitude: 11.833, longitude: 13.151 },
+  { name: 'Cross River', aliases: ['cross river', 'cross-river'], latitude: 4.958, longitude: 8.326 },
+  { name: 'Delta', aliases: ['delta'], latitude: 5.704, longitude: 5.934 },
+  { name: 'Ebonyi', aliases: ['ebonyi'], latitude: 6.265, longitude: 8.013 },
+  { name: 'Edo', aliases: ['edo'], latitude: 6.338, longitude: 5.625 },
+  { name: 'Ekiti', aliases: ['ekiti'], latitude: 7.719, longitude: 5.311 },
+  { name: 'Enugu', aliases: ['enugu'], latitude: 6.458, longitude: 7.546 },
+  {
+    name: 'Federal Capital Territory',
+    aliases: ['federal capital territory', 'abuja', 'fct'],
+    latitude: 9.0765,
+    longitude: 7.3986,
+  },
+  { name: 'Gombe', aliases: ['gombe'], latitude: 10.29, longitude: 11.17 },
+  { name: 'Imo', aliases: ['imo'], latitude: 5.484, longitude: 7.035 },
+  { name: 'Jigawa', aliases: ['jigawa'], latitude: 12.228, longitude: 9.562 },
+  { name: 'Kaduna', aliases: ['kaduna'], latitude: 10.511, longitude: 7.438 },
+  { name: 'Kano', aliases: ['kano'], latitude: 12.002, longitude: 8.592 },
+  { name: 'Katsina', aliases: ['katsina'], latitude: 12.985, longitude: 7.617 },
+  { name: 'Kebbi', aliases: ['kebbi'], latitude: 12.451, longitude: 4.197 },
+  { name: 'Kogi', aliases: ['kogi'], latitude: 7.801, longitude: 6.739 },
+  { name: 'Kwara', aliases: ['kwara'], latitude: 8.496, longitude: 4.542 },
+  { name: 'Lagos', aliases: ['lagos'], latitude: 6.5244, longitude: 3.3792 },
+  { name: 'Nasarawa', aliases: ['nasarawa'], latitude: 8.537, longitude: 8.322 },
+  { name: 'Niger', aliases: ['niger'], latitude: 9.93, longitude: 5.598 },
+  { name: 'Ogun', aliases: ['ogun'], latitude: 7.161, longitude: 3.35 },
+  { name: 'Ondo', aliases: ['ondo'], latitude: 7.252, longitude: 5.193 },
+  { name: 'Osun', aliases: ['osun'], latitude: 7.771, longitude: 4.556 },
+  { name: 'Oyo', aliases: ['oyo'], latitude: 7.378, longitude: 3.947 },
+  { name: 'Plateau', aliases: ['plateau', 'jos'], latitude: 9.8965, longitude: 8.8583 },
+  { name: 'Rivers', aliases: ['rivers', 'port harcourt', 'port-harcourt'], latitude: 4.8156, longitude: 7.0498 },
+  { name: 'Sokoto', aliases: ['sokoto'], latitude: 13.06, longitude: 5.237 },
+  { name: 'Taraba', aliases: ['taraba'], latitude: 7.999, longitude: 10.774 },
+  { name: 'Yobe', aliases: ['yobe'], latitude: 11.747, longitude: 11.966 },
+  { name: 'Zamfara', aliases: ['zamfara'], latitude: 12.17, longitude: 6.664 },
+];
+
+export const defaultNigeriaCoordinate = {
+  latitude: 9.0765,
+  longitude: 7.3986,
+};

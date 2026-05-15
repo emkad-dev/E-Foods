@@ -1,18 +1,29 @@
 import { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { confirmPasswordReset } from 'firebase/auth';
-import { auth } from '../../src/services/firebase/config';
-import { formatAuthError } from '../../src/services/firebase/auth';
+import { formatAuthError } from '../../src/services/supabase/auth';
+import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function ResetPasswordScreen() {
-  const params = useLocalSearchParams<{ oobCode?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    access_token?: string | string[];
+    code?: string | string[];
+    refresh_token?: string | string[];
+  }>();
   const router = useRouter();
-  const oobCode = useMemo(() => {
-    if (Array.isArray(params.oobCode)) return params.oobCode[0];
-    return params.oobCode;
-  }, [params.oobCode]);
+  const accessToken = useMemo(() => {
+    if (Array.isArray(params.access_token)) return params.access_token[0];
+    return params.access_token;
+  }, [params.access_token]);
+  const refreshToken = useMemo(() => {
+    if (Array.isArray(params.refresh_token)) return params.refresh_token[0];
+    return params.refresh_token;
+  }, [params.refresh_token]);
+  const recoveryCode = useMemo(() => {
+    if (Array.isArray(params.code)) return params.code[0];
+    return params.code;
+  }, [params.code]);
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -20,7 +31,7 @@ export default function ResetPasswordScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const handleResetPassword = async () => {
-    if (!oobCode) {
+    if (!accessToken && !refreshToken && !recoveryCode) {
       Alert.alert('Invalid link', 'This reset link is missing the required reset code.');
       return;
     }
@@ -43,7 +54,29 @@ export default function ResetPasswordScreen() {
     setSubmitting(true);
     setError(null);
     try {
-      await confirmPasswordReset(auth, oobCode, password);
+      if (recoveryCode) {
+        const exchangeResult = await supabase.auth.exchangeCodeForSession(recoveryCode);
+        if (exchangeResult.error) {
+          throw exchangeResult.error;
+        }
+      } else if (accessToken && refreshToken) {
+        const sessionResult = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (sessionResult.error) {
+          throw sessionResult.error;
+        }
+      } else {
+        throw new Error('This reset link is missing the session tokens required to update your password.');
+      }
+
+      const updateResult = await supabase.auth.updateUser({ password });
+      if (updateResult.error) {
+        throw updateResult.error;
+      }
+
+      await supabase.auth.signOut().catch(() => undefined);
       Alert.alert('Password updated', 'You can now sign in with your new password.', [
         {
           text: 'Continue to login',

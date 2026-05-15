@@ -5,6 +5,8 @@ import { formatOrderStatusLabel, getOrderStatusColor } from '../../src/domain/or
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
 
+const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+
 export default function PartnerOrdersScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -55,7 +57,7 @@ export default function PartnerOrdersScreen() {
               {order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0} items {'·'}{' '}
               {(order.fulfillmentType ?? 'delivery').toUpperCase()}
             </Text>
-            <Text style={styles.orderMeta}>Total ${(order.pricing?.total ?? order.total ?? 0).toFixed(2)}</Text>
+            <Text style={styles.orderMeta}>Total {formatMoney(order.pricing?.total ?? order.total ?? 0)}</Text>
           </TouchableOpacity>
         ))
       )}

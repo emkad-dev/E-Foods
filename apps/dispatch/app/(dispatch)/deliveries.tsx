@@ -6,6 +6,8 @@ import { formatOrderStatusLabel, getOrderStatusColor, isTerminalOrderStatus } fr
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { dispatchTheme } from '../../src/theme/palette';
 
+const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+
 export default function DeliveriesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -87,7 +89,7 @@ export default function DeliveriesScreen() {
               <Text style={styles.meta}>
                 Items {order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0}
               </Text>
-              <Text style={styles.meta}>Total ${(order.pricing?.total ?? order.total ?? 0).toFixed(2)}</Text>
+              <Text style={styles.meta}>Total {formatMoney(order.pricing?.total ?? order.total ?? 0)}</Text>
               <Text style={styles.meta}>Payment {order.payment?.status ?? 'pending'}</Text>
             </View>
             {order.deliveryLocation?.note ? <Text style={styles.note}>{order.deliveryLocation.note}</Text> : null}

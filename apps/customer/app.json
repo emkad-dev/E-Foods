@@ -67,12 +67,6 @@
       "eas": {
         "projectId": "dcd9458a-36cb-4f88-bd22-b53a99e1332b"
       },
-      "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBV2o8BxigxaF0nKA4Bi1YjvpqaYBWVjvk",
-      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "ebuy-ea84b.firebaseapp.com",
-      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "ebuy-ea84b",
-      "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "ebuy-ea84b.firebasestorage.app",
-      "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "309665605080",
-      "EXPO_PUBLIC_FIREBASE_APP_ID": "1:309665605080:web:ab295750343c0cc42d3ead",
       "EXPO_PUBLIC_PROJECT_ID": "G-VM017RKW5Q",
       "EXPO_PUBLIC_APP_DOMAIN": "ebuy.com",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",

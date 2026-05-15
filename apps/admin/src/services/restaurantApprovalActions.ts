@@ -1,5 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callAdminBackendRpc } from './backendRpc';
 
 type UpdateRestaurantApprovalInput = {
   restaurantId: string;
@@ -14,12 +13,5 @@ type UpdateRestaurantApprovalResult = {
   name: string;
 };
 
-const adminUpdateRestaurantApprovalCallable = httpsCallable<
-  UpdateRestaurantApprovalInput,
-  UpdateRestaurantApprovalResult
->(functions, 'adminUpdateRestaurantApproval');
-
-export const updateRestaurantApproval = async (input: UpdateRestaurantApprovalInput) => {
-  const result = await adminUpdateRestaurantApprovalCallable(input);
-  return result.data;
-};
+export const updateRestaurantApproval = async (input: UpdateRestaurantApprovalInput) =>
+  callAdminBackendRpc<UpdateRestaurantApprovalResult>('adminUpdateRestaurantApproval', input);

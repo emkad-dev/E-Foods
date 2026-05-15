@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { doc, onSnapshot } from 'firebase/firestore';
+import * as WebBrowser from 'expo-web-browser';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
@@ -13,16 +13,21 @@ import {
   formatPaymentMethodLabel,
 } from '../../src/domain/orders';
 import {
+  initializeCustomerPayment,
   placeCustomerOrder,
   PREPAID_CHECKOUT_DISABLED_MESSAGE,
+  refreshCustomerPaymentStatus,
 } from '../../src/services/customerOrderActions';
-import { db } from '../../src/services/firebase/config';
+import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 
 const tipOptions = [0, 2, 5, 10] as const;
-const paymentOptions: CheckoutPaymentMethod[] = ['card', 'wallet', 'cash'];
-const comingSoonPayments: CheckoutPaymentMethod[] = ['card', 'wallet'];
+const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer', 'wallet', 'cash'];
+const comingSoonPayments: CheckoutPaymentMethod[] = ['wallet'];
+const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+
+void formatMoney;
 
 export default function CartScreen() {
   const {
@@ -45,6 +50,7 @@ export default function CartScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [tipAmount, setTipAmount] = useState(2);
   const router = useRouter();
+  const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
   const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
   const pricingPreview = calculateCheckoutTotal({
     deliveryFee,
@@ -58,7 +64,7 @@ export default function CartScreen() {
   const isRestaurantPublished = restaurant?.isPublished === true;
   const restaurantUnavailableReason =
     !restaurant
-      ? 'Restaurant details are still loading. Wait a moment before checkout.'
+      ? 'This restaurant is no longer available for checkout.'
       : restaurant.isOpen === false
         ? 'This restaurant is currently closed.'
         : !isRestaurantPublished
@@ -68,7 +74,7 @@ export default function CartScreen() {
             : fulfillmentType === 'pickup' && !isPickupSupported
               ? 'Pickup is no longer available for this restaurant.'
               : belowMinimum
-                ? `Add $${(minOrder - total).toFixed(2)} more to meet the minimum order.`
+                ? `Add ${formatMoney(minOrder - total)} more to meet the minimum order.`
                 : null;
 
   useEffect(() => {
@@ -76,39 +82,36 @@ export default function CartScreen() {
   }, [deliveryLocation?.note]);
 
   useEffect(() => {
-    if (paymentMethod !== 'cash' && comingSoonPayments.includes(paymentMethod)) {
-      setPaymentMethod('cash');
-    }
-  }, [paymentMethod]);
-
-  useEffect(() => {
     if (!restaurantId) {
       setRestaurant(null);
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'restaurants', restaurantId),
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          setRestaurant(null);
+    let active = true;
+
+    const loadRestaurant = async () => {
+      try {
+        const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(restaurantId);
+        if (!active) {
           return;
         }
 
-        const restaurantData = snapshot.data() as RestaurantDocument;
-
-        setRestaurant({
-          ...restaurantData,
-          id: snapshot.id,
-        });
-      },
-      (error) => {
+        setRestaurant(nextRestaurant as RestaurantDocument | null);
+      } catch (error) {
         console.error('Error loading checkout restaurant:', error);
-        setRestaurant(null);
+        if (active) {
+          setRestaurant(null);
+        }
       }
-    );
+    };
 
-    return unsubscribe;
+    loadRestaurant();
+    const interval = setInterval(loadRestaurant, 30000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [restaurantId]);
 
   const handleFulfillmentChange = (nextType: FulfillmentType) => {
@@ -153,13 +156,13 @@ export default function CartScreen() {
     }
 
     if (belowMinimum) {
-      Alert.alert('Minimum order not reached', `This restaurant requires a minimum subtotal of $${minOrder.toFixed(2)}.`);
+      Alert.alert('Minimum order not reached', `This restaurant requires a minimum subtotal of ${formatMoney(minOrder)}.`);
       return;
     }
 
     setSubmitting(true);
     try {
-      const { orderId } = await placeCustomerOrder({
+      const checkoutPayload = {
         deliveryLocation:
           fulfillmentType === 'delivery' && deliveryLocation
             ? {
@@ -172,10 +175,29 @@ export default function CartScreen() {
         paymentMethod,
         restaurantId,
         tipAmount,
-      });
+      };
 
+      if (paymentMethod === 'cash') {
+        const { orderId } = await placeCustomerOrder(checkoutPayload);
+        clearCart();
+        router.replace(`/orders/${orderId}`);
+        return;
+      }
+
+      const { authorizationUrl, orderId } = await initializeCustomerPayment(checkoutPayload);
       clearCart();
-      router.replace(`/orders/${orderId}`);
+
+      try {
+        await WebBrowser.openBrowserAsync(authorizationUrl);
+      } finally {
+        try {
+          await refreshCustomerPaymentStatus(orderId);
+        } catch (refreshError) {
+          console.error('Unable to refresh payment status after Paystack handoff:', refreshError);
+        }
+
+        router.replace(`/orders/${orderId}`);
+      }
     } catch (error: any) {
       Alert.alert('Order failed', error.message ?? 'Something went wrong while placing your order.');
     } finally {
@@ -207,7 +229,7 @@ export default function CartScreen() {
           <View style={styles.itemCard}>
             <View style={styles.itemCopy}>
               <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>${item.price.toFixed(2)} each</Text>
+              <Text style={styles.itemMeta}>{formatMoney(item.price)} each</Text>
             </View>
 
             <View style={styles.itemActions}>
@@ -358,9 +380,11 @@ export default function CartScreen() {
                       ? fulfillmentType === 'pickup'
                         ? 'Pay at pickup'
                         : 'Pay on delivery'
+                      : option === 'bank_transfer'
+                        ? 'Pay with transfer'
                       : option === 'wallet'
                         ? 'Coming soon'
-                        : 'Coming soon';
+                        : 'Pay with card';
 
                   return (
                     <TouchableOpacity
@@ -402,7 +426,7 @@ export default function CartScreen() {
                       onPress={() => setTipAmount(option)}
                     >
                       <Text style={[styles.tipChipText, isActive ? styles.tipChipTextActive : null]}>
-                        {option === 0 ? 'No tip' : `$${option}`}
+                        {option === 0 ? 'No tip' : formatMoney(option)}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -411,25 +435,25 @@ export default function CartScreen() {
             </View>
             <View style={styles.summarySplit}>
               <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryDetailValue}>${total.toFixed(2)}</Text>
+              <Text style={styles.summaryDetailValue}>{formatMoney(total)}</Text>
             </View>
             <View style={styles.summarySplit}>
               <Text style={styles.summaryLabel}>Delivery fee</Text>
               <Text style={styles.summaryDetailValue}>
-                {fulfillmentType === 'delivery' ? `$${pricingPreview.deliveryFee.toFixed(2)}` : 'Free'}
+                {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'Free'}
               </Text>
             </View>
             <View style={styles.summarySplit}>
               <Text style={styles.summaryLabel}>Service fee</Text>
-              <Text style={styles.summaryDetailValue}>${pricingPreview.serviceFee.toFixed(2)}</Text>
+              <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.serviceFee)}</Text>
             </View>
             <View style={styles.summarySplit}>
               <Text style={styles.summaryLabel}>Tip</Text>
-              <Text style={styles.summaryDetailValue}>${pricingPreview.tip.toFixed(2)}</Text>
+              <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.tip)}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Order total</Text>
-              <Text style={styles.summaryValue}>${pricingPreview.total.toFixed(2)}</Text>
+              <Text style={styles.summaryValue}>{formatMoney(pricingPreview.total)}</Text>
             </View>
             <TouchableOpacity
               style={[
@@ -440,19 +464,31 @@ export default function CartScreen() {
               disabled={submitting || Boolean(restaurantUnavailableReason)}
             >
               <Text style={styles.checkoutButtonText}>
-                        {user
+                {user
                   ? fulfillmentType === 'delivery'
                     ? deliveryLocation
-                      ? (submitting ? 'Placing cash order...' : 'Place cash order')
+                      ? (submitting
+                          ? paymentMethod === 'cash'
+                            ? 'Placing cash order...'
+                            : 'Opening Paystack...'
+                          : paymentMethod === 'cash'
+                            ? 'Place cash order'
+                            : 'Continue to payment')
                       : 'Choose delivery location'
                     : (submitting
-                        ? 'Placing pickup order...'
-                        : 'Place pickup order')
+                        ? paymentMethod === 'cash'
+                          ? 'Placing pickup order...'
+                          : 'Opening Paystack...'
+                        : paymentMethod === 'cash'
+                          ? 'Place pickup order'
+                          : 'Continue to payment')
                   : 'Sign in to place order'}
               </Text>
             </TouchableOpacity>
             <Text style={styles.paymentHint}>
-              {`Cash will be collected ${fulfillmentType === 'pickup' ? 'when you collect the order' : 'at drop-off'}. Card and wallet payments are coming soon.`}
+              {paymentMethod === 'cash'
+                ? `Cash will be collected ${fulfillmentType === 'pickup' ? 'when you collect the order' : 'at drop-off'}.`
+                : 'Paystack will open in your browser. Your order only becomes live for the restaurant after payment verification succeeds.'}
             </Text>
           </View>
         }

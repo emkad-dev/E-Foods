@@ -16,13 +16,16 @@ import {
   normalizeOrderStatus,
 } from '../../../src/domain/orders';
 import { useCustomerOrder } from '../../../src/hooks/useCustomerOrder';
-import { cancelCustomerOrder } from '../../../src/services/customerOrderActions';
+import { cancelCustomerOrder, refreshCustomerPaymentStatus } from '../../../src/services/customerOrderActions';
+
+const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
 export default function OrderTracking() {
   const { id } = useLocalSearchParams();
   const { user } = useAuth();
   const { order, loading, error } = useCustomerOrder(id as string, user?.uid ?? null);
   const [cancelling, setCancelling] = useState(false);
+  const [refreshingPayment, setRefreshingPayment] = useState(false);
 
   if (!user) {
     return (
@@ -62,6 +65,8 @@ export default function OrderTracking() {
   const refundPolicy = getCustomerRefundPolicyLabel(order.status);
   const hasCapturedPrepaidAmount =
     isPrepaidPaymentMethod(order.payment?.method) && ['paid', 'refunded'].includes(order.payment?.status ?? '');
+  const isPendingPrepaidPayment =
+    isPrepaidPaymentMethod(order.payment?.method) && (order.payment?.status ?? 'pending') === 'pending';
   const refundCopy = !canCancel
     ? 'This order has moved too far along for self-service cancellation.'
     : !isPrepaidPaymentMethod(order.payment?.method)
@@ -103,6 +108,25 @@ export default function OrderTracking() {
     );
   };
 
+  const handleRefreshPayment = async () => {
+    if (!order || refreshingPayment) {
+      return;
+    }
+
+    try {
+      setRefreshingPayment(true);
+      const result = await refreshCustomerPaymentStatus(order.id);
+      Alert.alert(
+        'Payment status updated',
+        `Current payment state: ${formatPaymentStatusLabel(result.paymentStatus, order.payment?.method)}.`
+      );
+    } catch (nextError: any) {
+      Alert.alert('Refresh failed', nextError.message ?? 'We could not verify this payment right now.');
+    } finally {
+      setRefreshingPayment(false);
+    }
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
@@ -130,16 +154,16 @@ export default function OrderTracking() {
       </View>
 
       <View style={styles.details}>
-        <Text style={styles.total}>Total: ${total.toFixed(2)}</Text>
-        <Text style={styles.detailLine}>Subtotal: ${(order.pricing?.subtotal ?? total).toFixed(2)}</Text>
-        <Text style={styles.detailLine}>Delivery fee: ${(order.pricing?.deliveryFee ?? 0).toFixed(2)}</Text>
-        <Text style={styles.detailLine}>Service fee: ${(order.pricing?.serviceFee ?? 0).toFixed(2)}</Text>
-        <Text style={styles.detailLine}>Tip: ${(order.pricing?.tip ?? 0).toFixed(2)}</Text>
+        <Text style={styles.total}>Total: {formatMoney(total)}</Text>
+        <Text style={styles.detailLine}>Subtotal: {formatMoney(order.pricing?.subtotal ?? total)}</Text>
+        <Text style={styles.detailLine}>Delivery fee: {formatMoney(order.pricing?.deliveryFee ?? 0)}</Text>
+        <Text style={styles.detailLine}>Service fee: {formatMoney(order.pricing?.serviceFee ?? 0)}</Text>
+        <Text style={styles.detailLine}>Tip: {formatMoney(order.pricing?.tip ?? 0)}</Text>
         <Text style={styles.detailLine}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
         {order.payment?.reference ? <Text style={styles.detailLine}>Reference: {order.payment.reference}</Text> : null}
         {typeof order.payment?.refundAmount === 'number' && order.payment.refundAmount > 0 ? (
-          <Text style={styles.detailLine}>Refund amount: ${order.payment.refundAmount.toFixed(2)}</Text>
+          <Text style={styles.detailLine}>Refund amount: {formatMoney(order.payment.refundAmount)}</Text>
         ) : null}
         <Text style={styles.detailLine}>
           {fulfillmentType === 'pickup'
@@ -151,6 +175,13 @@ export default function OrderTracking() {
         ) : null}
         {order.deliveryLocation?.note ? (
           <Text style={styles.note}>Drop-off note: {order.deliveryLocation.note}</Text>
+        ) : null}
+        {isPendingPrepaidPayment ? (
+          <TouchableOpacity style={styles.refreshButton} onPress={handleRefreshPayment} disabled={refreshingPayment}>
+            <Text style={styles.refreshButtonText}>
+              {refreshingPayment ? 'Refreshing payment...' : 'Refresh payment status'}
+            </Text>
+          </TouchableOpacity>
         ) : null}
       </View>
 
@@ -194,6 +225,8 @@ const styles = StyleSheet.create({
   total: { fontSize: 18, fontWeight: 'bold', marginBottom: 8, color: '#f5b342' },
   detailLine: { color: '#374151', lineHeight: 22 },
   note: { marginTop: 8 },
+  refreshButton: { marginTop: 14, backgroundColor: '#111827', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  refreshButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   policyCard: { marginTop: 18, padding: 16, backgroundColor: '#fff7ed', borderRadius: 12, borderWidth: 1, borderColor: '#fed7aa' },
   policyTitle: { color: '#9a3412', fontSize: 16, fontWeight: '700' },
   policyCopy: { color: '#7c2d12', lineHeight: 21, marginTop: 8 },

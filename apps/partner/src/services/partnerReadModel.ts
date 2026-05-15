@@ -1,6 +1,5 @@
-import { httpsCallable } from 'firebase/functions';
 import type { OrderDocument, RestaurantDocument } from '../domain/entities';
-import { functions } from './firebase/config';
+import { callPartnerBackendRpc } from './backendRpc';
 
 type PartnerRestaurantContext = {
   claimableRestaurants: RestaurantDocument[];
@@ -9,32 +8,11 @@ type PartnerRestaurantContext = {
   restaurants: RestaurantDocument[];
 };
 
-const partnerGetRestaurantContextCallable = httpsCallable<Record<string, never>, PartnerRestaurantContext>(
-  functions,
-  'partnerGetRestaurantContext'
-);
+export const getPartnerRestaurantContext = async () =>
+  callPartnerBackendRpc<PartnerRestaurantContext>('partnerGetRestaurantContext');
 
-const partnerGetRestaurantOrdersCallable = httpsCallable<
-  Record<string, never>,
-  { orders: OrderDocument[]; restaurant: RestaurantDocument | null }
->(functions, 'partnerGetRestaurantOrders');
+export const getPartnerRestaurantOrders = async () =>
+  callPartnerBackendRpc<{ orders: OrderDocument[]; restaurant: RestaurantDocument | null }>('partnerGetRestaurantOrders');
 
-const partnerGetRestaurantOrderCallable = httpsCallable<{ orderId: string }, { order: OrderDocument }>(
-  functions,
-  'partnerGetRestaurantOrder'
-);
-
-export const getPartnerRestaurantContext = async () => {
-  const result = await partnerGetRestaurantContextCallable({});
-  return result.data;
-};
-
-export const getPartnerRestaurantOrders = async () => {
-  const result = await partnerGetRestaurantOrdersCallable({});
-  return result.data;
-};
-
-export const getPartnerRestaurantOrder = async (orderId: string) => {
-  const result = await partnerGetRestaurantOrderCallable({ orderId });
-  return result.data;
-};
+export const getPartnerRestaurantOrder = async (orderId: string) =>
+  callPartnerBackendRpc<{ order: OrderDocument }>('partnerGetRestaurantOrder', { orderId });

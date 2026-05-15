@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import type {
-  AddressRecord,
-  OrderPriceBreakdown,
-  OrderPaymentSummary,
-  OrderDocument,
-} from '../domain/entities';
+import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreakdown } from '../domain/entities';
 import type { FulfillmentType } from '../domain/orders';
-import { db } from '../services/firebase/config';
+import { getCustomerOrderDetail } from '../services/customerReadModel';
 
 export type Order = OrderDocument & {
   id: string;
@@ -31,32 +25,47 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     }
 
     setLoading(true);
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'orders', orderId),
-      (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const data = docSnapshot.data() as Order;
+    const loadOrder = async () => {
+      try {
+        const nextData = await getCustomerOrderDetail(orderId);
 
-          if (data.customerId !== customerId) {
-            setOrder(null);
-            setError('Order not found');
-          } else {
-            setOrder({ ...data, id: docSnapshot.id });
-            setError(null);
-          }
-        } else {
-          setError('Order not found');
+        if (cancelled) {
+          return;
         }
-        setLoading(false);
-      },
-      (err) => {
-        setError(err.message);
-        setLoading(false);
-      }
-    );
 
-    return unsubscribe;
+        if (nextData.order.customerId !== customerId) {
+          setOrder(null);
+          setError('Order not found');
+          return;
+        }
+
+        setOrder(nextData.order as Order);
+        setError(null);
+      } catch (err: any) {
+        if (cancelled) {
+          return;
+        }
+
+        setOrder(null);
+        setError(err.message ?? 'Order not found');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadOrder();
+    const interval = setInterval(() => {
+      void loadOrder();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [customerId, orderId]);
 
   return { order, loading, error };

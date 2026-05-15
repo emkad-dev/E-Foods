@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -126,14 +127,12 @@ export default function PartnerRegisterScreen() {
             onChangeText={handleFieldChange(setEmail)}
             editable={!loading}
           />
-          <TextInput
-            style={styles.input}
+          <AuthPasswordField
             placeholder="Password"
-            placeholderTextColor="#8e8e8e"
-            secureTextEntry
             value={password}
             onChangeText={handleFieldChange(setPassword)}
             editable={!loading}
+            showHint
           />
           <TextInput
             style={styles.input}

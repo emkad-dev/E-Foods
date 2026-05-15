@@ -1,26 +1,17 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callDispatchBackendRpc } from './backendRpc';
 
 export type DispatchApplicationInput = {
   currentAddress?: string;
   displayName: string;
-  latitude: number;
-  longitude: number;
+  lga: string;
   phoneNumber: string;
   region: string;
   vehicleType: string;
 };
 
-const submitDispatchApplicationCallable = httpsCallable<
-  DispatchApplicationInput,
-  {
+export const submitDispatchApplication = async (input: DispatchApplicationInput) =>
+  callDispatchBackendRpc<{
     status: 'pending';
     submittedAt: string;
     targetUid: string;
-  }
->(functions, 'submitDispatchApplication');
-
-export const submitDispatchApplication = async (input: DispatchApplicationInput) => {
-  const result = await submitDispatchApplicationCallable(input);
-  return result.data;
-};
+  }>('submitDispatchApplication', input);

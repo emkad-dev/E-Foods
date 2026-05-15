@@ -15,30 +15,18 @@ const getEnvValue = (
   return undefined;
 };
 
-export const firebaseEnv = {
-  apiKey: getEnvValue(
-    process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_API_KEY
+export const supabaseEnv = {
+  url: getEnvValue(
+    process.env.EXPO_PUBLIC_SUPABASE_URL,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_SUPABASE_URL
   ),
-  authDomain: getEnvValue(
-    process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN
+  anonKey: getEnvValue(
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_SUPABASE_ANON_KEY
   ),
-  projectId: getEnvValue(
-    process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_PROJECT_ID
-  ),
-  storageBucket: getEnvValue(
-    process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET
-  ),
-  messagingSenderId: getEnvValue(
-    process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
-  ),
-  appId: getEnvValue(
-    process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_FIREBASE_APP_ID
+  projectRef: getEnvValue(
+    process.env.EXPO_PUBLIC_SUPABASE_PROJECT_REF,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_SUPABASE_PROJECT_REF
   ),
 };
 
@@ -66,4 +54,35 @@ export const appEnv = {
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
   ),
+  backendRpcUrl: getEnvValue(
+    process.env.EXPO_PUBLIC_BACKEND_RPC_URL,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_RPC_URL
+  ),
+  functionsRegion:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_FUNCTIONS_REGION,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_FUNCTIONS_REGION
+    ) ?? 'us-central1',
+};
+
+const getBooleanEnvValue = (inlineValue: string | undefined, extraValue: unknown) => {
+  const resolvedValue = getEnvValue(inlineValue, extraValue)?.toLowerCase();
+  return resolvedValue === '1' || resolvedValue === 'true' || resolvedValue === 'yes';
+};
+
+export const devAuthEnv = {
+  enabled: getBooleanEnvValue(
+    process.env.EXPO_PUBLIC_DEV_AUTH_BYPASS,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_DEV_AUTH_BYPASS
+  ),
+  email:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_DEV_AUTH_EMAIL,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_DEV_AUTH_EMAIL
+    ) ?? 'customer.dev@ebuy.local',
+  uid:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_DEV_AUTH_UID,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_DEV_AUTH_UID
+    ) ?? 'customer-dev-user',
 };

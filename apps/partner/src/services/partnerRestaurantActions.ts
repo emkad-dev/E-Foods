@@ -1,5 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callPartnerBackendRpc } from './backendRpc';
 
 export type PartnerRestaurantProfileInput = {
   restaurantId?: string | null;
@@ -39,24 +38,14 @@ type PartnerRestaurantProfileResult = {
   name: string;
 };
 
-export const savePartnerRestaurantProfile = async (input: PartnerRestaurantProfileInput) => {
-  const callable = httpsCallable(functions, 'upsertPartnerRestaurantProfile');
-  const result = await callable(input);
-  return result.data as PartnerRestaurantProfileResult;
-};
+export const savePartnerRestaurantProfile = async (input: PartnerRestaurantProfileInput) =>
+  callPartnerBackendRpc<PartnerRestaurantProfileResult>('upsertPartnerRestaurantProfile', input);
 
-export const linkPartnerRestaurant = async (restaurantId: string) => {
-  const callable = httpsCallable(functions, 'claimPartnerRestaurantLink');
-  const result = await callable({ restaurantId });
-  return result.data as PartnerRestaurantProfileResult;
-};
+export const linkPartnerRestaurant = async (restaurantId: string) =>
+  callPartnerBackendRpc<PartnerRestaurantProfileResult>('claimPartnerRestaurantLink', { restaurantId });
 
-export const savePartnerRestaurantMenu = async (
-  restaurantId: string,
-  menu: PartnerMenuCategoryInput[]
-) => {
-  const callable = httpsCallable(functions, 'upsertPartnerRestaurantMenu');
-  await callable({
+export const savePartnerRestaurantMenu = async (restaurantId: string, menu: PartnerMenuCategoryInput[]) => {
+  await callPartnerBackendRpc('upsertPartnerRestaurantMenu', {
     menu,
     restaurantId,
   });

@@ -2,6 +2,7 @@ import { Link } from 'expo-router';
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -67,14 +68,12 @@ export default function PartnerLoginScreen() {
           onChangeText={handleEmailChange}
           editable={!loading}
         />
-        <TextInput
-          style={styles.input}
+        <AuthPasswordField
           placeholder="Password"
-          placeholderTextColor="#8e8e8e"
-          secureTextEntry
           value={password}
           onChangeText={handlePasswordChange}
           editable={!loading}
+          showHint
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>

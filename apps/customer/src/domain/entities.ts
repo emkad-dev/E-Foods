@@ -1,6 +1,7 @@
-import type { DocumentData } from 'firebase/firestore';
 import type { AppRole } from './roles';
 import type { FulfillmentType, OrderStatus, PaymentMethod, PaymentStatus } from './orders';
+
+type DocumentData = Record<string, unknown>;
 
 export type CurrencyCode = 'NGN' | 'USD' | string;
 
@@ -44,10 +45,16 @@ export interface RestaurantDocument extends DocumentData {
   deliveryTime?: string | number;
   minOrder?: number;
   deliveryFee?: number;
+  deliveryRadiusKm?: number | null;
   address?: string;
+  approvalStatus?: string | null;
   supportsPickup?: boolean;
   supportsDelivery?: boolean;
   isOpen?: boolean;
+  isPublished?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+  menu?: MenuCategoryDocument[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -92,6 +99,10 @@ export interface OrderPaymentSummary extends DocumentData {
   status: PaymentStatus;
   reference?: string | null;
   processor?: string | null;
+  accessCode?: string | null;
+  authorizationUrl?: string | null;
+  channel?: string | null;
+  verifiedAt?: unknown | null;
   capturedAmount?: number;
   refundAmount?: number;
   lastEvent?: string | null;

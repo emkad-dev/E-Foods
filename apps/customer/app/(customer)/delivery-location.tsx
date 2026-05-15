@@ -8,6 +8,7 @@ import {
   Platform,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -30,10 +31,20 @@ const FALLBACK_REGION: Region = {
   ...DEFAULT_DELTA,
 };
 
+type LocationSuggestion = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  title: string;
+  subtitle: string;
+  displayName: string;
+};
+
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestRef = useRef(0);
   const { deliveryLocation, setDeliveryLocation } = useCart();
   const [region, setRegion] = useState<Region | null>(
     deliveryLocation
@@ -53,6 +64,9 @@ export default function DeliveryLocationScreen() {
   const [loadingMap, setLoadingMap] = useState(true);
   const [resolvingAddress, setResolvingAddress] = useState(false);
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const [searchSuggestions, setSearchSuggestions] = useState<LocationSuggestion[]>([]);
 
   const mapProvider = useMemo(
     () => (Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined),
@@ -131,6 +145,22 @@ export default function DeliveryLocationScreen() {
     }, 350);
   }, [region]);
 
+  useEffect(() => {
+    const trimmedQuery = searchQuery.trim();
+
+    if (trimmedQuery.length < 3) {
+      setSearchingPlaces(false);
+      setSearchSuggestions([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      void searchPlaces(trimmedQuery);
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
   const resolveRegionAddress = async (latitude: number, longitude: number) => {
     setResolvingAddress(true);
 
@@ -147,6 +177,97 @@ export default function DeliveryLocationScreen() {
     } finally {
       setResolvingAddress(false);
     }
+  };
+
+  const searchPlaces = async (query: string) => {
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
+    setSearchingPlaces(true);
+
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=ng&addressdetails=1&limit=6&q=${encodeURIComponent(
+          query
+        )}`,
+        {
+          headers: {
+            Accept: 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Place search failed with status ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        place_id: number;
+        lat: string;
+        lon: string;
+        display_name: string;
+        address?: Record<string, string | undefined>;
+      }[];
+
+      if (searchRequestRef.current !== requestId) {
+        return;
+      }
+
+      const nextSuggestions = payload.map((item) => {
+        const address = item.address ?? {};
+        const title =
+          address.road ||
+          address.neighbourhood ||
+          address.suburb ||
+          address.village ||
+          address.town ||
+          address.city ||
+          address.county ||
+          item.display_name.split(',')[0]?.trim() ||
+          'Suggested place';
+        const subtitle = [
+          address.suburb,
+          address.city || address.town || address.village,
+          address.state,
+        ]
+          .filter(Boolean)
+          .join(', ');
+
+        return {
+          id: String(item.place_id),
+          latitude: Number(item.lat),
+          longitude: Number(item.lon),
+          title,
+          subtitle: subtitle || item.display_name,
+          displayName: item.display_name,
+        } satisfies LocationSuggestion;
+      });
+
+      setSearchSuggestions(nextSuggestions);
+    } catch (error) {
+      console.error('Failed to search delivery places:', error);
+      if (searchRequestRef.current === requestId) {
+        setSearchSuggestions([]);
+      }
+    } finally {
+      if (searchRequestRef.current === requestId) {
+        setSearchingPlaces(false);
+      }
+    }
+  };
+
+  const handleSuggestionSelect = (suggestion: LocationSuggestion) => {
+    const nextRegion = {
+      latitude: suggestion.latitude,
+      longitude: suggestion.longitude,
+      ...DEFAULT_DELTA,
+    };
+
+    setSearchQuery(suggestion.title);
+    setSearchSuggestions([]);
+    setRegion(nextRegion);
+    setResolvedAddress(suggestion.displayName);
+    setShortAddress(suggestion.title);
+    mapRef.current?.animateToRegion(nextRegion, 450);
   };
 
   const handleUseCurrentLocation = async () => {
@@ -231,6 +352,36 @@ export default function DeliveryLocationScreen() {
         <View style={styles.topMessage}>
           <Text style={styles.topTitle}>Pin your delivery spot</Text>
           <Text style={styles.topSubtitle}>Move the map until the pin sits on your doorstep.</Text>
+          <View style={styles.searchWrapper}>
+            <FontAwesome name="search" size={15} color="#9ca3af" style={styles.searchIcon} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search for a street, area, or landmark"
+              placeholderTextColor="#9ca3af"
+              style={styles.searchInput}
+              autoCorrect={false}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+          </View>
+          {searchingPlaces ? <Text style={styles.searchStatus}>Searching nearby places...</Text> : null}
+          {searchSuggestions.length ? (
+            <View style={styles.searchDropdown}>
+              {searchSuggestions.map((suggestion) => (
+                <TouchableOpacity
+                  key={suggestion.id}
+                  style={styles.searchSuggestion}
+                  onPress={() => handleSuggestionSelect(suggestion)}
+                >
+                  <Text style={styles.searchSuggestionTitle}>{suggestion.title}</Text>
+                  <Text style={styles.searchSuggestionCopy} numberOfLines={2}>
+                    {suggestion.subtitle}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -329,6 +480,52 @@ const styles = StyleSheet.create({
   topSubtitle: {
     color: '#d1d5db',
     fontSize: 13,
+    marginTop: 4,
+  },
+  searchWrapper: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    flexDirection: 'row',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    color: '#111827',
+    flex: 1,
+    fontSize: 14,
+    minHeight: 40,
+  },
+  searchStatus: {
+    color: '#d1d5db',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  searchDropdown: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  searchSuggestion: {
+    borderTopColor: '#e5e7eb',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  searchSuggestionTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  searchSuggestionCopy: {
+    color: '#6b7280',
+    fontSize: 12,
+    lineHeight: 18,
     marginTop: 4,
   },
   centerPinWrapper: {

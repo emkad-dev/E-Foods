@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
@@ -10,12 +9,12 @@ import {
   formatPaymentStatusLabel,
   getOrderStatusColor,
 } from '../../../src/domain/orders';
-import { db } from '../../../src/services/firebase/config';
+import { getCustomerOrders } from '../../../src/services/customerReadModel';
 
 type Order = {
   id: string;
   restaurantName: string;
-  total: number;
+  total?: number;
   pricing?: {
     total: number;
   };
@@ -26,6 +25,8 @@ type Order = {
   status: string;
   createdAt: any;
 };
+
+const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
 export default function OrdersList() {
   const { user } = useAuth();
@@ -40,26 +41,40 @@ export default function OrdersList() {
       return;
     }
 
-    const ordersQuery = query(
-      collection(db, 'orders'),
-      where('customerId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(
-      ordersQuery,
-      (snapshot) => {
-        const ordersList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
-        setOrders(ordersList);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching orders:', error);
-        setLoading(false);
+    const loadOrders = async () => {
+      try {
+        const nextData = await getCustomerOrders();
+
+        if (cancelled) {
+          return;
+        }
+
+        setOrders(nextData.orders as Order[]);
+      } catch (nextError) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error('Error fetching orders:', nextError);
+        setOrders([]);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    );
+    };
 
-    return unsubscribe;
+    void loadOrders();
+    const interval = setInterval(() => {
+      void loadOrders();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [user]);
 
   if (!user) {
@@ -102,7 +117,7 @@ export default function OrdersList() {
                 {formatOrderStatusLabel(item.status).toUpperCase()}
               </Text>
             </View>
-            <Text style={styles.total}>${(item.pricing?.total ?? item.total).toFixed(2)}</Text>
+            <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>
             <Text style={styles.payment}>
               {formatPaymentStatusLabel(item.payment?.status ?? 'pending', item.payment?.method)}
             </Text>

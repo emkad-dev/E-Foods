@@ -1,17 +1,4 @@
-const DEFAULT_LAGOS_COORDINATE = {
-  latitude: 6.5244,
-  longitude: 3.3792,
-};
-
-const ZONE_COORDINATES = [
-  { match: ['victoria island', 'vi'], latitude: 6.4281, longitude: 3.4219 },
-  { match: ['lekki'], latitude: 6.4698, longitude: 3.5852 },
-  { match: ['ikoyi'], latitude: 6.4541, longitude: 3.4346 },
-  { match: ['yaba'], latitude: 6.5095, longitude: 3.3711 },
-  { match: ['surulere'], latitude: 6.4969, longitude: 3.3537 },
-  { match: ['mainland'], latitude: 6.5244, longitude: 3.3792 },
-  { match: ['lagos island'], latitude: 6.4549, longitude: 3.4246 },
-];
+import { defaultNigeriaCoordinate, getNigeriaAreaCoordinate } from '../constants/nigeriaLocations';
 
 const toNumber = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -47,22 +34,9 @@ const getCoordinateCandidate = (container: unknown) => {
 
 export const getZoneCoordinate = (zone: string | null | undefined) => {
   if (!zone) {
-    return DEFAULT_LAGOS_COORDINATE;
+    return defaultNigeriaCoordinate;
   }
-
-  const normalizedZone = zone.trim().toLowerCase();
-  const matchedZone = ZONE_COORDINATES.find((entry) =>
-    entry.match.some((token) => normalizedZone.includes(token))
-  );
-
-  if (!matchedZone) {
-    return DEFAULT_LAGOS_COORDINATE;
-  }
-
-  return {
-    latitude: matchedZone.latitude,
-    longitude: matchedZone.longitude,
-  };
+  return getNigeriaAreaCoordinate(zone, undefined);
 };
 
 export const resolveDispatchRiderCoordinate = (data: Record<string, unknown>, zone?: string | null) => {
@@ -93,7 +67,14 @@ export const resolveDispatchRiderCoordinate = (data: Record<string, unknown>, zo
   }
 
   return {
-    ...getZoneCoordinate(zone),
+    ...getNigeriaAreaCoordinate(
+      typeof data.region === 'string' && data.region.trim() ? data.region : zone,
+      typeof data.lga === 'string' && data.lga.trim()
+        ? data.lga
+        : typeof data.currentAddress === 'string' && data.currentAddress.trim()
+          ? data.currentAddress
+          : undefined
+    ),
     isPrecise: false,
   };
 };

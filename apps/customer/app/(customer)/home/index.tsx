@@ -14,9 +14,8 @@ import {
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { collection, onSnapshot } from 'firebase/firestore';
 import { useCart } from '../../../src/contexts/CartContext';
-import { db } from '../../../src/services/firebase/config';
+import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
 import {
   type DiscoveryRestaurant,
   getRestaurantAvailabilityBadge,
@@ -53,22 +52,32 @@ export default function HomeScreen() {
   const { deliveryLocation } = useCart();
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, 'restaurants'),
-      (snapshot) => {
-        const list = snapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() } as Restaurant))
-          .filter((restaurant) => isRestaurantVisibleToCustomers(restaurant));
-        setRestaurants(list);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Error fetching restaurants:', error);
-        setLoading(false);
-      }
-    );
+    let active = true;
 
-    return unsubscribe;
+    const loadRestaurants = async () => {
+      try {
+        const { restaurants: catalog } = await getPublishedRestaurants();
+        if (!active) {
+          return;
+        }
+
+        setRestaurants(catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as Restaurant[]);
+      } catch (error) {
+        console.error('Error fetching restaurants:', error);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadRestaurants();
+    const interval = setInterval(loadRestaurants, 30000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const discoveryResults = useMemo(

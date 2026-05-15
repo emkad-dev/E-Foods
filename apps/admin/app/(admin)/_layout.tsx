@@ -1,7 +1,10 @@
 import { Tabs } from 'expo-router';
+import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { adminTheme } from '../../src/theme/palette';
 
 export default function AdminTabsLayout() {
+  usePushNotifications();
+
   return (
     <Tabs
       screenOptions={{

@@ -1,6 +1,9 @@
 {
   "name": "ebuy-platform",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -21,11 +24,15 @@
     "db:doctor": "npm --prefix functions run db:doctor",
     "db:generate": "npm --prefix functions run prisma:generate",
     "db:migrate:deploy": "npm --prefix functions run prisma:migrate:deploy",
-    "db:validate": "npm --prefix functions run prisma:validate",
-    "firebase:functions:deploy": "firebase deploy --only functions",
-    "firebase:functions:deploy:project": "firebase deploy --only functions --project %FIREBASE_PROJECT_ID%",
-    "firebase:rules:deploy": "firebase deploy --only firestore:rules",
-    "firebase:rules:deploy:project": "firebase deploy --only firestore:rules --project %FIREBASE_PROJECT_ID%",
-    "firebase:rules:dryrun": "firebase deploy --only firestore:rules --debug"
+    "db:validate": "npm --prefix functions run prisma:validate"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
+    "jose": "^6.2.3",
+    "jwt-decode": "^4.0.0",
+    "react-native-url-polyfill": "^3.0.0"
+  },
+  "devDependencies": {
+    "supabase": "^2.98.2"
   }
 }

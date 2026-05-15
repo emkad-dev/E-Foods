@@ -1,8 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
-
-const dispatchAssignOrderCourier = httpsCallable(functions, 'dispatchAssignOrderCourier');
-const dispatchUpdateOrderStatus = httpsCallable(functions, 'dispatchUpdateOrderStatus');
+import { callDispatchBackendRpc } from './backendRpc';
 
 export const assignDispatchCourier = async (
   orderId: string,
@@ -16,43 +12,30 @@ export const assignDispatchCourier = async (
     dispatchId?: string | null;
   } | null
 ) => {
-  await dispatchAssignOrderCourier({
+  await callDispatchBackendRpc('dispatchAssignOrderCourier', {
     courierId: courier.id,
     orderId,
   });
 };
 
-export const markDispatchOrderPickedUp = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await dispatchUpdateOrderStatus({
-    action: 'picked_up',
+const updateDispatchOrderStatus = async (orderId: string, action: string) => {
+  await callDispatchBackendRpc('dispatchUpdateOrderStatus', {
+    action,
     orderId,
   });
 };
 
-export const markDispatchOrderOnTheWay = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await dispatchUpdateOrderStatus({
-    action: 'on_the_way',
-    orderId,
-  });
-};
+export const markDispatchOrderPickedUp = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updateDispatchOrderStatus(orderId, 'picked_up');
 
-export const markDispatchOrderDelivered = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await dispatchUpdateOrderStatus({
-    action: 'delivered',
-    orderId,
-  });
-};
+export const markDispatchOrderOnTheWay = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updateDispatchOrderStatus(orderId, 'on_the_way');
 
-export const markDispatchOrderFailed = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await dispatchUpdateOrderStatus({
-    action: 'failed_delivery',
-    orderId,
-  });
-};
+export const markDispatchOrderDelivered = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updateDispatchOrderStatus(orderId, 'delivered');
 
-export const escalateDispatchOrder = async (orderId: string, _timeline: Record<string, unknown> | null) => {
-  await dispatchUpdateOrderStatus({
-    action: 'escalate',
-    orderId,
-  });
-};
+export const markDispatchOrderFailed = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updateDispatchOrderStatus(orderId, 'failed_delivery');
+
+export const escalateDispatchOrder = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updateDispatchOrderStatus(orderId, 'escalate');

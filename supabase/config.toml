@@ -1,0 +1,10 @@
+project_id = "ebuy-platform"
+
+[functions.app-rpc]
+verify_jwt = false
+
+[functions.public-catalog]
+verify_jwt = false
+
+[functions.notifications]
+verify_jwt = true

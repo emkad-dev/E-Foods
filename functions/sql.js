@@ -1,5 +1,4 @@
 const { PrismaClient } = require("@prisma/client");
-const { HttpsError } = require("firebase-functions/v2/https");
 
 const globalForPrisma = globalThis;
 
@@ -25,36 +24,25 @@ const validateDatabaseUrl = (rawValue) => {
   try {
     parsedUrl = new URL(rawValue);
   } catch {
-    throw new HttpsError(
-      "failed-precondition",
-      "DATABASE_URL must be a valid PostgreSQL connection URI."
-    );
+    throw createConfigError("DATABASE_URL must be a valid PostgreSQL connection URI.");
   }
 
   if (!["postgres:", "postgresql:"].includes(parsedUrl.protocol)) {
-    throw new HttpsError(
-      "failed-precondition",
-      "DATABASE_URL must use the postgres:// or postgresql:// protocol."
-    );
+    throw createConfigError("DATABASE_URL must use the postgres:// or postgresql:// protocol.");
   }
 
   if (!parsedUrl.username || !parsedUrl.password || !parsedUrl.hostname) {
-    throw new HttpsError(
-      "failed-precondition",
-      "DATABASE_URL is missing required username, password, or host details."
-    );
+    throw createConfigError("DATABASE_URL is missing required username, password, or host details.");
   }
 
   if (rawValue.includes("[") || rawValue.includes("]")) {
-    throw new HttpsError(
-      "failed-precondition",
+    throw createConfigError(
       "DATABASE_URL still contains placeholder brackets. Replace template placeholders with the real encoded password."
     );
   }
 
   if (parsedUrl.hostname.endsWith(".supabase.co") && parsedUrl.searchParams.get("sslmode") !== "require") {
-    throw new HttpsError(
-      "failed-precondition",
+    throw createConfigError(
       "Supabase direct Postgres connections must include ?sslmode=require in DATABASE_URL. If this machine cannot reach the direct host, switch DATABASE_URL to the Supavisor Session pooler URI instead."
     );
   }
@@ -64,8 +52,7 @@ const validateDatabaseUrl = (rawValue) => {
 
 const requireSql = () => {
   if (!process.env.DATABASE_URL) {
-    throw new HttpsError(
-      "failed-precondition",
+    throw createConfigError(
       "SQL migration is enabled in code, but DATABASE_URL is not configured for functions yet."
     );
   }
@@ -134,10 +121,24 @@ const syncSqlUserAccount = async ({
   uid,
   email,
   displayName,
+  phoneNumber,
+  photoURL,
   emailVerified,
   roleDisplay,
+  partnerApplicationStatus,
+  partnerApplicationReviewedAt,
+  partnerApplicationRejectionReason,
+  dispatchApplicationStatus,
+  dispatchApplicationReviewedAt,
+  dispatchApplicationRejectionReason,
+  expoPushToken,
+  pushTokenUpdatedAt,
   activeSessionId,
   activeSessionUpdatedAt,
+  accountDisabled,
+  disabledAt,
+  disabledByUid,
+  lastPrivilegedRole,
   restaurantId,
   restaurantName,
   restaurantLinkedAt,
@@ -153,10 +154,24 @@ const syncSqlUserAccount = async ({
       uid,
       email,
       displayName: displayName ?? null,
+      phoneNumber: phoneNumber ?? null,
+      photoURL: photoURL ?? null,
       emailVerified: emailVerified === true,
       roleDisplay: roleDisplay ?? null,
+      partnerApplicationStatus: partnerApplicationStatus ?? null,
+      partnerApplicationReviewedAt: parseDateValue(partnerApplicationReviewedAt),
+      partnerApplicationRejectionReason: partnerApplicationRejectionReason ?? null,
+      dispatchApplicationStatus: dispatchApplicationStatus ?? null,
+      dispatchApplicationReviewedAt: parseDateValue(dispatchApplicationReviewedAt),
+      dispatchApplicationRejectionReason: dispatchApplicationRejectionReason ?? null,
+      expoPushToken: expoPushToken ?? null,
+      pushTokenUpdatedAt: parseDateValue(pushTokenUpdatedAt),
       activeSessionId: activeSessionId ?? null,
       activeSessionUpdatedAt: parseDateValue(activeSessionUpdatedAt),
+      accountDisabled: accountDisabled === true,
+      disabledAt: parseDateValue(disabledAt),
+      disabledByUid: disabledByUid ?? null,
+      lastPrivilegedRole: lastPrivilegedRole ?? null,
       restaurantId: restaurantId ?? null,
       restaurantName: restaurantName ?? null,
       restaurantLinkedAt: parseDateValue(restaurantLinkedAt),
@@ -167,10 +182,24 @@ const syncSqlUserAccount = async ({
     update: {
       email,
       displayName: displayName ?? null,
+      phoneNumber: phoneNumber ?? null,
+      photoURL: photoURL ?? null,
       emailVerified: emailVerified === true,
       roleDisplay: roleDisplay ?? null,
+      partnerApplicationStatus: partnerApplicationStatus ?? null,
+      partnerApplicationReviewedAt: parseDateValue(partnerApplicationReviewedAt),
+      partnerApplicationRejectionReason: partnerApplicationRejectionReason ?? null,
+      dispatchApplicationStatus: dispatchApplicationStatus ?? null,
+      dispatchApplicationReviewedAt: parseDateValue(dispatchApplicationReviewedAt),
+      dispatchApplicationRejectionReason: dispatchApplicationRejectionReason ?? null,
+      expoPushToken: expoPushToken ?? null,
+      pushTokenUpdatedAt: parseDateValue(pushTokenUpdatedAt),
       activeSessionId: activeSessionId ?? null,
       activeSessionUpdatedAt: parseDateValue(activeSessionUpdatedAt),
+      accountDisabled: accountDisabled === true,
+      disabledAt: parseDateValue(disabledAt),
+      disabledByUid: disabledByUid ?? null,
+      lastPrivilegedRole: lastPrivilegedRole ?? null,
       restaurantId: restaurantId ?? null,
       restaurantName: restaurantName ?? null,
       restaurantLinkedAt: parseDateValue(restaurantLinkedAt),
@@ -236,12 +265,14 @@ const syncSqlRestaurant = async ({
   address = null,
   description = null,
   image = null,
+  menu = [],
   deliveryFee = null,
   deliveryRadiusKm = null,
   deliveryTime = null,
   latitude = null,
   longitude = null,
   minOrder = null,
+  paystackSubaccountCode = null,
   supportsDelivery = true,
   supportsPickup = true,
   isOpen = true,
@@ -262,12 +293,14 @@ const syncSqlRestaurant = async ({
       address,
       description,
       image,
+      menu: toJsonValue(menu ?? []),
       deliveryFee,
       deliveryRadiusKm,
       deliveryTime,
       latitude,
       longitude,
       minOrder,
+      paystackSubaccountCode,
       supportsDelivery,
       supportsPickup,
       isOpen,
@@ -283,12 +316,14 @@ const syncSqlRestaurant = async ({
       address,
       description,
       image,
+      menu: toJsonValue(menu ?? []),
       deliveryFee,
       deliveryRadiusKm,
       deliveryTime,
       latitude,
       longitude,
       minOrder,
+      paystackSubaccountCode,
       supportsDelivery,
       supportsPickup,
       isOpen,
@@ -407,6 +442,93 @@ const updateSqlOrder = async ({
   });
 };
 
+const getSqlPaymentTransactionByReference = async ({ reference }) => {
+  const sql = requireSql();
+
+  return sql.paymentTransaction.findUnique({
+    where: { reference },
+  });
+};
+
+const upsertSqlPaymentTransaction = async ({
+  orderId,
+  customerId,
+  restaurantId,
+  provider,
+  method,
+  reference,
+  currency,
+  amount,
+  status,
+  accessCode = null,
+  authorizationUrl = null,
+  externalTransactionId = null,
+  channel = null,
+  gatewayStatus = null,
+  lastError = null,
+  paidAt = null,
+  failedAt = null,
+  verifiedAt = null,
+  splitSubaccountCode = null,
+  initializeResponse = null,
+  verificationResponse = null,
+  webhookEvent = null,
+}) => {
+  const sql = requireSql();
+
+  return sql.paymentTransaction.upsert({
+    where: { reference },
+    create: {
+      orderId,
+      customerId,
+      restaurantId,
+      provider,
+      method,
+      reference,
+      currency,
+      amount,
+      status,
+      accessCode,
+      authorizationUrl,
+      externalTransactionId,
+      channel,
+      gatewayStatus,
+      lastError,
+      paidAt: parseDateValue(paidAt),
+      failedAt: parseDateValue(failedAt),
+      verifiedAt: parseDateValue(verifiedAt),
+      splitSubaccountCode,
+      initializeResponse: toJsonValue(initializeResponse),
+      verificationResponse: toJsonValue(verificationResponse),
+      webhookEvent: toJsonValue(webhookEvent),
+    },
+    update: {
+      orderId,
+      customerId,
+      restaurantId,
+      provider,
+      method,
+      currency,
+      amount,
+      status,
+      accessCode,
+      authorizationUrl,
+      externalTransactionId,
+      channel,
+      gatewayStatus,
+      lastError,
+      paidAt: parseDateValue(paidAt),
+      failedAt: parseDateValue(failedAt),
+      verifiedAt: parseDateValue(verifiedAt),
+      splitSubaccountCode,
+      initializeResponse: toJsonValue(initializeResponse),
+      verificationResponse: toJsonValue(verificationResponse),
+      webhookEvent: toJsonValue(webhookEvent),
+      updatedAt: new Date(),
+    },
+  });
+};
+
 const syncSqlDeliveryAssignment = async ({
   orderId,
   dispatchId = null,
@@ -440,6 +562,10 @@ const upsertSqlDispatchRider = async ({
   displayName,
   status,
   zone,
+  region = null,
+  lga = null,
+  phoneNumber = null,
+  currentAddress = null,
   vehicleType,
   acceptanceRate = null,
   activeLoad = 0,
@@ -456,6 +582,10 @@ const upsertSqlDispatchRider = async ({
       displayName,
       status,
       zone,
+      region,
+      lga,
+      phoneNumber,
+      currentAddress,
       vehicleType,
       acceptanceRate: toOptionalNumber(acceptanceRate),
       activeLoad: toOptionalInteger(activeLoad, 0),
@@ -467,6 +597,10 @@ const upsertSqlDispatchRider = async ({
       displayName,
       status,
       zone,
+      region,
+      lga,
+      phoneNumber,
+      currentAddress,
       vehicleType,
       acceptanceRate: toOptionalNumber(acceptanceRate),
       activeLoad: toOptionalInteger(activeLoad, 0),
@@ -557,15 +691,22 @@ module.exports = {
   deleteSqlUserAccount,
   deleteSqlUserRoles,
   getSqlIdempotencyRecord,
+  getSqlPaymentTransactionByReference,
   prisma,
   recordSqlDeliveryEvent,
   requireSql,
   storeSqlIdempotencyRecord,
   syncSqlDeliveryAssignment,
   upsertSqlDispatchRider,
+  upsertSqlPaymentTransaction,
   syncSqlRestaurant,
   syncSqlRestaurantApproval,
   syncSqlUserAccount,
   syncSqlUserRole,
   updateSqlOrder,
+};
+const createConfigError = (message) => {
+  const error = new Error(message);
+  error.code = "failed-precondition";
+  return error;
 };

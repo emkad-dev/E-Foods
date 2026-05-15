@@ -1,6 +1,7 @@
-import type { DocumentData } from 'firebase/firestore';
 import type { AppRole } from './roles';
 import type { FulfillmentType, OrderStatus, PaymentMethod, PaymentStatus } from './orders';
+
+type DocumentData = Record<string, unknown>;
 
 export type CurrencyCode = 'NGN' | 'USD' | string;
 
@@ -171,6 +172,7 @@ export interface DispatchProfileDocument extends DocumentData {
   zone?: string | null;
   currentZone?: string | null;
   region?: string | null;
+  lga?: string | null;
   currentAddress?: string | null;
   vehicleType?: string | null;
   activeLoad?: number | string | null;
@@ -215,6 +217,7 @@ export interface DispatchApplicationDocument extends DocumentData {
   displayName: string;
   phoneNumber: string;
   region: string;
+  lga: string;
   vehicleType: string;
   latitude: number;
   longitude: number;

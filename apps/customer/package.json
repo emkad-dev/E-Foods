@@ -3,10 +3,10 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../node_modules/expo/bin/cli start --port 8084",
-    "android": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../node_modules/expo/bin/cli run:android --port 8084",
-    "ios": "node ../../node_modules/expo/bin/cli run:ios",
-    "web": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../node_modules/expo/bin/cli start --web",
+    "start": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../scripts/run-expo-with-root-env.cjs start --port 8084",
+    "android": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../scripts/run-expo-with-root-env.cjs run:android --port 8084",
+    "ios": "node ../../scripts/run-expo-with-root-env.cjs run:ios",
+    "web": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../scripts/run-expo-with-root-env.cjs start --web",
     "lint": "node ../../node_modules/expo/bin/cli lint"
   },
   "dependencies": {
@@ -33,7 +33,6 @@
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
     "expo-web-browser": "~15.0.10",
-    "firebase": "^12.10.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",

@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import {
   type DispatchRiderDraft,
@@ -22,7 +23,7 @@ import { dispatchTheme } from '../../src/theme/palette';
 const settingsGroups = [
   {
     title: 'Dispatch center',
-    items: ['Victoria Island control room', 'Coverage: Lagos Island, Lekki, Yaba, Mainland'],
+    items: ['National dispatch control room', 'Coverage: Nigeria state and LGA rider regions'],
   },
   {
     title: 'Rules in force',
@@ -39,24 +40,12 @@ const createDefaultDraft = (): DispatchRiderDraft => ({
   acceptanceRate: 85,
   activeLoad: 0,
   completedTrips: 0,
-  latitude: null,
-  longitude: null,
+  lga: '',
   name: '',
   status: 'Available',
   vehicleType: 'Bike',
   zone: '',
 });
-
-const parseOptionalCoordinate = (value: string) => {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const parsedValue = Number.parseFloat(trimmed);
-  return Number.isFinite(parsedValue) ? parsedValue : null;
-};
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -65,6 +54,8 @@ export default function ProfileScreen() {
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
   const [saving, setSaving] = useState(false);
+  const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
+  const lgaOptions = useMemo(() => getLgaOptionsForState(draft.zone), [draft.zone]);
   const currentRider = useMemo(
     () => (user ? riders.find((rider) => rider.id === user.uid) ?? null : null),
     [riders, user]
@@ -77,8 +68,8 @@ export default function ProfileScreen() {
   const mapRegion = useMemo(() => {
     if (riders.length === 0) {
       return {
-        latitude: 6.5244,
-        longitude: 3.3792,
+        latitude: 9.0765,
+        longitude: 7.3986,
         latitudeDelta: 0.22,
         longitudeDelta: 0.22,
       };
@@ -99,26 +90,28 @@ export default function ProfileScreen() {
     };
   }, [riders]);
 
-  const populateDraftFromRider = (riderId: string) => {
-    const rider = riders.find((candidate) => candidate.id === riderId);
+  const populateDraftFromRider = useCallback(
+    (riderId: string) => {
+      const rider = riders.find((candidate) => candidate.id === riderId);
 
-    if (!rider) {
-      return;
-    }
+      if (!rider) {
+        return;
+      }
 
-    setSelectedRiderId(rider.id);
-    setDraft({
-      acceptanceRate: 85,
-      activeLoad: rider.activeLoadCount,
-      completedTrips: rider.completedTripsCount,
-      latitude: rider.hasPreciseLocation ? rider.latitude : null,
-      longitude: rider.hasPreciseLocation ? rider.longitude : null,
-      name: rider.name,
-      status: rider.status,
-      vehicleType: rider.vehicleType,
-      zone: rider.zone,
-    });
-  };
+      setSelectedRiderId(rider.id);
+      setDraft({
+        acceptanceRate: 85,
+        activeLoad: rider.activeLoadCount,
+        completedTrips: rider.completedTripsCount,
+        lga: rider.lga ?? '',
+        name: rider.name,
+        zone: rider.region ?? rider.zone,
+        status: rider.status,
+        vehicleType: rider.vehicleType,
+      });
+    },
+    [riders]
+  );
 
   const resetForm = () => {
     if (currentRider) {
@@ -137,14 +130,25 @@ export default function ProfileScreen() {
     }));
   };
 
+  useEffect(() => {
+    if (lgaOptions.length === 0) {
+      return;
+    }
+
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      lga: lgaOptions.includes(currentDraft.lga) ? currentDraft.lga : lgaOptions[0],
+    }));
+  }, [lgaOptions]);
+
   const handleSaveRider = async () => {
     if (!user?.uid || !currentRider) {
       Alert.alert('Profile unavailable', 'Your rider profile has to be provisioned by admin approval before you can update it.');
       return;
     }
 
-    if (!draft.name.trim() || !draft.zone.trim()) {
-      Alert.alert('Missing details', 'Enter your rider name and zone before saving.');
+    if (!draft.name.trim() || !draft.zone.trim() || !draft.lga.trim()) {
+      Alert.alert('Missing details', 'Select your dispatch state and LGA before saving.');
       return;
     }
 
@@ -153,6 +157,7 @@ export default function ProfileScreen() {
     try {
       await updateDispatchRider(user.uid, {
         ...draft,
+        lga: draft.lga.trim(),
         name: draft.name.trim(),
         zone: draft.zone.trim(),
       });
@@ -198,7 +203,7 @@ export default function ProfileScreen() {
     if (currentRider && selectedRiderId !== currentRider.id) {
       populateDraftFromRider(currentRider.id);
     }
-  }, [currentRider, selectedRiderId]);
+  }, [currentRider, populateDraftFromRider, selectedRiderId]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
@@ -206,7 +211,7 @@ export default function ProfileScreen() {
         <Text style={styles.eyebrow}>E-Fooders</Text>
         <Text style={styles.title}>My rider status</Text>
         <Text style={styles.copy}>
-          Keep your live rider status, zone, and coordinates current here. Team visibility stays below, but provisioning and offboarding remain admin-controlled.
+          Keep your live rider status and dispatch base current here. Team visibility stays below, but provisioning and offboarding remain admin-controlled.
         </Text>
       </View>
 
@@ -215,7 +220,7 @@ export default function ProfileScreen() {
           <View style={styles.sectionHeaderCopy}>
             <Text style={styles.groupTitle}>My rider profile</Text>
             <Text style={styles.groupSubtitle}>
-              Admin approval creates rider records. From here you can keep your own live dispatch status and location current.
+              Admin approval creates rider records. From here you can keep your own live dispatch status and service area current.
             </Text>
           </View>
           <TouchableOpacity style={styles.secondaryAction} onPress={resetForm}>
@@ -239,12 +244,32 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Zone</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Lekki East"
-            value={draft.zone}
-            onChangeText={(value) => updateDraft('zone', value)}
+          <Text style={styles.fieldLabel}>Dispatch state</Text>
+          <CompactOptionPicker
+            label="Dispatch state"
+            selectedValue={draft.zone}
+            options={nigeriaStateOptions}
+            isOpen={openPicker === 'state'}
+            onToggle={() => setOpenPicker((current) => (current === 'state' ? null : 'state'))}
+            onSelect={(value) => {
+              updateDraft('zone', value);
+              setOpenPicker(null);
+            }}
+          />
+        </View>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.fieldLabel}>Local government area</Text>
+          <CompactOptionPicker
+            label="Local government area"
+            selectedValue={draft.lga}
+            options={lgaOptions}
+            isOpen={openPicker === 'lga'}
+            onToggle={() => setOpenPicker((current) => (current === 'lga' ? null : 'lga'))}
+            onSelect={(value) => {
+              updateDraft('lga', value);
+              setOpenPicker(null);
+            }}
           />
         </View>
 
@@ -296,29 +321,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        <View style={styles.inlineGroup}>
-          <View style={styles.inlineField}>
-            <Text style={styles.fieldLabel}>Latitude</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="decimal-pad"
-              placeholder="6.5244"
-              value={draft.latitude === null || draft.latitude === undefined ? '' : String(draft.latitude)}
-              onChangeText={(value) => updateDraft('latitude', parseOptionalCoordinate(value))}
-            />
-          </View>
-          <View style={styles.inlineField}>
-            <Text style={styles.fieldLabel}>Longitude</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="decimal-pad"
-              placeholder="3.3792"
-              value={draft.longitude === null || draft.longitude === undefined ? '' : String(draft.longitude)}
-              onChangeText={(value) => updateDraft('longitude', parseOptionalCoordinate(value))}
-            />
-          </View>
-        </View>
-
         <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving || !currentRider}>
           <Text style={styles.primaryActionText}>{saving ? 'Saving rider...' : 'Update my rider profile'}</Text>
         </TouchableOpacity>
@@ -327,7 +329,7 @@ export default function ProfileScreen() {
       <View style={styles.groupCard}>
         <Text style={styles.groupTitle}>Live rider map</Text>
         <Text style={styles.groupSubtitle}>
-          Exact rider coordinates are used when available. Otherwise, we place riders on their current zone so the map still stays useful.
+          Exact rider coordinates are used when available. Otherwise, we place riders on their selected LGA so the map still stays useful.
         </Text>
         <View style={styles.mapCard}>
           <MapView provider={mapProvider} style={styles.map} initialRegion={mapRegion}>
@@ -336,7 +338,7 @@ export default function ProfileScreen() {
                 key={rider.id}
                 coordinate={{ latitude: rider.latitude, longitude: rider.longitude }}
                 title={rider.name}
-                description={`${rider.zone} - ${rider.hasPreciseLocation ? 'Live coordinate' : 'Zone-based pin'}`}
+                description={`${rider.zone} - ${rider.hasPreciseLocation ? 'Live coordinate' : 'LGA-based pin'}`}
               />
             ))}
           </MapView>
@@ -349,7 +351,7 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.mapLegendChip}>
             <Text style={styles.mapLegendText}>
-              {riders.filter((rider) => !rider.hasPreciseLocation).length} zone pins
+              {riders.filter((rider) => !rider.hasPreciseLocation).length} LGA pins
             </Text>
           </View>
         </View>

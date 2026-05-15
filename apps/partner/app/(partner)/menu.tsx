@@ -36,6 +36,15 @@ export default function PartnerMenuScreen() {
   const [isAvailable, setIsAvailable] = useState(true);
 
   const menu = useMemo(() => restaurant?.menu ?? [], [restaurant?.menu]);
+  const totalMeals = useMemo(() => menu.reduce((sum, menuCategory) => sum + menuCategory.items.length, 0), [menu]);
+  const availableMeals = useMemo(
+    () =>
+      menu.reduce(
+        (sum, menuCategory) => sum + menuCategory.items.filter((item) => item.isAvailable !== false).length,
+        0
+      ),
+    [menu]
+  );
 
   const resetForm = () => {
     setEditingItemId(null);
@@ -182,33 +191,107 @@ export default function PartnerMenuScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
       <Text style={styles.title}>Menu builder</Text>
-      <Text style={styles.subtitle}>Add categories and meals that the customer app can render immediately.</Text>
+      <Text style={styles.subtitle}>
+        Shape the dishes customers will see first. Keep names clean, pricing accurate, and descriptions short enough to scan fast.
+      </Text>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryPill}>
+          <Text style={styles.summaryValue}>{menu.length}</Text>
+          <Text style={styles.summaryLabel}>Categories</Text>
+        </View>
+        <View style={styles.summaryPill}>
+          <Text style={styles.summaryValue}>{totalMeals}</Text>
+          <Text style={styles.summaryLabel}>Meals</Text>
+        </View>
+        <View style={styles.summaryPill}>
+          <Text style={styles.summaryValue}>{availableMeals}</Text>
+          <Text style={styles.summaryLabel}>Live now</Text>
+        </View>
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Meal editor</Text>
         {!restaurant ? (
           <Text style={styles.emptyCopy}>Set up or link a restaurant on the Store tab before building a menu.</Text>
         ) : null}
-        <TextInput style={styles.input} placeholder="Category e.g. Shawarma" value={category} onChangeText={setCategory} />
-        <TextInput style={styles.input} placeholder="Meal name" value={itemName} onChangeText={setItemName} />
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Meal description"
-          value={itemDescription}
-          onChangeText={setItemDescription}
-          multiline
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Price"
-          value={itemPrice}
-          onChangeText={setItemPrice}
-          keyboardType="decimal-pad"
-        />
-        <TextInput style={styles.input} placeholder="Image URL (optional)" value={itemImage} onChangeText={setItemImage} />
+        <View style={styles.editorIntro}>
+          <Text style={styles.editorIntroTitle}>
+            {editingItemId ? 'Update this meal listing' : 'Build a meal customers can trust'}
+          </Text>
+          <Text style={styles.editorIntroCopy}>
+            Use recognizable category names, a sharp meal title, and a short description that tells customers what makes the dish worth adding.
+          </Text>
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Category</Text>
+          <Text style={styles.fieldHint}>Group similar meals together so the customer menu feels organized.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Examples: Shawarma, Rice Bowls, Drinks"
+            placeholderTextColor={partnerTheme.textMuted}
+            value={category}
+            onChangeText={setCategory}
+          />
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Meal name</Text>
+          <Text style={styles.fieldHint}>Write the exact name you want customers to remember and reorder.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Examples: Chicken Shawarma Wrap, Smoky Jollof Bowl"
+            placeholderTextColor={partnerTheme.textMuted}
+            value={itemName}
+            onChangeText={setItemName}
+          />
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Meal description</Text>
+          <Text style={styles.fieldHint}>Keep it short and appetizing: ingredients, spice level, portion style, or what comes with it.</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Examples: Grilled chicken, crunchy vegetables, house sauce, and soft flatbread."
+            placeholderTextColor={partnerTheme.textMuted}
+            value={itemDescription}
+            onChangeText={setItemDescription}
+            multiline
+          />
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Price</Text>
+          <Text style={styles.fieldHint}>Enter the full selling price in naira without commas.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Examples: 4500 or 12500"
+            placeholderTextColor={partnerTheme.textMuted}
+            value={itemPrice}
+            onChangeText={setItemPrice}
+            keyboardType="decimal-pad"
+          />
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>Image URL</Text>
+          <Text style={styles.fieldHint}>Optional, but helpful when you already have a good hosted photo for the dish.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Example: https://yourcdn.com/meals/chicken-shawarma.jpg"
+            placeholderTextColor={partnerTheme.textMuted}
+            value={itemImage}
+            onChangeText={setItemImage}
+          />
+        </View>
+
         <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Available for ordering</Text>
+          <View style={styles.toggleCopy}>
+            <Text style={styles.toggleLabel}>Available for ordering</Text>
+            <Text style={styles.toggleHint}>Turn this off if the meal is sold out or paused for now.</Text>
+          </View>
           <Switch
             value={isAvailable}
             onValueChange={setIsAvailable}
@@ -235,16 +318,29 @@ export default function PartnerMenuScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Live menu</Text>
-        {menu.length === 0 ? <Text style={styles.emptyCopy}>No categories yet. Start by adding the first meal above.</Text> : null}
+        <Text style={styles.cardSubtitle}>This is the structure your customer-facing menu will follow once the restaurant is published.</Text>
+        {menu.length === 0 ? (
+          <View style={styles.emptyPanel}>
+            <Text style={styles.emptyPanelTitle}>No categories yet</Text>
+            <Text style={styles.emptyCopy}>Start with one strong category and one complete meal so the menu feels intentional from the first save.</Text>
+          </View>
+        ) : null}
         {menu.map((menuCategory) => (
           <View key={menuCategory.category} style={styles.categoryBlock}>
-            <Text style={styles.categoryTitle}>{menuCategory.category}</Text>
+            <View style={styles.categoryHeader}>
+              <Text style={styles.categoryTitle}>{menuCategory.category}</Text>
+              <View style={styles.categoryCountPill}>
+                <Text style={styles.categoryCountText}>
+                  {menuCategory.items.length} {menuCategory.items.length === 1 ? 'meal' : 'meals'}
+                </Text>
+              </View>
+            </View>
             {menuCategory.items.map((item) => (
               <View key={item.id} style={styles.itemRow}>
                 <View style={styles.itemMeta}>
                   <Text style={styles.itemName}>{item.name}</Text>
                   <Text style={styles.itemInfo}>
-                    ${item.price.toFixed(2)} | {item.isAvailable === false ? 'Unavailable' : 'Available'}
+                    ₦{item.price.toFixed(2)} | {item.isAvailable === false ? 'Unavailable' : 'Available'}
                   </Text>
                   {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
                 </View>
@@ -294,6 +390,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 12,
   },
+  summaryCard: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  summaryPill: {
+    backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  summaryValue: {
+    color: partnerTheme.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  summaryLabel: {
+    color: partnerTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+    textTransform: 'uppercase',
+  },
   card: {
     backgroundColor: partnerTheme.surface,
     borderRadius: 20,
@@ -306,6 +428,46 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 12,
   },
+  cardSubtitle: {
+    color: partnerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: -4,
+    marginBottom: 6,
+  },
+  editorIntro: {
+    backgroundColor: partnerTheme.surfaceMuted,
+    borderColor: partnerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  editorIntroTitle: {
+    color: partnerTheme.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  editorIntroCopy: {
+    color: partnerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  fieldGroup: {
+    marginTop: 10,
+  },
+  fieldLabel: {
+    color: partnerTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  fieldHint: {
+    color: partnerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
   input: {
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
@@ -313,7 +475,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 14,
-    marginTop: 10,
+    marginTop: 8,
     paddingHorizontal: 14,
     paddingVertical: 13,
   },
@@ -327,10 +489,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 14,
   },
+  toggleCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
   toggleLabel: {
     color: partnerTheme.text,
     fontSize: 14,
     fontWeight: '700',
+  },
+  toggleHint: {
+    color: partnerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
   },
   actionRow: {
     gap: 10,
@@ -366,16 +538,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
   },
+  emptyPanel: {
+    backgroundColor: partnerTheme.surfaceMuted,
+    borderColor: partnerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 16,
+  },
+  emptyPanelTitle: {
+    color: partnerTheme.text,
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
   categoryBlock: {
     borderTopColor: partnerTheme.border,
     borderTopWidth: 1,
     marginTop: 14,
     paddingTop: 14,
   },
+  categoryHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
   categoryTitle: {
     color: partnerTheme.text,
     fontSize: 16,
     fontWeight: '800',
+  },
+  categoryCountPill: {
+    backgroundColor: partnerTheme.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  categoryCountText: {
+    color: partnerTheme.accentStrong,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   itemRow: {
     borderColor: partnerTheme.border,

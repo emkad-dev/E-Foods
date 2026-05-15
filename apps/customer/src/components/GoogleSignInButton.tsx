@@ -32,7 +32,7 @@ export default function GoogleSignInButton() {
     try {
       const idToken = await signInWithGoogleIdToken();
 
-      // Use the ID token to sign in with Firebase
+      const idToken = await signInWithGoogleIdToken();
       await signInWithGoogle(idToken);
       
       // Redirect to home page after successful sign-in

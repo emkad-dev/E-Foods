@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import AuthPasswordField from '../../src/components/AuthPasswordField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 import { customerTheme } from '../../src/theme/palette';
@@ -52,13 +53,12 @@ export default function LoginScreen() {
         keyboardType="email-address"
         editable={!loading}
       />
-      <TextInput
-        style={styles.input}
+      <AuthPasswordField
         placeholder="Password"
         value={password}
         onChangeText={handlePasswordChange}
-        secureTextEntry
         editable={!loading}
+        showHint
       />
       <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
         <Text style={styles.buttonText}>{loading ? 'Loading...' : 'Sign In'}</Text>
@@ -99,7 +99,6 @@ const styles = StyleSheet.create({
     color: customerTheme.text,
     borderRadius: 10,
     paddingHorizontal: 16,
-    marginBottom: 16,
   },
   button: { backgroundColor: customerTheme.accent, padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 16 },
   buttonText: { color: '#fff', fontWeight: 'bold' },

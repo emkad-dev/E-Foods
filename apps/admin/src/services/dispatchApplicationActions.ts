@@ -1,5 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase/config';
+import { callAdminBackendRpc } from './backendRpc';
 
 type ReviewDispatchApplicationResult = {
   applicationId: string;
@@ -18,38 +17,14 @@ type ReviewPartnerApplicationResult = {
   tokenRefreshRequired: boolean;
 };
 
-const adminReviewDispatchApplicationCallable = httpsCallable<
-  {
-    applicationId: string;
-    decision: 'approve' | 'reject';
-    rejectionReason?: string;
-  },
-  ReviewDispatchApplicationResult
->(functions, 'adminReviewDispatchApplication');
-
-const adminReviewPartnerApplicationCallable = httpsCallable<
-  {
-    applicationId: string;
-    decision: 'approve' | 'reject';
-    rejectionReason?: string;
-  },
-  ReviewPartnerApplicationResult
->(functions, 'adminReviewPartnerApplication');
-
 export const reviewDispatchApplication = async (input: {
   applicationId: string;
   decision: 'approve' | 'reject';
   rejectionReason?: string;
-}) => {
-  const result = await adminReviewDispatchApplicationCallable(input);
-  return result.data;
-};
+}) => callAdminBackendRpc<ReviewDispatchApplicationResult>('adminReviewDispatchApplication', input);
 
 export const reviewPartnerApplication = async (input: {
   applicationId: string;
   decision: 'approve' | 'reject';
   rejectionReason?: string;
-}) => {
-  const result = await adminReviewPartnerApplicationCallable(input);
-  return result.data;
-};
+}) => callAdminBackendRpc<ReviewPartnerApplicationResult>('adminReviewPartnerApplication', input);

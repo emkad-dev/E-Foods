@@ -1,17 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
+import { devAuthEnv } from '../config/env';
 import {
   createUserWithEmail,
-  deleteUserAccount,
   formatAuthError,
   getUserRoleClaim,
-  sendPasswordReset,
   signInWithEmail,
   signOutUser,
-} from '../services/firebase/auth';
-import { auth, db } from '../services/firebase/config';
+  sendPasswordReset,
+} from '../services/supabase/auth';
+import { supabase } from '../services/supabase/config';
 import {
   clearStoredUserProfile,
   clearStoredSessionId,
@@ -20,10 +19,10 @@ import {
   getStoredSessionId,
   storeSessionId,
   storeUserProfile,
-} from '../services/firebase/session';
+} from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { submitPartnerApplication, type PartnerApplicationInput } from '../services/partnerApplications';
-import { getUserDocument, updateUserDocument } from '../services/firebase/firestore';
+import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 
 type AuthContextType = {
@@ -44,15 +43,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const PARTNER_ACCESS_ERROR = 'This account does not have partner access.';
 const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
-const SESSION_CONFLICT_ERROR = 'This account was signed in on another device. Sign in again here if you want to continue on this device.';
+const SESSION_CONFLICT_ERROR =
+  'This account was signed in on another device. Sign in again here if you want to continue on this device.';
 const PARTNER_APPLICATION_PENDING_MESSAGE =
   'Your restaurant application has been submitted. Wait for admin approval before signing into the partner dashboard.';
 const PARTNER_APPLICATION_REJECTED_FALLBACK =
   'Your restaurant application was reviewed but not approved yet. Update your details with the onboarding team before trying again.';
 const PARTNER_SIGNUP_ROLLBACK_ERROR =
   'Your restaurant application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the onboarding team.';
+const DEV_AUTH_BYPASS_MESSAGE = 'Dev auth bypass is enabled. Partner auth actions are paused for this app session.';
 
-const isFirestoreOfflineError = (error: unknown) => {
+const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
   const errorMessage =
     typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
@@ -66,7 +67,7 @@ const isFirestoreOfflineError = (error: unknown) => {
 };
 
 const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isFirestoreOfflineError(error)) {
+  if (isProfileOfflineError(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -107,32 +108,42 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
 
+  useEffect(() => {
+    if (!devAuthEnv.enabled) {
+      return;
+    }
+
+    const mockUser: UserDocument = {
+      uid: devAuthEnv.uid,
+      email: devAuthEnv.email,
+      emailVerified: true,
+      role: 'restaurant',
+      displayName: 'Dev Partner',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      restaurantId: 'dev-restaurant',
+      restaurantName: 'Dev Restaurant',
+      restaurantLinkedAt: new Date().toISOString(),
+      restaurantLinkSource: 'dev_auth_bypass',
+    };
+
+    setUser(mockUser);
+    setError(null);
+    setLoading(false);
+    void storeUserProfile(mockUser);
+  }, []);
+
   const rollbackPendingApplicant = useCallback(async (userId: string) => {
     pendingApplicantUidRef.current = null;
 
     try {
-      const currentUser = auth.currentUser;
-
-      if (currentUser?.uid === userId) {
-        await deleteUserAccount(currentUser);
-      } else if (currentUser) {
-        await signOutUser(auth);
-      }
-
+      await deleteOwnPartnerAccount();
+      await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
       return true;
     } catch (rollbackError) {
       console.error('Failed to rollback partner applicant signup:', rollbackError);
-
-      try {
-        if (auth.currentUser?.uid === userId) {
-          await signOutUser(auth);
-        }
-      } catch (signOutError) {
-        console.error('Failed to sign out after partner signup rollback error:', signOutError);
-      }
-
       await clearLocalUserState();
       setUser(null);
       return false;
@@ -142,7 +153,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
 
-    await updateUserDocument(db, userId, {
+    await updateUserDocument(userId, {
       activeSessionId: sessionId,
       activeSessionUpdatedAt: new Date().toISOString(),
     });
@@ -154,18 +165,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       if (userId && localSessionId) {
-        const userDocument = await getUserDocument(db, userId);
+        const userDocument = await getUserDocument(userId);
 
         if (userDocument?.activeSessionId === localSessionId) {
-          await updateUserDocument(db, userId, {
+          await updateUserDocument(userId, {
             activeSessionId: null,
             activeSessionUpdatedAt: new Date().toISOString(),
           });
         }
       }
     } catch (releaseError) {
-      if (!isFirestoreOfflineError(releaseError)) {
-        console.warn('Unable to release partner session in Firestore:', releaseError);
+      if (!isProfileOfflineError(releaseError)) {
+        console.warn('Unable to release partner session in Supabase:', releaseError);
       }
     } finally {
       await clearStoredSessionId();
@@ -178,7 +189,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
       await clearLocalUserState();
-      await signOutUser(auth);
+      await signOutUser(supabase);
       setUser(null);
       setError(SESSION_CONFLICT_ERROR);
       return false;
@@ -191,67 +202,87 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return true;
   }, [clearLocalUserState]);
 
+  const buildNextUser = useCallback(
+    async (authUser: SupabaseAuthUser) => {
+      const claimRole = await getUserRoleClaim(authUser);
+      const userDocument = await getUserDocument(authUser.id);
+
+      if (claimRole !== 'restaurant') {
+        if (pendingApplicantUidRef.current === authUser.id) {
+          return null;
+        }
+
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(getPartnerAccessStateMessage(userDocument));
+        return null;
+      }
+
+      if (!userDocument) {
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(MISSING_PROFILE_ERROR);
+        return null;
+      }
+
+      return {
+        ...userDocument,
+        uid: authUser.id,
+        email: authUser.email ?? userDocument.email,
+        emailVerified: Boolean(authUser.email_confirmed_at),
+        role: claimRole,
+      } satisfies UserDocument;
+    },
+    [clearLocalUserState]
+  );
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    if (devAuthEnv.enabled) {
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
       setLoading(true);
 
       try {
-        if (!firebaseUser) {
+        const authUser = session?.user ?? null;
+
+        if (!authUser) {
           setUser(null);
           await clearLocalUserState();
           return;
         }
 
-        const claimRole = await getUserRoleClaim(firebaseUser);
-        if (claimRole !== 'restaurant') {
-          if (pendingApplicantUidRef.current === firebaseUser.uid) {
-            return;
-          }
+        const nextUser = await buildNextUser(authUser);
 
-          const userDocument = await getUserDocument(db, firebaseUser.uid);
-
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(getPartnerAccessStateMessage(userDocument));
+        if (!nextUser) {
           return;
         }
 
-        const userDocument = await getUserDocument(db, firebaseUser.uid);
-
-        if (!userDocument) {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(MISSING_PROFILE_ERROR);
-          return;
-        }
-
-        const sessionIsValid = await syncSingleDeviceSession(userDocument);
+        const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
         if (!sessionIsValid) {
           return;
         }
 
-        const nextUser: UserDocument = {
-          ...userDocument,
-          email: firebaseUser.email ?? userDocument.email,
-          emailVerified: firebaseUser.emailVerified,
-          role: claimRole,
-        };
-
         setUser(nextUser);
         await storeUserProfile(nextUser);
       } catch (nextError) {
-        if (firebaseUser && isFirestoreOfflineError(nextError)) {
+        const authUser = session?.user ?? null;
+        if (authUser && isProfileOfflineError(nextError)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
-          if (cachedUser?.uid === firebaseUser.uid && cachedUser.role === 'restaurant') {
+          if (cachedUser?.uid === authUser.id && cachedUser.role === 'restaurant') {
             const fallbackUser: UserDocument = {
               ...cachedUser,
-              uid: firebaseUser.uid,
-              email: firebaseUser.email ?? cachedUser.email,
-              emailVerified: firebaseUser.emailVerified,
+              uid: authUser.id,
+              email: authUser.email ?? cachedUser.email,
+              emailVerified: Boolean(authUser.email_confirmed_at),
+              role: 'restaurant',
             };
 
             const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
@@ -274,86 +305,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    return unsubscribe;
-  }, [clearLocalUserState, syncSingleDeviceSession]);
+    return () => subscription.unsubscribe();
+  }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  useEffect(() => {
-    if (!user?.uid) {
+  const signUp = async (email: string, password: string, userData: PartnerApplicationInput) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      doc(db, 'users', user.uid),
-      async (userSnapshot) => {
-        if (!userSnapshot.exists()) {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          return;
-        }
-
-        const nextUser = userSnapshot.data() as UserDocument;
-        const currentFirebaseUser = auth.currentUser;
-        if (!currentFirebaseUser) {
-          await clearLocalUserState();
-          setUser(null);
-          return;
-        }
-
-        const claimRole = await getUserRoleClaim(currentFirebaseUser);
-        if (claimRole !== 'restaurant') {
-          await clearLocalUserState();
-          await signOutUser(auth);
-          setUser(null);
-          setError(getPartnerAccessStateMessage(nextUser));
-          return;
-        }
-
-        const sessionIsValid = await syncSingleDeviceSession(nextUser);
-
-        if (!sessionIsValid) {
-          return;
-        }
-
-        setUser((currentUser) => {
-          if (!currentUser) {
-            return currentUser;
-          }
-
-          const resolvedUser = {
-            ...currentUser,
-            ...nextUser,
-            email: auth.currentUser?.email ?? nextUser.email,
-            emailVerified: auth.currentUser?.emailVerified ?? nextUser.emailVerified,
-            role: claimRole,
-          };
-
-          void storeUserProfile(resolvedUser);
-          return resolvedUser;
-        });
-      },
-      (snapshotError) => {
-        if (isFirestoreOfflineError(snapshotError)) {
-          setError(NO_INTERNET_ERROR);
-          return;
-        }
-
-        console.error('Error watching partner session:', snapshotError);
-      }
-    );
-
-    return unsubscribe;
-  }, [clearLocalUserState, syncSingleDeviceSession, user?.uid]);
-
-  const signUp = async (email: string, password: string, userData: PartnerApplicationInput) => {
     setLoading(true);
     setError(null);
     let applicantUid: string | null = null;
 
     try {
-      const firebaseUser = await createUserWithEmail(auth, email, password);
-      applicantUid = firebaseUser.uid;
-      pendingApplicantUidRef.current = firebaseUser.uid;
+      const authUser = await createUserWithEmail(supabase, email, password);
+      applicantUid = authUser.id;
+      pendingApplicantUidRef.current = authUser.id;
+
+      await createUserDocument(authUser.id, {
+        email: authUser.email ?? email,
+        emailVerified: Boolean(authUser.email_confirmed_at),
+        role: 'customer',
+      });
 
       await submitPartnerApplication({
         address: userData.address.trim(),
@@ -368,19 +342,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       await clearLocalUserState();
-      await signOutUser(auth);
+      await signOutUser(supabase);
       setUser(null);
       setError(PARTNER_APPLICATION_PENDING_MESSAGE);
     } catch (nextError: any) {
-      const nextMessage =
+      let resolvedMessage =
         nextError?.message === PARTNER_APPLICATION_PENDING_MESSAGE
           ? PARTNER_APPLICATION_PENDING_MESSAGE
           : getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
-      let resolvedMessage = nextMessage;
 
       if (applicantUid) {
         const rollbackSucceeded = await rollbackPendingApplicant(applicantUid);
-
         if (!rollbackSucceeded) {
           resolvedMessage = PARTNER_SIGNUP_ROLLBACK_ERROR;
         }
@@ -395,34 +367,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      const firebaseUser = await signInWithEmail(auth, email, password);
-      const claimRole = await getUserRoleClaim(firebaseUser);
+      const authUser = await signInWithEmail(supabase, email, password);
+      const claimRole = await getUserRoleClaim(authUser);
 
       if (claimRole !== 'restaurant') {
-        const userDocument = await getUserDocument(db, firebaseUser.uid);
+        const userDocument = await getUserDocument(authUser.id);
         await clearLocalUserState();
-        await signOutUser(auth);
+        await signOutUser(supabase);
         setUser(null);
         const nextMessage = getPartnerAccessStateMessage(userDocument);
         setError(nextMessage);
         throw new Error(nextMessage);
       }
 
-      const userDocument = await getUserDocument(db, firebaseUser.uid);
+      const userDocument = await getUserDocument(authUser.id);
 
       if (!userDocument) {
         await clearLocalUserState();
-        await signOutUser(auth);
+        await signOutUser(supabase);
         setUser(null);
         setError(MISSING_PROFILE_ERROR);
         throw new Error(MISSING_PROFILE_ERROR);
       }
 
-      await startSingleDeviceSession(firebaseUser.uid);
+      await startSingleDeviceSession(authUser.id);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign in');
       setError(nextMessage);
@@ -433,11 +410,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      await sendPasswordReset(auth, email);
+      await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);
@@ -448,6 +430,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const linkRestaurant = async (restaurantId: string) => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     if (!user) {
       throw new Error('Sign in again to link a restaurant.');
     }
@@ -485,12 +472,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      await releaseSingleDeviceSession(auth.currentUser?.uid);
-      await signOutUser(auth);
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      await releaseSingleDeviceSession(authUser?.id);
+      await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);
     } catch (nextError: any) {
@@ -503,7 +498,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const deleteAccount = async () => {
-    if (!auth.currentUser) {
+    if (devAuthEnv.enabled) {
+      setError(DEV_AUTH_BYPASS_MESSAGE);
+      return;
+    }
+
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser) {
       const message = 'No user is currently signed in';
       setError(message);
       throw new Error(message);
@@ -514,7 +518,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       await deleteOwnPartnerAccount();
-      await signOutUser(auth).catch(() => undefined);
+      await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
     } catch (nextError: any) {
