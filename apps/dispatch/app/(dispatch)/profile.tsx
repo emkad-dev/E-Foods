@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +18,7 @@ import {
   updateDispatchRider,
 } from '../../src/services/dispatchRiderActions';
 import { dispatchTheme } from '../../src/theme/palette';
+import { GoogleMapsLocationService } from '../../src/services/googleMapsLocation';
 
 const settingsGroups = [
   {
@@ -61,10 +61,6 @@ export default function ProfileScreen() {
     [riders, user]
   );
 
-  const mapProvider = useMemo(
-    () => (Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined),
-    []
-  );
   const mapRegion = useMemo(() => {
     if (riders.length === 0) {
       return {
@@ -75,18 +71,18 @@ export default function ProfileScreen() {
       };
     }
 
-    const latitudes = riders.map((rider) => rider.latitude);
-    const longitudes = riders.map((rider) => rider.longitude);
-    const minLatitude = Math.min(...latitudes);
-    const maxLatitude = Math.max(...latitudes);
-    const minLongitude = Math.min(...longitudes);
-    const maxLongitude = Math.max(...longitudes);
+    const riderCoords = riders.map((rider) => ({
+      latitude: rider.latitude,
+      longitude: rider.longitude,
+    }));
 
-    return {
-      latitude: (minLatitude + maxLatitude) / 2,
-      longitude: (minLongitude + maxLongitude) / 2,
-      latitudeDelta: Math.max((maxLatitude - minLatitude) * 1.8, 0.08),
-      longitudeDelta: Math.max((maxLongitude - minLongitude) * 1.8, 0.08),
+    const bounds = GoogleMapsLocationService.calculateMapRegionBounds(riderCoords, 0.12);
+
+    return bounds || {
+      latitude: 9.0765,
+      longitude: 7.3986,
+      latitudeDelta: 0.22,
+      longitudeDelta: 0.22,
     };
   }, [riders]);
 
@@ -332,7 +328,15 @@ export default function ProfileScreen() {
           Exact rider coordinates are used when available. Otherwise, we place riders on their selected LGA so the map still stays useful.
         </Text>
         <View style={styles.mapCard}>
-          <MapView provider={mapProvider} style={styles.map} initialRegion={mapRegion}>
+          <MapView
+            provider={PROVIDER_GOOGLE}
+            style={styles.map}
+            initialRegion={mapRegion}
+            zoomControlEnabled={true}
+            zoomTapEnabled={true}
+            minZoomLevel={5}
+            maxZoomLevel={20}
+          >
             {riders.map((rider) => (
               <Marker
                 key={rider.id}

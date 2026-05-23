@@ -35,6 +35,8 @@ export default function PartnerProfileScreen() {
   const [address, setAddress] = useState('');
   const [image, setImage] = useState('');
   const [deliveryTime, setDeliveryTime] = useState('');
+  const [openingTime, setOpeningTime] = useState('');
+  const [closingTime, setClosingTime] = useState('');
   const [deliveryFee, setDeliveryFee] = useState('');
   const [minOrder, setMinOrder] = useState('');
   const [latitude, setLatitude] = useState('');
@@ -53,6 +55,8 @@ export default function PartnerProfileScreen() {
     setAddress(restaurant?.address ?? '');
     setImage(restaurant?.image ?? '');
     setDeliveryTime(String(restaurant?.deliveryTime ?? '25-35 min'));
+    setOpeningTime(restaurant?.openingTime ?? '08:00');
+    setClosingTime(restaurant?.closingTime ?? '22:00');
     setDeliveryFee(
       restaurant?.deliveryFee !== null && restaurant?.deliveryFee !== undefined ? String(restaurant.deliveryFee) : '0'
     );
@@ -105,6 +109,8 @@ export default function PartnerProfileScreen() {
         address,
         image,
         deliveryTime,
+        openingTime,
+        closingTime,
         deliveryFee: toNumberOrNull(deliveryFee),
         minOrder: toNumberOrNull(minOrder),
         latitude: toNumberOrNull(latitude),
@@ -195,6 +201,22 @@ export default function PartnerProfileScreen() {
         <TextInput style={styles.input} placeholder="Address" value={address} onChangeText={setAddress} />
         <TextInput style={styles.input} placeholder="Image URL" value={image} onChangeText={setImage} />
         <TextInput style={styles.input} placeholder="Delivery time e.g. 25-35 min" value={deliveryTime} onChangeText={setDeliveryTime} />
+        <View style={styles.row}>
+          <TextInput
+            style={[styles.input, styles.halfInput]}
+            placeholder="Opens at e.g. 08:00"
+            value={openingTime}
+            onChangeText={setOpeningTime}
+            autoCapitalize="none"
+          />
+          <TextInput
+            style={[styles.input, styles.halfInput]}
+            placeholder="Closes at e.g. 22:00"
+            value={closingTime}
+            onChangeText={setClosingTime}
+            autoCapitalize="none"
+          />
+        </View>
         <View style={styles.row}>
           <TextInput
             style={[styles.input, styles.halfInput]}
@@ -291,6 +313,9 @@ export default function PartnerProfileScreen() {
         <Text style={styles.metaLine}>Approved by: {restaurant?.approvedByUid ?? 'Awaiting admin review'}</Text>
         <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
         <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
+        <Text style={styles.metaLine}>
+          Trading hours: {restaurant?.openingTime && restaurant?.closingTime ? `${restaurant.openingTime} - ${restaurant.closingTime}` : 'Not set'}
+        </Text>
       </View>
 
       <View style={styles.card}>

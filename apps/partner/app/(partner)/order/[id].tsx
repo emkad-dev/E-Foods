@@ -10,6 +10,7 @@ import {
   rejectPartnerOrder,
 } from '../../../src/services/partnerOrderActions';
 import { partnerTheme } from '../../../src/theme/palette';
+import { formatPartnerMoney } from '../../../src/utils/partnerQueue';
 
 export default function PartnerOrderDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -85,7 +86,7 @@ export default function PartnerOrderDetailScreen() {
         <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
         <Text style={styles.copy}>
           {(order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0)} items ·{' '}
-          {(order.fulfillmentType ?? 'delivery').toUpperCase()} · ${(order.pricing?.total ?? order.total ?? 0).toFixed(2)}
+          {(order.fulfillmentType ?? 'delivery').toUpperCase()} · {formatPartnerMoney(order.pricing?.total ?? order.total ?? 0)}
         </Text>
         <View style={[styles.statusPill, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
           <Text style={[styles.statusText, { color: getOrderStatusColor(order.status) }]}>
@@ -102,7 +103,7 @@ export default function PartnerOrderDetailScreen() {
               <Text style={styles.itemName}>{item.name ?? 'Order item'}</Text>
               <Text style={styles.itemMeta}>Qty {item.quantity ?? 0}</Text>
             </View>
-            <Text style={styles.itemPrice}>${(((item.price ?? 0) * (item.quantity ?? 0)) || 0).toFixed(2)}</Text>
+            <Text style={styles.itemPrice}>{formatPartnerMoney(((item.price ?? 0) * (item.quantity ?? 0)) || 0)}</Text>
           </View>
         ))}
       </View>
@@ -126,30 +127,21 @@ export default function PartnerOrderDetailScreen() {
           <Text style={styles.actionButtonText}>Accept order</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[
-            styles.actionButton,
-            !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
-          ]}
+          style={[styles.actionButton, !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}
           disabled={!['accepted', 'placed'].includes(normalizedStatus)}
           onPress={handlePreparing}
         >
           <Text style={styles.actionButtonText}>Start preparing</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[
-            styles.actionButton,
-            !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
-          ]}
+          style={[styles.actionButton, !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}
           disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
           onPress={handleReady}
         >
           <Text style={styles.actionButtonText}>Mark ready for pickup</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[
-            styles.rejectButton,
-            !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
-          ]}
+          style={[styles.rejectButton, !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}
           disabled={!['placed', 'accepted'].includes(normalizedStatus)}
           onPress={handleReject}
         >

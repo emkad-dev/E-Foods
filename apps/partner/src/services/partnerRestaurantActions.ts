@@ -8,6 +8,8 @@ export type PartnerRestaurantProfileInput = {
   image?: string;
   cuisine?: string;
   deliveryTime?: string;
+  openingTime: string;
+  closingTime: string;
   minOrder?: number | null;
   deliveryFee?: number | null;
   address?: string;
@@ -25,6 +27,8 @@ export type PartnerMenuItemInput = {
   description: string;
   price: number;
   image?: string;
+  categoryId?: string;
+  categoryLabel?: string;
   isAvailable?: boolean;
 };
 

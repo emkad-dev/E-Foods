@@ -22,13 +22,63 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
+const MENU_CATEGORY_OPTIONS = [
+  { id: 'rice', label: 'Rice' },
+  { id: 'swallow', label: 'Swallow' },
+  { id: 'soups', label: 'Soups' },
+  { id: 'proteins', label: 'Proteins' },
+  { id: 'snacks', label: 'Snacks' },
+  { id: 'drinks', label: 'Drinks' },
+] as const;
+
+type MenuCategoryId = (typeof MENU_CATEGORY_OPTIONS)[number]['id'];
+
+const getMenuCategoryLabel = (categoryId: string) =>
+  MENU_CATEGORY_OPTIONS.find((categoryOption) => categoryOption.id === categoryId)?.label ?? 'Rice';
+
+const inferMenuCategoryId = (value: string): MenuCategoryId => {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (/(rice|jollof|ofada|biryani)/.test(normalizedValue)) {
+    return 'rice';
+  }
+
+  if (/(swallow|amala|eba|fufu|semo|pounded yam)/.test(normalizedValue)) {
+    return 'swallow';
+  }
+
+  if (/(soup|egusi|efo|ogbono|banga|okra|oha|afang)/.test(normalizedValue)) {
+    return 'soups';
+  }
+
+  if (/(chicken|beef|fish|turkey|goat|suya|protein|meat)/.test(normalizedValue)) {
+    return 'proteins';
+  }
+
+  if (/(drink|juice|water|soda|zobo|smoothie|tea|coffee)/.test(normalizedValue)) {
+    return 'drinks';
+  }
+
+  return 'snacks';
+};
+
+const normalizeMenuItemCategory = (categoryName: string, item: { categoryId?: string; categoryLabel?: string }) => {
+  const existingCategoryId = MENU_CATEGORY_OPTIONS.find((categoryOption) => categoryOption.id === item.categoryId)?.id;
+  const categoryId = existingCategoryId ?? inferMenuCategoryId(item.categoryLabel ?? categoryName);
+
+  return {
+    categoryId,
+    categoryLabel: item.categoryLabel ?? getMenuCategoryLabel(categoryId),
+  };
+};
+
 export default function PartnerMenuScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { error, loading, restaurant } = usePartnerRestaurant();
   const [saving, setSaving] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState<MenuCategoryId>('rice');
   const [itemName, setItemName] = useState('');
   const [itemDescription, setItemDescription] = useState('');
   const [itemPrice, setItemPrice] = useState('');
@@ -48,7 +98,7 @@ export default function PartnerMenuScreen() {
 
   const resetForm = () => {
     setEditingItemId(null);
-    setCategory('');
+    setCategoryId('rice');
     setItemName('');
     setItemDescription('');
     setItemPrice('');
@@ -62,7 +112,7 @@ export default function PartnerMenuScreen() {
       return;
     }
 
-    if (!category.trim() || !itemName.trim() || !itemPrice.trim()) {
+    if (!categoryId || !itemName.trim() || !itemPrice.trim()) {
       Alert.alert('Missing details', 'Add a category, meal name, and price before saving.');
       return;
     }
@@ -77,17 +127,24 @@ export default function PartnerMenuScreen() {
     setSaving(true);
 
     try {
-      const normalizedCategory = category.trim();
+      const normalizedCategory = getMenuCategoryLabel(categoryId);
       const itemId = editingItemId ?? `${toSlug(itemName)}-${Date.now()}`;
       const nextMenu: PartnerMenuCategoryInput[] = [...menu].map((menuCategory) => ({
         category: menuCategory.category,
-        items: menuCategory.items.map((item) => ({
-          ...item,
-          description: item.description ?? '',
-        })),
+        items: menuCategory.items.map((item) => {
+          const normalizedItemCategory = normalizeMenuItemCategory(menuCategory.category, item);
+
+          return {
+            ...item,
+            ...normalizedItemCategory,
+            description: item.description ?? '',
+          };
+        }),
       }));
       const categoryIndex = nextMenu.findIndex(
-        (menuCategory) => menuCategory.category.trim().toLowerCase() === normalizedCategory.toLowerCase()
+        (menuCategory) =>
+          menuCategory.category.trim().toLowerCase() === normalizedCategory.toLowerCase() ||
+          menuCategory.items.some((item) => item.categoryId === categoryId)
       );
 
       const nextItem = {
@@ -95,6 +152,8 @@ export default function PartnerMenuScreen() {
         name: itemName.trim(),
         description: itemDescription.trim(),
         price: parsedPrice,
+        categoryId,
+        categoryLabel: normalizedCategory,
         image: itemImage.trim() || undefined,
         isAvailable,
       };
@@ -133,10 +192,18 @@ export default function PartnerMenuScreen() {
       isAvailable?: boolean;
       name: string;
       price: number;
+      categoryId?: string;
+      categoryLabel?: string;
     }
   ) => {
     setEditingItemId(item.id);
-    setCategory(categoryName);
+    const nextCategoryId = MENU_CATEGORY_OPTIONS.find(
+      (categoryOption) =>
+        categoryOption.id === item.categoryId ||
+        categoryOption.label.toLowerCase() === (item.categoryLabel ?? categoryName).trim().toLowerCase() ||
+        categoryOption.label.toLowerCase() === categoryName.trim().toLowerCase()
+    )?.id;
+    setCategoryId(nextCategoryId ?? inferMenuCategoryId(item.categoryLabel ?? categoryName));
     setItemName(item.name);
     setItemDescription(item.description ?? '');
     setItemPrice(String(item.price));
@@ -157,10 +224,15 @@ export default function PartnerMenuScreen() {
           if (menuCategory.category !== categoryName) {
             return {
               category: menuCategory.category,
-              items: menuCategory.items.map((item) => ({
-                ...item,
-                description: item.description ?? '',
-              })),
+              items: menuCategory.items.map((item) => {
+                const normalizedItemCategory = normalizeMenuItemCategory(menuCategory.category, item);
+
+                return {
+                  ...item,
+                  ...normalizedItemCategory,
+                  description: item.description ?? '',
+                };
+              }),
             };
           }
 
@@ -168,10 +240,15 @@ export default function PartnerMenuScreen() {
             ...menuCategory,
             items: menuCategory.items
               .filter((item) => item.id !== itemId)
-              .map((item) => ({
-                ...item,
-                description: item.description ?? '',
-              })),
+              .map((item) => {
+                const normalizedItemCategory = normalizeMenuItemCategory(menuCategory.category, item);
+
+                return {
+                  ...item,
+                  ...normalizedItemCategory,
+                  description: item.description ?? '',
+                };
+              }),
           };
         })
         .filter((menuCategory) => menuCategory.items.length > 0);
@@ -221,20 +298,29 @@ export default function PartnerMenuScreen() {
             {editingItemId ? 'Update this meal listing' : 'Build a meal customers can trust'}
           </Text>
           <Text style={styles.editorIntroCopy}>
-            Use recognizable category names, a sharp meal title, and a short description that tells customers what makes the dish worth adding.
+            Pick the food category customers should find this meal under, then add a sharp title and short description.
           </Text>
         </View>
 
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>Category</Text>
-          <Text style={styles.fieldHint}>Group similar meals together so the customer menu feels organized.</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Examples: Shawarma, Rice Bowls, Drinks"
-            placeholderTextColor={partnerTheme.textMuted}
-            value={category}
-            onChangeText={setCategory}
-          />
+          <Text style={styles.fieldHint}>Choose the customer-facing food group for this meal.</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryPickerRow}>
+            {MENU_CATEGORY_OPTIONS.map((categoryOption) => {
+              const active = categoryId === categoryOption.id;
+              return (
+                <TouchableOpacity
+                  key={categoryOption.id}
+                  style={[styles.categoryPickerChip, active ? styles.categoryPickerChipActive : null]}
+                  onPress={() => setCategoryId(categoryOption.id)}
+                >
+                  <Text style={active ? styles.categoryPickerChipTextActive : styles.categoryPickerChipText}>
+                    {categoryOption.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
         <View style={styles.fieldGroup}>
@@ -340,7 +426,8 @@ export default function PartnerMenuScreen() {
                 <View style={styles.itemMeta}>
                   <Text style={styles.itemName}>{item.name}</Text>
                   <Text style={styles.itemInfo}>
-                    ₦{item.price.toFixed(2)} | {item.isAvailable === false ? 'Unavailable' : 'Available'}
+                    ₦{item.price.toFixed(2)} | {item.categoryLabel ?? menuCategory.category} |{' '}
+                    {item.isAvailable === false ? 'Unavailable' : 'Available'}
                   </Text>
                   {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
                 </View>
@@ -467,6 +554,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 4,
+  },
+  categoryPickerRow: {
+    paddingRight: 12,
+    paddingTop: 8,
+  },
+  categoryPickerChip: {
+    backgroundColor: partnerTheme.surfaceMuted,
+    borderColor: partnerTheme.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginRight: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
+  categoryPickerChipActive: {
+    backgroundColor: partnerTheme.accent,
+    borderColor: partnerTheme.accent,
+  },
+  categoryPickerChipText: {
+    color: partnerTheme.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  categoryPickerChipTextActive: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
   },
   input: {
     backgroundColor: partnerTheme.surfaceMuted,

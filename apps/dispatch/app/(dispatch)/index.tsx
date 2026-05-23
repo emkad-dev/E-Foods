@@ -6,6 +6,7 @@ import { formatOrderStatusLabel, getOrderStatusColor } from '../../src/domain/or
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { dispatchTheme } from '../../src/theme/palette';
+import { formatDispatchMoney } from '../../src/utils/dispatchQueue';
 
 export default function DispatchDashboard() {
   const router = useRouter();
@@ -125,7 +126,7 @@ export default function DispatchDashboard() {
                 <Text style={styles.deliveryFact}>
                   Items: {order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0}
                 </Text>
-                <Text style={styles.deliveryFact}>Total: ${(order.pricing?.total ?? order.total ?? 0).toFixed(2)}</Text>
+                <Text style={styles.deliveryFact}>Total: {formatDispatchMoney(order.pricing?.total ?? order.total ?? 0)}</Text>
                 <Text style={styles.deliveryFact}>Payment: {order.payment?.status ?? 'pending'}</Text>
               </View>
               {order.deliveryLocation?.note ? <Text style={styles.deliveryNote}>{order.deliveryLocation.note}</Text> : null}
