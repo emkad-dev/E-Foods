@@ -1,6 +1,8 @@
 import type { RestaurantDocument } from '../domain/entities';
 import { appEnv, supabaseEnv } from '../config/env';
 
+const PUBLIC_CATALOG_TIMEOUT_MS = 12000;
+
 const resolvePublicCatalogUrl = () => {
   if (supabaseEnv.url?.trim()) {
     return `${supabaseEnv.url.trim().replace(/\/+$/, '')}/functions/v1/public-catalog`;
@@ -28,16 +30,34 @@ const resolvePublicCatalogUrl = () => {
 };
 
 const callPublicCatalog = async <T>(action: string, data?: Record<string, unknown>) => {
-  const response = await fetch(resolvePublicCatalogUrl(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      action,
-      data: data ?? {},
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PUBLIC_CATALOG_TIMEOUT_MS);
+
+  let response: Response;
+
+  try {
+    response = await fetch(resolvePublicCatalogUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action,
+        data: data ?? {},
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('The restaurant service timed out. Check your network or Supabase Edge deployment and try again.');
+    }
+
+    throw new Error(
+      'The restaurant service is unreachable right now. Check your internet connection, DNS, or Supabase Edge deployment.'
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const payload = (await response.json().catch(() => null)) as
     | {

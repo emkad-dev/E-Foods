@@ -24,6 +24,8 @@ export type DiscoveryRestaurant = Partial<RestaurantDocument> & {
   menu?: {
     category: string;
     items: {
+      categoryId?: string;
+      categoryLabel?: string;
       id: string;
       isAvailable?: boolean;
       name: string;
@@ -34,6 +36,8 @@ export type DiscoveryRestaurant = Partial<RestaurantDocument> & {
   deliveryRadiusKm?: number | string | null;
   deliveryAreaKm?: number | string | null;
 };
+
+const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 export type RestaurantAvailability = {
   isAvailable: boolean;
@@ -74,6 +78,36 @@ const extractCoordinatePoint = (value: unknown): CoordinatePoint | null => {
 };
 
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+
+const parseOperatingMinutes = (value: string | null | undefined) => {
+  if (!value || !TIME_PATTERN.test(value)) {
+    return null;
+  }
+
+  const [hours, minutes] = value.split(':').map((part) => Number.parseInt(part, 10));
+  return hours * 60 + minutes;
+};
+
+const isInsideOperatingWindow = (restaurant: DiscoveryRestaurant, now = new Date()) => {
+  const openingMinutes = parseOperatingMinutes(restaurant.openingTime);
+  const closingMinutes = parseOperatingMinutes(restaurant.closingTime);
+
+  if (openingMinutes === null || closingMinutes === null) {
+    return true;
+  }
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  if (openingMinutes === closingMinutes) {
+    return true;
+  }
+
+  if (closingMinutes > openingMinutes) {
+    return currentMinutes >= openingMinutes && currentMinutes < closingMinutes;
+  }
+
+  return currentMinutes >= openingMinutes || currentMinutes < closingMinutes;
+};
 
 const calculateDistanceKm = (origin: CoordinatePoint, destination: CoordinatePoint) => {
   const earthRadiusKm = 6371;
@@ -149,6 +183,10 @@ export const isRestaurantVisibleToCustomers = (restaurant: DiscoveryRestaurant) 
     return false;
   }
 
+  if (!isInsideOperatingWindow(restaurant)) {
+    return false;
+  }
+
   return getPublishedMenuItemCount(restaurant) > 0;
 };
 
@@ -157,6 +195,15 @@ export const getRestaurantAvailability = (
   deliveryLocation: AddressRecord | null
 ): RestaurantAvailability => {
   if (restaurant.isOpen === false) {
+    return {
+      isAvailable: false,
+      reason: 'closed',
+      distanceKm: null,
+      radiusKm: null,
+    };
+  }
+
+  if (!isInsideOperatingWindow(restaurant)) {
     return {
       isAvailable: false,
       reason: 'closed',
@@ -268,4 +315,15 @@ export const getRestaurantAvailabilityBadge = (availability: RestaurantAvailabil
   }
 
   return null;
+};
+
+export const getRestaurantOperatingHoursLabel = (restaurant: DiscoveryRestaurant) => {
+  const openingTime = restaurant.openingTime?.trim();
+  const closingTime = restaurant.closingTime?.trim();
+
+  if (!openingTime || !closingTime) {
+    return null;
+  }
+
+  return `${openingTime} - ${closingTime}`;
 };

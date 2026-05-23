@@ -43,6 +43,8 @@ export interface RestaurantDocument extends DocumentData {
   cuisine?: string;
   rating?: number;
   deliveryTime?: string | number;
+  openingTime?: string | null;
+  closingTime?: string | null;
   minOrder?: number;
   deliveryFee?: number;
   deliveryRadiusKm?: number | null;
@@ -65,6 +67,8 @@ export interface MenuItemDocument extends DocumentData {
   description: string;
   price: number;
   image?: string;
+  categoryId?: string;
+  categoryLabel?: string;
   category?: string;
   isAvailable?: boolean;
 }

@@ -52,6 +52,8 @@ export interface MenuItemDocument extends DocumentData {
   description?: string;
   price: number;
   image?: string;
+  categoryId?: string;
+  categoryLabel?: string;
   category?: string;
   isAvailable?: boolean;
 }
@@ -70,6 +72,8 @@ export interface RestaurantDocument extends DocumentData {
   cuisine?: string | null;
   rating?: number;
   deliveryTime?: string | number | null;
+  openingTime?: string | null;
+  closingTime?: string | null;
   minOrder?: number | null;
   deliveryFee?: number | null;
   address?: string | null;

@@ -1,4 +1,4 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+/// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
@@ -12,11 +12,13 @@ type RestaurantApprovalRow = {
 
 type RestaurantRecordRow = {
   address?: string | null;
+  closingTime?: string | null;
   createdAt?: string | null;
   cuisine?: string | null;
   deliveryFee?: number | null;
   deliveryRadiusKm?: number | null;
   deliveryTime?: string | number | null;
+  description?: string | null;
   id: string;
   image?: string | null;
   isOpen?: boolean | null;
@@ -26,6 +28,7 @@ type RestaurantRecordRow = {
   menu?: unknown[] | null;
   minOrder?: number | null;
   name: string;
+  openingTime?: string | null;
   ownerId?: string | null;
   paystackSubaccountCode?: string | null;
   supportsDelivery?: boolean | null;
@@ -62,6 +65,8 @@ const toRestaurantResponse = (
   deliveryFee: restaurant.deliveryFee ?? 0,
   deliveryRadiusKm: restaurant.deliveryRadiusKm ?? null,
   deliveryTime: restaurant.deliveryTime ?? null,
+  description: sanitizeOptionalText(restaurant.description),
+  closingTime: sanitizeOptionalText(restaurant.closingTime),
   id: restaurant.id,
   image: sanitizeOptionalText(restaurant.image),
   isOpen: restaurant.isOpen !== false,
@@ -71,6 +76,7 @@ const toRestaurantResponse = (
   menu: Array.isArray(restaurant.menu) ? restaurant.menu : [],
   minOrder: restaurant.minOrder ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
+  openingTime: sanitizeOptionalText(restaurant.openingTime),
   ownerId: sanitizeOptionalText(restaurant.ownerId),
   paystackSubaccountCode: sanitizeOptionalText(restaurant.paystackSubaccountCode),
   supportsDelivery: restaurant.supportsDelivery !== false,
@@ -83,7 +89,7 @@ const loadApprovedRestaurantCatalog = async () => {
     serviceClient
       .from('RestaurantRecord')
       .select(
-        'id,name,ownerId,address,cuisine,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
+        'id,name,ownerId,address,cuisine,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
       )
       .eq('isPublished', true)
       .order('updatedAt', { ascending: false }),
