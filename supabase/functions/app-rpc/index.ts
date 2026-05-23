@@ -1,8 +1,9 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+/// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
 import {
+  buildNotificationData,
   loadRestaurantRecipientUserIds,
   sendPushNotificationsToRoles,
   sendPushNotificationsToUsers,
@@ -54,6 +55,7 @@ type RestaurantApprovalRow = {
 
 type RestaurantRecordRow = {
   address?: string | null;
+  closingTime?: string | null;
   createdAt?: string | null;
   cuisine?: string | null;
   deliveryFee?: number | null;
@@ -70,6 +72,7 @@ type RestaurantRecordRow = {
   minOrder?: number | null;
   name: string;
   nameKey?: string | null;
+  openingTime?: string | null;
   ownerId?: string | null;
   paystackSubaccountCode?: string | null;
   supportsDelivery?: boolean | null;
@@ -292,6 +295,19 @@ const ORDER_STATUS = {
   REJECTED: 'rejected',
 } as const;
 
+const toSortableTimestamp = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  return 0;
+};
+
 class RpcError extends Error {
   status: number;
 
@@ -323,6 +339,19 @@ const sanitizeText = (value: unknown, fallback = '') =>
 const sanitizeOptionalText = (value: unknown) => {
   const nextValue = sanitizeText(value);
   return nextValue || null;
+};
+
+const normalizeOperatingTime = (value: unknown, fieldLabel: string) => {
+  const nextValue = sanitizeOptionalText(value);
+  if (!nextValue) {
+    return null;
+  }
+
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(nextValue)) {
+    fail(400, `${fieldLabel} must use 24-hour HH:mm format.`);
+  }
+
+  return nextValue;
 };
 
 const parseNumber = (value: unknown, fallback = 0) => {
@@ -373,6 +402,82 @@ const normalizeOrderStatus = (value: unknown) => {
     default:
       return status;
   }
+};
+
+const getPartnerKitchenPriority = (order: CustomerOrderRow) => {
+  const status = normalizeOrderStatus(order.status);
+
+  if (status === ORDER_STATUS.PLACED) {
+    return 0;
+  }
+
+  if (status === ORDER_STATUS.ACCEPTED) {
+    return 1;
+  }
+
+  if (status === ORDER_STATUS.PREPARING) {
+    return 2;
+  }
+
+  if (status === ORDER_STATUS.READY_FOR_PICKUP) {
+    return 3;
+  }
+
+  if ([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY].includes(status)) {
+    return 4;
+  }
+
+  return 5;
+};
+
+const sortPartnerKitchenQueue = (orders: CustomerOrderRow[]) =>
+  [...orders].sort((left, right) => {
+    const leftStatus = normalizeOrderStatus(left.status);
+    const rightStatus = normalizeOrderStatus(right.status);
+    const leftTerminal = TERMINAL_ORDER_STATUSES.has(leftStatus);
+    const rightTerminal = TERMINAL_ORDER_STATUSES.has(rightStatus);
+
+    if (leftTerminal !== rightTerminal) {
+      return leftTerminal ? 1 : -1;
+    }
+
+    if (leftTerminal && rightTerminal) {
+      return toSortableTimestamp(right.updatedAt ?? right.createdAt) - toSortableTimestamp(left.updatedAt ?? left.createdAt);
+    }
+
+    const priorityDelta = getPartnerKitchenPriority(left) - getPartnerKitchenPriority(right);
+    if (priorityDelta !== 0) {
+      return priorityDelta;
+    }
+
+    return toSortableTimestamp(left.createdAt) - toSortableTimestamp(right.createdAt);
+  });
+
+const getDispatchQueuePriority = (order: CustomerOrderRow, assignment: DeliveryAssignmentRow | null) => {
+  const status = normalizeOrderStatus(order.status);
+  const hasCourier = Boolean(sanitizeText(assignment?.courierId));
+
+  if (status === ORDER_STATUS.ESCALATED) {
+    return 0;
+  }
+
+  if (!hasCourier && [ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(status)) {
+    return 1;
+  }
+
+  if (!hasCourier && status === ORDER_STATUS.PLACED) {
+    return 2;
+  }
+
+  if (hasCourier && [ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(status)) {
+    return 3;
+  }
+
+  if ([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY].includes(status)) {
+    return 4;
+  }
+
+  return 5;
 };
 
 const isAppRole = (role: string) => (APP_ROLES as readonly string[]).includes(role);
@@ -441,6 +546,7 @@ const buildRestaurantResponse = (
   deliveryFee: restaurant.deliveryFee ?? 0,
   deliveryRadiusKm: restaurant.deliveryRadiusKm ?? null,
   deliveryTime: sanitizeOptionalText(restaurant.deliveryTime),
+  closingTime: sanitizeOptionalText(restaurant.closingTime),
   description: sanitizeOptionalText(restaurant.description),
   id: restaurant.id,
   image: sanitizeOptionalText(restaurant.image),
@@ -451,6 +557,7 @@ const buildRestaurantResponse = (
   menu: Array.isArray(restaurant.menu) ? restaurant.menu : [],
   minOrder: restaurant.minOrder ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
+  openingTime: sanitizeOptionalText(restaurant.openingTime),
   ownerId: sanitizeOptionalText(restaurant.ownerId),
   paystackSubaccountCode: sanitizeOptionalText(restaurant.paystackSubaccountCode),
   supportsDelivery: restaurant.supportsDelivery !== false,
@@ -897,7 +1004,7 @@ const loadRestaurantById = async (restaurantId: string) => {
     serviceClient
       .from('RestaurantRecord')
       .select(
-        'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+        'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
       )
       .eq('id', restaurantId)
       .maybeSingle<RestaurantRecordRow>(),
@@ -936,7 +1043,7 @@ const loadManagedRestaurantForUser = async (uid: string, role: string) => {
   const query = serviceClient
     .from('RestaurantRecord')
     .select(
-      'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+      'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
     )
     .order('updatedAt', { ascending: false })
     .limit(1);
@@ -1875,11 +1982,12 @@ const syncOrderPaymentState = async ({
     await notifyRestaurantUsers(order.restaurantId, {
       title: 'Paid order received',
       body: `Order ${order.id.slice(-6).toUpperCase()} is paid and ready for confirmation.`,
-      data: {
+      data: buildNotificationData({
+        app: 'partner',
         orderId: order.id,
-        path: `/order/${order.id}`,
+        routeKey: 'partner_order_detail',
         type: 'order_update',
-      },
+      }),
     });
   }
 
@@ -1921,6 +2029,41 @@ const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEv
 };
 
 const normalizePartnerMenuInput = (menu: unknown) => {
+  const allowedMenuCategories = new Map([
+    ['rice', 'Rice'],
+    ['swallow', 'Swallow'],
+    ['soups', 'Soups'],
+    ['proteins', 'Proteins'],
+    ['snacks', 'Snacks'],
+    ['drinks', 'Drinks'],
+  ]);
+
+  const inferMenuCategoryId = (value: string) => {
+    const normalizedValue = value.trim().toLowerCase();
+
+    if (/(rice|jollof|ofada|biryani)/.test(normalizedValue)) {
+      return 'rice';
+    }
+
+    if (/(swallow|amala|eba|fufu|semo|pounded yam)/.test(normalizedValue)) {
+      return 'swallow';
+    }
+
+    if (/(soup|egusi|efo|ogbono|banga|okra|oha|afang)/.test(normalizedValue)) {
+      return 'soups';
+    }
+
+    if (/(chicken|beef|fish|turkey|goat|suya|protein|meat)/.test(normalizedValue)) {
+      return 'proteins';
+    }
+
+    if (/(drink|juice|water|soda|zobo|smoothie|tea|coffee)/.test(normalizedValue)) {
+      return 'drinks';
+    }
+
+    return 'snacks';
+  };
+
   if (!Array.isArray(menu)) {
     fail(400, 'Menu payload must be an array of categories.');
   }
@@ -1946,6 +2089,12 @@ const normalizePartnerMenuInput = (menu: unknown) => {
         const itemName = sanitizeText(itemRecord.name);
         const itemDescription = sanitizeOptionalText(itemRecord.description) ?? '';
         const itemPrice = roundCurrency(parseNumber(itemRecord.price, Number.NaN));
+        const rawCategoryId = sanitizeOptionalText(itemRecord.categoryId)?.toLowerCase();
+        const fallbackCategoryId = inferMenuCategoryId(
+          sanitizeOptionalText(itemRecord.categoryLabel) ?? rawCategoryId ?? categoryName
+        );
+        const categoryId = rawCategoryId && allowedMenuCategories.has(rawCategoryId) ? rawCategoryId : fallbackCategoryId;
+        const categoryLabel = allowedMenuCategories.get(categoryId);
 
         if (!itemId || !itemName || !Number.isFinite(itemPrice) || itemPrice <= 0) {
           fail(
@@ -1954,7 +2103,16 @@ const normalizePartnerMenuInput = (menu: unknown) => {
           );
         }
 
+        if (!categoryLabel) {
+          fail(
+            400,
+            `Menu item ${itemIndex + 1} in "${categoryName}" has an unsupported customer category.`
+          );
+        }
+
         return {
+          categoryId,
+          categoryLabel,
           description: itemDescription,
           id: itemId,
           image: sanitizeOptionalText(itemRecord.image),
@@ -2004,8 +2162,16 @@ const buildPartnerRestaurantPayload = (
     fail(400, 'A restaurant address is required.');
   }
 
+  const openingTime = normalizeOperatingTime(input.openingTime, 'Opening time');
+  const closingTime = normalizeOperatingTime(input.closingTime, 'Closing time');
+
+  if (!openingTime || !closingTime) {
+    fail(400, 'Add both opening and closing time before saving.');
+  }
+
   return {
     address,
+    closingTime,
     cuisine: sanitizeOptionalText(input.cuisine) ?? '',
     deliveryFee: roundCurrency(parseNumber(input.deliveryFee, 0)),
     deliveryRadiusKm:
@@ -2022,6 +2188,7 @@ const buildPartnerRestaurantPayload = (
     minOrder: roundCurrency(parseNumber(input.minOrder, 0)),
     name,
     nameKey: buildNameKey(name),
+    openingTime,
     ownerId: uid,
     supportsDelivery,
     supportsPickup,
@@ -2228,10 +2395,11 @@ const handleNativeAction = async (
     await notifyUsers([context.uid], {
       title: 'Admin access enabled',
       body: 'This account is now the first platform admin.',
-      data: {
-        path: '/access',
+      data: buildNotificationData({
+        app: 'admin',
+        routeKey: 'admin_access',
         type: 'staff_access',
-      },
+      }),
     });
 
     return json(200, {
@@ -2328,11 +2496,12 @@ const handleNativeAction = async (
     await notifyUsers([targetUid], {
       title: 'Staff access provisioned',
       body: `Your ${role} account is ready. Sign in to continue.`,
-      data: {
-        path: '/profile',
+      data: buildNotificationData({
+        app: role === 'admin' ? 'admin' : role === 'dispatch' ? 'dispatch' : 'partner',
         role,
+        routeKey: role === 'admin' ? 'admin_profile' : role === 'dispatch' ? 'dispatch_profile' : 'partner_profile',
         type: 'staff_access',
-      },
+      }),
     });
 
     return json(200, {
@@ -2374,11 +2543,19 @@ const handleNativeAction = async (
     await notifyUsers([targetUid], {
       title: 'Access role updated',
       body: `Your access role is now ${nextRole}. Refresh your session if the app prompts for it.`,
-      data: {
-        path: nextRole === 'admin' ? '/access' : '/profile',
+      data: buildNotificationData({
+        app: nextRole === 'admin' ? 'admin' : nextRole === 'dispatch' ? 'dispatch' : nextRole === 'restaurant' ? 'partner' : 'customer',
         role: nextRole,
+        routeKey:
+          nextRole === 'admin'
+            ? 'admin_access'
+            : nextRole === 'dispatch'
+              ? 'dispatch_profile'
+              : nextRole === 'restaurant'
+                ? 'partner_profile'
+                : 'customer_profile',
         type: 'staff_access',
-      },
+      }),
     });
 
     return json(200, {
@@ -2414,11 +2591,12 @@ const handleNativeAction = async (
     await notifyUsers([targetUid], {
       title: 'Privileged access removed',
       body: 'This account has been returned to standard customer access.',
-      data: {
-        path: '/profile',
+      data: buildNotificationData({
+        app: 'customer',
         role: 'customer',
+        routeKey: 'customer_profile',
         type: 'staff_access',
-      },
+      }),
     });
 
     return json(200, {
@@ -2468,10 +2646,11 @@ const handleNativeAction = async (
     await notifyUsers([targetUid], {
       title: 'Account access disabled',
       body: 'An admin disabled this account. Contact your platform administrator for restore access.',
-      data: {
-        path: '/profile',
+      data: buildNotificationData({
+        app: 'customer',
+        routeKey: 'customer_login',
         type: 'staff_access',
-      },
+      }),
     });
 
     return json(200, {
@@ -2517,11 +2696,12 @@ const handleNativeAction = async (
     await notifyUsers([targetUid], {
       title: 'Account access restored',
       body: `Your ${restoreRole} access has been restored.`,
-      data: {
-        path: restoreRole === 'admin' ? '/access' : '/profile',
+      data: buildNotificationData({
+        app: restoreRole === 'admin' ? 'admin' : restoreRole === 'dispatch' ? 'dispatch' : 'partner',
         role: restoreRole,
+        routeKey: restoreRole === 'admin' ? 'admin_access' : restoreRole === 'dispatch' ? 'dispatch_profile' : 'partner_profile',
         type: 'staff_access',
-      },
+      }),
     });
 
     return json(200, {
@@ -2775,11 +2955,14 @@ const handleNativeAction = async (
     await notifyAdmins({
       title: 'New dispatch application',
       body: `${displayName} applied for dispatch access in ${region}.`,
-      data: {
-        applicationId: context.uid,
-        path: '/approvals',
+      data: buildNotificationData({
+        app: 'admin',
+        extra: {
+          applicationId: context.uid,
+        },
+        routeKey: 'admin_approvals',
         type: 'application_submitted',
-      },
+      }),
     });
 
     return json(200, {
@@ -2891,11 +3074,14 @@ const handleNativeAction = async (
     await notifyAdmins({
       title: 'New partner application',
       body: `${restaurantName} submitted a partner application.`,
-      data: {
-        applicationId: context.uid,
-        path: '/approvals',
+      data: buildNotificationData({
+        app: 'admin',
+        extra: {
+          applicationId: context.uid,
+        },
+        routeKey: 'admin_approvals',
         type: 'application_submitted',
-      },
+      }),
     });
 
     return json(200, {
@@ -2919,7 +3105,7 @@ const handleNativeAction = async (
       serviceClient
         .from('RestaurantRecord')
         .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
         )
         .order('isPublished', { ascending: true })
         .order('updatedAt', { ascending: false }),
@@ -3109,11 +3295,12 @@ const handleNativeAction = async (
         decision === 'approve'
           ? 'Your dispatch application was approved. Sign in to access the dispatch workspace.'
           : rejectionReason ?? 'Your dispatch application was rejected by admin review.',
-      data: {
-        path: decision === 'approve' ? '/profile' : '/login',
+      data: buildNotificationData({
+        app: 'dispatch',
+        routeKey: decision === 'approve' ? 'dispatch_profile' : 'dispatch_login',
         status: decision === 'approve' ? DISPATCH_APPLICATION_STATUS.APPROVED : DISPATCH_APPLICATION_STATUS.REJECTED,
         type: 'application_reviewed',
-      },
+      }),
     });
 
     return json(200, {
@@ -3297,12 +3484,13 @@ const handleNativeAction = async (
         decision === 'approve'
           ? 'Your partner application was approved. Sign in to complete your restaurant setup.'
           : rejectionReason ?? 'Your partner application was rejected by admin review.',
-      data: {
-        path: decision === 'approve' ? '/profile' : '/login',
+      data: buildNotificationData({
+        app: 'partner',
         restaurantId,
+        routeKey: decision === 'approve' ? 'partner_profile' : 'partner_login',
         status: decision === 'approve' ? PARTNER_APPLICATION_STATUS.APPROVED : PARTNER_APPLICATION_STATUS.REJECTED,
         type: 'application_reviewed',
-      },
+      }),
     });
 
     return json(200, {
@@ -3403,11 +3591,12 @@ const handleNativeAction = async (
     await notifyRestaurantUsers(orderDraft.restaurantId, {
       title: 'New cash order',
       body: `Order ${orderId.slice(-6).toUpperCase()} is waiting for restaurant confirmation.`,
-      data: {
+      data: buildNotificationData({
+        app: 'partner',
         orderId,
-        path: `/order/${orderId}`,
+        routeKey: 'partner_order_detail',
         type: 'order_update',
-      },
+      }),
     });
 
     return json(200, { data: response });
@@ -3680,23 +3869,25 @@ const handleNativeAction = async (
     await notifyRestaurantUsers(bundle.order.restaurantId, {
       title: 'Order cancelled',
       body: `Order ${orderId.slice(-6).toUpperCase()} was cancelled by ${context.role}.`,
-      data: {
+      data: buildNotificationData({
+        app: 'partner',
         orderId,
-        path: `/order/${orderId}`,
+        routeKey: 'partner_order_detail',
         status: ORDER_STATUS.CANCELLED,
         type: 'order_update',
-      },
+      }),
     });
     if (sanitizeText(bundle.assignment?.courierId)) {
       await notifyUsers([sanitizeText(bundle.assignment?.courierId)], {
         title: 'Delivery cancelled',
         body: `Order ${orderId.slice(-6).toUpperCase()} no longer requires delivery.`,
-        data: {
+        data: buildNotificationData({
+          app: 'dispatch',
           orderId,
-          path: `/delivery/${orderId}`,
+          routeKey: 'dispatch_delivery_detail',
           status: ORDER_STATUS.CANCELLED,
           type: 'order_update',
-        },
+        }),
       });
     }
 
@@ -3718,7 +3909,7 @@ const handleNativeAction = async (
       serviceClient
         .from('RestaurantRecord')
         .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
         )
         .order('updatedAt', { ascending: false }),
     ]);
@@ -3776,7 +3967,7 @@ const handleNativeAction = async (
       throw new Error(error.message);
     }
 
-    const orderList = ((orders ?? []) as CustomerOrderRow[]).filter(isOrderOperationallyVisible);
+    const orderList = sortPartnerKitchenQueue(((orders ?? []) as CustomerOrderRow[]).filter(isOrderOperationallyVisible));
     const { assignmentsByOrderId, itemsByOrderId } = await loadOrderRelations(orderList.map((order) => order.id));
 
     return json(200, {
@@ -3861,6 +4052,8 @@ const handleNativeAction = async (
         deliveryFee: profile.deliveryFee,
         deliveryRadiusKm: profile.deliveryRadiusKm,
         deliveryTime: profile.deliveryTime,
+        openingTime: profile.openingTime,
+        closingTime: profile.closingTime,
         latitude: profile.latitude,
         longitude: profile.longitude,
         minOrder: profile.minOrder,
@@ -4050,12 +4243,13 @@ const handleNativeAction = async (
     await notifyUsers([bundle.order.customerId], {
       title: 'Order update',
       body: `Order ${orderId.slice(-6).toUpperCase()} is now ${nextState.status.replace(/_/g, ' ')}.`,
-      data: {
+      data: buildNotificationData({
+        app: 'customer',
         orderId,
-        path: `/orders/${orderId}`,
+        routeKey: 'customer_order_detail',
         status: nextState.status,
         type: 'order_update',
-      },
+      }),
     });
     if (
       nextState.status === ORDER_STATUS.READY_FOR_PICKUP &&
@@ -4066,12 +4260,13 @@ const handleNativeAction = async (
         {
           title: 'Pickup ready',
           body: `Order ${orderId.slice(-6).toUpperCase()} is ready for pickup.`,
-          data: {
+          data: buildNotificationData({
+            app: 'dispatch',
             orderId,
-            path: `/delivery/${orderId}`,
+            routeKey: 'dispatch_delivery_detail',
             status: nextState.status,
             type: 'order_update',
-          },
+          }),
         }
       );
     }
@@ -4100,10 +4295,33 @@ const handleNativeAction = async (
 
     const orderList = ((orders ?? []) as CustomerOrderRow[]).filter(isOrderOperationallyVisible);
     const { assignmentsByOrderId, itemsByOrderId } = await loadOrderRelations(orderList.map((order) => order.id));
+    const sortedOrderList = [...orderList].sort((left, right) => {
+      const leftStatus = normalizeOrderStatus(left.status);
+      const rightStatus = normalizeOrderStatus(right.status);
+      const leftTerminal = TERMINAL_ORDER_STATUSES.has(leftStatus);
+      const rightTerminal = TERMINAL_ORDER_STATUSES.has(rightStatus);
+
+      if (leftTerminal !== rightTerminal) {
+        return leftTerminal ? 1 : -1;
+      }
+
+      if (leftTerminal && rightTerminal) {
+        return toSortableTimestamp(right.updatedAt ?? right.createdAt) - toSortableTimestamp(left.updatedAt ?? left.createdAt);
+      }
+
+      const priorityDelta =
+        getDispatchQueuePriority(left, assignmentsByOrderId.get(left.id) ?? null) -
+        getDispatchQueuePriority(right, assignmentsByOrderId.get(right.id) ?? null);
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      return toSortableTimestamp(left.createdAt) - toSortableTimestamp(right.createdAt);
+    });
 
     return json(200, {
       data: {
-        orders: orderList.map((order) =>
+        orders: sortedOrderList.map((order) =>
           toOrderSnapshotResponse(
             order,
             itemsByOrderId.get(order.id) ?? [],
@@ -4321,21 +4539,23 @@ const handleNativeAction = async (
     await notifyUsers([bundle.order.customerId], {
       title: wasReassigned ? 'Rider reassigned' : 'Rider assigned',
       body: `${courierName} has been assigned to order ${orderId.slice(-6).toUpperCase()}.`,
-      data: {
+      data: buildNotificationData({
+        app: 'customer',
         orderId,
-        path: `/orders/${orderId}`,
+        routeKey: 'customer_order_detail',
         status: normalizeOrderStatus(bundle.order.status),
         type: 'order_update',
-      },
+      }),
     });
     await notifyUsers([courier.id], {
       title: 'New delivery assignment',
       body: `You were assigned to order ${orderId.slice(-6).toUpperCase()}.`,
-      data: {
+      data: buildNotificationData({
+        app: 'dispatch',
         orderId,
-        path: `/delivery/${orderId}`,
+        routeKey: 'dispatch_delivery_detail',
         type: 'dispatch_assignment',
-      },
+      }),
     });
 
     return json(200, {
@@ -4403,22 +4623,24 @@ const handleNativeAction = async (
     await notifyUsers([bundle.order.customerId], {
       title: 'Delivery update',
       body: `Order ${orderId.slice(-6).toUpperCase()} is now ${nextState.status.replace(/_/g, ' ')}.`,
-      data: {
+      data: buildNotificationData({
+        app: 'customer',
         orderId,
-        path: `/orders/${orderId}`,
+        routeKey: 'customer_order_detail',
         status: nextState.status,
         type: 'order_update',
-      },
+      }),
     });
     await notifyRestaurantUsers(bundle.order.restaurantId, {
       title: 'Delivery progress update',
       body: `Order ${orderId.slice(-6).toUpperCase()} is now ${nextState.status.replace(/_/g, ' ')}.`,
-      data: {
+      data: buildNotificationData({
+        app: 'partner',
         orderId,
-        path: `/order/${orderId}`,
+        routeKey: 'partner_order_detail',
         status: nextState.status,
         type: 'order_update',
-      },
+      }),
     });
 
     return json(200, {
@@ -4441,7 +4663,7 @@ const handleNativeAction = async (
       serviceClient
         .from('RestaurantRecord')
         .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
         )
         .order('updatedAt', { ascending: false }),
       serviceClient

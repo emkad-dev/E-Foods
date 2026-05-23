@@ -1,11 +1,11 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+/// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
 import { enqueueNotification, updateJobStatus, incrementRetry } from '../_shared/queue.ts';
 import { OrderPlacementJob } from '../_shared/queue.ts';
 import {
-  sendPushNotificationsToUsers,
+  buildNotificationData,
   loadRestaurantRecipientUserIds,
 } from '../_shared/notifications.ts';
 
@@ -73,7 +73,12 @@ const handleOrderPlacement = async (job: OrderPlacementJob) => {
         payload: {
           title: 'New Order Received',
           body: `Order ${orderId} is waiting for confirmation`,
-          data: { orderId, type: 'order_update', path: `/orders/${orderId}` },
+          data: buildNotificationData({
+            app: 'partner',
+            orderId,
+            routeKey: 'partner_order_detail',
+            type: 'order_update',
+          }),
         },
       });
     }

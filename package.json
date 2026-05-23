@@ -24,7 +24,8 @@
     "db:doctor": "npm --prefix functions run db:doctor",
     "db:generate": "npm --prefix functions run prisma:generate",
     "db:migrate:deploy": "npm --prefix functions run prisma:migrate:deploy",
-    "db:validate": "npm --prefix functions run prisma:validate"
+    "db:validate": "npm --prefix functions run prisma:validate",
+    "deploy:paystack": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\deploy-paystack-functions.ps1"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
@@ -33,6 +34,6 @@
     "react-native-url-polyfill": "^3.0.0"
   },
   "devDependencies": {
-    "supabase": "^2.98.2"
+    "supabase": "^2.101.0"
   }
 }

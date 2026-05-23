@@ -18,16 +18,16 @@ import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSign
 import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
-  const [displayName, setDisplayName] = useState('');
+  const [nickname, setNickname] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const { loading, signUp, error, clearError } = useAuth();
   const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
 
-  const handleDisplayNameChange = (value: string) => {
+  const handleNicknameChange = (value: string) => {
     if (error) clearError();
-    setDisplayName(value);
+    setNickname(value);
   };
 
   const handleEmailChange = (value: string) => {
@@ -46,7 +46,7 @@ export default function RegisterScreen() {
   };
 
   const handleRegister = async () => {
-    if (!displayName.trim() || !email.trim() || !password.trim()) {
+    if (!nickname.trim() || !email.trim() || !password.trim()) {
       Alert.alert('Missing information', 'Please complete all fields before continuing.');
       return;
     }
@@ -63,7 +63,7 @@ export default function RegisterScreen() {
 
     try {
       const { verificationEmailSent } = await signUp(email.trim(), password, {
-        displayName: displayName.trim(),
+        displayName: nickname.trim(),
       });
 
       Alert.alert(
@@ -95,11 +95,12 @@ export default function RegisterScreen() {
 
           <TextInput
             style={styles.input}
-            placeholder="Full name"
-            value={displayName}
-            onChangeText={handleDisplayNameChange}
+            placeholder="Nickname or username"
+            value={nickname}
+            onChangeText={handleNicknameChange}
             editable={!loading}
           />
+          <Text style={styles.helperText}>This is how we will greet you in the customer app.</Text>
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -185,8 +186,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     height: 50,
+    marginTop: 10,
     paddingHorizontal: 16,
     color: customerTheme.text,
+  },
+  helperText: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
   },
   button: {
     alignItems: 'center',

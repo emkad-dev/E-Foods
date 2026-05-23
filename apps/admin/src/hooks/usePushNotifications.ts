@@ -4,27 +4,19 @@ import { useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { resolveNotificationHref, type AppNotificationPayload } from '../../../../packages/domain/src/notifications';
 import { appEnv } from '../config/env';
 import { useAuth } from '../contexts/AuthContext';
 import { updateUserDocument } from '../services/supabase/profile';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
-type NotificationData = {
-  path?: string;
-};
-
-const routeFromNotification = (data: NotificationData) => {
-  if (typeof data.path === 'string' && data.path.trim()) {
-    router.push(data.path as never);
-  }
-};
-
 export const usePushNotifications = () => {
   const { user } = useAuth();
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
   const registeredUserId = useRef<string | null>(null);
+  const handledResponseIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (isExpoGo || Platform.OS === 'web') {
@@ -88,6 +80,38 @@ export const usePushNotifications = () => {
       }
     };
 
+    const handleNotificationResponse = async (response: Notifications.NotificationResponse | null) => {
+      if (!response) {
+        return;
+      }
+
+      const identifier =
+        response.notification.request.identifier ||
+        JSON.stringify(response.notification.request.content.data ?? {});
+
+      if (handledResponseIds.current.has(identifier)) {
+        return;
+      }
+
+      handledResponseIds.current.add(identifier);
+
+      const href = resolveNotificationHref(
+        'admin',
+        (response.notification.request.content.data ?? {}) as AppNotificationPayload
+      );
+
+      if (!href) {
+        await Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+        return;
+      }
+
+      setTimeout(() => {
+        router.push(href as never);
+      }, 50);
+
+      await Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+    };
+
     if (user) {
       void registerForPushNotifications();
     } else {
@@ -96,8 +120,14 @@ export const usePushNotifications = () => {
 
     notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      routeFromNotification((response.notification.request.content.data ?? {}) as NotificationData);
+      void handleNotificationResponse(response);
     });
+
+    void Notifications.getLastNotificationResponseAsync()
+      .then((response) => handleNotificationResponse(response))
+      .catch((error) => {
+        console.warn('Unable to inspect the last admin notification response.', error);
+      });
 
     return () => {
       notificationListener.current?.remove();

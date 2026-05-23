@@ -4,7 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
-import { configureGoogleSignIn } from '../src/services/googleSignIn';
+import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
@@ -13,17 +13,30 @@ function RootLayoutNav() {
 
   useEffect(() => {
     const handleDeepLink = ({ url }: { url: string }) => {
-      const { path, queryParams } = Linking.parse(url);
+      const { hostname, path, queryParams } = Linking.parse(url);
+      const targetPath =
+        typeof path === 'string' && path.trim() ? path.trim() : typeof hostname === 'string' ? hostname.trim() : '';
 
-      if (path === 'verify-email') {
-        router.replace('/(auth)/verify-email');
-      } else if (path === 'reset-password' && queryParams?.oobCode) {
+      if (targetPath === 'verify-email') {
+        router.replace({
+          pathname: '/(auth)/verify-email',
+          params: {
+            ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
+            ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
+            ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
+          },
+        });
+      } else if (targetPath === 'reset-password') {
         router.replace({
           pathname: '/(auth)/reset-password',
-          params: { oobCode: queryParams.oobCode as string },
+          params: {
+            ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
+            ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
+            ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
+          },
         });
-      } else if (path?.startsWith('order/')) {
-        const orderId = path.split('/')[1];
+      } else if (targetPath.startsWith('order/')) {
+        const orderId = targetPath.split('/')[1];
         router.push(`/orders/${orderId}`);
       }
     };
@@ -41,9 +54,12 @@ function RootLayoutNav() {
 
     const inCustomerGroup = segments[0] === '(customer)';
     const currentScreen = segments[1];
+    const inAuthGroup = segments[0] === '(auth)';
+    const isVerificationScreen = inAuthGroup && currentScreen === 'verify-email';
+    const isResetScreen = inAuthGroup && currentScreen === 'reset-password';
 
     if (!user) {
-      if (currentScreen === 'verify-email') {
+      if (!isVerificationScreen && !isResetScreen) {
         router.replace('/(auth)/login');
       }
       return;
@@ -72,6 +88,10 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
+    if (!hasGoogleSignInConfig()) {
+      return;
+    }
+
     const result = configureGoogleSignIn();
 
     if (!result.ok) {

@@ -1,5 +1,11 @@
 project_id = "ebuy-platform"
 
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET)"
+skip_nonce_check = false
+
 [functions.app-rpc]
 verify_jwt = false
 
@@ -8,3 +14,9 @@ verify_jwt = false
 
 [functions.notifications]
 verify_jwt = true
+
+[functions.payment-verification]
+verify_jwt = false
+
+[functions.paystack-webhook]
+verify_jwt = false

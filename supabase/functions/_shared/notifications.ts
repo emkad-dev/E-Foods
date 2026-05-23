@@ -1,6 +1,29 @@
 import { serviceClient } from './client.ts';
 
 type JsonObject = Record<string, unknown>;
+type NotificationApp = 'customer' | 'partner' | 'dispatch' | 'admin';
+type NotificationRouteKey =
+  | 'customer_home'
+  | 'customer_promotions'
+  | 'customer_profile'
+  | 'customer_orders'
+  | 'customer_order_detail'
+  | 'customer_delivery_location'
+  | 'customer_restaurant_detail'
+  | 'customer_login'
+  | 'partner_profile'
+  | 'partner_orders'
+  | 'partner_order_detail'
+  | 'partner_login'
+  | 'dispatch_profile'
+  | 'dispatch_deliveries'
+  | 'dispatch_delivery_detail'
+  | 'dispatch_fleet'
+  | 'dispatch_login'
+  | 'admin_access'
+  | 'admin_approvals'
+  | 'admin_profile'
+  | 'admin_login';
 
 type ExpoPushMessage = {
   to: string;
@@ -32,6 +55,95 @@ const chunkArray = <T>(values: T[], size: number) => {
 };
 
 const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
+const sanitizeText = (value: unknown) =>
+  typeof value === 'string' && value.trim() ? value.trim() : null;
+
+const buildNotificationPath = (
+  app: NotificationApp,
+  routeKey: NotificationRouteKey,
+  data: {
+    orderId?: string | null;
+    restaurantId?: string | null;
+  }
+) => {
+  switch (routeKey) {
+    case 'customer_home':
+      return '/home';
+    case 'customer_promotions':
+      return '/promotions';
+    case 'customer_profile':
+      return '/profile';
+    case 'customer_orders':
+      return '/orders';
+    case 'customer_order_detail':
+      return data.orderId ? `/orders/${data.orderId}` : '/orders';
+    case 'customer_delivery_location':
+      return '/delivery-location';
+    case 'customer_restaurant_detail':
+      return data.restaurantId ? `/home/restaurant/${data.restaurantId}` : '/home';
+    case 'customer_login':
+      return '/login';
+    case 'partner_profile':
+      return '/profile';
+    case 'partner_orders':
+      return '/orders';
+    case 'partner_order_detail':
+      return data.orderId ? `/order/${data.orderId}` : '/orders';
+    case 'partner_login':
+      return '/login';
+    case 'dispatch_profile':
+      return '/profile';
+    case 'dispatch_deliveries':
+      return '/deliveries';
+    case 'dispatch_delivery_detail':
+      return data.orderId ? `/delivery/${data.orderId}` : '/deliveries';
+    case 'dispatch_fleet':
+      return '/fleet';
+    case 'dispatch_login':
+      return '/login';
+    case 'admin_access':
+      return '/access';
+    case 'admin_approvals':
+      return '/approvals';
+    case 'admin_profile':
+      return '/profile';
+    case 'admin_login':
+      return '/login';
+    default:
+      return app === 'customer' ? '/home' : '/profile';
+  }
+};
+
+export const buildNotificationData = (input: {
+  app: NotificationApp;
+  extra?: JsonObject;
+  orderId?: string | null;
+  path?: string | null;
+  restaurantId?: string | null;
+  role?: string | null;
+  routeKey: NotificationRouteKey;
+  status?: string | null;
+  type: string;
+}) => {
+  const orderId = sanitizeText(input.orderId);
+  const restaurantId = sanitizeText(input.restaurantId);
+  const role = sanitizeText(input.role);
+  const status = sanitizeText(input.status);
+  const path = sanitizeText(input.path) ?? buildNotificationPath(input.app, input.routeKey, { orderId, restaurantId });
+
+  return {
+    ...(input.extra ?? {}),
+    app: input.app,
+    ...(orderId ? { orderId } : null),
+    path,
+    ...(restaurantId ? { restaurantId } : null),
+    ...(role ? { role } : null),
+    routeKey: input.routeKey,
+    ...(status ? { status } : null),
+    type: input.type,
+    version: 1,
+  } satisfies JsonObject;
+};
 
 const loadPushRowsByUserIds = async (userIds: string[]) => {
   const nextUserIds = unique(userIds);

@@ -58,6 +58,8 @@ const getConfiguredWebClientId = (): string | null => {
   return webClientId;
 };
 
+export const hasGoogleSignInConfig = () => Boolean(getConfiguredWebClientId());
+
 export const getGoogleSignInUnavailableMessage = (): string | null => {
   if (Platform.OS === 'web') {
     return 'This Google Sign-In setup only supports native Android and iOS builds.';
@@ -72,7 +74,7 @@ export const getGoogleSignInUnavailableMessage = (): string | null => {
   }
 
   if (!getConfiguredWebClientId()) {
-    return 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in your .env file to your real Google Web Client ID before using Google Sign-In.';
+    return 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and enable Google in Supabase Auth before using customer Google sign-in.';
   }
 
   return null;
