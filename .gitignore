@@ -44,8 +44,17 @@ android-run-*.log
 # local env files
 .env
 .env*.local
+.env.apps
 functions/.env
+supabase/.env
 apps/*/.env
+apps/*/.env.local
+apps/*/.env.development
+apps/*/.env.production
+
+# local Supabase and Codex state
+.supabase-home/
+supabase/.temp/
 
 # typescript
 *.tsbuildinfo
