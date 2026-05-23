@@ -28,6 +28,26 @@ export const supabaseEnv = {
 };
 
 export const appEnv = {
+  appDomain:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_APP_DOMAIN,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN
+    ) ?? 'ebuy.com',
+  appScheme:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_APP_SCHEME,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_SCHEME
+    ) ?? 'ebuy-admin',
+  verifyEmailPath:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_VERIFY_EMAIL_PATH,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_VERIFY_EMAIL_PATH
+    ) ?? 'verify-email',
+  resetPasswordPath:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_RESET_PASSWORD_PATH,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_RESET_PASSWORD_PATH
+    ) ?? 'reset-password',
   projectId: getEnvValue(
     process.env.EXPO_PUBLIC_PROJECT_ID,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID
@@ -41,26 +61,4 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_FUNCTIONS_REGION,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_FUNCTIONS_REGION
     ) ?? 'us-central1',
-};
-
-const getBooleanEnvValue = (inlineValue: string | undefined, extraValue: unknown) => {
-  const resolvedValue = getEnvValue(inlineValue, extraValue)?.toLowerCase();
-  return resolvedValue === '1' || resolvedValue === 'true' || resolvedValue === 'yes';
-};
-
-export const devAuthEnv = {
-  enabled: getBooleanEnvValue(
-    process.env.EXPO_PUBLIC_DEV_AUTH_BYPASS,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_DEV_AUTH_BYPASS
-  ),
-  email:
-    getEnvValue(
-      process.env.EXPO_PUBLIC_DEV_AUTH_EMAIL,
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_DEV_AUTH_EMAIL
-    ) ?? 'admin.dev@ebuy.local',
-  uid:
-    getEnvValue(
-      process.env.EXPO_PUBLIC_DEV_AUTH_UID,
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_DEV_AUTH_UID
-    ) ?? 'admin-dev-user',
 };

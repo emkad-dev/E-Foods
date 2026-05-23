@@ -3,7 +3,7 @@ import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supaba
 import { router } from 'expo-router';
 import type { UserDocument } from '../domain/entities';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
-import { appEnv, devAuthEnv } from '../config/env';
+import { appEnv } from '../config/env';
 import {
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
@@ -37,7 +37,14 @@ interface AuthContextType {
   user: User;
   loading: boolean;
   error: string | null;
-  signUp: (email: string, password: string, userData?: any) => Promise<SignUpResult>;
+  signUp: (
+    email: string,
+    password: string,
+    userData?: {
+      displayName?: string;
+      phoneNumber?: string;
+    }
+  ) => Promise<SignUpResult>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (idToken: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -52,8 +59,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const CUSTOMER_ACCESS_ERROR = 'This account does not have customer access.';
 const SESSION_CONFLICT_ERROR = 'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const DEV_AUTH_BYPASS_MESSAGE = 'Dev auth bypass is enabled. Customer auth actions are paused for this app session.';
-
 const isOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
   const errorMessage =
@@ -88,7 +93,7 @@ const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) =>
  */
 const getActionCodeSettings = (path: string) => {
   return {
-    url: `https://${appEnv.appDomain}/${path}`,
+    url: `${appEnv.appScheme}://${path}`,
   };
 };
 
@@ -99,27 +104,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
-  }, []);
-
-  useEffect(() => {
-    if (!devAuthEnv.enabled) {
-      return;
-    }
-
-    const mockUser: UserDocument = {
-      uid: devAuthEnv.uid,
-      email: devAuthEnv.email,
-      emailVerified: true,
-      role: DEFAULT_APP_ROLE,
-      displayName: 'Dev Customer',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setUser(mockUser);
-    setError(null);
-    setLoading(false);
-    void storeUserProfile(mockUser);
   }, []);
 
   const buildNextUser = useCallback(
@@ -213,10 +197,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
    * Listen for authentication state changes and sync user profile
    */
   useEffect(() => {
-    if (devAuthEnv.enabled) {
-      return;
-    }
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
@@ -276,17 +256,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => subscription.unsubscribe();
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  const signUp = async (email: string, password: string, userData?: any): Promise<SignUpResult> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return { verificationEmailSent: false };
+  const signUp = async (
+    email: string,
+    password: string,
+    userData?: {
+      displayName?: string;
+      phoneNumber?: string;
     }
-
+  ): Promise<SignUpResult> => {
     setLoading(true);
     setError(null);
 
     try {
-      const authUser = await createUserWithEmail(supabase, email, password);
+      const authUser = await createUserWithEmail(supabase, email, password, {
+        displayName: userData?.displayName,
+      });
       await createUserDocument(authUser.id, {
         email: authUser.email ?? '',
         role: DEFAULT_APP_ROLE,
@@ -316,11 +300,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string): Promise<void> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -345,11 +324,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signInWithGoogleAuth = async (idToken: string): Promise<void> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -391,11 +365,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async (): Promise<void> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -418,11 +387,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const deleteAccount = async (): Promise<void> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();
@@ -452,11 +416,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string): Promise<void> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setError(null);
 
     try {
@@ -473,11 +432,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const reloadUser = async (): Promise<boolean> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return true;
-    }
-
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();
@@ -520,11 +474,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const sendVerificationEmail = async (): Promise<void> => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();

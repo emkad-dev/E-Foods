@@ -9,11 +9,22 @@ export const isActionCodeConfigurationError = (error: AuthError | null | undefin
 export const createUserWithEmail = async (
   supabase: SupabaseClient,
   email: string,
-  password: string
+  password: string,
+  options?: {
+    displayName?: string;
+  }
 ): Promise<User> => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
+    options: options?.displayName
+      ? {
+          data: {
+            display_name: options.displayName,
+            full_name: options.displayName,
+          },
+        }
+      : undefined,
   });
 
   if (error) {
@@ -22,6 +33,13 @@ export const createUserWithEmail = async (
 
   if (!data.user) {
     throw new Error('Supabase did not return a user for this sign-up attempt.');
+  }
+
+  if (!data.session) {
+    const signInResult = await supabase.auth.signInWithPassword({ email, password });
+    if (signInResult.error) {
+      throw signInResult.error;
+    }
   }
 
   return data.user;

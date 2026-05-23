@@ -40,5 +40,4 @@ This repo now includes the first foundation pieces for a full Firebase Auth and 
 
 ## Existing reminder that still matters
 
-- revert auth bypass later in [`.env.apps`](./.env.apps)
 - add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL` when you return to payments

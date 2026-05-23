@@ -4,7 +4,7 @@ import type { UserDocument } from '../domain/entities';
 import { formatAuthError, getUserRoleClaim, sendPasswordReset, signInWithEmail, signOutUser } from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
 import { callAdminBackendRpc } from '../services/backendRpc';
-import { devAuthEnv } from '../config/env';
+import { appEnv } from '../config/env';
 import {
   clearStoredSessionId,
   clearStoredUserProfile,
@@ -35,7 +35,9 @@ const NO_INTERNET_ERROR = 'No internet connection. Check your network and try ag
 const SESSION_CONFLICT_ERROR =
   'This admin account was signed in on another device. Sign in again here if you want to continue on this device.';
 const BOOTSTRAP_WAIT_MESSAGE = 'Preparing first admin access...';
-const DEV_AUTH_BYPASS_MESSAGE = 'Dev auth bypass is enabled. Admin auth actions are paused for this app session.';
+const getActionCodeSettings = (path: string) => ({
+  url: `${appEnv.appScheme}://${path}`,
+});
 
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -74,27 +76,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
-  }, []);
-
-  useEffect(() => {
-    if (!devAuthEnv.enabled) {
-      return;
-    }
-
-    const mockUser: UserDocument = {
-      uid: devAuthEnv.uid,
-      email: devAuthEnv.email,
-      emailVerified: true,
-      role: 'admin',
-      displayName: 'Dev Admin',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setUser(mockUser);
-    setError(null);
-    setLoading(false);
-    void storeUserProfile(mockUser);
   }, []);
 
   const startSingleDeviceSession = useCallback(async (userId: string) => {
@@ -188,10 +169,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 
   useEffect(() => {
-    if (devAuthEnv.enabled) {
-      return;
-    }
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
@@ -258,11 +235,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
   const signIn = async (email: string, password: string) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -299,11 +271,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const bootstrapFirstAdmin = async (email: string, password: string) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -357,16 +324,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
-      await sendPasswordReset(supabase, email);
+      await sendPasswordReset(supabase, email, getActionCodeSettings(appEnv.resetPasswordPath));
     } catch (nextError: any) {
       const nextMessage = getAdminAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);
@@ -377,11 +339,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 

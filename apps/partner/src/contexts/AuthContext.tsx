@@ -1,11 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
-import { devAuthEnv } from '../config/env';
+import { appEnv } from '../config/env';
 import {
   createUserWithEmail,
   formatAuthError,
   getUserRoleClaim,
+  sendVerificationEmail,
   signInWithEmail,
   signOutUser,
   sendPasswordReset,
@@ -29,7 +30,11 @@ type AuthContextType = {
   user: UserDocument | null;
   loading: boolean;
   error: string | null;
-  signUp: (email: string, password: string, userData: PartnerApplicationInput) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    userData: PartnerApplicationInput
+  ) => Promise<{ verificationEmailSent: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   linkRestaurant: (restaurantId: string) => Promise<void>;
@@ -51,7 +56,9 @@ const PARTNER_APPLICATION_REJECTED_FALLBACK =
   'Your restaurant application was reviewed but not approved yet. Update your details with the onboarding team before trying again.';
 const PARTNER_SIGNUP_ROLLBACK_ERROR =
   'Your restaurant application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the onboarding team.';
-const DEV_AUTH_BYPASS_MESSAGE = 'Dev auth bypass is enabled. Partner auth actions are paused for this app session.';
+const getActionCodeSettings = (path: string) => ({
+  url: `${appEnv.appScheme}://${path}`,
+});
 
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -106,31 +113,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
-  }, []);
-
-  useEffect(() => {
-    if (!devAuthEnv.enabled) {
-      return;
-    }
-
-    const mockUser: UserDocument = {
-      uid: devAuthEnv.uid,
-      email: devAuthEnv.email,
-      emailVerified: true,
-      role: 'restaurant',
-      displayName: 'Dev Partner',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      restaurantId: 'dev-restaurant',
-      restaurantName: 'Dev Restaurant',
-      restaurantLinkedAt: new Date().toISOString(),
-      restaurantLinkSource: 'dev_auth_bypass',
-    };
-
-    setUser(mockUser);
-    setError(null);
-    setLoading(false);
-    void storeUserProfile(mockUser);
   }, []);
 
   const rollbackPendingApplicant = useCallback(async (userId: string) => {
@@ -239,10 +221,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 
   useEffect(() => {
-    if (devAuthEnv.enabled) {
-      return;
-    }
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
@@ -309,11 +287,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
   const signUp = async (email: string, password: string, userData: PartnerApplicationInput) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     let applicantUid: string | null = null;
@@ -341,10 +314,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         restaurantName: userData.restaurantName.trim(),
       });
 
+      let verificationEmailSent = false;
+
+      try {
+        await sendVerificationEmail(
+          supabase,
+          authUser.email ?? email,
+          getActionCodeSettings(appEnv.verifyEmailPath)
+        );
+        verificationEmailSent = true;
+      } catch (verificationError) {
+        console.warn('Partner account created, but verification email could not be sent:', verificationError);
+      }
+
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
       setError(PARTNER_APPLICATION_PENDING_MESSAGE);
+      return { verificationEmailSent };
     } catch (nextError: any) {
       let resolvedMessage =
         nextError?.message === PARTNER_APPLICATION_PENDING_MESSAGE
@@ -367,11 +354,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -410,16 +392,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
-      await sendPasswordReset(supabase, email);
+      await sendPasswordReset(supabase, email, getActionCodeSettings(appEnv.resetPasswordPath));
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);
@@ -430,11 +407,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const linkRestaurant = async (restaurantId: string) => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     if (!user) {
       throw new Error('Sign in again to link a restaurant.');
     }
@@ -472,11 +444,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -498,11 +465,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const deleteAccount = async () => {
-    if (devAuthEnv.enabled) {
-      setError(DEV_AUTH_BYPASS_MESSAGE);
-      return;
-    }
-
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();

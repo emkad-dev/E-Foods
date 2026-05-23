@@ -46,6 +46,10 @@
       "typedRoutes": true,
       "autolinkingModuleResolution": true
     },
-    "extra": {}
+    "extra": {
+      "EXPO_PUBLIC_APP_SCHEME": "ebuy-partner",
+      "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
+      "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
+    }
   }
 }

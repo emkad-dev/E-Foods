@@ -46,6 +46,11 @@
       "typedRoutes": true,
       "autolinkingModuleResolution": true
     },
-    "extra": {}
+    "extra": {
+      "EXPO_PUBLIC_APP_DOMAIN": "ebuy.com",
+      "EXPO_PUBLIC_APP_SCHEME": "ebuy-admin",
+      "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
+      "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
+    }
   }
 }

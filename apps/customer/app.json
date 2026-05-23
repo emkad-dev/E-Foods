@@ -69,6 +69,7 @@
       },
       "EXPO_PUBLIC_PROJECT_ID": "G-VM017RKW5Q",
       "EXPO_PUBLIC_APP_DOMAIN": "ebuy.com",
+      "EXPO_PUBLIC_APP_SCHEME": "ebuy-customer",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password",
       "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "309665605080-vfjg90ffdc8sbtot6t4bgkti1c5ldd8i.apps.googleusercontent.com"
