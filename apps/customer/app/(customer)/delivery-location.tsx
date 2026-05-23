@@ -1,34 +1,27 @@
 import { FontAwesome } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import MapView, { PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, type Provider, Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
+import { appEnv } from '../../src/config/env';
 import {
   fallbackAddressFromCoords,
-  formatDeliveryLocation,
 } from '../../src/utils/deliveryLocation';
+import { GoogleMapsLocationService } from '../../src/services/googleMapsLocation';
 
 const DEFAULT_DELTA = {
-  latitudeDelta: 0.01,
-  longitudeDelta: 0.01,
-};
-
-const FALLBACK_REGION: Region = {
-  latitude: 6.5244,
-  longitude: 3.3792,
-  ...DEFAULT_DELTA,
+  latitudeDelta: 0.008,
+  longitudeDelta: 0.008,
 };
 
 type LocationSuggestion = {
@@ -68,10 +61,8 @@ export default function DeliveryLocationScreen() {
   const [searchingPlaces, setSearchingPlaces] = useState(false);
   const [searchSuggestions, setSearchSuggestions] = useState<LocationSuggestion[]>([]);
 
-  const mapProvider = useMemo(
-    () => (Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined),
-    []
-  );
+  const mapProvider = useMemo<Provider>(() => PROVIDER_GOOGLE, []);
+  const sessionTokenRef = useRef(Math.random().toString(36).substr(2, 9));
 
   useEffect(() => {
     let cancelled = false;
@@ -83,39 +74,61 @@ export default function DeliveryLocationScreen() {
       }
 
       try {
-        const permission = await Location.requestForegroundPermissionsAsync();
+        const hasPermission = await GoogleMapsLocationService.requestLocationPermission();
 
-        if (!permission.granted) {
+        if (!hasPermission) {
           if (!cancelled) {
             setLocationPermissionDenied(true);
-            setRegion(FALLBACK_REGION);
+            const fallbackRegion: Region = {
+              latitude: 6.5244,
+              longitude: 3.3792,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            };
+            setRegion(fallbackRegion);
             setLoadingMap(false);
           }
           return;
         }
 
-        const currentPosition =
-          (await Location.getLastKnownPositionAsync()) ??
-          (await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          }));
+        let currentPosition = await GoogleMapsLocationService.getCurrentLocationHighAccuracy({
+          timeout: 10000,
+          maxAge: 0,
+        });
+
+        if (!currentPosition) {
+          currentPosition = await GoogleMapsLocationService.getLastKnownLocation();
+        }
 
         if (!cancelled) {
           if (currentPosition) {
             setRegion({
-              latitude: currentPosition.coords.latitude,
-              longitude: currentPosition.coords.longitude,
-              ...DEFAULT_DELTA,
+              latitude: currentPosition.latitude,
+              longitude: currentPosition.longitude,
+              latitudeDelta: 0.008,
+              longitudeDelta: 0.008,
             });
           } else {
-            setRegion(FALLBACK_REGION);
+            const fallbackRegion: Region = {
+              latitude: 6.5244,
+              longitude: 3.3792,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            };
+            setRegion(fallbackRegion);
           }
           setLoadingMap(false);
         }
       } catch (error) {
         console.error('Failed to load device location:', error);
         if (!cancelled) {
-          setRegion(FALLBACK_REGION);
+          const fallbackRegion: Region = {
+            latitude: 6.5244,
+            longitude: 3.3792,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          };
+          setRegion(fallbackRegion);
           setLoadingMap(false);
         }
       }
@@ -165,11 +178,27 @@ export default function DeliveryLocationScreen() {
     setResolvingAddress(true);
 
     try {
-      const result = await Location.reverseGeocodeAsync({ latitude, longitude });
-      const { address, shortAddress } = formatDeliveryLocation(result[0] ?? null);
+      if (!appEnv.googleMapsApiKey) {
+        const address = fallbackAddressFromCoords(latitude, longitude);
+        setResolvedAddress(address);
+        setShortAddress('Selected map pin');
+        return;
+      }
 
-      setResolvedAddress(address || fallbackAddressFromCoords(latitude, longitude));
-      setShortAddress(shortAddress);
+      const result = await GoogleMapsLocationService.reverseGeocode(
+        latitude,
+        longitude,
+        appEnv.googleMapsApiKey
+      );
+
+      if (result) {
+        setResolvedAddress(result.address);
+        setShortAddress(result.shortAddress);
+      } else {
+        const address = fallbackAddressFromCoords(latitude, longitude);
+        setResolvedAddress(address);
+        setShortAddress('Selected map pin');
+      }
     } catch (error) {
       console.error('Failed to reverse geocode location:', error);
       setResolvedAddress(fallbackAddressFromCoords(latitude, longitude));
@@ -185,62 +214,28 @@ export default function DeliveryLocationScreen() {
     setSearchingPlaces(true);
 
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=ng&addressdetails=1&limit=6&q=${encodeURIComponent(
-          query
-        )}`,
-        {
-          headers: {
-            Accept: 'application/json',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Place search failed with status ${response.status}`);
+      if (!appEnv.googleMapsApiKey) {
+        throw new Error('Google Maps API key not configured');
       }
 
-      const payload = (await response.json()) as {
-        place_id: number;
-        lat: string;
-        lon: string;
-        display_name: string;
-        address?: Record<string, string | undefined>;
-      }[];
+      const predictions = await GoogleMapsLocationService.searchPlaces(
+        query,
+        appEnv.googleMapsApiKey,
+        sessionTokenRef.current
+      );
 
       if (searchRequestRef.current !== requestId) {
         return;
       }
 
-      const nextSuggestions = payload.map((item) => {
-        const address = item.address ?? {};
-        const title =
-          address.road ||
-          address.neighbourhood ||
-          address.suburb ||
-          address.village ||
-          address.town ||
-          address.city ||
-          address.county ||
-          item.display_name.split(',')[0]?.trim() ||
-          'Suggested place';
-        const subtitle = [
-          address.suburb,
-          address.city || address.town || address.village,
-          address.state,
-        ]
-          .filter(Boolean)
-          .join(', ');
-
-        return {
-          id: String(item.place_id),
-          latitude: Number(item.lat),
-          longitude: Number(item.lon),
-          title,
-          subtitle: subtitle || item.display_name,
-          displayName: item.display_name,
-        } satisfies LocationSuggestion;
-      });
+      const nextSuggestions = predictions.map((prediction) => ({
+        id: prediction.placeId,
+        latitude: 0,
+        longitude: 0,
+        title: prediction.mainText,
+        subtitle: prediction.secondaryText || prediction.description,
+        displayName: prediction.description,
+      }));
 
       setSearchSuggestions(nextSuggestions);
     } catch (error) {
@@ -255,26 +250,47 @@ export default function DeliveryLocationScreen() {
     }
   };
 
-  const handleSuggestionSelect = (suggestion: LocationSuggestion) => {
-    const nextRegion = {
-      latitude: suggestion.latitude,
-      longitude: suggestion.longitude,
-      ...DEFAULT_DELTA,
-    };
+  const handleSuggestionSelect = async (suggestion: LocationSuggestion) => {
+    try {
+      if (!appEnv.googleMapsApiKey) {
+        throw new Error('Google Maps API key not configured');
+      }
 
-    setSearchQuery(suggestion.title);
-    setSearchSuggestions([]);
-    setRegion(nextRegion);
-    setResolvedAddress(suggestion.displayName);
-    setShortAddress(suggestion.title);
-    mapRef.current?.animateToRegion(nextRegion, 450);
+      const placeDetails = await GoogleMapsLocationService.getPlaceDetails(
+        suggestion.id,
+        appEnv.googleMapsApiKey,
+        sessionTokenRef.current
+      );
+
+      if (!placeDetails) {
+        Alert.alert('Error', 'Could not fetch location details. Please try again.');
+        return;
+      }
+
+      const nextRegion = {
+        latitude: placeDetails.latitude,
+        longitude: placeDetails.longitude,
+        latitudeDelta: 0.008,
+        longitudeDelta: 0.008,
+      };
+
+      setSearchQuery(placeDetails.name || suggestion.title);
+      setSearchSuggestions([]);
+      setRegion(nextRegion);
+      setResolvedAddress(placeDetails.formattedAddress);
+      setShortAddress(suggestion.title);
+      mapRef.current?.animateToRegion(nextRegion, 450);
+    } catch (error) {
+      console.error('Failed to select suggestion:', error);
+      Alert.alert('Error', 'Could not select this location. Please try again.');
+    }
   };
 
   const handleUseCurrentLocation = async () => {
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const hasPermission = await GoogleMapsLocationService.requestLocationPermission();
 
-      if (!permission.granted) {
+      if (!hasPermission) {
         Alert.alert(
           'Location permission needed',
           'Allow location access so we can center the map around your delivery point.'
@@ -282,14 +298,21 @@ export default function DeliveryLocationScreen() {
         return;
       }
 
-      const currentPosition = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+      const currentPosition = await GoogleMapsLocationService.getCurrentLocationHighAccuracy({
+        timeout: 10000,
+        maxAge: 0,
       });
 
+      if (!currentPosition) {
+        Alert.alert('Location unavailable', 'We could not get your current location right now.');
+        return;
+      }
+
       const nextRegion = {
-        latitude: currentPosition.coords.latitude,
-        longitude: currentPosition.coords.longitude,
-        ...DEFAULT_DELTA,
+        latitude: currentPosition.latitude,
+        longitude: currentPosition.longitude,
+        latitudeDelta: 0.008,
+        longitudeDelta: 0.008,
       };
 
       setLocationPermissionDenied(false);
@@ -336,6 +359,10 @@ export default function DeliveryLocationScreen() {
         showsUserLocation={!locationPermissionDenied}
         showsMyLocationButton={false}
         onRegionChangeComplete={setRegion}
+        zoomControlEnabled={true}
+        zoomTapEnabled={true}
+        minZoomLevel={8}
+        maxZoomLevel={20}
       />
 
       <View pointerEvents="none" style={styles.centerPinWrapper}>
@@ -346,7 +373,7 @@ export default function DeliveryLocationScreen() {
       </View>
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity style={styles.topButton} onPress={() => router.replace('/cart')}>
+        <TouchableOpacity style={styles.topButton} onPress={() => router.replace('/(customer)/home')}>
           <FontAwesome name="arrow-left" size={18} color="#111" />
         </TouchableOpacity>
         <View style={styles.topMessage}>

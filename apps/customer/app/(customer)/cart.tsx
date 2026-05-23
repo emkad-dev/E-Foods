@@ -19,6 +19,7 @@ import {
   refreshCustomerPaymentStatus,
 } from '../../src/services/customerOrderActions';
 import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
+import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 
@@ -26,8 +27,6 @@ const tipOptions = [0, 2, 5, 10] as const;
 const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer', 'wallet', 'cash'];
 const comingSoonPayments: CheckoutPaymentMethod[] = ['wallet'];
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
-
-void formatMoney;
 
 export default function CartScreen() {
   const {
@@ -50,7 +49,6 @@ export default function CartScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [tipAmount, setTipAmount] = useState(2);
   const router = useRouter();
-  const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
   const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
   const pricingPreview = calculateCheckoutTotal({
     deliveryFee,
@@ -105,8 +103,10 @@ export default function CartScreen() {
       }
     };
 
-    loadRestaurant();
-    const interval = setInterval(loadRestaurant, 30000);
+    void loadRestaurant();
+    const interval = setInterval(() => {
+      void loadRestaurant();
+    }, 30000);
 
     return () => {
       active = false;
@@ -220,7 +220,8 @@ export default function CartScreen() {
         data={items}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
-          <View style={styles.header}>
+          <View style={styles.heroCard}>
+            <Text style={styles.heroEyebrow}>Checkout</Text>
             <Text style={styles.title}>{restaurantName}</Text>
             <Text style={styles.subtitle}>Review your order before checkout.</Text>
           </View>
@@ -248,7 +249,7 @@ export default function CartScreen() {
         )}
         ListFooterComponent={
           <View style={styles.footer}>
-            <View style={styles.fulfillmentSection}>
+            <View style={styles.sectionCard}>
               <Text style={styles.sectionLabel}>Fulfillment</Text>
               <View style={styles.fulfillmentToggle}>
                 <TouchableOpacity
@@ -262,8 +263,8 @@ export default function CartScreen() {
                 >
                   <FontAwesome
                     name="motorcycle"
-                    size={16}
-                    color={fulfillmentType === 'delivery' ? '#fff' : '#8a6442'}
+                    size={15}
+                    color={fulfillmentType === 'delivery' ? '#fff' : customerTheme.accentStrong}
                   />
                   <Text
                     style={[
@@ -283,7 +284,11 @@ export default function CartScreen() {
                   onPress={() => handleFulfillmentChange('pickup')}
                   disabled={!isPickupSupported}
                 >
-                  <FontAwesome name="shopping-bag" size={16} color={fulfillmentType === 'pickup' ? '#fff' : '#8a6442'} />
+                  <FontAwesome
+                    name="shopping-bag"
+                    size={15}
+                    color={fulfillmentType === 'pickup' ? '#fff' : customerTheme.accentStrong}
+                  />
                   <Text
                     style={[
                       styles.fulfillmentOptionText,
@@ -304,33 +309,23 @@ export default function CartScreen() {
 
             {user ? (
               fulfillmentType === 'delivery' ? (
-                <View style={styles.locationSection}>
+                <View style={styles.sectionCard}>
                   <Text style={styles.sectionLabel}>Delivery location</Text>
                   {deliveryLocation ? (
-                    <TouchableOpacity
-                      style={styles.locationCard}
-                      onPress={() => router.push('/delivery-location')}
-                      activeOpacity={0.9}
-                    >
+                    <TouchableOpacity style={styles.locationCard} onPress={() => router.push('/delivery-location')} activeOpacity={0.9}>
                       <View style={styles.locationIconWrap}>
-                        <FontAwesome name="map-marker" size={22} color="#ef4444" />
+                        <FontAwesome name="map-marker" size={20} color="#ef4444" />
                       </View>
                       <View style={styles.locationCopy}>
-                        <Text style={styles.locationTitle}>
-                          {deliveryLocation.shortAddress ?? 'Pinned delivery spot'}
-                        </Text>
+                        <Text style={styles.locationTitle}>{deliveryLocation.shortAddress ?? 'Pinned delivery spot'}</Text>
                         <Text style={styles.locationAddress}>{deliveryLocation.address}</Text>
                       </View>
                       <Text style={styles.locationAction}>Change</Text>
                     </TouchableOpacity>
                   ) : (
-                    <TouchableOpacity
-                      style={styles.locationEmptyCard}
-                      onPress={() => router.push('/delivery-location')}
-                      activeOpacity={0.9}
-                    >
+                    <TouchableOpacity style={styles.locationEmptyCard} onPress={() => router.push('/delivery-location')} activeOpacity={0.9}>
                       <View style={styles.locationEmptyIcon}>
-                        <FontAwesome name="crosshairs" size={18} color="#7a5b23" />
+                        <FontAwesome name="crosshairs" size={17} color={customerTheme.accentStrong} />
                       </View>
                       <View style={styles.locationCopy}>
                         <Text style={styles.locationTitle}>Choose where we should deliver</Text>
@@ -344,20 +339,24 @@ export default function CartScreen() {
                   <TextInput
                     style={styles.noteInput}
                     placeholder="Apartment, suite, or landmark (optional)"
+                    placeholderTextColor={customerTheme.textSoft}
                     value={deliveryNote}
                     onChangeText={handleDeliveryNoteChange}
                   />
                 </View>
               ) : (
-                <View style={styles.pickupCard}>
-                  <View style={styles.pickupIcon}>
-                    <FontAwesome name="shopping-bag" size={18} color="#7a5b23" />
-                  </View>
-                  <View style={styles.locationCopy}>
-                    <Text style={styles.locationTitle}>Pickup from {restaurantName}</Text>
-                    <Text style={styles.locationAddress}>
-                      We will keep this order ready for collection once the restaurant marks it prepared.
-                    </Text>
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionLabel}>Pickup</Text>
+                  <View style={styles.pickupCard}>
+                    <View style={styles.pickupIcon}>
+                      <FontAwesome name="shopping-bag" size={17} color={customerTheme.accentStrong} />
+                    </View>
+                    <View style={styles.locationCopy}>
+                      <Text style={styles.locationTitle}>Pickup from {restaurantName}</Text>
+                      <Text style={styles.locationAddress}>
+                        We will keep this order ready for collection once the restaurant marks it prepared.
+                      </Text>
+                    </View>
                   </View>
                 </View>
               )
@@ -369,7 +368,8 @@ export default function CartScreen() {
                 />
               </View>
             )}
-            <View style={styles.paymentSection}>
+
+            <View style={styles.sectionCard}>
               <Text style={styles.sectionLabel}>Payment</Text>
               <View style={styles.optionGrid}>
                 {paymentOptions.map((option) => {
@@ -413,7 +413,8 @@ export default function CartScreen() {
                 })}
               </View>
             </View>
-            <View style={styles.tipSection}>
+
+            <View style={styles.sectionCard}>
               <Text style={styles.sectionLabel}>Courier tip</Text>
               <View style={styles.tipRow}>
                 {tipOptions.map((option) => {
@@ -433,65 +434,70 @@ export default function CartScreen() {
                 })}
               </View>
             </View>
-            <View style={styles.summarySplit}>
-              <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryDetailValue}>{formatMoney(total)}</Text>
-            </View>
-            <View style={styles.summarySplit}>
-              <Text style={styles.summaryLabel}>Delivery fee</Text>
-              <Text style={styles.summaryDetailValue}>
-                {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'Free'}
-              </Text>
-            </View>
-            <View style={styles.summarySplit}>
-              <Text style={styles.summaryLabel}>Service fee</Text>
-              <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.serviceFee)}</Text>
-            </View>
-            <View style={styles.summarySplit}>
-              <Text style={styles.summaryLabel}>Tip</Text>
-              <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.tip)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Order total</Text>
-              <Text style={styles.summaryValue}>{formatMoney(pricingPreview.total)}</Text>
-            </View>
-            <TouchableOpacity
-              style={[
-                styles.checkoutButton,
-                submitting || Boolean(restaurantUnavailableReason) ? styles.checkoutButtonDisabled : null,
-              ]}
-              onPress={handlePlaceOrder}
-              disabled={submitting || Boolean(restaurantUnavailableReason)}
-            >
-              <Text style={styles.checkoutButtonText}>
-                {user
-                  ? fulfillmentType === 'delivery'
-                    ? deliveryLocation
-                      ? (submitting
+
+            <View style={styles.summaryCard}>
+              <Text style={styles.sectionLabel}>Summary</Text>
+              <View style={styles.summarySplit}>
+                <Text style={styles.summaryDetailLabel}>Subtotal</Text>
+                <Text style={styles.summaryDetailValue}>{formatMoney(total)}</Text>
+              </View>
+              <View style={styles.summarySplit}>
+                <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
+                <Text style={styles.summaryDetailValue}>
+                  {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'Free'}
+                </Text>
+              </View>
+              <View style={styles.summarySplit}>
+                <Text style={styles.summaryDetailLabel}>Service fee</Text>
+                <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.serviceFee)}</Text>
+              </View>
+              <View style={styles.summarySplit}>
+                <Text style={styles.summaryDetailLabel}>Tip</Text>
+                <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.tip)}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Order total</Text>
+                <Text style={styles.summaryValue}>{formatMoney(pricingPreview.total)}</Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.checkoutButton,
+                  submitting || Boolean(restaurantUnavailableReason) ? styles.checkoutButtonDisabled : null,
+                ]}
+                onPress={handlePlaceOrder}
+                disabled={submitting || Boolean(restaurantUnavailableReason)}
+              >
+                <Text style={styles.checkoutButtonText}>
+                  {user
+                    ? fulfillmentType === 'delivery'
+                      ? deliveryLocation
+                        ? submitting
                           ? paymentMethod === 'cash'
                             ? 'Placing cash order...'
                             : 'Opening Paystack...'
                           : paymentMethod === 'cash'
                             ? 'Place cash order'
-                            : 'Continue to payment')
-                      : 'Choose delivery location'
-                    : (submitting
+                            : 'Continue to payment'
+                        : 'Choose delivery location'
+                      : submitting
                         ? paymentMethod === 'cash'
                           ? 'Placing pickup order...'
                           : 'Opening Paystack...'
                         : paymentMethod === 'cash'
                           ? 'Place pickup order'
-                          : 'Continue to payment')
-                  : 'Sign in to place order'}
+                          : 'Continue to payment'
+                    : 'Sign in to place order'}
+                </Text>
+              </TouchableOpacity>
+              <Text style={styles.paymentHint}>
+                {paymentMethod === 'cash'
+                  ? `Cash will be collected ${fulfillmentType === 'pickup' ? 'when you collect the order' : 'at drop-off'}.`
+                  : 'Paystack will open in your browser. Your order only becomes live for the restaurant after payment verification succeeds.'}
               </Text>
-            </TouchableOpacity>
-            <Text style={styles.paymentHint}>
-              {paymentMethod === 'cash'
-                ? `Cash will be collected ${fulfillmentType === 'pickup' ? 'when you collect the order' : 'at drop-off'}.`
-                : 'Paystack will open in your browser. Your order only becomes live for the restaurant after payment verification succeeds.'}
-            </Text>
+            </View>
           </View>
         }
+        contentContainerStyle={styles.listContent}
       />
     </View>
   );
@@ -499,58 +505,76 @@ export default function CartScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: customerTheme.background,
     flex: 1,
+  },
+  listContent: {
+    padding: 14,
+    paddingBottom: 28,
   },
   emptyContainer: {
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.background,
     flex: 1,
     justifyContent: 'center',
     padding: 24,
   },
   emptyTitle: {
-    color: '#222',
-    fontSize: 24,
-    fontWeight: '700',
+    color: customerTheme.text,
+    fontSize: 22,
+    fontWeight: '800',
     marginBottom: 8,
   },
   emptyCopy: {
-    color: '#666',
-    fontSize: 16,
+    color: customerTheme.textMuted,
+    fontSize: 14,
     textAlign: 'center',
   },
-  header: {
+  heroCard: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 12,
     padding: 16,
+  },
+  heroEyebrow: {
+    color: customerTheme.accentStrong,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
   },
   title: {
-    color: '#111',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 6,
+    color: customerTheme.text,
+    fontSize: 22,
+    fontWeight: '800',
+    marginTop: 8,
   },
   subtitle: {
-    color: '#666',
-    fontSize: 15,
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    marginTop: 5,
   },
   itemCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 14,
   },
   itemCopy: {
-    marginBottom: 12,
+    marginBottom: 10,
   },
   itemName: {
-    color: '#222',
-    fontSize: 16,
-    fontWeight: '700',
+    color: customerTheme.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
   itemMeta: {
-    color: '#666',
-    fontSize: 14,
+    color: customerTheme.textMuted,
+    fontSize: 12,
     marginTop: 4,
   },
   itemActions: {
@@ -559,60 +583,71 @@ const styles = StyleSheet.create({
   },
   quantityButton: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
-    borderRadius: 8,
-    height: 32,
+    backgroundColor: customerTheme.accent,
+    borderRadius: 10,
+    height: 30,
     justifyContent: 'center',
-    width: 32,
+    width: 30,
   },
   quantityButtonText: {
     color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
   },
   quantityText: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginHorizontal: 14,
+    color: customerTheme.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginHorizontal: 12,
   },
   removeButton: {
     marginLeft: 'auto',
   },
   removeButtonText: {
-    color: '#c62828',
-    fontWeight: '600',
+    color: customerTheme.danger,
+    fontSize: 12,
+    fontWeight: '800',
   },
   footer: {
-    padding: 16,
-    paddingBottom: 32,
+    paddingTop: 4,
   },
   guestPromptWrapper: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  fulfillmentSection: {
-    marginBottom: 18,
+  sectionCard: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
   },
-  locationSection: {
-    marginBottom: 16,
+  sectionLabel: {
+    color: customerTheme.textSoft,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+    textTransform: 'uppercase',
   },
   fulfillmentToggle: {
-    backgroundColor: '#fff3d9',
-    borderRadius: 18,
+    backgroundColor: customerTheme.surfaceStrong,
+    borderRadius: 16,
     flexDirection: 'row',
     marginBottom: 10,
     padding: 4,
   },
   fulfillmentOption: {
     alignItems: 'center',
-    borderRadius: 14,
+    borderRadius: 12,
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
   fulfillmentOptionActive: {
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
   },
   fulfillmentOptionIdle: {
     backgroundColor: 'transparent',
@@ -621,228 +656,228 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   fulfillmentOptionText: {
-    color: '#8a6442',
-    fontSize: 14,
-    fontWeight: '700',
+    color: customerTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '800',
     marginLeft: 8,
   },
   fulfillmentOptionTextActive: {
     color: '#fff',
   },
   fulfillmentHint: {
-    color: '#6b7280',
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  sectionLabel: {
-    color: '#6b7280',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-    marginBottom: 10,
-    textTransform: 'uppercase',
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
   },
   warningText: {
-    color: '#b45309',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 20,
+    color: '#8a4f12',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 18,
     marginTop: 8,
   },
   locationCard: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 18,
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
     flexDirection: 'row',
-    marginBottom: 14,
-    padding: 16,
+    marginBottom: 12,
+    padding: 14,
   },
   locationEmptyCard: {
     alignItems: 'center',
-    backgroundColor: '#fff7e8',
-    borderColor: '#f1d59c',
-    borderRadius: 18,
+    backgroundColor: customerTheme.surfaceStrong,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
-    marginBottom: 14,
-    padding: 16,
+    marginBottom: 12,
+    padding: 14,
   },
   locationIconWrap: {
     alignItems: 'center',
     backgroundColor: '#fde7e7',
-    borderRadius: 16,
-    height: 42,
+    borderRadius: 14,
+    height: 38,
     justifyContent: 'center',
     marginRight: 12,
-    width: 42,
+    width: 38,
   },
   locationEmptyIcon: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    height: 42,
+    backgroundColor: customerTheme.surface,
+    borderRadius: 14,
+    height: 38,
     justifyContent: 'center',
     marginRight: 12,
-    width: 42,
+    width: 38,
   },
   locationCopy: {
     flex: 1,
   },
   locationTitle: {
-    color: '#111827',
-    fontSize: 16,
-    fontWeight: '700',
+    color: customerTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
   },
   locationAddress: {
-    color: '#6b7280',
-    fontSize: 13,
-    lineHeight: 19,
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
     marginTop: 4,
   },
   locationAction: {
-    color: '#f59e0b',
-    fontSize: 13,
-    fontWeight: '700',
-    marginLeft: 12,
+    color: customerTheme.accentStrong,
+    fontSize: 12,
+    fontWeight: '800',
+    marginLeft: 10,
   },
   noteInput: {
-    backgroundColor: '#fff',
-    borderColor: '#ddd',
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.border,
     borderRadius: 12,
     borderWidth: 1,
-    height: 52,
-    paddingHorizontal: 16,
+    color: customerTheme.text,
+    height: 46,
+    paddingHorizontal: 14,
   },
   pickupCard: {
     alignItems: 'center',
-    backgroundColor: '#fff8ea',
-    borderColor: '#f3d8a5',
-    borderRadius: 18,
+    backgroundColor: customerTheme.surfaceStrong,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
-    marginBottom: 16,
-    padding: 16,
+    padding: 14,
   },
   pickupIcon: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    height: 42,
+    backgroundColor: customerTheme.surface,
+    borderRadius: 14,
+    height: 38,
     justifyContent: 'center',
     marginRight: 12,
-    width: 42,
-  },
-  paymentSection: {
-    marginBottom: 16,
+    width: 38,
   },
   optionGrid: {
     gap: 10,
   },
   optionCard: {
-    backgroundColor: '#fff',
-    borderColor: '#e5e7eb',
-    borderRadius: 16,
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.border,
+    borderRadius: 14,
     borderWidth: 1,
-    padding: 14,
+    padding: 12,
   },
   optionCardDisabled: {
     opacity: 0.6,
   },
   optionCardActive: {
-    backgroundColor: '#fff7e8',
-    borderColor: '#f5b342',
+    backgroundColor: customerTheme.surfaceStrong,
+    borderColor: customerTheme.accent,
   },
   optionTitle: {
-    color: '#111827',
-    fontSize: 15,
-    fontWeight: '700',
+    color: customerTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
   },
   optionTitleActive: {
-    color: '#8a5a12',
+    color: customerTheme.accentStrong,
   },
   optionCopy: {
-    color: '#6b7280',
-    fontSize: 13,
-    lineHeight: 18,
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
     marginTop: 4,
   },
   optionCopyActive: {
-    color: '#8a6442',
-  },
-  tipSection: {
-    marginBottom: 18,
+    color: customerTheme.textSoft,
   },
   tipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   tipChip: {
-    backgroundColor: '#fff',
-    borderColor: '#e5e7eb',
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.border,
     borderRadius: 999,
     borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
   tipChipActive: {
-    backgroundColor: '#f5b342',
-    borderColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
+    borderColor: customerTheme.accent,
   },
   tipChipText: {
-    color: '#6b7280',
-    fontSize: 13,
-    fontWeight: '700',
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
   },
   tipChipTextActive: {
     color: '#fff',
   },
+  summaryCard: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+  },
   summarySplit: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+  summaryDetailLabel: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
   },
   summaryDetailValue: {
-    color: '#4b5563',
-    fontSize: 15,
-    fontWeight: '600',
+    color: customerTheme.text,
+    fontSize: 13,
+    fontWeight: '700',
   },
   summaryRow: {
-    borderTopColor: '#e5e7eb',
+    borderTopColor: customerTheme.border,
     borderTopWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
-    marginTop: 6,
-    paddingTop: 14,
+    marginBottom: 14,
+    marginTop: 4,
+    paddingTop: 12,
   },
   summaryLabel: {
-    color: '#333',
-    fontSize: 16,
+    color: customerTheme.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
   summaryValue: {
-    color: '#111',
-    fontSize: 20,
-    fontWeight: '700',
+    color: customerTheme.accentStrong,
+    fontSize: 18,
+    fontWeight: '800',
   },
   checkoutButton: {
     alignItems: 'center',
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.accent,
     borderRadius: 12,
-    paddingVertical: 16,
+    paddingVertical: 14,
   },
   checkoutButtonDisabled: {
     backgroundColor: '#d1d5db',
   },
   checkoutButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '800',
   },
   paymentHint: {
-    color: '#6b7280',
-    fontSize: 13,
-    lineHeight: 19,
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
     marginTop: 10,
   },
 });

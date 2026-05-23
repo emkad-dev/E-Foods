@@ -2,6 +2,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
+import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { customerTheme } from '../../src/theme/palette';
@@ -23,7 +24,24 @@ export default function CustomerLayout() {
       screenOptions={{
         tabBarActiveTintColor: customerTheme.accentStrong,
         tabBarInactiveTintColor: customerTheme.textMuted,
-        tabBarStyle: { backgroundColor: customerTheme.surface, borderTopColor: customerTheme.border },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', paddingBottom: 2 },
+        tabBarItemStyle: { paddingVertical: 4 },
+        tabBarStyle: {
+          backgroundColor: customerTheme.surface,
+          borderTopColor: 'transparent',
+          borderRadius: 22,
+          bottom: 10,
+          elevation: 6,
+          height: 62,
+          left: 10,
+          paddingTop: 4,
+          position: 'absolute',
+          right: 10,
+          shadowColor: '#684612',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.14,
+          shadowRadius: 14,
+        },
         headerShown: false,
       }}
     >
@@ -39,22 +57,28 @@ export default function CustomerLayout() {
         options={{
           title: 'Cart',
           headerShown: true,
-          headerRight: () => <AuthHeaderActions />,
-          tabBarIcon: ({ color }) => <FontAwesome name="shopping-cart" size={24} color={color} />,
+          headerLeft: () => <CustomerHeaderBackButton href="/(customer)/home" />,
+          headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
+          tabBarStyle: { display: 'none' },
+          tabBarIcon: ({ color }) => <FontAwesome name="shopping-cart" size={22} color={color} />,
         }}
       />
       <Tabs.Screen
         name="orders"
         options={{
           title: 'Order',
-          tabBarIcon: ({ color }) => <FontAwesome name="list" size={24} color={color} />,
+          headerShown: false,
+          tabBarStyle: { display: 'none' },
+          tabBarIcon: ({ color }) => <FontAwesome name="list" size={22} color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <FontAwesome name="user" size={24} color={color} />,
+          headerShown: false,
+          tabBarStyle: { display: 'none' },
+          tabBarIcon: ({ color }) => <FontAwesome name="user" size={22} color={color} />,
         }}
       />
       <Tabs.Screen

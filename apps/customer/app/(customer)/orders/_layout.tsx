@@ -1,6 +1,7 @@
 // app/(customer)/orders/_layout.tsx
 import { Stack } from 'expo-router';
-import AuthHeaderActions from '../../../src/components/AuthHeaderActions';
+import CustomerHeaderBackButton from '../../../src/components/CustomerHeaderBackButton';
+import { customerTheme } from '../../../src/theme/palette';
 
 export default function OrdersLayout() {
   return (
@@ -8,15 +9,16 @@ export default function OrdersLayout() {
       <Stack.Screen
         name="index"
         options={{
+          headerLeft: () => <CustomerHeaderBackButton href="/(customer)/home" />,
+          headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
           title: 'Orders',
-          headerRight: () => <AuthHeaderActions />,
         }}
       />
       <Stack.Screen
         name="[id]"
         options={{
+          headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
           title: 'Order Details',
-          headerRight: () => <AuthHeaderActions />,
         }}
       />
     </Stack>

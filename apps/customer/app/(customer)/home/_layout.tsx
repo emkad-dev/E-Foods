@@ -1,5 +1,4 @@
 import { Stack } from 'expo-router';
-import AuthHeaderActions from '../../../src/components/AuthHeaderActions';
 
 export default function HomeLayout() {
   return (
@@ -7,15 +6,13 @@ export default function HomeLayout() {
       <Stack.Screen
         name="index"
         options={{
-          title: 'Restaurant',
-          headerRight: () => <AuthHeaderActions />,
+          headerShown: false,
         }}
       />
       <Stack.Screen
         name="restaurant/[id]"
         options={{
-          title: 'Restaurant',
-          headerRight: () => <AuthHeaderActions />,
+          headerShown: false,
         }}
       />
     </Stack>

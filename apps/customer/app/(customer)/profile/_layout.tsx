@@ -1,6 +1,7 @@
 // app/(customer)/profile/_layout.tsx
 import { Stack } from 'expo-router';
-import AuthHeaderActions from '../../../src/components/AuthHeaderActions';
+import CustomerHeaderBackButton from '../../../src/components/CustomerHeaderBackButton';
+import { customerTheme } from '../../../src/theme/palette';
 
 export default function ProfileLayout() {
   return (
@@ -8,8 +9,9 @@ export default function ProfileLayout() {
       <Stack.Screen
         name="index"
         options={{
+          headerLeft: () => <CustomerHeaderBackButton href="/(customer)/home" />,
+          headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
           title: 'Profile',
-          headerRight: () => <AuthHeaderActions />,
         }}
       />
       {/* Add additional screens here if needed, e.g., edit-profile.tsx */}
