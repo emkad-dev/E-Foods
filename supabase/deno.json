@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.window", "dom", "esnext"],
+    "strict": true
+  },
+  "fmt": {
+    "include": ["functions/**/*.ts"]
+  },
+  "lint": {
+    "include": ["functions/**/*.ts"]
+  }
+}

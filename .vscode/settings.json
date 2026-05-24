@@ -12,5 +12,7 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "deno.enablePaths": ["supabase/functions"],
+  "deno.config": "supabase/deno.json"
 }
