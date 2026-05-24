@@ -70,7 +70,7 @@ export default function PartnerRegisterScreen() {
     }
 
     try {
-      await signUp(email.trim(), password, {
+      const result = await signUp(email.trim(), password, {
         address: address.trim(),
         contactName: contactName.trim(),
         cuisine,
@@ -84,7 +84,9 @@ export default function PartnerRegisterScreen() {
 
       Alert.alert(
         'Application submitted',
-        'Your restaurant application is now waiting for admin approval. Come back and sign in after the team approves this partner account.'
+        result.verificationEmailSent
+          ? 'Your restaurant application is pending admin approval. Check your inbox and confirm your email before trying to sign in.'
+          : 'Your restaurant application is pending admin approval. Email verification could not be confirmed from the app, so check your inbox later before signing in.'
       );
       router.replace('/(auth)/login');
     } catch (nextError: any) {

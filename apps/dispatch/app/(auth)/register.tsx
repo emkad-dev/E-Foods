@@ -71,7 +71,7 @@ export default function DispatchRegisterScreen() {
     }
 
     try {
-      await signUp(email.trim(), password, {
+      const result = await signUp(email.trim(), password, {
         currentAddress: currentAddress.trim() || undefined,
         displayName: displayName.trim(),
         lga,
@@ -82,7 +82,9 @@ export default function DispatchRegisterScreen() {
 
       Alert.alert(
         'Application submitted',
-        'Your dispatch rider details are now waiting for admin approval. Sign in after the team approves this account.'
+        result.verificationEmailSent
+          ? 'Your rider application is pending admin approval. Check your inbox and confirm your email before trying to sign in.'
+          : 'Your rider application is pending admin approval. Email verification could not be confirmed from the app, so check your inbox later before signing in.'
       );
       router.replace('/(auth)/login');
     } catch (nextError: any) {
