@@ -1,6 +1,6 @@
 # EBuy Platform
 
-This repository is a multi-app delivery platform workspace. Customer, partner, dispatch, and admin all live in one repo, runs as separate Expo apps, and share a hardened Firebase + SQL hybrid backend direction.
+This repository is a multi-app delivery platform workspace. Customer, partner, dispatch, and admin all live in one repo, run as separate Expo apps, and now share a Supabase + Postgres backend direction.
 
 ## App layout
 
@@ -36,33 +36,7 @@ Default ports:
 
 These defaults are intentional so the installed dev builds do not fight over the same Metro port.
 
-### Temporary dev auth bypass
-
-If you want to inspect app flow without signing in, you can temporarily enable one shared bypass for all apps.
-
-Copy [`.env.apps.example`](/c:/Users/emkad/EBuy/E-Foods/.env.apps.example) to `.env.apps` in the repo root, then set:
-
-```bash
-EXPO_PUBLIC_DEV_AUTH_BYPASS=true
-```
-
-Optional overrides:
-
-```bash
-EXPO_PUBLIC_DEV_AUTH_EMAIL=dev@example.com
-EXPO_PUBLIC_DEV_AUTH_UID=dev-user
-```
-
-Each app will inject its own mock role when this flag is on:
-
-- customer -> `customer`
-- partner -> `restaurant`
-- dispatch -> `dispatch`
-- admin -> `admin`
-
-Auth actions become safe no-ops while bypass is enabled, so remember to turn the flag back off when you want to test real sign-in again.
-
-The Expo start scripts now load `.env.apps` automatically for:
+The Expo start scripts load `.env.apps` automatically for:
 
 - `npm run dev:customer`
 - `npm run dev:partner`
@@ -108,10 +82,9 @@ Notification tap routes are path-driven, so each app can deep-link directly into
 
 Today the stack is:
 
-- `Firebase Auth` for sign-in and token issuance
-- `Firebase custom claims` for privileged app access
-- `Firestore` for profile/session metadata and realtime mirrors
-- `Cloud Functions` for trusted mutations and protected read APIs
+- `Supabase Auth` for sign-in and token issuance
+- `Supabase JWT claims` for privileged app access
+- `Supabase Edge Functions` for trusted mutations and protected read APIs
 - `Postgres via Prisma` for authority records, approvals, operational orders, riders, and audit/event history
 
 Paystack phase 1 is now implemented in code for `card` and `bank transfer` checkout:
@@ -120,8 +93,10 @@ Paystack phase 1 is now implemented in code for `card` and `bank transfer` check
 - the order stays out of partner/dispatch operations until online payment is verified
 - a Paystack webhook or manual refresh confirms payment and marks the order trusted
 - `wallet` remains intentionally blocked for now
+- the Paystack dashboard webhook should point to:
+  `https://YOUR_PROJECT_REF.supabase.co/functions/v1/paystack-webhook`
 
-This still needs env setup plus Functions/rules deployment before it becomes live in Firebase.
+This still needs env setup plus live Edge Function deployment before it becomes usable.
 
 ## First admin bootstrap
 
@@ -136,7 +111,7 @@ PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxx
 PAYSTACK_CALLBACK_URL=https://your-web-app-or-confirmation-page.example.com/payment-return
 ```
 
-Then sign in with that Firebase Auth account and call the `bootstrapFirstAdmin` function once. After the first admin exists, normal admin-managed role assignment should be used instead.
+Then sign in with that Supabase Auth account and call the `bootstrapFirstAdmin` function once. After the first admin exists, normal admin-managed role assignment should be used instead.
 
 ## End-to-end sandbox runbook
 
@@ -185,11 +160,11 @@ npm run dev:admin
    - dispatch assigns a rider and moves delivery through pickup, on-the-way, and delivered
    - customer order tracking updates as the order progresses
 
-## Firebase and SQL deploy flow
+## Supabase and SQL deploy flow
 
 ### Environment
 
-Functions need both Firebase project config and a live Postgres connection:
+Edge Functions need both Supabase project config and a live Postgres connection:
 
 ```bash
 # Runtime traffic through Supavisor connection pooling:
@@ -233,15 +208,13 @@ The repo has been cut over on the app side, but two backend items still need to 
 
 Do these next:
 
-1. Turn `EXPO_PUBLIC_DEV_AUTH_BYPASS` back off in `.env.apps` so real auth is restored.
-2. Add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL` to `functions/.env` and the live backend environment before resuming payment testing.
-3. Get `npm run db:migrate:deploy` through against Supabase so the authored Prisma migrations are actually applied to the live database.
-4. Confirm the latest SQL migrations are live, especially:
+1. Add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL` to `functions/.env` and the live backend environment before resuming payment testing.
+2. Get `npm run db:migrate:deploy` through against Supabase so the authored Prisma migrations are actually applied to the live database.
+3. Confirm the latest SQL migrations are live, especially:
    - `RestaurantRecord.menu` for customer discovery and restaurant detail
    - `DispatchRiderRecord.region`, `DispatchRiderRecord.lga`, `DispatchRiderRecord.phoneNumber`, and `DispatchRiderRecord.currentAddress` for the native dispatch rider path
-5. Apply the latest application-record migration (`20260514_application_records`) on the live Supabase database before using the native approval and offboarding flows in production.
-6. Remove the remaining legacy Firebase-hosted backend path once the native Supabase functions or SQL/RPC replacements are live.
-7. Rerun the full sandbox flow end to end:
+4. Apply the latest application-record migration (`20260514_application_records`) on the live Supabase database before using the native approval and offboarding flows in production.
+5. Rerun the full sandbox flow end to end:
    - bootstrap first admin
    - provision partner and dispatch
    - create restaurant and menu
@@ -254,8 +227,8 @@ Do these next:
 
 Before you move on, the tracked backlog is:
 
-1. revert `EXPO_PUBLIC_DEV_AUTH_BYPASS` in `.env.apps`
-2. add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL`
+1. add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL`
+2. deploy `paystack-webhook` and `payment-verification`
 3. fix `npm run db:migrate:deploy` on Supabase and apply the live migrations
 4. confirm the new `DispatchRiderRecord` SQL fields are applied live
 5. apply the latest application-record migration (`20260514_application_records`) on Supabase before using the native approval and offboarding flows live
