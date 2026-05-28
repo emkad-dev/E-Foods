@@ -7,6 +7,7 @@ export type PartnerApplicationInput = {
   deliveryTime?: string;
   description?: string;
   latitude?: number | null;
+  logoImage?: string | null;
   longitude?: number | null;
   phoneNumber: string;
   restaurantName: string;

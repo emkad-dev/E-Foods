@@ -1,6 +1,7 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { corsHeaders } from '../_shared/cors.ts';
+import { verifySupabaseJwt } from '../_shared/auth.ts';
 import { serviceClient } from '../_shared/client.ts';
 import {
   buildNotificationData,
@@ -64,6 +65,7 @@ type RestaurantRecordRow = {
   description?: string | null;
   id: string;
   image?: string | null;
+  logoImage?: string | null;
   isOpen?: boolean | null;
   isPublished?: boolean | null;
   latitude?: number | null;
@@ -143,6 +145,7 @@ type PartnerApplicationRow = {
   description?: string | null;
   email: string;
   id: string;
+  logoImage?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   phoneNumber: string;
@@ -550,6 +553,7 @@ const buildRestaurantResponse = (
   description: sanitizeOptionalText(restaurant.description),
   id: restaurant.id,
   image: sanitizeOptionalText(restaurant.image),
+  logoImage: sanitizeOptionalText(restaurant.logoImage),
   isOpen: restaurant.isOpen !== false,
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,
@@ -630,6 +634,7 @@ const buildPartnerApplicationResponse = (application: PartnerApplicationRow) => 
   description: sanitizeOptionalText(application.description),
   email: sanitizeText(application.email),
   id: application.id,
+  logoImage: sanitizeOptionalText(application.logoImage),
   latitude: application.latitude ?? null,
   longitude: application.longitude ?? null,
   phoneNumber: sanitizeText(application.phoneNumber),
@@ -971,7 +976,7 @@ const loadPartnerApplication = async (applicationId: string) => {
   const { data, error } = await serviceClient
     .from('PartnerApplicationRecord')
     .select(
-      'id,uid,email,contactName,phoneNumber,restaurantName,cuisine,address,description,latitude,longitude,deliveryTime,status,restaurantId,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt'
+      'id,uid,email,contactName,phoneNumber,restaurantName,cuisine,address,description,logoImage,latitude,longitude,deliveryTime,status,restaurantId,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt'
     )
     .eq('id', applicationId)
     .maybeSingle<PartnerApplicationRow>();
@@ -1004,7 +1009,7 @@ const loadRestaurantById = async (restaurantId: string) => {
     serviceClient
       .from('RestaurantRecord')
       .select(
-        'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+        'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
       )
       .eq('id', restaurantId)
       .maybeSingle<RestaurantRecordRow>(),
@@ -1043,7 +1048,7 @@ const loadManagedRestaurantForUser = async (uid: string, role: string) => {
   const query = serviceClient
     .from('RestaurantRecord')
     .select(
-      'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+      'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
     )
     .order('updatedAt', { ascending: false })
     .limit(1);
@@ -1510,6 +1515,20 @@ const loadOrdersForCustomer = async (customerId: string) => {
       assignmentsByOrderId.get(order.id) ?? null
     )
   );
+};
+
+const loadFavoriteRestaurantIds = async (customerId: string) => {
+  const { data, error } = await serviceClient
+    .from('CustomerFavoriteRestaurant')
+    .select('restaurantId,createdAt')
+    .eq('customerId', customerId)
+    .order('createdAt', { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as { restaurantId: string }[]).map((favorite) => favorite.restaurantId);
 };
 
 const loadOrderBundle = async (orderId: string, includeEvents = false) => {
@@ -2181,6 +2200,7 @@ const buildPartnerRestaurantPayload = (
     deliveryTime: sanitizeText(input.deliveryTime, DEFAULT_DELIVERY_TIME),
     description: sanitizeOptionalText(input.description) ?? '',
     image: sanitizeOptionalText(input.image) ?? '',
+    logoImage: sanitizeOptionalText(input.logoImage) ?? '',
     isOpen: input.isOpen !== false,
     isPublished: allowPublish ? input.isPublished === true : existingPublished,
     latitude,
@@ -2307,6 +2327,48 @@ const upsertUserAccount = async (record: JsonObject) => {
   }
 };
 
+const extractClaimText = (claims: Record<string, unknown>, key: string) =>
+  typeof claims[key] === 'string' && claims[key].trim() ? claims[key].trim() : null;
+
+const getBootstrapRequestContext = async (request: Request) => {
+  const { claims, token } = await verifySupabaseJwt(request);
+  const uid = extractClaimText(claims as Record<string, unknown>, 'sub');
+  const email = extractClaimText(claims as Record<string, unknown>, 'email')?.toLowerCase();
+  const role = extractClaimText(claims as Record<string, unknown>, 'user_role') ?? 'customer';
+
+  if (!uid || !email) {
+    fail(401, 'Authenticated bootstrap request is missing a valid user identity.');
+  }
+
+  const existingAccount = await loadUserAccount(uid);
+  if (!existingAccount) {
+    const now = nowIso();
+    await upsertUserAccount({
+      uid,
+      email,
+      displayName: email.split('@')[0],
+      emailVerified: true,
+      roleDisplay: role,
+      accountDisabled: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return {
+    email,
+    role,
+    token,
+    uid,
+    userProfile: {
+      accountDisabled: false,
+      email,
+      role,
+      uid,
+    },
+  };
+};
+
 const deleteUserAccount = async (uid: string) => {
   const { error } = await serviceClient.from('UserAccount').delete().eq('uid', uid);
   if (error) {
@@ -2362,9 +2424,8 @@ const handleNativeAction = async (
   request: Request,
   data: Record<string, unknown>
 ) => {
-  const context = await getAuthenticatedRequestContext(request);
-
   if (action === 'bootstrapFirstAdmin') {
+    const context = await getBootstrapRequestContext(request);
     const allowedEmails = getBootstrapAdminEmails();
     if (!allowedEmails.includes(context.email.toLowerCase())) {
       fail(403, 'This account is not allowed to run the first-admin bootstrap flow.');
@@ -2410,6 +2471,8 @@ const handleNativeAction = async (
       },
     });
   }
+
+  const context = await getAuthenticatedRequestContext(request);
 
   if (action === 'provisionStaffAccount') {
     ensureRole(context.role, ['admin']);
@@ -2979,9 +3042,10 @@ const handleNativeAction = async (
     const phoneNumber = sanitizeText(data.phoneNumber);
     const restaurantName = sanitizeText(data.restaurantName);
     const cuisine = sanitizeText(data.cuisine);
-    const address = sanitizeText(data.address);
-    const description = sanitizeOptionalText(data.description);
-    const deliveryTime = sanitizeOptionalText(data.deliveryTime) ?? DEFAULT_DELIVERY_TIME;
+      const address = sanitizeText(data.address);
+      const description = sanitizeOptionalText(data.description);
+      const logoImage = sanitizeOptionalText(data.logoImage);
+      const deliveryTime = sanitizeOptionalText(data.deliveryTime) ?? DEFAULT_DELIVERY_TIME;
     const latitude =
       data.latitude === null || data.latitude === undefined ? null : parseNumber(data.latitude, Number.NaN);
     const longitude =
@@ -3033,9 +3097,10 @@ const handleNativeAction = async (
         phoneNumber,
         restaurantName,
         cuisine,
-        address,
-        description,
-        latitude: hasLatitude ? latitude : null,
+          address,
+          description,
+          logoImage,
+          latitude: hasLatitude ? latitude : null,
         longitude: hasLongitude ? longitude : null,
         deliveryTime,
         status: PARTNER_APPLICATION_STATUS.PENDING,
@@ -3069,8 +3134,9 @@ const handleNativeAction = async (
     });
     await createAuditEntry(context.uid, 'partner_application_submitted', 'partner_application', context.uid, {
       cuisine,
-      restaurantName,
-    });
+        restaurantName,
+        logoImage: logoImage ?? null,
+      });
     await notifyAdmins({
       title: 'New partner application',
       body: `${restaurantName} submitted a partner application.`,
@@ -3105,7 +3171,7 @@ const handleNativeAction = async (
       serviceClient
         .from('RestaurantRecord')
         .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+          'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
         )
         .order('isPublished', { ascending: true })
         .order('updatedAt', { ascending: false }),
@@ -3121,7 +3187,7 @@ const handleNativeAction = async (
       serviceClient
         .from('PartnerApplicationRecord')
         .select(
-          'id,uid,email,contactName,phoneNumber,restaurantName,cuisine,address,description,latitude,longitude,deliveryTime,status,restaurantId,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt'
+          'id,uid,email,contactName,phoneNumber,restaurantName,cuisine,address,description,logoImage,latitude,longitude,deliveryTime,status,restaurantId,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt'
         )
         .order('submittedAt', { ascending: false }),
     ]);
@@ -3394,6 +3460,7 @@ const handleNativeAction = async (
           address: sanitizeOptionalText(application.address),
           description: sanitizeOptionalText(application.description) ?? '',
           image: '',
+          logoImage: sanitizeOptionalText(application.logoImage) ?? '',
           menu: [],
           deliveryFee: 0,
           deliveryRadiusKm: 12,
@@ -3531,6 +3598,73 @@ const handleNativeAction = async (
     return json(200, {
       data: {
         order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment),
+      },
+    });
+  }
+
+  if (action === 'customerListFavoriteRestaurants') {
+    ensureRole(context.role, ['customer', 'admin']);
+    const targetCustomerId = context.role === 'admin' ? sanitizeText(data.customerId, context.uid) : context.uid;
+    const restaurantIds = await loadFavoriteRestaurantIds(targetCustomerId);
+    return json(200, { data: { restaurantIds } });
+  }
+
+  if (action === 'customerToggleFavoriteRestaurant') {
+    ensureRole(context.role, ['customer', 'admin']);
+    const restaurantId = sanitizeText(data.restaurantId);
+    const requestedFavoriteState =
+      typeof data.isFavorite === 'boolean' ? data.isFavorite : null;
+
+    if (!restaurantId) {
+      fail(400, 'A restaurant id is required.');
+    }
+
+    const { restaurant, approval } = await loadRestaurantById(restaurantId);
+    if (!restaurant || restaurant.isPublished !== true || approval?.status !== 'approved') {
+      fail(404, 'This restaurant is not available for favorites.');
+    }
+
+    const customerId = context.role === 'admin' ? sanitizeText(data.customerId, context.uid) : context.uid;
+    const favoriteIds = new Set(await loadFavoriteRestaurantIds(customerId));
+    const isCurrentlyFavorite = favoriteIds.has(restaurantId);
+    const shouldBeFavorite = requestedFavoriteState ?? !isCurrentlyFavorite;
+
+    if (shouldBeFavorite && !isCurrentlyFavorite) {
+      const now = nowIso();
+      const { error } = await serviceClient.from('CustomerFavoriteRestaurant').upsert(
+        {
+          id: `${customerId}_${restaurantId}`,
+          customerId,
+          restaurantId,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { onConflict: 'customerId,restaurantId' }
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    }
+
+    if (!shouldBeFavorite && isCurrentlyFavorite) {
+      const { error } = await serviceClient
+        .from('CustomerFavoriteRestaurant')
+        .delete()
+        .eq('customerId', customerId)
+        .eq('restaurantId', restaurantId);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    }
+
+    const restaurantIds = await loadFavoriteRestaurantIds(customerId);
+    return json(200, {
+      data: {
+        isFavorite: shouldBeFavorite,
+        restaurantId,
+        restaurantIds,
       },
     });
   }
@@ -3909,7 +4043,7 @@ const handleNativeAction = async (
       serviceClient
         .from('RestaurantRecord')
         .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+          'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
         )
         .order('updatedAt', { ascending: false }),
     ]);
@@ -4049,6 +4183,7 @@ const handleNativeAction = async (
         address: profile.address,
         description: profile.description,
         image: profile.image,
+        logoImage: profile.logoImage,
         deliveryFee: profile.deliveryFee,
         deliveryRadiusKm: profile.deliveryRadiusKm,
         deliveryTime: profile.deliveryTime,
@@ -4663,7 +4798,7 @@ const handleNativeAction = async (
       serviceClient
         .from('RestaurantRecord')
         .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
+          'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
         )
         .order('updatedAt', { ascending: false }),
       serviceClient

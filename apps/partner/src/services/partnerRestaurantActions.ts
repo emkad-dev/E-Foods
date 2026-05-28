@@ -6,6 +6,7 @@ export type PartnerRestaurantProfileInput = {
   name: string;
   description?: string;
   image?: string;
+  logoImage?: string;
   cuisine?: string;
   deliveryTime?: string;
   openingTime: string;

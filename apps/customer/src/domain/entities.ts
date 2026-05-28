@@ -40,6 +40,7 @@ export interface RestaurantDocument extends DocumentData {
   name: string;
   description?: string;
   image?: string;
+  logoImage?: string | null;
   cuisine?: string;
   rating?: number;
   deliveryTime?: string | number;

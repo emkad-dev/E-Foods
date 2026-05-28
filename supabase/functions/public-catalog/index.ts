@@ -21,6 +21,7 @@ type RestaurantRecordRow = {
   description?: string | null;
   id: string;
   image?: string | null;
+  logoImage?: string | null;
   isOpen?: boolean | null;
   isPublished?: boolean | null;
   latitude?: number | null;
@@ -69,6 +70,7 @@ const toRestaurantResponse = (
   closingTime: sanitizeOptionalText(restaurant.closingTime),
   id: restaurant.id,
   image: sanitizeOptionalText(restaurant.image),
+  logoImage: sanitizeOptionalText(restaurant.logoImage),
   isOpen: restaurant.isOpen !== false,
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,
@@ -89,7 +91,7 @@ const loadApprovedRestaurantCatalog = async () => {
     serviceClient
       .from('RestaurantRecord')
       .select(
-        'id,name,ownerId,address,cuisine,description,image,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
+        'id,name,ownerId,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
       )
       .eq('isPublished', true)
       .order('updatedAt', { ascending: false }),

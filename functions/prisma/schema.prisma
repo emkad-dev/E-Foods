@@ -56,6 +56,7 @@ model UserAccount {
   approvedPartnerApplications PartnerApplicationRecord[] @relation("PartnerApplicationReviewer")
   approvedDispatchApplications DispatchApplicationRecord[] @relation("DispatchApplicationReviewer")
   auditLogs              AdminAuditLog[]      @relation("AuditActor")
+  favoriteRestaurants    CustomerFavoriteRestaurant[]
 }
 
 model UserRole {
@@ -83,6 +84,7 @@ model RestaurantRecord {
   address          String?
   description      String?
   image            String?
+  logoImage        String?
   menu             Json?
   deliveryFee      Float?
   deliveryRadiusKm Float?
@@ -102,6 +104,7 @@ model RestaurantRecord {
   owner            UserAccount?        @relation("RestaurantOwner", fields: [ownerId], references: [uid], onDelete: SetNull)
   approval         RestaurantApproval?
   orders           CustomerOrder[]
+  favorites        CustomerFavoriteRestaurant[]
 }
 
 model RestaurantApproval {
@@ -128,6 +131,7 @@ model PartnerApplicationRecord {
   cuisine         String
   address         String
   description     String?
+  logoImage       String?
   latitude        Float?
   longitude       Float?
   deliveryTime    String?
@@ -142,6 +146,20 @@ model PartnerApplicationRecord {
 
   @@index([status])
   @@index([submittedAt])
+}
+
+model CustomerFavoriteRestaurant {
+  id           String           @id @default(cuid())
+  customerId   String
+  restaurantId String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  customer     UserAccount      @relation(fields: [customerId], references: [uid], onDelete: Cascade)
+  restaurant   RestaurantRecord @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, restaurantId])
+  @@index([customerId])
+  @@index([restaurantId])
 }
 
 model DispatchApplicationRecord {

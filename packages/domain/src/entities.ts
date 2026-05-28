@@ -69,6 +69,7 @@ export interface RestaurantDocument extends DocumentData {
   name: string;
   description?: string;
   image?: string;
+  logoImage?: string | null;
   cuisine?: string | null;
   rating?: number;
   deliveryTime?: string | number | null;
@@ -204,6 +205,7 @@ export interface PartnerApplicationDocument extends DocumentData {
   cuisine: string;
   address: string;
   description?: string | null;
+  logoImage?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   deliveryTime?: string | null;
