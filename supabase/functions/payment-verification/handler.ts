@@ -7,6 +7,11 @@ import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
 } from '../_shared/notifications.ts';
+import {
+  toKoboAmount,
+  toNumber,
+  validatePaystackVerificationForOrder,
+} from './invariants.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -45,17 +50,6 @@ const verifyPaystackTransaction = async (reference: string) => {
 
   return data.data as JsonObject;
 };
-
-const toNumber = (value: unknown, fallback = 0) => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-};
-
-const toKoboAmount = (amount: unknown) => Math.round(toNumber(amount, 0) * 100);
 
 const normalizeStatus = (value: unknown, fallback: string) => {
   if (typeof value === 'string' && value.trim()) return value.trim();
@@ -188,12 +182,11 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
     if (orderError || !order) throw new Error('Order not found');
 
     const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
-    const expectedAmount = toKoboAmount((order.pricing ?? {}).total);
-    const actualAmount = toNumber(verifiedTransaction.amount, -1);
-
-    if (actualAmount !== expectedAmount) {
-      throw new Error(`Amount mismatch: expected ${expectedAmount}, got ${actualAmount}`);
-    }
+    validatePaystackVerificationForOrder({
+      order,
+      paymentReference,
+      transactionData: verifiedTransaction,
+    });
 
     const result = await markOrderPaymentState(order, verifiedTransaction, webhookEvent);
 

@@ -3,6 +3,7 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
 import { handlePaymentVerification } from '../payment-verification/handler.ts';
+import { resolveWebhookOrderIdForReference } from './invariants.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -104,15 +105,21 @@ Deno.serve(async (req) => {
     );
   }
 
-  const orderId =
-    normalizeText((eventData?.metadata as JsonObject | null)?.orderId) || (await getOrderIdForReference(reference));
+  const metadataOrderId = normalizeText((eventData?.metadata as JsonObject | null)?.orderId);
+  const transactionOrderId = await getOrderIdForReference(reference);
+  const orderResolution = resolveWebhookOrderIdForReference({
+    metadataOrderId,
+    transactionOrderId,
+  });
 
-  if (!orderId) {
-    return new Response(JSON.stringify({ received: true, ignored: true, reason: 'order_not_found', reference }), {
+  if (orderResolution.ignored) {
+    return new Response(JSON.stringify({ received: true, ignored: true, reason: orderResolution.reason, reference }), {
       status: 202,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
+
+  const orderId = orderResolution.orderId;
 
   try {
     const result = await handlePaymentVerification({

@@ -5,7 +5,6 @@ import { serviceClient } from '../_shared/client.ts';
 
 type RestaurantApprovalRow = {
   approvedAt?: string | null;
-  approvedByUid?: string | null;
   restaurantId: string;
   status: string;
 };
@@ -30,8 +29,6 @@ type RestaurantRecordRow = {
   minOrder?: number | null;
   name: string;
   openingTime?: string | null;
-  ownerId?: string | null;
-  paystackSubaccountCode?: string | null;
   supportsDelivery?: boolean | null;
   supportsPickup?: boolean | null;
   updatedAt?: string | null;
@@ -61,7 +58,6 @@ const toRestaurantResponse = (
   address: sanitizeOptionalText(restaurant.address),
   approvalStatus: approval?.status ?? (restaurant.isPublished ? 'approved' : 'pending'),
   approvedAt: approval?.approvedAt ?? null,
-  approvedByUid: sanitizeOptionalText(approval?.approvedByUid),
   cuisine: sanitizeOptionalText(restaurant.cuisine),
   deliveryFee: restaurant.deliveryFee ?? 0,
   deliveryRadiusKm: restaurant.deliveryRadiusKm ?? null,
@@ -79,8 +75,6 @@ const toRestaurantResponse = (
   minOrder: restaurant.minOrder ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
-  ownerId: sanitizeOptionalText(restaurant.ownerId),
-  paystackSubaccountCode: sanitizeOptionalText(restaurant.paystackSubaccountCode),
   supportsDelivery: restaurant.supportsDelivery !== false,
   supportsPickup: restaurant.supportsPickup !== false,
   updatedAt: restaurant.updatedAt ?? null,
@@ -91,13 +85,13 @@ const loadApprovedRestaurantCatalog = async () => {
     serviceClient
       .from('RestaurantRecord')
       .select(
-        'id,name,ownerId,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
+        'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
       )
       .eq('isPublished', true)
       .order('updatedAt', { ascending: false }),
     serviceClient
       .from('RestaurantApproval')
-      .select('restaurantId,status,approvedByUid,approvedAt')
+      .select('restaurantId,status,approvedAt')
       .eq('status', 'approved'),
   ]);
 

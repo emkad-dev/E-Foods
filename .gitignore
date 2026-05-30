@@ -55,6 +55,7 @@ apps/*/.env.production
 # local Supabase and Codex state
 .supabase-home/
 supabase/.temp/
+supabase/**/.temp/
 .superpowers/
 
 # typescript
