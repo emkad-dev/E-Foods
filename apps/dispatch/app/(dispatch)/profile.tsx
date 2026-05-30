@@ -1,5 +1,7 @@
+import { FontAwesome } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -10,30 +12,28 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
-import { useAuth } from '../../src/contexts/AuthContext';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
+import { useWeeklyEarnings } from '../../src/hooks/useWeeklyEarnings';
 import {
   type DispatchRiderDraft,
   updateDispatchRider,
 } from '../../src/services/dispatchRiderActions';
-import { dispatchTheme } from '../../src/theme/palette';
 import { GoogleMapsLocationService } from '../../src/services/googleMapsLocation';
+import { dispatchTheme } from '../../src/theme/palette';
 
-const settingsGroups = [
-  {
-    title: 'Dispatch center',
-    items: ['National dispatch control room', 'Coverage: Nigeria state and LGA rider regions'],
-  },
-  {
-    title: 'Rules in force',
-    items: ['Auto-assign riders under 2.5 km', 'Escalate pickups delayed beyond 8 mins', 'Rebalance zones every 15 mins'],
-  },
-  {
-    title: 'Next build targets',
-    items: ['Live map tracking', 'Assignment overrides', 'Courier incident logging'],
-  },
-];
+type ProfileSection =
+  | 'profile'
+  | 'availableSessions'
+  | 'mySessions'
+  | 'inbox'
+  | 'recentDeliveries'
+  | 'weeklyEarnings'
+  | 'payments'
+  | 'activity'
+  | 'rewards'
+  | 'session';
 
 const statusOptions = ['Available', 'Delivering', 'Pickup delayed', 'Offline'];
 const createDefaultDraft = (): DispatchRiderDraft => ({
@@ -47,10 +47,40 @@ const createDefaultDraft = (): DispatchRiderDraft => ({
   zone: '',
 });
 
+const menuItems: { icon: keyof typeof FontAwesome.glyphMap; key: ProfileSection; label: string }[] = [
+  { icon: 'user-o', key: 'profile', label: 'My profile' },
+  { icon: 'calendar-check-o', key: 'availableSessions', label: 'Available sessions' },
+  { icon: 'calendar-o', key: 'mySessions', label: 'My sessions' },
+  { icon: 'bell-o', key: 'inbox', label: 'Inbox' },
+  { icon: 'history', key: 'recentDeliveries', label: 'Recent deliveries' },
+  { icon: 'line-chart', key: 'weeklyEarnings', label: 'Weekly earnings' },
+  { icon: 'credit-card', key: 'payments', label: 'Payments' },
+  { icon: 'bar-chart', key: 'activity', label: 'Activity Insights' },
+  { icon: 'gift', key: 'rewards', label: 'Rewards' },
+  { icon: 'sign-out', key: 'session', label: 'Session' },
+];
+
+const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) {
+    return 'Time pending';
+  }
+
+  return new Intl.DateTimeFormat('en-NG', {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: 'short',
+  }).format(new Date(value));
+};
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { error, riders } = useDispatchRiders();
+  const { error: earningsError, loading: earningsLoading, refresh: refreshEarnings, refreshing, report } = useWeeklyEarnings();
+  const [selectedSection, setSelectedSection] = useState<ProfileSection>('profile');
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
   const [saving, setSaving] = useState(false);
@@ -76,9 +106,7 @@ export default function ProfileScreen() {
       longitude: rider.longitude,
     }));
 
-    const bounds = GoogleMapsLocationService.calculateMapRegionBounds(riderCoords, 0.12);
-
-    return bounds || {
+    return GoogleMapsLocationService.calculateMapRegionBounds(riderCoords, 0.12) || {
       latitude: 9.0765,
       longitude: 7.3986,
       latitudeDelta: 0.22,
@@ -101,9 +129,9 @@ export default function ProfileScreen() {
         completedTrips: rider.completedTripsCount,
         lga: rider.lga ?? '',
         name: rider.name,
-        zone: rider.region ?? rider.zone,
         status: rider.status,
         vehicleType: rider.vehicleType,
+        zone: rider.region ?? rider.zone,
       });
     },
     [riders]
@@ -137,14 +165,20 @@ export default function ProfileScreen() {
     }));
   }, [lgaOptions]);
 
+  useEffect(() => {
+    if (currentRider && selectedRiderId !== currentRider.id) {
+      populateDraftFromRider(currentRider.id);
+    }
+  }, [currentRider, populateDraftFromRider, selectedRiderId]);
+
   const handleSaveRider = async () => {
     if (!user?.uid || !currentRider) {
-      Alert.alert('Profile unavailable', 'Your rider profile has to be provisioned by admin approval before you can update it.');
+      Alert.alert('Profile unavailable', 'Wait for admin approval before updating status.');
       return;
     }
 
     if (!draft.name.trim() || !draft.zone.trim() || !draft.lga.trim()) {
-      Alert.alert('Missing details', 'Select your dispatch state and LGA before saving.');
+      Alert.alert('Missing details', 'Select your dispatch state and LGA.');
       return;
     }
 
@@ -175,237 +209,265 @@ export default function ProfileScreen() {
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete rider account',
-      'Dispatch accounts with active assignments cannot remove themselves. When delivery work or roster ownership still exists, admin offboarding is required instead.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete account',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAccount();
-            } catch (nextError: any) {
-              Alert.alert('Delete blocked', nextError.message ?? 'Unable to delete this account right now.');
-            }
-          },
+    Alert.alert('Delete rider account', 'Admin offboarding is required while assignments exist.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete account',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteAccount();
+          } catch (nextError: any) {
+            Alert.alert('Delete blocked', nextError.message ?? 'Unable to delete this account right now.');
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  useEffect(() => {
-    if (currentRider && selectedRiderId !== currentRider.id) {
-      populateDraftFromRider(currentRider.id);
+  const renderHeader = () => (
+    <View style={styles.identityCard}>
+      <View>
+        <Text style={styles.nameText}>{currentRider?.name ?? user?.displayName ?? 'Feaster'}</Text>
+        <Text style={styles.statusText}>{currentRider?.status ?? 'Profile pending'}</Text>
+      </View>
+      <View style={styles.pointsPill}>
+        <FontAwesome name="trophy" size={12} color={dispatchTheme.text} />
+        <Text style={styles.pointsText}>{currentRider?.completedTripsCount ?? 0}</Text>
+      </View>
+    </View>
+  );
+
+  const renderMenu = () => (
+    <View style={styles.menuCard}>
+      {menuItems.map((item) => {
+        const isActive = selectedSection === item.key;
+
+        return (
+          <TouchableOpacity
+            key={item.key}
+            activeOpacity={0.85}
+            onPress={() => setSelectedSection(item.key)}
+            style={[styles.menuItem, isActive ? styles.menuItemActive : null]}
+          >
+            <FontAwesome name={item.icon} size={15} color={isActive ? '#07140c' : dispatchTheme.textMuted} />
+            <Text style={[styles.menuItemText, isActive ? styles.menuItemTextActive : null]}>{item.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  const renderProfileEditor = () => (
+    <View style={styles.detailCard}>
+      <View style={styles.detailHeader}>
+        <Text style={styles.detailTitle}>My profile</Text>
+        <TouchableOpacity style={styles.smallAction} onPress={resetForm}>
+          <Text style={styles.smallActionText}>Reset</Text>
+        </TouchableOpacity>
+      </View>
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {!currentRider ? <Text style={styles.emptyText}>Rider record pending.</Text> : null}
+
+      <FieldLabel label="Rider name" />
+      <ReadOnlyValue hint="Admin-managed" value={currentRider?.name ?? 'Pending'} />
+
+      <FieldLabel label="Dispatch state" />
+      <CompactOptionPicker
+        label="Dispatch state"
+        selectedValue={draft.zone}
+        options={nigeriaStateOptions}
+        isOpen={openPicker === 'state'}
+        onToggle={() => setOpenPicker((current) => (current === 'state' ? null : 'state'))}
+        onSelect={(value) => {
+          updateDraft('zone', value);
+          setOpenPicker(null);
+        }}
+      />
+
+      <FieldLabel label="Local government area" />
+      <CompactOptionPicker
+        label="Local government area"
+        selectedValue={draft.lga}
+        options={lgaOptions}
+        isOpen={openPicker === 'lga'}
+        onToggle={() => setOpenPicker((current) => (current === 'lga' ? null : 'lga'))}
+        onSelect={(value) => {
+          updateDraft('lga', value);
+          setOpenPicker(null);
+        }}
+      />
+
+      <FieldLabel label="Status" />
+      <View style={styles.chipRow}>
+        {statusOptions.map((option) => (
+          <TouchableOpacity
+            key={option}
+            style={[styles.chip, draft.status === option ? styles.chipActive : null]}
+            onPress={() => updateDraft('status', option)}
+          >
+            <Text style={[styles.chipText, draft.status === option ? styles.chipTextActive : null]}>{option}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving || !currentRider}>
+        <Text style={styles.primaryActionText}>{saving ? 'Saving...' : 'Update profile'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderWeeklyEarnings = () => (
+    <View style={styles.detailCard}>
+      <View style={styles.detailHeader}>
+        <TouchableOpacity style={styles.backIcon} onPress={() => setSelectedSection('profile')}>
+          <FontAwesome name="arrow-left" size={14} color={dispatchTheme.text} />
+        </TouchableOpacity>
+        <Text style={styles.detailTitle}>Weekly earnings</Text>
+      </View>
+      {earningsLoading ? (
+        <ActivityIndicator color={dispatchTheme.accent} />
+      ) : (
+        <>
+          <View style={styles.earningsHero}>
+            <Text style={styles.balanceLabel}>This week</Text>
+            <Text style={styles.balanceValue}>{formatMoney(report?.total ?? 0)}</Text>
+            <Text style={styles.resetText}>Resets Monday 00:00</Text>
+          </View>
+          {earningsError ? <Text style={styles.errorText}>{earningsError}</Text> : null}
+          <View style={styles.metricRow}>
+            <Metric label="Delivered orders" value={String(report?.deliveredOrders ?? 0)} />
+            <Metric label="Average" value={formatMoney(report?.averagePerDelivery ?? 0)} />
+          </View>
+          <TouchableOpacity style={styles.secondaryButton} onPress={refreshEarnings} disabled={refreshing}>
+            <Text style={styles.secondaryButtonText}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
+          </TouchableOpacity>
+          <Text style={styles.sectionLabel}>Track record</Text>
+          {report?.records.length ? (
+            report.records.map((record) => (
+              <View key={record.orderId} style={styles.transactionRow}>
+                <View>
+                  <Text style={styles.transactionTitle}>Order #{record.orderId.slice(-6)}</Text>
+                  <Text style={styles.transactionMeta}>
+                    {formatDateTime(record.deliveredAt)} · {record.restaurantName ?? 'Restaurant'}
+                  </Text>
+                  <Text style={styles.transactionMeta}>{record.address ?? 'Area pending'}</Text>
+                </View>
+                <Text style={styles.transactionAmount}>{formatMoney(record.amount)}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No earnings this week.</Text>
+          )}
+        </>
+      )}
+    </View>
+  );
+
+  const renderActivity = () => (
+    <View style={styles.detailCard}>
+      <Text style={styles.detailTitle}>Activity Insights</Text>
+      <View style={styles.mapCard}>
+        <MapView
+          provider={PROVIDER_GOOGLE}
+          style={styles.map}
+          initialRegion={mapRegion}
+          zoomControlEnabled
+          zoomTapEnabled
+          minZoomLevel={5}
+          maxZoomLevel={20}
+        >
+          {riders.map((rider) => (
+            <Marker
+              key={rider.id}
+              coordinate={{ latitude: rider.latitude, longitude: rider.longitude }}
+              title={rider.name}
+              description={`${rider.zone} · ${rider.hasPreciseLocation ? 'Live' : 'LGA pin'}`}
+            />
+          ))}
+        </MapView>
+      </View>
+      <View style={styles.metricRow}>
+        <Metric label="Live pins" value={String(riders.filter((rider) => rider.hasPreciseLocation).length)} />
+        <Metric label="LGA pins" value={String(riders.filter((rider) => !rider.hasPreciseLocation).length)} />
+      </View>
+    </View>
+  );
+
+  const renderSession = () => (
+    <View style={styles.detailCard}>
+      <Text style={styles.detailTitle}>Session</Text>
+      <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={authLoading}>
+        <Text style={styles.signOutButtonText}>Sign out</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} disabled={authLoading}>
+        <Text style={styles.deleteButtonText}>Delete account</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderPlaceholder = (title: string, copy: string) => (
+    <View style={styles.detailCard}>
+      <Text style={styles.detailTitle}>{title}</Text>
+      <Text style={styles.emptyText}>{copy}</Text>
+    </View>
+  );
+
+  const renderDetail = () => {
+    switch (selectedSection) {
+      case 'profile':
+        return renderProfileEditor();
+      case 'weeklyEarnings':
+        return renderWeeklyEarnings();
+      case 'activity':
+        return renderActivity();
+      case 'session':
+        return renderSession();
+      case 'recentDeliveries':
+        return renderPlaceholder('Recent deliveries', 'Completed deliveries appear in the deliveries tab.');
+      case 'availableSessions':
+        return renderPlaceholder('Available sessions', 'Sessions are not open yet.');
+      case 'mySessions':
+        return renderPlaceholder('My sessions', 'No active session schedule.');
+      case 'inbox':
+        return renderPlaceholder('Inbox', 'No new dispatch messages.');
+      case 'payments':
+        return renderPlaceholder('Payments', 'Payout setup comes later.');
+      case 'rewards':
+        return renderPlaceholder('Rewards', 'No rewards yet.');
+      default:
+        return null;
     }
-  }, [currentRider, populateDraftFromRider, selectedRiderId]);
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
-      <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Feasters</Text>
-        <Text style={styles.title}>My rider status</Text>
-        <Text style={styles.copy}>
-          Keep your live rider status and dispatch base current here. Team visibility stays below, but provisioning and offboarding remain admin-controlled.
-        </Text>
-      </View>
-
-      <View style={styles.groupCard}>
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionHeaderCopy}>
-            <Text style={styles.groupTitle}>My rider profile</Text>
-            <Text style={styles.groupSubtitle}>
-              Admin approval creates rider records. From here you can keep your own live dispatch status and service area current.
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.secondaryAction} onPress={resetForm}>
-            <Text style={styles.secondaryActionText}>Reset</Text>
-          </TouchableOpacity>
-        </View>
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        {!currentRider ? (
-          <Text style={styles.helperText}>
-            Your rider record is not ready yet. Wait for admin approval before trying to update live dispatch status.
-          </Text>
-        ) : null}
-
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Rider name</Text>
-          <View style={styles.readOnlyInput}>
-            <Text style={styles.readOnlyValue}>{currentRider?.name ?? 'Pending admin setup'}</Text>
-            <Text style={styles.readOnlyHint}>Admin-managed identity field</Text>
-          </View>
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Dispatch state</Text>
-          <CompactOptionPicker
-            label="Dispatch state"
-            selectedValue={draft.zone}
-            options={nigeriaStateOptions}
-            isOpen={openPicker === 'state'}
-            onToggle={() => setOpenPicker((current) => (current === 'state' ? null : 'state'))}
-            onSelect={(value) => {
-              updateDraft('zone', value);
-              setOpenPicker(null);
-            }}
-          />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Local government area</Text>
-          <CompactOptionPicker
-            label="Local government area"
-            selectedValue={draft.lga}
-            options={lgaOptions}
-            isOpen={openPicker === 'lga'}
-            onToggle={() => setOpenPicker((current) => (current === 'lga' ? null : 'lga'))}
-            onSelect={(value) => {
-              updateDraft('lga', value);
-              setOpenPicker(null);
-            }}
-          />
-        </View>
-
-        <View style={styles.inlineGroup}>
-          <View style={styles.inlineField}>
-            <Text style={styles.fieldLabel}>Trips today</Text>
-            <View style={styles.readOnlyInput}>
-              <Text style={styles.readOnlyValue}>{currentRider?.completedTrips ?? '0'}</Text>
-              <Text style={styles.readOnlyHint}>Dispatch-managed metric</Text>
-            </View>
-          </View>
-          <View style={styles.inlineField}>
-            <Text style={styles.fieldLabel}>Active load</Text>
-            <View style={styles.readOnlyInput}>
-              <Text style={styles.readOnlyValue}>{currentRider?.activeLoad ?? '0 orders'}</Text>
-              <Text style={styles.readOnlyHint}>Dispatch-managed metric</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Acceptance rate</Text>
-          <View style={styles.readOnlyInput}>
-            <Text style={styles.readOnlyValue}>85%</Text>
-            <Text style={styles.readOnlyHint}>Fixed dispatch baseline</Text>
-          </View>
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Status</Text>
-          <View style={styles.chipRow}>
-            {statusOptions.map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={[styles.chip, draft.status === option ? styles.chipActive : null]}
-                onPress={() => updateDraft('status', option)}
-              >
-                <Text style={[styles.chipText, draft.status === option ? styles.chipTextActive : null]}>{option}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.fieldLabel}>Vehicle</Text>
-          <View style={styles.readOnlyInput}>
-            <Text style={styles.readOnlyValue}>{currentRider?.vehicleType ?? 'Pending admin setup'}</Text>
-            <Text style={styles.readOnlyHint}>Vehicle class is set during approval</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving || !currentRider}>
-          <Text style={styles.primaryActionText}>{saving ? 'Saving rider...' : 'Update my rider profile'}</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.groupCard}>
-        <Text style={styles.groupTitle}>Live rider map</Text>
-        <Text style={styles.groupSubtitle}>
-          Exact rider coordinates are used when available. Otherwise, we place riders on their selected LGA so the map still stays useful.
-        </Text>
-        <View style={styles.mapCard}>
-          <MapView
-            provider={PROVIDER_GOOGLE}
-            style={styles.map}
-            initialRegion={mapRegion}
-            zoomControlEnabled={true}
-            zoomTapEnabled={true}
-            minZoomLevel={5}
-            maxZoomLevel={20}
-          >
-            {riders.map((rider) => (
-              <Marker
-                key={rider.id}
-                coordinate={{ latitude: rider.latitude, longitude: rider.longitude }}
-                title={rider.name}
-                description={`${rider.zone} - ${rider.hasPreciseLocation ? 'Live coordinate' : 'LGA-based pin'}`}
-              />
-            ))}
-          </MapView>
-        </View>
-        <View style={styles.mapLegendRow}>
-          <View style={styles.mapLegendChip}>
-            <Text style={styles.mapLegendText}>
-              {riders.filter((rider) => rider.hasPreciseLocation).length} live pins
-            </Text>
-          </View>
-          <View style={styles.mapLegendChip}>
-            <Text style={styles.mapLegendText}>
-              {riders.filter((rider) => !rider.hasPreciseLocation).length} LGA pins
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.groupCard}>
-        <Text style={styles.groupTitle}>Live rider records</Text>
-        <Text style={styles.groupSubtitle}>Roster view only. Rider provisioning and other rider records are admin-managed.</Text>
-        {riders.length === 0 ? (
-          <Text style={styles.emptyText}>No rider profiles yet.</Text>
-        ) : (
-          riders.map((rider) => (
-            <View
-              key={rider.id}
-              style={[styles.riderCard, selectedRiderId === rider.id ? styles.riderCardActive : null]}
-            >
-              <View>
-                <Text style={styles.riderName}>{rider.name}</Text>
-                <Text style={styles.riderMeta}>{`${rider.zone} - ${rider.status} - ${rider.vehicleType}`}</Text>
-              </View>
-              <Text style={styles.riderLoad}>{rider.activeLoad}</Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      {settingsGroups.map((group) => (
-        <View key={group.title} style={styles.groupCard}>
-          <Text style={styles.groupTitle}>{group.title}</Text>
-          {group.items.map((item) => (
-            <Text key={item} style={styles.groupItem}>
-              {item}
-            </Text>
-          ))}
-        </View>
-      ))}
-
-      <View style={styles.groupCard}>
-        <Text style={styles.groupTitle}>Session</Text>
-        <Text style={styles.groupSubtitle}>
-          Sign out when you are done on this device. Delete is only for rider accounts that are no longer tied to live assignments.
-        </Text>
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={authLoading}>
-          <Text style={styles.signOutButtonText}>Sign out</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} disabled={authLoading}>
-          <Text style={styles.deleteButtonText}>Delete account</Text>
-        </TouchableOpacity>
-      </View>
+      {renderHeader()}
+      {renderMenu()}
+      {renderDetail()}
     </ScrollView>
+  );
+}
+
+function FieldLabel({ label }: { label: string }) {
+  return <Text style={styles.fieldLabel}>{label}</Text>;
+}
+
+function ReadOnlyValue({ hint, value }: { hint: string; value: string | number }) {
+  return (
+    <View style={styles.readOnlyInput}>
+      <Text style={styles.readOnlyValue}>{value}</Text>
+      <Text style={styles.readOnlyHint}>{hint}</Text>
+    </View>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metricCard}>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -418,128 +480,132 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingBottom: 30,
   },
-  hero: {
-    backgroundColor: dispatchTheme.hero,
-    borderRadius: 26,
-    padding: 22,
-  },
-  eyebrow: {
-    color: dispatchTheme.accentSoft,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 10,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: dispatchTheme.cream,
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  copy: {
-    color: '#d6dfeb',
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 10,
-  },
-  groupCard: {
+  identityCard: {
+    alignItems: 'flex-start',
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 22,
+    borderRadius: 24,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 18,
+  },
+  nameText: {
+    color: dispatchTheme.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  statusText: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  pointsPill: {
+    alignItems: 'center',
+    backgroundColor: '#13f28a',
+    borderRadius: 999,
+    flexDirection: 'row',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  pointsText: {
+    color: dispatchTheme.text,
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 5,
+  },
+  menuCard: {
+    backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginTop: 14,
+    overflow: 'hidden',
+  },
+  menuItem: {
+    alignItems: 'center',
+    borderBottomColor: dispatchTheme.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  menuItemActive: {
+    backgroundColor: '#13f28a',
+  },
+  menuItemText: {
+    color: dispatchTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
+    marginLeft: 12,
+  },
+  menuItemTextActive: {
+    color: '#07140c',
+  },
+  detailCard: {
+    backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
+    borderRadius: 24,
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
   },
-  groupTitle: {
+  detailHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  detailTitle: {
     color: dispatchTheme.text,
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 10,
+    fontSize: 20,
+    fontWeight: '900',
   },
-  groupSubtitle: {
-    color: dispatchTheme.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 14,
+  backIcon: {
+    alignItems: 'center',
+    height: 34,
+    justifyContent: 'center',
+    marginRight: 10,
+    width: 34,
   },
-  groupItem: {
-    color: dispatchTheme.textMuted,
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 4,
-  },
-  sectionHeader: {
-    alignItems: 'flex-start',
-    marginBottom: 6,
-  },
-  sectionHeaderCopy: {
-    width: '100%',
-  },
-  secondaryAction: {
-    alignSelf: 'flex-start',
+  smallAction: {
     backgroundColor: dispatchTheme.accentTint,
     borderRadius: 999,
-    marginTop: 4,
+    marginLeft: 'auto',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
-  secondaryActionText: {
+  smallActionText: {
     color: dispatchTheme.accentStrong,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  errorText: {
-    color: dispatchTheme.danger,
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 10,
-  },
-  formGroup: {
-    marginTop: 10,
+    fontSize: 12,
+    fontWeight: '800',
   },
   fieldLabel: {
     color: dispatchTheme.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '900',
     marginBottom: 8,
+    marginTop: 12,
     textTransform: 'uppercase',
-  },
-  input: {
-    backgroundColor: dispatchTheme.cream,
-    borderColor: dispatchTheme.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    color: dispatchTheme.text,
-    fontSize: 15,
-    minHeight: 50,
-    paddingHorizontal: 14,
   },
   readOnlyInput: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
     borderRadius: 14,
     borderWidth: 1,
-    minHeight: 60,
     justifyContent: 'center',
+    minHeight: 58,
     paddingHorizontal: 14,
   },
   readOnlyValue: {
     color: dispatchTheme.text,
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '900',
   },
   readOnlyHint: {
     color: dispatchTheme.textSoft,
     fontSize: 12,
     marginTop: 4,
-  },
-  inlineGroup: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-  },
-  inlineField: {
-    width: '48%',
   },
   chipRow: {
     flexDirection: 'row',
@@ -559,7 +625,7 @@ const styles = StyleSheet.create({
   chipText: {
     color: dispatchTheme.textMuted,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   chipTextActive: {
     color: '#ffffff',
@@ -574,86 +640,132 @@ const styles = StyleSheet.create({
   primaryActionText: {
     color: '#ffffff',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  helperText: {
+  earningsHero: {
+    alignItems: 'center',
+    backgroundColor: '#f1f5f2',
+    borderRadius: 22,
+    padding: 18,
+  },
+  balanceLabel: {
+    backgroundColor: '#13f28a',
+    borderRadius: 999,
+    color: '#07140c',
+    fontSize: 11,
+    fontWeight: '900',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  balanceValue: {
+    color: dispatchTheme.text,
+    fontSize: 34,
+    fontWeight: '900',
+    marginTop: 10,
+  },
+  resetText: {
     color: dispatchTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  metricRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  metricCard: {
+    backgroundColor: dispatchTheme.cream,
+    borderRadius: 16,
+    flex: 1,
+    padding: 14,
+  },
+  metricValue: {
+    color: dispatchTheme.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  metricLabel: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    backgroundColor: dispatchTheme.accentTint,
+    borderRadius: 14,
+    marginTop: 12,
+    paddingVertical: 12,
+  },
+  secondaryButtonText: {
+    color: dispatchTheme.accentStrong,
     fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 8,
+    fontWeight: '900',
+  },
+  sectionLabel: {
+    color: dispatchTheme.text,
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 18,
+  },
+  transactionRow: {
+    alignItems: 'center',
+    backgroundColor: '#f1f5f2',
+    borderRadius: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    padding: 12,
+  },
+  transactionTitle: {
+    color: dispatchTheme.text,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  transactionMeta: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  transactionAmount: {
+    color: dispatchTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '900',
   },
   mapCard: {
     borderColor: dispatchTheme.border,
     borderRadius: 20,
     borderWidth: 1,
+    marginTop: 12,
     overflow: 'hidden',
   },
   map: {
     height: 220,
     width: '100%',
   },
-  mapLegendRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-  },
-  mapLegendChip: {
-    backgroundColor: dispatchTheme.accentTint,
-    borderRadius: 999,
-    marginRight: 8,
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  mapLegendText: {
-    color: dispatchTheme.accentStrong,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   emptyText: {
     color: dispatchTheme.textMuted,
     fontSize: 14,
     lineHeight: 20,
   },
-  riderCard: {
-    alignItems: 'center',
-    backgroundColor: dispatchTheme.cream,
-    borderRadius: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-    padding: 14,
-  },
-  riderCardActive: {
-    backgroundColor: dispatchTheme.accentSoft,
-  },
-  riderName: {
-    color: dispatchTheme.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  riderMeta: {
-    color: dispatchTheme.textMuted,
+  errorText: {
+    color: dispatchTheme.danger,
     fontSize: 13,
     lineHeight: 19,
-    marginTop: 4,
-  },
-  riderLoad: {
-    color: dispatchTheme.accentStrong,
-    fontSize: 13,
-    fontWeight: '800',
+    marginVertical: 8,
   },
   signOutButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.text,
     borderRadius: 16,
-    marginTop: 6,
+    marginTop: 10,
     paddingVertical: 15,
   },
   signOutButtonText: {
     color: '#ffffff',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   deleteButton: {
     alignItems: 'center',
@@ -666,6 +778,6 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     color: dispatchTheme.danger,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 });

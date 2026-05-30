@@ -20,3 +20,27 @@ export const getDispatchRiders = async () =>
 
 export const getDispatchOrderDetail = async (orderId: string) =>
   callDispatchBackendRpc<{ order: DispatchOrderDetail }>('dispatchGetOrderDetail', { orderId });
+
+export type WeeklyEarningsRecord = {
+  address?: string | null;
+  amount: number;
+  deliveredAt?: string | null;
+  orderId: string;
+  restaurantName?: string | null;
+};
+
+export type WeeklyEarningsReport = {
+  averagePerDelivery: number;
+  currency: string;
+  deliveredOrders: number;
+  records: WeeklyEarningsRecord[];
+  total: number;
+  week: {
+    endsAt: string;
+    startsAt: string;
+    timezone: string;
+  };
+};
+
+export const getDispatchWeeklyEarnings = async () =>
+  callDispatchBackendRpc<WeeklyEarningsReport>('dispatchGetWeeklyEarnings');

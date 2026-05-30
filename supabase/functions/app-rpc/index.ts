@@ -489,6 +489,33 @@ const getDispatchQueuePriority = (order: CustomerOrderRow, assignment: DeliveryA
   return 5;
 };
 
+const LAGOS_TIME_OFFSET_MS = 60 * 60 * 1000;
+
+const getLagosWeekWindow = (date = new Date()) => {
+  const lagosNow = new Date(date.getTime() + LAGOS_TIME_OFFSET_MS);
+  const day = lagosNow.getUTCDay();
+  const daysSinceMonday = (day + 6) % 7;
+  const startLocalMs = Date.UTC(
+    lagosNow.getUTCFullYear(),
+    lagosNow.getUTCMonth(),
+    lagosNow.getUTCDate() - daysSinceMonday,
+    0,
+    0,
+    0,
+    0
+  );
+  const endLocalMs = startLocalMs + 7 * 24 * 60 * 60 * 1000;
+
+  return {
+    endsAt: new Date(endLocalMs - LAGOS_TIME_OFFSET_MS).toISOString(),
+    startsAt: new Date(startLocalMs - LAGOS_TIME_OFFSET_MS).toISOString(),
+    timezone: 'Africa/Lagos',
+  };
+};
+
+const getDispatchEarningsAmount = (pricing: JsonObject | null | undefined) =>
+  roundCurrency(parseNumber(pricing?.dispatchFee, parseNumber(pricing?.deliveryFee, 0)));
+
 const isAppRole = (role: string) => (APP_ROLES as readonly string[]).includes(role);
 
 const ensureRole = (role: string, allowedRoles: readonly string[]) => {
@@ -4535,6 +4562,83 @@ const handleNativeAction = async (
     return json(200, {
       data: {
         riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) => buildDispatchRiderResponse(rider)),
+      },
+    });
+  }
+
+  if (action === 'dispatchGetWeeklyEarnings') {
+    ensureRole(context.role, ['dispatch', 'admin']);
+    const requestedCourierId = sanitizeText(data.courierId);
+    const courierId = context.role === 'admin' && requestedCourierId ? requestedCourierId : context.uid;
+    const weekWindow = getLagosWeekWindow();
+
+    const { data: assignments, error: assignmentError } = await serviceClient
+      .from('DeliveryAssignment')
+      .select('orderId,courierId,courierName,assignedAt')
+      .eq('courierId', courierId);
+
+    if (assignmentError) {
+      throw new Error(assignmentError.message);
+    }
+
+    const orderIds = ((assignments ?? []) as DeliveryAssignmentRow[])
+      .map((assignment) => sanitizeText(assignment.orderId))
+      .filter(Boolean);
+
+    if (orderIds.length === 0) {
+      return json(200, {
+        data: {
+          averagePerDelivery: 0,
+          currency: DEFAULT_CURRENCY,
+          deliveredOrders: 0,
+          records: [],
+          total: 0,
+          week: weekWindow,
+        },
+      });
+    }
+
+    const { data: orders, error: orderError } = await serviceClient
+      .from('CustomerOrder')
+      .select(
+        'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,createdAt,updatedAt'
+      )
+      .in('id', orderIds)
+      .eq('status', ORDER_STATUS.DELIVERED)
+      .gte('updatedAt', weekWindow.startsAt)
+      .lt('updatedAt', weekWindow.endsAt)
+      .order('updatedAt', { ascending: false });
+
+    if (orderError) {
+      throw new Error(orderError.message);
+    }
+
+    const deliveredOrders = ((orders ?? []) as CustomerOrderRow[]).filter(
+      (order) => normalizeOrderStatus(order.status) === ORDER_STATUS.DELIVERED
+    );
+    const records = deliveredOrders.map((order) => {
+      const earningsAmount = getDispatchEarningsAmount(order.pricing);
+
+      return {
+        address: sanitizeOptionalText(order.deliveryLocation?.shortAddress) ??
+          sanitizeOptionalText(order.deliveryAddress),
+        amount: earningsAmount,
+        deliveredAt: order.updatedAt ?? order.createdAt ?? null,
+        orderId: order.id,
+        restaurantName: order.restaurantName,
+      };
+    });
+    const total = roundCurrency(records.reduce((sum, record) => sum + record.amount, 0));
+    const deliveredOrderCount = records.length;
+
+    return json(200, {
+      data: {
+        averagePerDelivery: deliveredOrderCount > 0 ? roundCurrency(total / deliveredOrderCount) : 0,
+        currency: DEFAULT_CURRENCY,
+        deliveredOrders: deliveredOrderCount,
+        records,
+        total,
+        week: weekWindow,
       },
     });
   }
