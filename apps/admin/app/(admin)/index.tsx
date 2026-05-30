@@ -3,7 +3,6 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AdminCard from '../../src/components/AdminCard';
 import AdminEmptyState from '../../src/components/AdminEmptyState';
-import AdminScreenHeader from '../../src/components/AdminScreenHeader';
 import AdminStatusBadge from '../../src/components/AdminStatusBadge';
 import { useAuth } from '../../src/contexts/AuthContext';
 import type { DispatchProfileDocument, OrderDocument, RestaurantDocument, UserDocument } from '../../src/domain/entities';
@@ -113,19 +112,15 @@ export default function AdminDashboardScreen() {
         .slice(0, 4),
     [restaurants]
   );
+  const rawName = user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'ADMIN';
+  const greetingName = rawName.toUpperCase().slice(0, 18);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-      <AdminScreenHeader
-        eyebrow="Control plane"
-        title="Company dashboard"
-        subtitle="Track approvals, access posture, and the operational pulse across customer, partner, and dispatch."
-      />
-
-      <View style={styles.hero}>
-        <Text style={styles.heroEyebrow}>Signed in as</Text>
-        <Text style={styles.heroTitle}>{user?.displayName ?? user?.email ?? 'Admin operator'}</Text>
-        <Text style={styles.heroCopy}>This sandbox is the internal control surface for platform ops and approvals.</Text>
+      <View style={styles.greetingBlock}>
+        <Text style={styles.greetingText} numberOfLines={1}>
+          HI {greetingName}
+        </Text>
       </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -155,14 +150,14 @@ export default function AdminDashboardScreen() {
         ))}
       </View>
 
-      <AdminCard title="Role coverage" subtitle="A quick health check on how access is distributed across the sandbox.">
+      <AdminCard title="Role coverage">
         <Text style={styles.metaLine}>Admins: {roleCounts.admins}</Text>
         <Text style={styles.metaLine}>Customers: {roleCounts.customers}</Text>
         <Text style={styles.metaLine}>Partners: {roleCounts.partners}</Text>
         <Text style={styles.metaLine}>Dispatch: {roleCounts.dispatch}</Text>
       </AdminCard>
 
-      <AdminCard title="Recent order watch" subtitle="Watch the latest operational traffic without leaving the dashboard.">
+      <AdminCard title="Recent order watch">
         {recentOrders.length === 0 ? (
           <AdminEmptyState
             title="No orders yet"
@@ -182,7 +177,7 @@ export default function AdminDashboardScreen() {
         ))}
       </AdminCard>
 
-      <AdminCard title="Approval pulse" subtitle="A compact view of which restaurant records are waiting for operator action.">
+      <AdminCard title="Approval pulse">
         {approvalPulse.length === 0 ? (
           <AdminEmptyState
             title="No restaurants to review"
@@ -215,32 +210,13 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     paddingHorizontal: 18,
   },
-  hero: {
-    backgroundColor: adminTheme.hero,
-    borderColor: adminTheme.accentStrong,
-    borderRadius: 22,
-    borderWidth: 1,
-    marginTop: 16,
-    padding: 20,
+  greetingBlock: {
+    alignItems: 'flex-start',
   },
-  heroEyebrow: {
-    color: adminTheme.accentSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
-    color: '#ffffff',
-    fontSize: 22,
+  greetingText: {
+    color: adminTheme.text,
+    fontSize: 24,
     fontWeight: '800',
-    marginTop: 8,
-  },
-  heroCopy: {
-    color: '#d7e3f3',
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
   },
   errorText: {
     color: adminTheme.danger,
@@ -257,7 +233,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginTop: 16,
+    marginTop: 14,
   },
   metricCard: {
     backgroundColor: adminTheme.surface,

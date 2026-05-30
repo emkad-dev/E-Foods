@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Switch,
@@ -13,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaurantActions';
+import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
 
 const toNumberOrNull = (value: string) => {
@@ -34,6 +37,7 @@ export default function PartnerProfileScreen() {
   const [description, setDescription] = useState('');
   const [address, setAddress] = useState('');
   const [image, setImage] = useState('');
+  const [logoImage, setLogoImage] = useState('');
   const [deliveryTime, setDeliveryTime] = useState('');
   const [openingTime, setOpeningTime] = useState('');
   const [closingTime, setClosingTime] = useState('');
@@ -54,6 +58,7 @@ export default function PartnerProfileScreen() {
     setDescription(restaurant?.description ?? '');
     setAddress(restaurant?.address ?? '');
     setImage(restaurant?.image ?? '');
+    setLogoImage(restaurant?.logoImage ?? '');
     setDeliveryTime(String(restaurant?.deliveryTime ?? '25-35 min'));
     setOpeningTime(restaurant?.openingTime ?? '08:00');
     setClosingTime(restaurant?.closingTime ?? '22:00');
@@ -76,6 +81,46 @@ export default function PartnerProfileScreen() {
     setSupportsPickup(restaurant?.supportsPickup !== false);
     setIsOpen(restaurant?.isOpen !== false);
   }, [restaurant, user?.displayName]);
+
+  const handlePickRestaurantAsset = async (kind: 'covers' | 'logos') => {
+    if (!user) {
+      Alert.alert('Session expired', 'Sign in again before uploading images.');
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Photo access blocked', 'Allow photo access to upload images.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: kind === 'logos' ? [1, 1] : [16, 9],
+      mediaTypes: ['images'],
+      quality: 0.84,
+    });
+
+    if (result.canceled || !result.assets[0]?.uri) {
+      return;
+    }
+
+    try {
+      const publicUrl = await uploadRestaurantAsset({
+        kind,
+        ownerId: user.uid,
+        uri: result.assets[0].uri,
+      });
+
+      if (kind === 'logos') {
+        setLogoImage(publicUrl);
+      } else {
+        setImage(publicUrl);
+      }
+    } catch (nextError: any) {
+      Alert.alert('Upload failed', nextError.message ?? 'Unable to upload this image right now.');
+    }
+  };
 
   const handleLinkRestaurant = async (restaurantId: string, restaurantName: string) => {
     try {
@@ -108,6 +153,7 @@ export default function PartnerProfileScreen() {
         description,
         address,
         image,
+        logoImage,
         deliveryTime,
         openingTime,
         closingTime,
@@ -199,7 +245,32 @@ export default function PartnerProfileScreen() {
           multiline
         />
         <TextInput style={styles.input} placeholder="Address" value={address} onChangeText={setAddress} />
-        <TextInput style={styles.input} placeholder="Image URL" value={image} onChangeText={setImage} />
+        <View style={styles.assetGrid}>
+          <View style={styles.assetBlock}>
+            <View style={styles.logoPreview}>
+              {logoImage ? (
+                <Image source={{ uri: logoImage }} style={styles.assetImage} />
+              ) : (
+                <Text style={styles.assetFallbackText}>Logo</Text>
+              )}
+            </View>
+            <TouchableOpacity style={styles.assetButton} onPress={() => handlePickRestaurantAsset('logos')}>
+              <Text style={styles.assetButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.assetBlock}>
+            <View style={styles.coverPreview}>
+              {image ? (
+                <Image source={{ uri: image }} style={styles.assetImage} />
+              ) : (
+                <Text style={styles.assetFallbackText}>Cover</Text>
+              )}
+            </View>
+            <TouchableOpacity style={styles.assetButton} onPress={() => handlePickRestaurantAsset('covers')}>
+              <Text style={styles.assetButtonText}>{image ? 'Change cover' : 'Upload cover'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         <TextInput style={styles.input} placeholder="Delivery time e.g. 25-35 min" value={deliveryTime} onChangeText={setDeliveryTime} />
         <View style={styles.row}>
           <TextInput
@@ -523,6 +594,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 6,
+  },
+  assetBlock: {
+    flex: 1,
+  },
+  assetButton: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.accent,
+    borderRadius: 14,
+    marginTop: 10,
+    paddingVertical: 12,
+  },
+  assetButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  assetFallbackText: {
+    color: partnerTheme.textMuted,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  assetGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  assetImage: {
+    height: '100%',
+    width: '100%',
+  },
+  coverPreview: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.surfaceMuted,
+    borderColor: partnerTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    height: 86,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  logoPreview: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.surfaceMuted,
+    borderColor: partnerTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    height: 86,
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   restaurantRow: {
     alignItems: 'center',

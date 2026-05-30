@@ -50,6 +50,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
+  updateDisplayName: (displayName: string) => Promise<void>;
   reloadUser: () => Promise<boolean>;
   sendVerificationEmail: () => Promise<void>;
   clearError: () => void;
@@ -415,6 +416,52 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const updateDisplayName = async (displayName: string): Promise<void> => {
+    if (!user?.uid) {
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
+    }
+
+    const nextDisplayName = displayName.trim();
+
+    if (!nextDisplayName) {
+      const message = 'Username is required';
+      setError(message);
+      throw new Error(message);
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await updateUserDocument(user.uid, {
+        displayName: nextDisplayName,
+      });
+
+      setUser((currentUser) => {
+        if (!currentUser) {
+          return currentUser;
+        }
+
+        const nextUser = {
+          ...currentUser,
+          displayName: nextDisplayName,
+          updatedAt: new Date().toISOString(),
+        };
+
+        void storeUserProfile(nextUser);
+        return nextUser;
+      });
+    } catch (err: any) {
+      const formattedError = getCustomerAuthErrorMessage(err, 'Unable to update username');
+      setError(formattedError);
+      throw new Error(formattedError);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resetPassword = async (email: string): Promise<void> => {
     setError(null);
 
@@ -513,6 +560,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         signOut,
         resetPassword,
         deleteAccount,
+        updateDisplayName,
         reloadUser,
         sendVerificationEmail,
         clearError,

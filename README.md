@@ -1,4 +1,4 @@
-# EBuy Platform
+# FEASTy Platform
 
 This repository is a multi-app delivery platform workspace. Customer, partner, dispatch, and admin all live in one repo, run as separate Expo apps, and now share a Supabase + Postgres backend direction.
 

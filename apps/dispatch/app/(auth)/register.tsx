@@ -99,7 +99,7 @@ export default function DispatchRegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>E-Fooders</Text>
+          <Text style={styles.eyebrow}>Feasters</Text>
           <Text style={styles.title}>Apply as a dispatch rider</Text>
           <Text style={styles.copy}>
             Share the rider details ops needs: name, phone, state, LGA, vehicle, and your current base location. The admin team approves each rider before they can dispatch orders.

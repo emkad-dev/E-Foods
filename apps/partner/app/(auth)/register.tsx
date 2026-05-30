@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link, useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -32,6 +34,7 @@ export default function PartnerRegisterScreen() {
   const [address, setAddress] = useState('');
   const [description, setDescription] = useState('');
   const [deliveryTime, setDeliveryTime] = useState<(typeof deliveryTimeOptions)[number]>('25-35 min');
+  const [logoImage, setLogoImage] = useState<string | null>(null);
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
 
@@ -77,6 +80,7 @@ export default function PartnerRegisterScreen() {
         deliveryTime,
         description: description.trim() || undefined,
         latitude: hasLatitude ? parsedLatitude : null,
+        logoImage,
         longitude: hasLongitude ? parsedLongitude : null,
         phoneNumber: phoneNumber.trim(),
         restaurantName: restaurantName.trim(),
@@ -91,6 +95,26 @@ export default function PartnerRegisterScreen() {
       router.replace('/(auth)/login');
     } catch (nextError: any) {
       Alert.alert('Application failed', nextError.message ?? 'Unable to submit your partner application right now.');
+    }
+  };
+
+  const handlePickLogo = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert('Logo access blocked', 'Allow photo access to upload a logo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ['images'],
+      quality: 0.82,
+    });
+
+    if (!result.canceled && result.assets[0]?.uri) {
+      setLogoImage(result.assets[0].uri);
     }
   };
 
@@ -153,6 +177,26 @@ export default function PartnerRegisterScreen() {
             onChangeText={handleFieldChange(setRestaurantName)}
             editable={!loading}
           />
+
+          <View style={styles.logoRow}>
+            <View style={styles.logoPreview}>
+              {logoImage ? (
+                <Image source={{ uri: logoImage }} style={styles.logoImage} />
+              ) : (
+                <Text style={styles.logoPreviewText}>Logo</Text>
+              )}
+            </View>
+            <View style={styles.logoActions}>
+              <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading}>
+                <Text style={styles.logoButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
+              </TouchableOpacity>
+              {logoImage ? (
+                <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading}>
+                  <Text style={styles.removeLogoText}>Remove</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
 
           <Text style={styles.sectionLabel}>Cuisine focus</Text>
           <View style={styles.optionRow}>
@@ -323,6 +367,54 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginTop: 12,
+  },
+  logoActions: {
+    flex: 1,
+  },
+  logoButton: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.accent,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  logoButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  logoImage: {
+    height: '100%',
+    width: '100%',
+  },
+  logoPreview: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.cream,
+    borderColor: partnerTheme.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 76,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: 76,
+  },
+  logoPreviewText: {
+    color: partnerTheme.textMuted,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  logoRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 14,
+  },
+  removeLogoText: {
+    color: partnerTheme.danger,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 10,
+    textAlign: 'center',
   },
   chip: {
     backgroundColor: partnerTheme.cream,

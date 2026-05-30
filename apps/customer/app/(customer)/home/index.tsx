@@ -20,12 +20,13 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
+import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
+import RestaurantLogoBadge from '../../../src/components/RestaurantLogoBadge';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
 import {
   type DiscoveryRestaurant,
   getDiscoveryEmptyState,
   getRestaurantAvailability,
-  getRestaurantAvailabilityBadge,
   getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
@@ -34,6 +35,7 @@ import { customerTheme } from '../../../src/theme/palette';
 
 type Restaurant = DiscoveryRestaurant & {
   image: string;
+  logoImage?: string | null;
   rating: number;
   deliveryTime: string;
 };
@@ -93,20 +95,6 @@ const FEATURED_CURATIONS: {
     title: 'Snacks for light cravings',
   },
 ];
-
-const getGreetingLabel = () => {
-  const hour = new Date().getHours();
-  if (hour < 12) {
-    return 'Good morning';
-  }
-
-  if (hour > 12) {
-    return 'Good afternoon';
-  }
-  if (hour > 16) {
-  return 'Good evening';
-  }
-};
 
 const getCustomerName = (displayName: string | undefined, email: string | undefined) => {
   const rawValue = displayName?.trim() || email?.split('@')[0]?.trim() || 'there';
@@ -372,7 +360,7 @@ export default function HomeScreen() {
   };
 
   const customerName = getCustomerName(user?.displayName, user?.email);
-  const greeting = `${getGreetingLabel()} ${customerName}`;
+  const greeting = `HI ${customerName.toUpperCase().slice(0, 18)}`;
   const avatarLabel = customerName.slice(0, 1).toUpperCase();
   const locationLabel = deliveryLocation?.shortAddress ?? 'Set delivery area';
 
@@ -389,25 +377,31 @@ export default function HomeScreen() {
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 12) + 6 }]}
     >
-      <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.heroCard}>
-        <View style={styles.heroTopRow}>
+      <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.homeHeader}>
+        <View style={styles.headerTopRow}>
+          <View style={styles.greetingBlock}>
+            <Text style={styles.greetingText} numberOfLines={1}>
+              {greeting}
+            </Text>
+          </View>
+          <Text style={styles.headerWordmark} numberOfLines={1}>
+            <Text style={styles.headerWordmarkGreen}>FEAST</Text>
+            <Text style={styles.headerWordmarkOrange}>Y</Text>
+          </Text>
+        </View>
+
+        <View style={styles.headerActionRow}>
           <TouchableOpacity style={styles.locationChip} onPress={() => router.push('/delivery-location')}>
-            <FontAwesome name="map-marker" size={15} color={customerTheme.accentSoft} />
-            <View style={styles.locationChipCopy}>
-              <Text style={styles.locationChipLabel}>{locationLabel}</Text>
-              <Text style={styles.locationChipSubcopy}>
-                {deliveryLocation ? 'Restaurants tailored to this delivery point.' : 'Choose a delivery area for tighter results.'}
-              </Text>
-            </View>
-            <FontAwesome name="angle-down" size={18} color={customerTheme.accentSoft} />
+            <FontAwesome name="map-marker" size={15} color={customerTheme.brandGreen} />
+            <Text style={styles.locationChipLabel} numberOfLines={1}>
+              {locationLabel}
+            </Text>
+            <FontAwesome name="angle-down" size={18} color={customerTheme.brandGreen} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')}>
             <Text style={styles.avatarButtonText}>{avatarLabel}</Text>
           </TouchableOpacity>
         </View>
-
-        <Text style={styles.heroGreeting}>{greeting}.</Text>
-        <Text style={styles.heroSubcopy}>Find deeper local food picks, quicker delivery calls, and kitchens worth repeating.</Text>
 
         <View style={styles.searchShell}>
           <FontAwesome name="search" size={16} color={customerTheme.textMuted} />
@@ -537,7 +531,6 @@ export default function HomeScreen() {
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Top rated bukas</Text>
-            <Text style={styles.sectionCopy}>Reliable kitchens with stronger ratings and repeat-worthy meals.</Text>
           </View>
           {topRatedRestaurants.length > 4 ? (
             <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'topRated' ? null : 'topRated')}>
@@ -562,6 +555,17 @@ export default function HomeScreen() {
                   <Text style={styles.topRatedImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
                 </View>
               )}
+              <RestaurantLogoBadge
+                logoImage={restaurant.logoImage}
+                name={restaurant.name}
+                size={42}
+                style={styles.topRatedLogoBadge}
+              />
+              <RestaurantFavoriteButton
+                restaurantId={restaurant.id}
+                size={15}
+                style={styles.topRatedFavoriteButton}
+              />
               <View style={styles.topRatedInfo}>
                 <Text style={styles.topRatedName} numberOfLines={1}>
                   {restaurant.name}
@@ -590,7 +594,6 @@ export default function HomeScreen() {
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Suggested bukas</Text>
-            <Text style={styles.sectionCopy}>A deeper mix of kitchens that match your current search and delivery area.</Text>
           </View>
           {suggestedRestaurants.length > 5 ? (
             <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'suggested' ? null : 'suggested')}>
@@ -610,16 +613,18 @@ export default function HomeScreen() {
                   <Text style={styles.suggestedImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
                 </View>
               )}
+              <RestaurantLogoBadge
+                logoImage={restaurant.logoImage}
+                name={restaurant.name}
+                size={38}
+                style={styles.suggestedLogoBadge}
+              />
               <View style={styles.suggestedInfo}>
                 <View style={styles.suggestedTitleRow}>
                   <Text style={styles.suggestedName} numberOfLines={1}>
                     {restaurant.name}
                   </Text>
-                  {getRestaurantAvailabilityBadge(availability) ? (
-                    <View style={styles.availabilityBadge}>
-                      <Text style={styles.availabilityBadgeText}>{getRestaurantAvailabilityBadge(availability)}</Text>
-                    </View>
-                  ) : null}
+                  <RestaurantFavoriteButton restaurantId={restaurant.id} size={14} style={styles.suggestedFavoriteButton} />
                 </View>
                 <Text style={styles.suggestedCuisine} numberOfLines={1}>
                   {restaurant.cuisine ?? 'Cuisine coming soon'}
@@ -649,11 +654,10 @@ export default function HomeScreen() {
 
       {deliveryLocation ? (
         <Animated.View entering={FadeInDown.delay(360).duration(500)} style={styles.sectionBlock}>
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={styles.sectionTitle}>Near your delivery point</Text>
-              <Text style={styles.sectionCopy}>Closest matches to the location you selected for delivery.</Text>
-            </View>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Near your delivery point</Text>
+          </View>
             {nearbyRestaurants.length > 4 ? (
               <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'nearby' ? null : 'nearby')}>
                 <Text style={styles.sectionActionText}>{expandedShelf === 'nearby' ? 'Show less' : 'See all'}</Text>
@@ -670,6 +674,7 @@ export default function HomeScreen() {
                 activeOpacity={0.92}
                 onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
               >
+                <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
                 <Text style={styles.nearbyName} numberOfLines={1}>
                   {restaurant.name}
                 </Text>
@@ -754,77 +759,95 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
-  heroCard: {
-    backgroundColor: customerTheme.hero,
+  homeHeader: {
+    backgroundColor: customerTheme.headerBackground,
+    borderColor: 'rgba(3, 184, 51, 0.18)',
     borderRadius: 24,
-    padding: 16,
+    borderWidth: 1,
+    padding: 14,
+    shadowColor: customerTheme.text,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
   },
-  heroTopRow: {
+  headerTopRow: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  greetingBlock: {
+    flex: 1,
+    alignItems: 'flex-start',
+    marginRight: 12,
+  },
+  greetingText: {
+    color: customerTheme.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  headerWordmark: {
+    flexShrink: 0,
+    fontSize: 22,
+    fontStyle: 'italic',
+    fontWeight: '900',
+    letterSpacing: -1,
+  },
+  headerWordmarkGreen: {
+    color: customerTheme.brandGreen,
+  },
+  headerWordmarkOrange: {
+    color: customerTheme.brandOrange,
+  },
+  headerActionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
   locationChip: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 16,
+    backgroundColor: customerTheme.headerSurface,
+    borderColor: 'rgba(3, 184, 51, 0.18)',
+    borderRadius: 15,
+    borderWidth: 1,
     flex: 1,
     flexDirection: 'row',
     paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  locationChipCopy: {
-    flex: 1,
-    marginHorizontal: 10,
+    paddingVertical: 9,
   },
   locationChipLabel: {
-    color: customerTheme.surface,
+    color: customerTheme.text,
+    flex: 1,
     fontSize: 13,
     fontWeight: '700',
-  },
-  locationChipSubcopy: {
-    color: '#d5e1ef',
-    fontSize: 11,
-    marginTop: 2,
+    marginHorizontal: 10,
   },
   avatarButton: {
     alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: customerTheme.brandGreen,
+    borderColor: 'rgba(255, 149, 31, 0.55)',
     borderRadius: 20,
     borderWidth: 1,
-    height: 42,
+    height: 40,
     justifyContent: 'center',
     marginLeft: 10,
-    width: 42,
+    width: 40,
   },
   avatarButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '800',
   },
-  heroGreeting: {
-    color: '#fffdf8',
-    fontSize: 24,
-    fontStyle: 'italic',
-    fontWeight: '800',
-    marginTop: 18,
-  },
-  heroSubcopy: {
-    color: '#d5e1ef',
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-    maxWidth: '92%',
-  },
   searchShell: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 18,
+    borderColor: 'rgba(255, 149, 31, 0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
     flexDirection: 'row',
-    marginTop: 16,
+    marginTop: 10,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 5,
   },
   searchInput: {
     color: customerTheme.text,
@@ -841,10 +864,11 @@ const styles = StyleSheet.create({
     width: 32,
   },
   searchActionActive: {
-    backgroundColor: customerTheme.accent,
+    backgroundColor: customerTheme.brandGreen,
   },
   searchActionIdle: {
-    backgroundColor: customerTheme.accentSoft,
+    backgroundColor: customerTheme.brandOrange,
+    opacity: 0.72,
   },
   catalogStatusCard: {
     backgroundColor: customerTheme.warningSoft,
@@ -1046,13 +1070,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
   },
-  sectionCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    maxWidth: 220,
-  },
   sectionAction: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
@@ -1093,8 +1110,18 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: '800',
   },
+  topRatedFavoriteButton: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+  },
   topRatedInfo: {
     padding: 12,
+  },
+  topRatedLogoBadge: {
+    left: 12,
+    position: 'absolute',
+    top: 108,
   },
   topRatedName: {
     color: customerTheme.text,
@@ -1144,9 +1171,19 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '800',
   },
+  suggestedFavoriteButton: {
+    backgroundColor: customerTheme.surfaceMuted,
+    height: 34,
+    width: 34,
+  },
   suggestedInfo: {
     flex: 1,
     padding: 12,
+  },
+  suggestedLogoBadge: {
+    left: 84,
+    position: 'absolute',
+    top: 72,
   },
   suggestedTitleRow: {
     alignItems: 'center',
@@ -1209,6 +1246,13 @@ const styles = StyleSheet.create({
     minHeight: 96,
     padding: 14,
     width: 158,
+  },
+  nearbyFavoriteButton: {
+    alignSelf: 'flex-end',
+    backgroundColor: customerTheme.surfaceMuted,
+    height: 30,
+    marginBottom: 4,
+    width: 30,
   },
   nearbyName: {
     color: customerTheme.text,

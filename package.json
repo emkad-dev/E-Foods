@@ -1,5 +1,5 @@
 {
-  "name": "ebuy-platform",
+  "name": "feasty-platform",
   "private": true,
   "engines": {
     "node": "22.x"
@@ -34,6 +34,7 @@
     "react-native-url-polyfill": "^3.0.0"
   },
   "devDependencies": {
+    "@supabase/cli-windows-x64": "^2.101.0",
     "supabase": "^2.101.0"
   }
 }

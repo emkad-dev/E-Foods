@@ -204,7 +204,7 @@ export default function ProfileScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>E-Fooders</Text>
+        <Text style={styles.eyebrow}>Feasters</Text>
         <Text style={styles.title}>My rider status</Text>
         <Text style={styles.copy}>
           Keep your live rider status and dispatch base current here. Team visibility stays below, but provisioning and offboarding remain admin-controlled.

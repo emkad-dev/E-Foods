@@ -1,15 +1,46 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Linking from 'expo-linking';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
+import { customerTheme } from '../src/theme/palette';
+
+function FeastyLaunchScreen() {
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(opacity, {
+        duration: 260,
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      Animated.delay(520),
+      Animated.timing(opacity, {
+        duration: 300,
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity]);
+
+  return (
+    <View style={styles.launchScreen}>
+      <Animated.Text style={[styles.launchWordmark, { opacity }]}>
+        <Text style={styles.launchWordmarkGreen}>FEAST</Text>
+        <Text style={styles.launchWordmarkOrange}>Y</Text>
+      </Animated.Text>
+    </View>
+  );
+}
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+  const [showLaunch, setShowLaunch] = useState(false);
 
   useEffect(() => {
     const handleDeepLink = ({ url }: { url: string }) => {
@@ -55,11 +86,12 @@ function RootLayoutNav() {
     const inCustomerGroup = segments[0] === '(customer)';
     const currentScreen = segments[1];
     const inAuthGroup = segments[0] === '(auth)';
-    const isVerificationScreen = inAuthGroup && currentScreen === 'verify-email';
-    const isResetScreen = inAuthGroup && currentScreen === 'reset-password';
+    const isPublicAuthScreen =
+      inAuthGroup &&
+      ['forgot-password', 'login', 'register', 'reset-password', 'verify-email'].includes(currentScreen ?? '');
 
     if (!user) {
-      if (!isVerificationScreen && !isResetScreen) {
+      if (!isPublicAuthScreen) {
         router.replace('/(auth)/login');
       }
       return;
@@ -75,12 +107,28 @@ function RootLayoutNav() {
     }
   }, [loading, router, segments, user]);
 
+  useEffect(() => {
+    if (loading || user?.role !== 'customer' || !user.emailVerified) {
+      setShowLaunch(false);
+      return;
+    }
+
+    setShowLaunch(true);
+    const timer = setTimeout(() => setShowLaunch(false), 1150);
+
+    return () => clearTimeout(timer);
+  }, [loading, user?.emailVerified, user?.role, user?.uid]);
+
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#f5b342" />
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color={customerTheme.brandGreen} />
       </View>
     );
+  }
+
+  if (showLaunch) {
+    return <FeastyLaunchScreen />;
   }
 
   return <Slot />;
@@ -110,3 +158,30 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  launchScreen: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.launchBackground,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  launchWordmark: {
+    fontSize: 54,
+    fontStyle: 'italic',
+    fontWeight: '900',
+    letterSpacing: -2,
+  },
+  launchWordmarkGreen: {
+    color: customerTheme.brandGreen,
+  },
+  launchWordmarkOrange: {
+    color: customerTheme.brandOrange,
+  },
+  loadingScreen: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.launchBackground,
+    flex: 1,
+    justifyContent: 'center',
+  },
+});

@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
@@ -11,6 +12,7 @@ import { formatDispatchMoney } from '../../src/utils/dispatchQueue';
 export default function DispatchDashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const { activeDeliveryOrders, awaitingPickupCount, deliveredCount, error, loading, onTheWayCount } =
     useDispatchOrders();
   const {
@@ -21,6 +23,7 @@ export default function DispatchDashboard() {
     onlineRiders,
     riders,
   } = useDispatchRiders();
+  const currentRider = user ? riders.find((rider) => rider.id === user.uid) ?? null : null;
   const delayedRiders = riders.filter((rider) => rider.availabilityLabel.includes('delay'));
   const offlineRiders = riders.filter((rider) => rider.availabilityLabel.includes('offline'));
   const dispatchMetrics = [
@@ -49,6 +52,8 @@ export default function DispatchDashboard() {
         }
       : null,
   ].filter((alert): alert is { title: string; copy: string } => Boolean(alert));
+  const rawName = currentRider?.name?.trim() || user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'DISPATCH';
+  const greetingName = rawName.toUpperCase().slice(0, 18);
 
   if (loading || ridersLoading) {
     return (
@@ -61,22 +66,10 @@ export default function DispatchDashboard() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
-      <View style={styles.hero}>
-        <Text style={styles.eyebrow}>E-Fooders</Text>
-        <Text style={styles.title}>Live operations overview</Text>
-        <Text style={styles.copy}>
-          Keep riders, handoffs, and zone pressure in view from a dispatch board that now matches the customer side better.
+      <View style={styles.greetingBlock}>
+        <Text style={styles.greetingText} numberOfLines={1}>
+          HI {greetingName}
         </Text>
-        <View style={styles.heroMetaRow}>
-          <View style={styles.heroPill}>
-            <Text style={styles.heroPillLabel}>Shift</Text>
-            <Text style={styles.heroPillValue}>Lunch Rush</Text>
-          </View>
-          <View style={styles.heroPill}>
-            <Text style={styles.heroPillLabel}>Last sync</Text>
-            <Text style={styles.heroPillValue}>2 mins ago</Text>
-          </View>
-        </View>
       </View>
 
       <View style={styles.statsGrid}>
@@ -91,7 +84,6 @@ export default function DispatchDashboard() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Active dispatch board</Text>
-        <Text style={styles.sectionCopy}>Orders that need eyes right now, sorted by urgency and handoff stage.</Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         {activeDeliveryOrders.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -205,58 +197,19 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingBottom: 30,
   },
-  hero: {
-    backgroundColor: dispatchTheme.hero,
-    borderRadius: 28,
-    padding: 22,
+  greetingBlock: {
+    alignItems: 'flex-start',
   },
-  eyebrow: {
-    color: dispatchTheme.accentSoft,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginBottom: 10,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: dispatchTheme.cream,
-    fontSize: 30,
+  greetingText: {
+    color: dispatchTheme.text,
+    fontSize: 24,
     fontWeight: '800',
-  },
-  copy: {
-    color: '#d6dfeb',
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 10,
-  },
-  heroMetaRow: {
-    flexDirection: 'row',
-    marginTop: 18,
-  },
-  heroPill: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderRadius: 18,
-    marginRight: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  heroPillLabel: {
-    color: '#f3debf',
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  heroPillValue: {
-    color: dispatchTheme.cream,
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 4,
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginTop: 18,
+    marginTop: 14,
   },
   metricCard: {
     backgroundColor: dispatchTheme.surface,
@@ -288,14 +241,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: dispatchTheme.text,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
-  },
-  sectionCopy: {
-    color: dispatchTheme.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
   },
   errorText: {
     color: dispatchTheme.danger,

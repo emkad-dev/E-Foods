@@ -23,6 +23,7 @@ import {
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { submitPartnerApplication, type PartnerApplicationInput } from '../services/partnerApplications';
+import { uploadRestaurantAsset } from '../services/restaurantAssetUpload';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 
@@ -302,6 +303,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         role: 'customer',
       });
 
+      const logoImage = userData.logoImage
+        ? await uploadRestaurantAsset({
+            kind: 'logos',
+            ownerId: authUser.id,
+            uri: userData.logoImage,
+          })
+        : null;
+
       await submitPartnerApplication({
         address: userData.address.trim(),
         contactName: userData.contactName.trim(),
@@ -309,6 +318,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         deliveryTime: userData.deliveryTime?.trim() || undefined,
         description: userData.description?.trim() || undefined,
         latitude: userData.latitude ?? null,
+        logoImage,
         longitude: userData.longitude ?? null,
         phoneNumber: userData.phoneNumber.trim(),
         restaurantName: userData.restaurantName.trim(),

@@ -295,8 +295,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       pendingApplicantUidRef.current = authUser.id;
 
       await createUserDocument(authUser.id, {
+        displayName: userData.displayName.trim(),
         email: authUser.email ?? email,
         emailVerified: Boolean(authUser.email_confirmed_at),
+        phoneNumber: userData.phoneNumber.trim(),
         role: 'customer',
       });
 

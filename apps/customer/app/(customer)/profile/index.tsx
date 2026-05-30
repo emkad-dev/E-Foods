@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { useAuth } from '../../../src/contexts/AuthContext';
@@ -45,7 +45,12 @@ function ProfileRow({ destructive = false, icon, label, onPress, value }: Profil
 }
 
 export default function ProfileScreen() {
-  const { deleteAccount, loading, signOut, user } = useAuth();
+  const { deleteAccount, loading, signOut, updateDisplayName, user } = useAuth();
+  const [usernameDraft, setUsernameDraft] = useState('');
+
+  useEffect(() => {
+    setUsernameDraft(user?.displayName?.trim() ?? '');
+  }, [user?.displayName]);
 
   const handleSignOut = async () => {
     try {
@@ -74,6 +79,26 @@ export default function ProfileScreen() {
         },
       ]
     );
+  };
+
+  const handleSaveUsername = async () => {
+    const nextUsername = usernameDraft.trim();
+
+    if (!nextUsername) {
+      Alert.alert('Username required', 'Add the name you want the app to greet you with.');
+      return;
+    }
+
+    if (nextUsername === user?.displayName?.trim()) {
+      return;
+    }
+
+    try {
+      await updateDisplayName(nextUsername);
+      Alert.alert('Username saved', 'Your customer greeting has been updated.');
+    } catch (nextError: any) {
+      Alert.alert('Save failed', nextError.message ?? 'Unable to update username right now.');
+    }
   };
 
   if (!user) {
@@ -109,6 +134,32 @@ export default function ProfileScreen() {
 
       <View style={styles.group}>
         <Text style={styles.groupTitle}>Account</Text>
+        <View style={styles.usernameRow}>
+          <Text style={styles.usernameLabel}>Username</Text>
+          <View style={styles.usernameInputRow}>
+            <TextInput
+              style={styles.usernameInput}
+              value={usernameDraft}
+              onChangeText={setUsernameDraft}
+              placeholder="Add username"
+              placeholderTextColor={customerTheme.textMuted}
+              editable={!loading}
+              maxLength={24}
+            />
+            <TouchableOpacity
+              style={[
+                styles.usernameSaveButton,
+                !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()
+                  ? styles.usernameSaveButtonDisabled
+                  : null,
+              ]}
+              onPress={handleSaveUsername}
+              disabled={loading || !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()}
+            >
+              <Text style={styles.usernameSaveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         <ProfileRow icon="user-o" label="Email" value={user.email} />
         <ProfileRow icon="check-circle-o" label="Email verified" value={user.emailVerified ? 'Yes' : 'No'} />
         <ProfileRow icon="mobile" label="Session" value={user.activeSessionId ? 'Active on this device' : 'Idle'} />
@@ -189,6 +240,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 14,
     textTransform: 'uppercase',
+  },
+  usernameRow: {
+    borderTopColor: customerTheme.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  usernameLabel: {
+    color: customerTheme.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  usernameInputRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginTop: 10,
+  },
+  usernameInput: {
+    backgroundColor: customerTheme.surfaceStrong,
+    borderColor: customerTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    color: customerTheme.text,
+    flex: 1,
+    fontSize: 14,
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  usernameSaveButton: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.accent,
+    borderRadius: 14,
+    marginLeft: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  usernameSaveButtonDisabled: {
+    opacity: 0.45,
+  },
+  usernameSaveText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
   },
   row: {
     alignItems: 'center',

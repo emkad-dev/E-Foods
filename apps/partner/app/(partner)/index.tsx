@@ -9,9 +9,12 @@ import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerHome() {
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const router = useRouter();
   const { activeOrders, completedToday, error, incomingOrders, loading, preparingOrders, restaurant } = usePartnerOrders();
+  const rawName =
+    restaurant?.name?.trim() || user?.restaurantName?.trim() || user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'PARTNER';
+  const greetingName = rawName.toUpperCase().slice(0, 18);
 
   const handleSignOut = async () => {
     try {
@@ -32,12 +35,15 @@ export default function PartnerHome() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-      <View style={styles.hero}>
-        <Text style={styles.eyebrow}>E-Foods Partner</Text>
-        <Text style={styles.title}>{restaurant?.name ?? 'Restaurant operations'}</Text>
-        <Text style={styles.copy}>
-          Stay on top of incoming orders, kitchen flow, and pickup readiness from one control board.
+      <View style={styles.greetingBlock}>
+        <Text style={styles.greetingText} numberOfLines={1}>
+          HI {greetingName}
         </Text>
+        {restaurant?.name ? (
+          <Text style={styles.greetingMeta} numberOfLines={1}>
+            {restaurant.name}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.metricsRow}>
@@ -125,34 +131,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: 12,
   },
-  hero: {
-    backgroundColor: partnerTheme.hero,
-    borderRadius: 26,
-    padding: 22,
+  greetingBlock: {
+    alignItems: 'flex-start',
   },
-  eyebrow: {
-    color: partnerTheme.heroSoft,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 12,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: '#fffdf8',
-    fontSize: 28,
+  greetingText: {
+    color: partnerTheme.text,
+    fontSize: 24,
     fontWeight: '800',
-    marginBottom: 12,
   },
-  copy: {
-    color: '#e7dbc7',
-    fontSize: 16,
-    lineHeight: 24,
+  greetingMeta: {
+    color: partnerTheme.textMuted,
+    fontSize: 12,
+    marginTop: 4,
   },
   metricsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
+    marginTop: 14,
   },
   metricCard: {
     backgroundColor: partnerTheme.surface,
@@ -178,7 +173,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: partnerTheme.text,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
   },
   errorText: {

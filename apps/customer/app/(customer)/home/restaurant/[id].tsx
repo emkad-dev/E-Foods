@@ -13,6 +13,8 @@ import {
 import Animated, { FadeIn, FadeInDown, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
+import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
+import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
 import { useAuth } from '../../../../src/contexts/AuthContext';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { customerTheme } from '../../../../src/theme/palette';
@@ -175,6 +177,14 @@ export default function RestaurantDetail() {
   const totalItemsInCart = items.reduce((sum, item) => sum + item.quantity, 0);
   const availabilityBadge = restaurant ? getRestaurantAvailabilityBadge({ isAvailable: true } as any) : null;
   const operatingHoursLabel = restaurant ? getRestaurantOperatingHoursLabel(restaurant) : null;
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/(customer)/home');
+  };
 
   if (loading) {
     return (
@@ -208,31 +218,32 @@ export default function RestaurantDetail() {
               )}
 
               <View style={styles.heroOverlay}>
-                <TouchableOpacity style={styles.heroBackButton} onPress={() => router.back()}>
+                <TouchableOpacity style={styles.heroBackButton} onPress={handleBack}>
                   <FontAwesome name="arrow-left" size={16} color="#ffffff" />
                 </TouchableOpacity>
               </View>
 
               <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.summaryCard}>
+                <RestaurantLogoBadge
+                  logoImage={restaurant.logoImage}
+                  name={restaurant.name}
+                  size={56}
+                  style={styles.summaryLogo}
+                />
                 <View style={styles.summaryHeader}>
                   <View style={styles.summaryHeaderCopy}>
                     <Text style={styles.name}>{restaurant.name}</Text>
                     <Text style={styles.cuisine}>{restaurant.cuisine ?? 'Cuisine coming soon'}</Text>
                   </View>
-                  {restaurant.isOpen === false ? (
-                    <View style={styles.closedBadge}>
-                      <Text style={styles.closedBadgeText}>Closed</Text>
-                    </View>
-                  ) : availabilityBadge ? (
-                    <View style={styles.availabilityBadge}>
-                      <Text style={styles.availabilityBadgeText}>{availabilityBadge}</Text>
-                    </View>
-                  ) : null}
+                  <RestaurantFavoriteButton restaurantId={restaurant.id} style={styles.summaryFavoriteButton} />
                 </View>
 
                 <View style={styles.factsRow}>
-                  <Text style={styles.factPill}>★ {restaurant.rating ?? 'New'}</Text>
+                  <Text style={styles.factPill}>{restaurant.rating ? `Rated ${restaurant.rating}` : 'New'}</Text>
                   <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
+                  <Text style={styles.factPill}>
+                    {restaurant.isOpen === false ? 'Closed' : availabilityBadge ?? 'Open'}
+                  </Text>
                   <Text style={styles.factPill}>
                     Delivery {restaurant.deliveryFee ? formatMoney(Number(restaurant.deliveryFee)) : 'Pending'}
                   </Text>
@@ -379,6 +390,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: -32,
     padding: 20,
+    paddingTop: 34,
+  },
+  summaryFavoriteButton: {
+    backgroundColor: customerTheme.surfaceMuted,
+  },
+  summaryLogo: {
+    left: 20,
+    position: 'absolute',
+    top: -28,
   },
   summaryHeader: {
     alignItems: 'center',
