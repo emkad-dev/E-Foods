@@ -213,6 +213,11 @@ type PaymentTransactionRow = {
 
 type DispatchOrderDetailResponse = ReturnType<typeof toOrderSnapshotResponse>;
 
+type OrderSnapshotOptions = {
+  courierPhone?: string | null;
+  customerPhone?: string | null;
+};
+
 const APP_ROLES = ['customer', 'restaurant', 'dispatch', 'admin'] as const;
 const PRIVILEGED_APP_ROLES = new Set(['restaurant', 'dispatch', 'admin']);
 const DISPATCH_APPLICATION_STATUS = {
@@ -233,6 +238,7 @@ const DEFAULT_CURRENCY = 'NGN';
 const DEFAULT_DELIVERY_TIME = '25-35 min';
 const DEFAULT_DISPATCH_STATUS = 'Available';
 const DEFAULT_DISPATCH_VEHICLE = 'Bike';
+const PLATFORM_COMMISSION_RATE = 0.15;
 const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')?.trim() ?? '';
@@ -495,18 +501,21 @@ const toOrderSnapshotResponse = (
   order: CustomerOrderRow,
   items: OrderItemRow[],
   assignment: DeliveryAssignmentRow | null,
-  events: DeliveryEventRow[] = []
+  events: DeliveryEventRow[] = [],
+  options: OrderSnapshotOptions = {}
 ) => ({
   assignment: assignment
     ? {
         courierId: sanitizeOptionalText(assignment.courierId),
         courierName: sanitizeOptionalText(assignment.courierName),
+        courierPhone: sanitizeOptionalText(options.courierPhone),
         dispatchId: sanitizeOptionalText(assignment.dispatchId),
       }
     : null,
   cancellation: order.cancellation ?? null,
   createdAt: order.createdAt ?? null,
   customerId: order.customerId,
+  customerPhone: sanitizeOptionalText(options.customerPhone),
   deliveryAddress: sanitizeOptionalText(order.deliveryAddress),
   deliveryLocation: order.deliveryLocation ?? null,
   events: events.map((event) => ({
@@ -948,6 +957,44 @@ const loadUserAccount = async (uid: string) => {
   return data ?? null;
 };
 
+const loadUserPhoneNumber = async (uid: string) => {
+  const safeUid = sanitizeText(uid);
+  if (!safeUid) {
+    return null;
+  }
+
+  const { data, error } = await serviceClient
+    .from('UserAccount')
+    .select('phoneNumber')
+    .eq('uid', safeUid)
+    .maybeSingle<Pick<UserAccountRow, 'phoneNumber'>>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return sanitizeOptionalText(data?.phoneNumber);
+};
+
+const loadDispatchRiderPhoneNumber = async (riderId: string | null | undefined) => {
+  const safeRiderId = sanitizeText(riderId);
+  if (!safeRiderId) {
+    return null;
+  }
+
+  const { data, error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .select('phoneNumber')
+    .eq('id', safeRiderId)
+    .maybeSingle<Pick<DispatchRiderRow, 'phoneNumber'>>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return sanitizeOptionalText(data?.phoneNumber);
+};
+
 const loadUserRoles = async (userIds: string[]) => {
   if (userIds.length === 0) {
     return new Map<string, UserRoleRow[]>();
@@ -1147,15 +1194,17 @@ const normalizeDeliveryLocation = (deliveryLocation: unknown) => {
   const latitude = parseNumber(record.latitude, Number.NaN);
   const longitude = parseNumber(record.longitude, Number.NaN);
 
-  if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  if (!address) {
     return null;
   }
+
+  const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
 
   return {
     address,
     label: sanitizeOptionalText(record.label),
-    latitude,
-    longitude,
+    latitude: hasCoordinates ? latitude : null,
+    longitude: hasCoordinates ? longitude : null,
     note: sanitizeOptionalText(record.note),
     shortAddress: sanitizeOptionalText(record.shortAddress),
   };
@@ -1167,6 +1216,29 @@ const calculateServiceFee = (subtotal: number) => {
   }
 
   return roundCurrency(Math.min(Math.max(subtotal * 0.05, 0.49), 12));
+};
+
+const calculateSettlementBreakdown = ({
+  deliveryFee,
+  subtotal,
+}: {
+  deliveryFee: number;
+  subtotal: number;
+}) => {
+  const safeSubtotal = roundCurrency(subtotal);
+  const dispatchFee = roundCurrency(deliveryFee);
+  const platformFee = roundCurrency(safeSubtotal * PLATFORM_COMMISSION_RATE);
+  const restaurantPayable = roundCurrency(Math.max(safeSubtotal - platformFee, 0));
+  const netSettlement = roundCurrency(restaurantPayable + dispatchFee);
+
+  return {
+    basis: 'subtotal',
+    commissionRate: PLATFORM_COMMISSION_RATE,
+    dispatchFee,
+    netSettlement,
+    platformFee,
+    restaurantPayable,
+  };
 };
 
 const calculatePricing = ({
@@ -1182,13 +1254,22 @@ const calculatePricing = ({
   const safeDeliveryFee = roundCurrency(deliveryFee);
   const safeTip = roundCurrency(tip);
   const serviceFee = calculateServiceFee(safeSubtotal);
+  const settlement = calculateSettlementBreakdown({
+    deliveryFee: safeDeliveryFee,
+    subtotal: safeSubtotal,
+  });
   const total = roundCurrency(safeSubtotal + safeDeliveryFee + serviceFee + safeTip);
 
   return {
     currency: DEFAULT_CURRENCY,
     deliveryFee: safeDeliveryFee,
     discount: 0,
+    dispatchFee: settlement.dispatchFee,
+    netSettlement: settlement.netSettlement,
+    platformFee: settlement.platformFee,
+    restaurantPayable: settlement.restaurantPayable,
     serviceFee,
+    settlement,
     subtotal: safeSubtotal,
     tip: safeTip,
     total,
@@ -1200,11 +1281,13 @@ const buildInitialPaymentSummary = ({
   reference = null,
   authorizationUrl = null,
   accessCode = null,
+  settlement = null,
 }: {
   accessCode?: string | null;
   authorizationUrl?: string | null;
   paymentMethod: string;
   reference?: string | null;
+  settlement?: JsonObject | null;
 }) => {
   if (!PREPAID_PAYMENT_METHODS.has(paymentMethod)) {
     return {
@@ -1216,6 +1299,7 @@ const buildInitialPaymentSummary = ({
       refundAmount: 0,
       refundedAt: null,
       paidAt: null,
+      settlement,
       status: PAYMENT_STATUS.PENDING,
     };
   }
@@ -1232,6 +1316,7 @@ const buildInitialPaymentSummary = ({
     reference,
     refundAmount: 0,
     refundedAt: null,
+    settlement,
     status: PAYMENT_STATUS.PENDING,
     verifiedAt: null,
   };
@@ -1777,16 +1862,6 @@ const assertPaystackConfigured = () => {
 const toKoboAmount = (amount: number) => Math.round(roundCurrency(parseNumber(amount, 0)) * 100);
 const fromKoboAmount = (amount: unknown) => roundCurrency(parseNumber(amount, 0) / 100);
 
-const getDefaultPaystackTransactionChargeKobo = () => {
-  const configuredAmount = sanitizeOptionalText(Deno.env.get('PAYSTACK_TRANSACTION_CHARGE_KOBO'));
-  if (!configuredAmount) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(configuredAmount, 10);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
-};
-
 const mapPaystackChannels = (paymentMethod: string) => {
   switch (paymentMethod) {
     case 'card':
@@ -1845,8 +1920,6 @@ const initializePaystackTransaction = async ({
   metadata,
   paymentMethod,
   reference,
-  restaurantSubaccountCode,
-  transactionChargeKobo,
 }: {
   amount: number;
   callbackUrl?: string | null;
@@ -1854,8 +1927,6 @@ const initializePaystackTransaction = async ({
   metadata: JsonObject;
   paymentMethod: string;
   reference: string;
-  restaurantSubaccountCode?: string | null;
-  transactionChargeKobo?: number | null;
 }) => {
   const payload: JsonObject = {
     amount: String(toKoboAmount(amount)),
@@ -1868,15 +1939,6 @@ const initializePaystackTransaction = async ({
 
   if (callbackUrl) {
     payload.callback_url = callbackUrl;
-  }
-
-  if (restaurantSubaccountCode) {
-    payload.subaccount = restaurantSubaccountCode;
-    payload.bearer = 'account';
-
-    if (Number.isInteger(transactionChargeKobo) && transactionChargeKobo! >= 0) {
-      payload.transaction_charge = transactionChargeKobo;
-    }
   }
 
   return (await fetchPaystackJson({
@@ -1894,12 +1956,10 @@ const verifyPaystackTransaction = async (reference: string) =>
 
 const syncOrderPaymentState = async ({
   order,
-  splitSubaccountCode = null,
   transactionData,
   webhookEvent = null,
 }: {
   order: CustomerOrderRow;
-  splitSubaccountCode?: string | null;
   transactionData: JsonObject;
   webhookEvent?: JsonObject | null;
 }) => {
@@ -1981,7 +2041,6 @@ const syncOrderPaymentState = async ({
     paidAt: sanitizeText(nextPayment.status) === PAYMENT_STATUS.PAID ? nextPayment.paidAt ?? verifiedAtIso : null,
     failedAt: sanitizeText(nextPayment.status) === PAYMENT_STATUS.FAILED ? verifiedAtIso : null,
     verifiedAt: verifiedAtIso,
-    splitSubaccountCode,
     verificationResponse: transactionData,
     webhookEvent,
     updatedAt: verifiedAtIso,
@@ -2022,7 +2081,7 @@ const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEv
   const { data: paymentRecord, error: paymentError } = await serviceClient
     .from('PaymentTransaction')
     .select(
-      'orderId,customerId,restaurantId,method,reference,status,splitSubaccountCode,accessCode,authorizationUrl,channel,gatewayStatus,lastError'
+      'orderId,customerId,restaurantId,method,reference,status,accessCode,authorizationUrl,channel,gatewayStatus,lastError'
     )
     .eq('reference', paymentReference)
     .maybeSingle<PaymentTransactionRow>();
@@ -2041,7 +2100,6 @@ const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEv
 
   return syncOrderPaymentState({
     order,
-    splitSubaccountCode: sanitizeOptionalText(paymentRecord?.splitSubaccountCode),
     transactionData: verifiedTransaction,
     webhookEvent,
   });
@@ -3595,9 +3653,13 @@ const handleNativeAction = async (
       fail(403, 'You can only view your own orders.');
     }
 
+    const courierPhone = await loadDispatchRiderPhoneNumber(bundle.assignment?.courierId);
+
     return json(200, {
       data: {
-        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment),
+        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], {
+          courierPhone,
+        }),
       },
     });
   }
@@ -3686,6 +3748,7 @@ const handleNativeAction = async (
     const orderId = crypto.randomUUID();
     const payment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
+      settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
     });
 
     await createOrderWithItems({
@@ -3761,6 +3824,7 @@ const handleNativeAction = async (
     const initialPayment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
       reference: paymentReference,
+      settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
     });
 
     await createOrderWithItems({
@@ -3775,14 +3839,6 @@ const handleNativeAction = async (
       restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
     });
 
-    const restaurantSubaccountCode = sanitizeOptionalText(orderDraft.restaurant.paystackSubaccountCode);
-    const transactionChargeKobo = restaurantSubaccountCode
-      ? getDefaultPaystackTransactionChargeKobo() ??
-        toKoboAmount(
-          parseNumber(orderDraft.pricing.deliveryFee, 0) + parseNumber(orderDraft.pricing.serviceFee, 0)
-        )
-      : null;
-
     await upsertPaymentTransaction({
       orderId,
       customerId: context.uid,
@@ -3793,7 +3849,6 @@ const handleNativeAction = async (
       currency: DEFAULT_CURRENCY,
       amount: orderDraft.pricing.total,
       status: PAYMENT_STATUS.PENDING,
-      splitSubaccountCode: restaurantSubaccountCode,
     });
 
     try {
@@ -3810,9 +3865,7 @@ const handleNativeAction = async (
           restaurantId: orderDraft.restaurantId,
           source: 'ebuy_customer_checkout',
         },
-        restaurantSubaccountCode,
         callbackUrl: getPaystackCallbackUrl(),
-        transactionChargeKobo,
       });
 
       const paymentWithAuthorization = buildInitialPaymentSummary({
@@ -3820,6 +3873,7 @@ const handleNativeAction = async (
         reference: paymentReference,
         accessCode: sanitizeOptionalText(initializedTransaction.access_code),
         authorizationUrl: sanitizeOptionalText(initializedTransaction.authorization_url),
+        settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
       });
 
       await updateOrderRecord(orderId, {
@@ -3839,7 +3893,6 @@ const handleNativeAction = async (
         status: PAYMENT_STATUS.PENDING,
         accessCode: sanitizeOptionalText(initializedTransaction.access_code),
         authorizationUrl: sanitizeOptionalText(initializedTransaction.authorization_url),
-        splitSubaccountCode: restaurantSubaccountCode,
         initializeResponse: initializedTransaction,
       });
 
@@ -3901,7 +3954,6 @@ const handleNativeAction = async (
         status: PAYMENT_STATUS.FAILED,
         lastError: paymentError instanceof Error ? paymentError.message : String(paymentError),
         failedAt: nowIso(),
-        splitSubaccountCode: restaurantSubaccountCode,
       });
 
       throw paymentError;
@@ -4501,9 +4553,13 @@ const handleNativeAction = async (
 
     assertOrderPaymentReadyForOperations(bundle.order);
 
+    const customerPhone = await loadUserPhoneNumber(bundle.order.customerId);
+
     return json(200, {
       data: {
-        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, bundle.events),
+        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, bundle.events, {
+          customerPhone,
+        }),
       },
     });
   }

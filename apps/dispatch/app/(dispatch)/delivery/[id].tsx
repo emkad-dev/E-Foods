@@ -19,6 +19,7 @@ import {
 } from '../../../src/services/dispatchOrderActions';
 import { dispatchTheme } from '../../../src/theme/palette';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
+import { openPhoneDialer } from '../../../src/utils/phoneLinking';
 
 export default function DispatchDeliveryDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -147,6 +148,18 @@ export default function DispatchDeliveryDetailScreen() {
     }
   };
 
+  const handleCallCustomer = async () => {
+    if (!order?.customerPhone) {
+      return;
+    }
+
+    try {
+      await openPhoneDialer(order.customerPhone);
+    } catch (nextError: any) {
+      Alert.alert('Call failed', nextError.message ?? 'Could not open the phone app.');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -222,6 +235,11 @@ export default function DispatchDeliveryDetailScreen() {
           Address: {order.deliveryAddress ?? order.deliveryLocation?.address ?? 'Customer address pending'}
         </Text>
         {order.deliveryLocation?.note ? <Text style={styles.detailNote}>Drop-off note: {order.deliveryLocation.note}</Text> : null}
+        {order.customerPhone ? (
+          <TouchableOpacity style={styles.callButton} onPress={handleCallCustomer}>
+            <Text style={styles.callButtonText}>Call customer</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.sectionCard}>
@@ -438,6 +456,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     marginTop: 8,
+  },
+  callButton: {
+    alignItems: 'center',
+    backgroundColor: dispatchTheme.accent,
+    borderRadius: 14,
+    marginTop: 14,
+    paddingVertical: 13,
+  },
+  callButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '900',
   },
   itemRow: {
     alignItems: 'center',

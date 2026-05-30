@@ -14,6 +14,7 @@ export type DispatchOrderDetail = {
     note?: string | null;
     shortAddress?: string | null;
   } | null;
+  customerPhone?: string | null;
   fulfillmentType?: string | null;
   items?: {
     id?: string;

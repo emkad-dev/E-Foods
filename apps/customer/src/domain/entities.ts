@@ -9,8 +9,8 @@ export interface AddressRecord extends DocumentData {
   id?: string;
   address: string;
   shortAddress?: string | null;
-  latitude: number;
-  longitude: number;
+  latitude?: number | null;
+  longitude?: number | null;
   label?: string | null;
   note?: string | null;
   isDefault?: boolean;
@@ -119,6 +119,7 @@ export interface OrderAssignmentSummary extends DocumentData {
   dispatchId?: string | null;
   courierId?: string | null;
   courierName?: string | null;
+  courierPhone?: string | null;
 }
 
 export interface OrderTimeline extends DocumentData {
@@ -142,6 +143,7 @@ export interface OrderDocument extends DocumentData {
   createdAt: unknown;
   updatedAt?: unknown;
   scheduledAt?: unknown | null;
+  customerPhone?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
   pricing: OrderPriceBreakdown;

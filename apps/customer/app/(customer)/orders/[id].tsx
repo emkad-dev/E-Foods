@@ -18,6 +18,7 @@ import {
 import { useCustomerOrder } from '../../../src/hooks/useCustomerOrder';
 import { cancelCustomerOrder, refreshCustomerPaymentStatus } from '../../../src/services/customerOrderActions';
 import { customerTheme } from '../../../src/theme/palette';
+import { openPhoneDialer } from '../../../src/utils/phoneLinking';
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
@@ -68,6 +69,7 @@ export default function OrderTracking() {
     isPrepaidPaymentMethod(order.payment?.method) && ['paid', 'refunded'].includes(order.payment?.status ?? '');
   const isPendingPrepaidPayment =
     isPrepaidPaymentMethod(order.payment?.method) && (order.payment?.status ?? 'pending') === 'pending';
+  const courierPhone = order.assignment?.courierPhone ?? null;
   const refundCopy = !canCancel
     ? 'This order has moved too far along for self-service cancellation.'
     : !isPrepaidPaymentMethod(order.payment?.method)
@@ -124,6 +126,18 @@ export default function OrderTracking() {
     }
   };
 
+  const handleCallRider = async () => {
+    if (!courierPhone) {
+      return;
+    }
+
+    try {
+      await openPhoneDialer(courierPhone);
+    } catch (nextError: any) {
+      Alert.alert('Call failed', nextError.message ?? 'Could not open the phone app.');
+    }
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <View style={styles.heroCard}>
@@ -140,6 +154,11 @@ export default function OrderTracking() {
             </Text>
           </View>
         </View>
+        {courierPhone ? (
+          <TouchableOpacity style={styles.callButton} onPress={handleCallRider}>
+            <Text style={styles.callButtonText}>Call rider</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.progressCard}>
@@ -286,6 +305,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
+  },
+  callButton: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.accentStrong,
+    borderRadius: 14,
+    marginTop: 14,
+    paddingVertical: 12,
+  },
+  callButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '900',
   },
   progressCard: {
     backgroundColor: customerTheme.surface,

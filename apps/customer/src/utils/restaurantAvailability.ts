@@ -240,8 +240,10 @@ export const getRestaurantAvailability = (
   }
 
   const restaurantCoordinates = extractRestaurantCoordinates(restaurant);
+  const latitude = Number(deliveryLocation.latitude);
+  const longitude = Number(deliveryLocation.longitude);
 
-  if (!restaurantCoordinates) {
+  if (!restaurantCoordinates || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return {
       isAvailable: true,
       reason: 'available',
@@ -251,8 +253,8 @@ export const getRestaurantAvailability = (
   }
 
   const customerCoordinates = {
-    latitude: deliveryLocation.latitude,
-    longitude: deliveryLocation.longitude,
+    latitude,
+    longitude,
   };
   const distanceKm = calculateDistanceKm(restaurantCoordinates, customerCoordinates);
   const radiusKm = getRestaurantServiceRadiusKm(restaurant);
