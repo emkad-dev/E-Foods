@@ -516,6 +516,20 @@ const getLagosWeekWindow = (date = new Date()) => {
 const getDispatchEarningsAmount = (pricing: JsonObject | null | undefined) =>
   roundCurrency(parseNumber(pricing?.dispatchFee, parseNumber(pricing?.deliveryFee, 0)));
 
+const getOrderDeliveredAt = (order: CustomerOrderRow) =>
+  sanitizeOptionalText(order.timeline?.deliveredAt) ??
+  sanitizeOptionalText(order.updatedAt) ??
+  sanitizeOptionalText(order.createdAt);
+
+const isIsoDateInWindow = (value: string | null | undefined, startsAt: string, endsAt: string) => {
+  if (!value) {
+    return false;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp >= Date.parse(startsAt) && timestamp < Date.parse(endsAt);
+};
+
 const isAppRole = (role: string) => (APP_ROLES as readonly string[]).includes(role);
 
 const ensureRole = (role: string, allowedRoles: readonly string[]) => {
@@ -4605,8 +4619,6 @@ const handleNativeAction = async (
       )
       .in('id', orderIds)
       .eq('status', ORDER_STATUS.DELIVERED)
-      .gte('updatedAt', weekWindow.startsAt)
-      .lt('updatedAt', weekWindow.endsAt)
       .order('updatedAt', { ascending: false });
 
     if (orderError) {
@@ -4614,20 +4626,23 @@ const handleNativeAction = async (
     }
 
     const deliveredOrders = ((orders ?? []) as CustomerOrderRow[]).filter(
-      (order) => normalizeOrderStatus(order.status) === ORDER_STATUS.DELIVERED
+      (order) =>
+        normalizeOrderStatus(order.status) === ORDER_STATUS.DELIVERED &&
+        isIsoDateInWindow(getOrderDeliveredAt(order), weekWindow.startsAt, weekWindow.endsAt)
     );
     const records = deliveredOrders.map((order) => {
       const earningsAmount = getDispatchEarningsAmount(order.pricing);
+      const deliveredAt = getOrderDeliveredAt(order);
 
       return {
         address: sanitizeOptionalText(order.deliveryLocation?.shortAddress) ??
           sanitizeOptionalText(order.deliveryAddress),
         amount: earningsAmount,
-        deliveredAt: order.updatedAt ?? order.createdAt ?? null,
+        deliveredAt,
         orderId: order.id,
         restaurantName: order.restaurantName,
       };
-    });
+    }).sort((left, right) => Date.parse(right.deliveredAt ?? '') - Date.parse(left.deliveredAt ?? ''));
     const total = roundCurrency(records.reduce((sum, record) => sum + record.amount, 0));
     const deliveredOrderCount = records.length;
 
