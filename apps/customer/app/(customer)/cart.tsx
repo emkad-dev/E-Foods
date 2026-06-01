@@ -65,8 +65,8 @@ export default function CartScreen() {
       ? 'This restaurant is no longer available for checkout.'
       : restaurant.isOpen === false
         ? 'This restaurant is currently closed.'
-        : !isRestaurantPublished
-          ? 'This restaurant is awaiting admin approval and is not available for new orders.'
+          : !isRestaurantPublished
+          ? 'This restaurant is currently unavailable for new orders.'
           : fulfillmentType === 'delivery' && !isDeliverySupported
             ? 'Delivery is no longer available for this restaurant.'
             : fulfillmentType === 'pickup' && !isPickupSupported

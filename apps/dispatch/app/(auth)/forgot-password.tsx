@@ -39,7 +39,7 @@ export default function DispatchForgotPasswordScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Feasters</Text>
+        <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
         <Text style={styles.title}>Reset dispatch password</Text>
         <Text style={styles.copy}>
           Enter your dispatch email and we will send you a password reset link.

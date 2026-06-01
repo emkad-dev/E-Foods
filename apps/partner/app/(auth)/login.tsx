@@ -48,7 +48,7 @@ export default function PartnerLoginScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>E-Foods Partner</Text>
+        <Text style={styles.eyebrow}>FEASTY Partner</Text>
         <Text style={styles.title}>Restaurant sign in</Text>
         <Text style={styles.copy}>
           Use your restaurant operations account to manage orders, menu updates, and store performance.

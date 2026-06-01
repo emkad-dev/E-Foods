@@ -48,7 +48,7 @@ export default function DispatchLoginScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Feasters</Text>
+        <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
         <Text style={styles.title}>Dispatch sign in</Text>
         <Text style={styles.copy}>
           Use a dispatch-enabled team account to access live orders, rider controls, and operations tools.

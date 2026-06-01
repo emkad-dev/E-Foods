@@ -94,7 +94,7 @@ export default function PartnerVerifyEmailScreen() {
         {processing
           ? 'Finishing your email confirmation now. Stay on this screen for a moment.'
           : confirmed
-            ? 'Your email is confirmed. Your partner application remains pending until the admin team approves this account.'
+            ? 'Your email is confirmed. Your restaurant account is now ready for sign-in.'
             : 'Open the verification link from your email on this device to confirm this partner account.'}
       </Text>
 

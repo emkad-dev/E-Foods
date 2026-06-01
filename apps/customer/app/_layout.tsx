@@ -37,7 +37,7 @@ function FeastyLaunchScreen() {
 }
 
 function RootLayoutNav() {
-  const { user, loading } = useAuth();
+  const { user, loading, policyAccepted, policyLoading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
   const [showLaunch, setShowLaunch] = useState(false);
@@ -88,7 +88,7 @@ function RootLayoutNav() {
     const inAuthGroup = segments[0] === '(auth)';
     const isPublicAuthScreen =
       inAuthGroup &&
-      ['forgot-password', 'login', 'register', 'reset-password', 'verify-email'].includes(currentScreen ?? '');
+      ['accept-policy', 'forgot-password', 'login', 'privacy', 'register', 'reset-password', 'terms', 'verify-email'].includes(currentScreen ?? '');
 
     if (!user) {
       if (!isPublicAuthScreen) {
@@ -102,13 +102,18 @@ function RootLayoutNav() {
       return;
     }
 
+    if (!policyAccepted && currentScreen !== 'accept-policy' && currentScreen !== 'terms' && currentScreen !== 'privacy') {
+      router.replace('/(auth)/accept-policy');
+      return;
+    }
+
     if (user.role === 'customer' && !inCustomerGroup) {
       router.replace('/(customer)/home');
     }
-  }, [loading, router, segments, user]);
+  }, [loading, policyAccepted, router, segments, user]);
 
   useEffect(() => {
-    if (loading || user?.role !== 'customer' || !user.emailVerified) {
+    if (loading || policyLoading || user?.role !== 'customer' || !user.emailVerified || !policyAccepted) {
       setShowLaunch(false);
       return;
     }
@@ -117,9 +122,9 @@ function RootLayoutNav() {
     const timer = setTimeout(() => setShowLaunch(false), 1150);
 
     return () => clearTimeout(timer);
-  }, [loading, user?.emailVerified, user?.role, user?.uid]);
+  }, [loading, policyAccepted, policyLoading, user?.emailVerified, user?.role, user?.uid]);
 
-  if (loading) {
+  if (loading || policyLoading) {
     return (
       <View style={styles.loadingScreen}>
         <ActivityIndicator size="large" color={customerTheme.brandGreen} />

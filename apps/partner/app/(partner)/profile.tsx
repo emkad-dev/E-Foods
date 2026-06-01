@@ -27,6 +27,8 @@ const toNumberOrNull = (value: string) => {
   return Number.isFinite(parsedValue) ? parsedValue : null;
 };
 
+const INPUT_PLACEHOLDER_COLOR = '#6a7d76';
+
 export default function PartnerProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, linkRestaurant, loading: authLoading, signOut, user } = useAuth();
@@ -49,6 +51,7 @@ export default function PartnerProfileScreen() {
   const [supportsDelivery, setSupportsDelivery] = useState(true);
   const [supportsPickup, setSupportsPickup] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
+  const [isPublished, setIsPublished] = useState(true);
 
   const sortedRestaurants = [...restaurants].sort((left, right) => left.name.localeCompare(right.name));
 
@@ -80,6 +83,7 @@ export default function PartnerProfileScreen() {
     setSupportsDelivery(restaurant?.supportsDelivery !== false);
     setSupportsPickup(restaurant?.supportsPickup !== false);
     setIsOpen(restaurant?.isOpen !== false);
+    setIsPublished(restaurant?.isPublished !== false);
   }, [restaurant, user?.displayName]);
 
   const handlePickRestaurantAsset = async (kind: 'covers' | 'logos') => {
@@ -162,6 +166,7 @@ export default function PartnerProfileScreen() {
         latitude: toNumberOrNull(latitude),
         longitude: toNumberOrNull(longitude),
         deliveryRadiusKm: toNumberOrNull(deliveryRadiusKm),
+        isPublished,
         supportsDelivery,
         supportsPickup,
         isOpen,
@@ -173,7 +178,7 @@ export default function PartnerProfileScreen() {
 
       Alert.alert(
         user.restaurantId || restaurant?.id ? 'Store updated' : 'Store created',
-        `${savedRestaurant.name} is saved for partner menu management. Customer visibility stays pending until admin approval.`
+        `${savedRestaurant.name} is ${isPublished ? 'live for customers' : 'hidden from customers'} and saved for partner menu management.`
       );
     } catch (nextError: any) {
       Alert.alert('Save failed', nextError.message ?? 'Unable to save store details right now.');
@@ -213,8 +218,8 @@ export default function PartnerProfileScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-      <Text style={styles.title}>Store setup</Text>
-      <Text style={styles.subtitle}>Run the partner side from one place: your business identity, store setup, approval state, and linked restaurant record.</Text>
+      <Text style={styles.title}>Store control</Text>
+      <Text style={styles.subtitle}>Run the partner side from one place: your business identity, store setup, publishing state, and linked restaurant record.</Text>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Partner account</Text>
@@ -235,16 +240,39 @@ export default function PartnerProfileScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Restaurant details</Text>
-        <TextInput style={styles.input} placeholder="Restaurant name" value={name} onChangeText={setName} />
-        <TextInput style={styles.input} placeholder="Cuisine" value={cuisine} onChangeText={setCuisine} />
+        <Text style={styles.fieldLabel}>Restaurant name</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Type the exact restaurant name customers should see"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+          value={name}
+          onChangeText={setName}
+        />
+        <Text style={styles.fieldLabel}>Cuisine</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Example: Nigerian, Grills, Fast Food"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+          value={cuisine}
+          onChangeText={setCuisine}
+        />
+        <Text style={styles.fieldLabel}>Short description</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Short restaurant description"
+          placeholder="Tell customers what you serve in one short sentence"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={description}
           onChangeText={setDescription}
           multiline
         />
-        <TextInput style={styles.input} placeholder="Address" value={address} onChangeText={setAddress} />
+        <Text style={styles.fieldLabel}>Restaurant address</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Street, area, city"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+          value={address}
+          onChangeText={setAddress}
+        />
         <View style={styles.assetGrid}>
           <View style={styles.assetBlock}>
             <View style={styles.logoPreview}>
@@ -271,58 +299,91 @@ export default function PartnerProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <TextInput style={styles.input} placeholder="Delivery time e.g. 25-35 min" value={deliveryTime} onChangeText={setDeliveryTime} />
-        <View style={styles.row}>
-          <TextInput
-            style={[styles.input, styles.halfInput]}
-            placeholder="Opens at e.g. 08:00"
-            value={openingTime}
-            onChangeText={setOpeningTime}
-            autoCapitalize="none"
-          />
-          <TextInput
-            style={[styles.input, styles.halfInput]}
-            placeholder="Closes at e.g. 22:00"
-            value={closingTime}
-            onChangeText={setClosingTime}
-            autoCapitalize="none"
-          />
-        </View>
-        <View style={styles.row}>
-          <TextInput
-            style={[styles.input, styles.halfInput]}
-            placeholder="Delivery fee"
-            value={deliveryFee}
-            onChangeText={setDeliveryFee}
-            keyboardType="decimal-pad"
-          />
-          <TextInput
-            style={[styles.input, styles.halfInput]}
-            placeholder="Min order"
-            value={minOrder}
-            onChangeText={setMinOrder}
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <View style={styles.row}>
-          <TextInput
-            style={[styles.input, styles.halfInput]}
-            placeholder="Latitude"
-            value={latitude}
-            onChangeText={setLatitude}
-            keyboardType="decimal-pad"
-          />
-          <TextInput
-            style={[styles.input, styles.halfInput]}
-            placeholder="Longitude"
-            value={longitude}
-            onChangeText={setLongitude}
-            keyboardType="decimal-pad"
-          />
-        </View>
+        <Text style={styles.fieldLabel}>Delivery time</Text>
         <TextInput
           style={styles.input}
-          placeholder="Delivery radius in km"
+          placeholder="Example: 25-35 min"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+          value={deliveryTime}
+          onChangeText={setDeliveryTime}
+        />
+        <View style={styles.row}>
+          <View style={styles.fieldColumn}>
+            <Text style={styles.fieldLabel}>Opening time</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="08:00"
+              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+              value={openingTime}
+              onChangeText={setOpeningTime}
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.fieldColumn}>
+            <Text style={styles.fieldLabel}>Closing time</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="22:00"
+              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+              value={closingTime}
+              onChangeText={setClosingTime}
+              autoCapitalize="none"
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.fieldColumn}>
+            <Text style={styles.fieldLabel}>Delivery fee</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Amount customers pay for delivery"
+              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+              value={deliveryFee}
+              onChangeText={setDeliveryFee}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.fieldColumn}>
+            <Text style={styles.fieldLabel}>Minimum order</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Lowest order amount accepted"
+              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+              value={minOrder}
+              onChangeText={setMinOrder}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.fieldColumn}>
+            <Text style={styles.fieldLabel}>Latitude</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Optional map latitude"
+              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+              value={latitude}
+              onChangeText={setLatitude}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          <View style={styles.fieldColumn}>
+            <Text style={styles.fieldLabel}>Longitude</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Optional map longitude"
+              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+              value={longitude}
+              onChangeText={setLongitude}
+              keyboardType="decimal-pad"
+            />
+          </View>
+        </View>
+        <Text style={styles.fieldLabel}>Delivery radius</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Maximum delivery distance in km"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={deliveryRadiusKm}
           onChangeText={setDeliveryRadiusKm}
           keyboardType="decimal-pad"
@@ -347,10 +408,19 @@ export default function PartnerProfileScreen() {
           />
         </View>
         <View style={styles.approvalNotice}>
-          <Text style={styles.approvalNoticeTitle}>Admin approval required</Text>
+          <Text style={styles.approvalNoticeTitle}>Self-publish enabled</Text>
           <Text style={styles.approvalNoticeCopy}>
-            Customer visibility is now strictly admin-controlled. Partners can update store details here, but only the admin approvals app can publish or unpublish a restaurant.
+            Your restaurant stays visible to customers as soon as you save it. Use the visibility switch below if you want to hide it temporarily.
           </Text>
+        </View>
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>Visible to customers</Text>
+          <Switch
+            value={isPublished}
+            onValueChange={setIsPublished}
+            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
+            thumbColor={isPublished ? partnerTheme.accent : '#f3f4f6'}
+          />
         </View>
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>Store open now</Text>
@@ -379,9 +449,9 @@ export default function PartnerProfileScreen() {
         <Text style={styles.metaLine}>
           Listed items: {restaurant?.menu?.reduce((sum, category) => sum + (category.items?.length ?? 0), 0) ?? 0}
         </Text>
-        <Text style={styles.metaLine}>Approval status: {restaurant?.approvalStatus ?? 'pending'}</Text>
-        <Text style={styles.metaLine}>Approved at: {restaurant?.approvedAt ?? 'Awaiting admin review'}</Text>
-        <Text style={styles.metaLine}>Approved by: {restaurant?.approvedByUid ?? 'Awaiting admin review'}</Text>
+        <Text style={styles.metaLine}>Publishing status: {restaurant?.approvalStatus ?? (restaurant?.isPublished === true ? 'approved' : 'pending')}</Text>
+        <Text style={styles.metaLine}>Published at: {restaurant?.approvedAt ?? 'Not recorded yet'}</Text>
+        <Text style={styles.metaLine}>Published by: {restaurant?.approvedByUid ?? 'Not recorded yet'}</Text>
         <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
         <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
         <Text style={styles.metaLine}>
@@ -529,6 +599,15 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingHorizontal: 14,
     paddingVertical: 13,
+  },
+  fieldColumn: {
+    flex: 1,
+  },
+  fieldLabel: {
+    color: partnerTheme.text,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 12,
   },
   textArea: {
     minHeight: 98,

@@ -47,7 +47,7 @@ export default function AdminLoginScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>E-Foods Admin</Text>
+        <Text style={styles.eyebrow}>FEASTY Admin</Text>
         <Text style={styles.title}>Company control center</Text>
         <Text style={styles.copy}>
           Use your internal admin account to review restaurants, monitor platform access, and keep operations clean.
