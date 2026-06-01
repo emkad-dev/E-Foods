@@ -10,6 +10,7 @@ export const assignDispatchCourier = async (
     courierId?: string | null;
     courierName?: string | null;
     dispatchId?: string | null;
+    dispatchOwnerId?: string | null;
   } | null
 ) => {
   await callDispatchBackendRpc('dispatchAssignOrderCourier', {

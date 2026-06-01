@@ -16,7 +16,14 @@ import AdminScreenHeader from '../../src/components/AdminScreenHeader';
 import AdminStatusBadge from '../../src/components/AdminStatusBadge';
 import { useAuth } from '../../src/contexts/AuthContext';
 import type { AppRole, UserDocument } from '../../src/domain/entities';
-import { assignUserRole, disableUserAccess, enableUserAccess, provisionStaffAccount, revokeUserRole } from '../../src/services/accessManagement';
+import {
+  assignUserRole,
+  disableUserAccess,
+  enableUserAccess,
+  provisionStaffAccount,
+  revokeUserRole,
+  updateUserRestaurantLink,
+} from '../../src/services/accessManagement';
 import { getAdminAccessOverview } from '../../src/services/platformReads';
 import { adminTheme } from '../../src/theme/palette';
 import { getRoleTone } from '../../src/theme/status';
@@ -47,7 +54,9 @@ export default function AdminAccessScreen() {
   const [provisionEmail, setProvisionEmail] = useState('');
   const [provisionPassword, setProvisionPassword] = useState('');
   const [provisionName, setProvisionName] = useState('');
+  const [provisionRestaurantId, setProvisionRestaurantId] = useState('');
   const [provisionRole, setProvisionRole] = useState<Extract<AppRole, 'restaurant' | 'dispatch' | 'admin'>>('restaurant');
+  const [restaurantLinks, setRestaurantLinks] = useState<Record<string, string>>({});
 
   const loadAccessOverview = async (cancelled = false) => {
     try {
@@ -58,6 +67,17 @@ export default function AdminAccessScreen() {
       }
 
       setUsers(nextData.users);
+      setRestaurantLinks((current) => {
+        const nextLinks = { ...current };
+
+        for (const entry of nextData.users) {
+          if (nextLinks[entry.uid] === undefined) {
+            nextLinks[entry.uid] = entry.restaurantId ?? '';
+          }
+        }
+
+        return nextLinks;
+      });
       setError(null);
     } catch (nextError: any) {
       if (cancelled) {
@@ -118,6 +138,10 @@ export default function AdminAccessScreen() {
         displayName: provisionName.trim() || undefined,
         email: provisionEmail.trim(),
         password: provisionPassword,
+        restaurantId:
+          ['restaurant', 'dispatch'].includes(provisionRole) && provisionRestaurantId.trim()
+            ? provisionRestaurantId.trim()
+            : undefined,
         role: provisionRole,
       });
 
@@ -128,6 +152,7 @@ export default function AdminAccessScreen() {
       setProvisionEmail('');
       setProvisionPassword('');
       setProvisionName('');
+      setProvisionRestaurantId('');
       setProvisionRole('restaurant');
       await loadAccessOverview();
     } catch (nextError: any) {
@@ -137,11 +162,11 @@ export default function AdminAccessScreen() {
     }
   };
 
-  const handleAssignRole = async (targetUid: string, role: AppRole) => {
+  const handleAssignRole = async (targetUid: string, role: AppRole, restaurantId?: string | null) => {
     setPendingUid(targetUid);
 
     try {
-      await assignUserRole(targetUid, role);
+      await assignUserRole(targetUid, role, restaurantId);
       await loadAccessOverview();
     } catch (nextError: any) {
       Alert.alert('Role update failed', nextError.message ?? 'Unable to update this role right now.');
@@ -184,6 +209,23 @@ export default function AdminAccessScreen() {
       await loadAccessOverview();
     } catch (nextError: any) {
       Alert.alert('Restore failed', nextError.message ?? 'Unable to restore this account right now.');
+    } finally {
+      setPendingUid(null);
+    }
+  };
+
+  const handleUpdateRestaurantLink = async (targetUid: string) => {
+    setPendingUid(targetUid);
+
+    try {
+      const result = await updateUserRestaurantLink(targetUid, restaurantLinks[targetUid]);
+      setRestaurantLinks((current) => ({
+        ...current,
+        [targetUid]: result.restaurantId ?? '',
+      }));
+      await loadAccessOverview();
+    } catch (nextError: any) {
+      Alert.alert('Link update failed', nextError.message ?? 'Unable to update this restaurant link right now.');
     } finally {
       setPendingUid(null);
     }
@@ -251,6 +293,14 @@ export default function AdminAccessScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        <TextInput
+          style={styles.input}
+          placeholder="Restaurant ID (optional)"
+          placeholderTextColor={adminTheme.textMuted}
+          value={provisionRestaurantId}
+          onChangeText={setProvisionRestaurantId}
+          editable={!provisioning}
+        />
         <TouchableOpacity style={styles.primaryAction} onPress={handleProvisionStaff} disabled={provisioning}>
           <Text style={styles.primaryActionText}>{provisioning ? 'Provisioning...' : 'Provision staff account'}</Text>
         </TouchableOpacity>
@@ -293,7 +343,13 @@ export default function AdminAccessScreen() {
                   entry.role === role ? styles.inlineActionActive : null,
                   pendingUid === entry.uid || entry.accountDisabled ? styles.inlineActionDisabled : null,
                 ]}
-                onPress={() => handleAssignRole(entry.uid, role)}
+                onPress={() =>
+                  handleAssignRole(
+                    entry.uid,
+                    role,
+                    ['restaurant', 'dispatch'].includes(role) ? restaurantLinks[entry.uid] ?? entry.restaurantId ?? null : null
+                  )
+                }
                 disabled={pendingUid === entry.uid || entry.accountDisabled}
               >
                 <Text style={[styles.inlineActionText, entry.role === role ? styles.inlineActionTextActive : null]}>
@@ -301,6 +357,33 @@ export default function AdminAccessScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
+            {['restaurant', 'dispatch'].includes(entry.role) ? (
+              <View style={styles.linkBlock}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Restaurant ID for this account"
+                  placeholderTextColor={adminTheme.textMuted}
+                  value={restaurantLinks[entry.uid] ?? entry.restaurantId ?? ''}
+                  onChangeText={(value) =>
+                    setRestaurantLinks((current) => ({
+                      ...current,
+                      [entry.uid]: value,
+                    }))
+                  }
+                  editable={pendingUid !== entry.uid && !entry.accountDisabled}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.inlineAction,
+                    pendingUid === entry.uid || entry.accountDisabled ? styles.inlineActionDisabled : null,
+                  ]}
+                  onPress={() => handleUpdateRestaurantLink(entry.uid)}
+                  disabled={pendingUid === entry.uid || entry.accountDisabled}
+                >
+                  <Text style={styles.inlineActionText}>Save restaurant link</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={[
                 styles.inlineDanger,
@@ -446,6 +529,10 @@ const styles = StyleSheet.create({
   actionWrap: {
     gap: 10,
     marginTop: 14,
+  },
+  linkBlock: {
+    gap: 10,
+    marginTop: 2,
   },
   inlineAction: {
     backgroundColor: adminTheme.surfaceMuted,

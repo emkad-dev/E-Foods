@@ -161,8 +161,8 @@ export default function AdminApprovalsScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
       <AdminScreenHeader
         eyebrow="Approvals"
-        title="Restaurant approvals"
-        subtitle="Only admins can publish customer-facing stores. Review each restaurant and keep visibility aligned with platform standards."
+        title="Restaurant operations"
+        subtitle="Manage restaurant visibility and review any legacy partner or dispatch items that still need attention."
       />
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -177,7 +177,7 @@ export default function AdminApprovalsScreen() {
       {!loading && approvalQueue.length === 0 && riderApprovalQueue.length === 0 && partnerApprovalQueue.length === 0 ? (
         <AdminEmptyState
           title="No approvals waiting"
-          body="Restaurant visibility requests, partner onboarding requests, and dispatch rider applications will show up here as operators submit them."
+          body="Restaurant visibility controls stay available here, and legacy partner or dispatch review items will only appear if they still need attention."
         />
       ) : null}
 
@@ -185,7 +185,7 @@ export default function AdminApprovalsScreen() {
         <View style={styles.sectionWrap}>
           <Text style={styles.sectionHeading}>Partner onboarding applications</Text>
           <Text style={styles.sectionCopy}>
-            Review new restaurant partner applications before they receive partner dashboard access.
+            Legacy partner applications will appear here if they still need manual review.
           </Text>
         </View>
       ) : null}
@@ -288,7 +288,7 @@ export default function AdminApprovalsScreen() {
         <View style={styles.sectionWrap}>
           <Text style={styles.sectionHeading}>Dispatch rider applications</Text>
           <Text style={styles.sectionCopy}>
-            Review rider signup requests before they receive live dispatch access.
+            Legacy dispatch applications will appear here if they still need manual review.
           </Text>
         </View>
       ) : null}
@@ -352,9 +352,9 @@ export default function AdminApprovalsScreen() {
 
       {approvalQueue.length > 0 ? (
         <View style={styles.sectionWrap}>
-          <Text style={styles.sectionHeading}>Restaurant approvals</Text>
+          <Text style={styles.sectionHeading}>Restaurant visibility</Text>
           <Text style={styles.sectionCopy}>
-            Publish only the stores that are ready for customers and dispatch.
+            Use this section to keep customer visibility aligned with operations.
           </Text>
         </View>
       ) : null}

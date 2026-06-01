@@ -17,6 +17,7 @@ export type PartnerRestaurantProfileInput = {
   latitude?: number | null;
   longitude?: number | null;
   deliveryRadiusKm?: number | null;
+  isPublished?: boolean;
   supportsPickup: boolean;
   supportsDelivery: boolean;
   isOpen: boolean;

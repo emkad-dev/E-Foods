@@ -172,8 +172,8 @@ export default function ProfileScreen() {
   }, [currentRider, populateDraftFromRider, selectedRiderId]);
 
   const handleSaveRider = async () => {
-    if (!user?.uid || !currentRider) {
-      Alert.alert('Profile unavailable', 'Wait for admin approval before updating status.');
+    if (!user?.uid) {
+      Alert.alert('Profile unavailable', 'Sign in again before updating your rider profile.');
       return;
     }
 
@@ -229,7 +229,7 @@ export default function ProfileScreen() {
     <View style={styles.identityCard}>
       <View>
         <Text style={styles.nameText}>{currentRider?.name ?? user?.displayName ?? 'Feaster'}</Text>
-        <Text style={styles.statusText}>{currentRider?.status ?? 'Profile pending'}</Text>
+        <Text style={styles.statusText}>{currentRider?.status ?? 'Ready to go live'}</Text>
       </View>
       <View style={styles.pointsPill}>
         <FontAwesome name="trophy" size={12} color={dispatchTheme.text} />
@@ -267,7 +267,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      {!currentRider ? <Text style={styles.emptyText}>Rider record pending.</Text> : null}
+      {!currentRider ? <Text style={styles.emptyText}>Rider record will be created on the first save.</Text> : null}
 
       <FieldLabel label="Rider name" />
       <ReadOnlyValue hint="Admin-managed" value={currentRider?.name ?? 'Pending'} />

@@ -7,6 +7,7 @@ export type DispatchOrderDetail = {
     courierId?: string | null;
     courierName?: string | null;
     dispatchId?: string | null;
+    dispatchOwnerId?: string | null;
   } | null;
   deliveryAddress?: string | null;
   deliveryLocation?: {
