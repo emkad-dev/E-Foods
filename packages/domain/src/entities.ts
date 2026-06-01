@@ -127,6 +127,7 @@ export interface OrderPaymentSummary extends DocumentData {
 
 export interface OrderAssignmentSummary extends DocumentData {
   dispatchId?: string | null;
+  dispatchOwnerId?: string | null;
   courierId?: string | null;
   courierName?: string | null;
   courierPhone?: string | null;

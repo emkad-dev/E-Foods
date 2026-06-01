@@ -57,6 +57,7 @@ model UserAccount {
   approvedDispatchApplications DispatchApplicationRecord[] @relation("DispatchApplicationReviewer")
   auditLogs              AdminAuditLog[]      @relation("AuditActor")
   favoriteRestaurants    CustomerFavoriteRestaurant[]
+  policyAcceptances      UserPolicyAcceptance[]
 }
 
 model UserRole {
@@ -162,6 +163,25 @@ model CustomerFavoriteRestaurant {
   @@index([restaurantId])
 }
 
+model UserPolicyAcceptance {
+  id             String      @id @default(cuid())
+  userId         String
+  email          String
+  app            String
+  termsVersion   String
+  privacyVersion String
+  source         String
+  acceptedAt     DateTime    @default(now())
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  user           UserAccount @relation(fields: [userId], references: [uid], onDelete: Cascade)
+
+  @@unique([userId, app, termsVersion, privacyVersion])
+  @@index([userId])
+  @@index([app])
+  @@index([acceptedAt])
+}
+
 model DispatchApplicationRecord {
   id              String       @id
   uid             String       @unique
@@ -261,16 +281,18 @@ model OrderItem {
 }
 
 model DeliveryAssignment {
-  orderId      String        @id
-  dispatchId   String?
-  courierId    String?
-  courierName  String?
-  assignedAt   DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  order        CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId         String        @id
+  dispatchId      String?
+  dispatchOwnerId String?
+  courierId       String?
+  courierName     String?
+  assignedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  order           CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([dispatchId])
+  @@index([dispatchOwnerId])
   @@index([courierId])
 }
 

@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { partnerTheme } from '../../src/theme/palette';
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
@@ -37,11 +38,13 @@ export default function PartnerRegisterScreen() {
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
-  const canSubmit = useMemo(
+  const hasRequiredDetails = useMemo(
     () => Boolean(contactName.trim() && email.trim() && password.trim() && phoneNumber.trim() && restaurantName.trim() && address.trim()),
     [address, contactName, email, password, phoneNumber, restaurantName]
   );
+  const canSubmit = hasRequiredDetails && acceptedPolicies;
 
   const handleFieldChange = (setter: (value: string) => void) => (value: string) => {
     if (error) {
@@ -57,8 +60,13 @@ export default function PartnerRegisterScreen() {
     const parsedLatitude = hasLatitude ? Number.parseFloat(latitude) : null;
     const parsedLongitude = hasLongitude ? Number.parseFloat(longitude) : null;
 
-    if (!canSubmit) {
+    if (!hasRequiredDetails) {
       Alert.alert('Missing details', 'Complete the restaurant and contact details before submitting your partner application.');
+      return;
+    }
+
+    if (!acceptedPolicies) {
+      Alert.alert('Terms required', 'Accept the Terms and Privacy Policy before submitting your partner application.');
       return;
     }
 
@@ -83,14 +91,15 @@ export default function PartnerRegisterScreen() {
         logoImage,
         longitude: hasLongitude ? parsedLongitude : null,
         phoneNumber: phoneNumber.trim(),
+        policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
         restaurantName: restaurantName.trim(),
       });
 
       Alert.alert(
         'Application submitted',
         result.verificationEmailSent
-          ? 'Your restaurant application is pending admin approval. Check your inbox and confirm your email before trying to sign in.'
-          : 'Your restaurant application is pending admin approval. Email verification could not be confirmed from the app, so check your inbox later before signing in.'
+          ? 'Your restaurant is live. Check your inbox and confirm your email before trying to sign in.'
+          : 'Your restaurant is live, but email verification could not be confirmed from the app. Check your inbox and sign in once it is verified.'
       );
       router.replace('/(auth)/login');
     } catch (nextError: any) {
@@ -125,10 +134,10 @@ export default function PartnerRegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>E-Foods Partner</Text>
+          <Text style={styles.eyebrow}>FEASTY Partner</Text>
           <Text style={styles.title}>Apply as a restaurant partner</Text>
           <Text style={styles.copy}>
-            Share your restaurant details, contact number, cuisine, and base location. The admin team reviews each store before partner dashboard access goes live.
+            Share your restaurant details, contact number, cuisine, and base location. Your partner dashboard goes live as soon as the application is submitted and email is verified.
           </Text>
         </View>
 
@@ -269,6 +278,21 @@ export default function PartnerRegisterScreen() {
           <Text style={styles.helperText}>
             If you include coordinates, the platform can use them later for better delivery assignment and restaurant discovery accuracy.
           </Text>
+
+          <TouchableOpacity
+            style={styles.policyRow}
+            onPress={() => setAcceptedPolicies((current) => !current)}
+            activeOpacity={0.82}
+            disabled={loading}
+          >
+            <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
+              {acceptedPolicies ? <Text style={styles.checkmark}>✓</Text> : null}
+            </View>
+            <Text style={styles.policyText}>
+              I agree to the <Link href="/(auth)/terms" style={styles.policyLink}>Terms</Link> and{' '}
+              <Link href="/(auth)/privacy" style={styles.policyLink}>Privacy Policy</Link>.
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.primaryButton, !canSubmit ? styles.primaryButtonDisabled : null]}
@@ -448,6 +472,40 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     marginTop: 14,
+  },
+  checkbox: {
+    alignItems: 'center',
+    borderColor: partnerTheme.border,
+    borderRadius: 7,
+    borderWidth: 1,
+    height: 24,
+    justifyContent: 'center',
+    width: 24,
+  },
+  checkboxActive: {
+    backgroundColor: partnerTheme.accent,
+    borderColor: partnerTheme.accent,
+  },
+  checkmark: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  policyLink: {
+    color: partnerTheme.accentStrong,
+    fontWeight: '800',
+  },
+  policyRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  policyText: {
+    color: partnerTheme.textMuted,
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
   },
   primaryButton: {
     alignItems: 'center',

@@ -15,6 +15,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
+import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
@@ -22,6 +23,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const { loading, signUp, error, clearError } = useAuth();
   const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
 
@@ -61,9 +63,15 @@ export default function RegisterScreen() {
       return;
     }
 
+    if (!acceptedPolicies) {
+      Alert.alert('Terms required', 'Accept the Terms and Privacy Policy before creating an account.');
+      return;
+    }
+
     try {
       const { verificationEmailSent } = await signUp(email.trim(), password, {
         displayName: nickname.trim(),
+        policyAcceptance: buildCustomerPolicyAcceptance('customer_signup'),
       });
 
       Alert.alert(
@@ -124,7 +132,26 @@ export default function RegisterScreen() {
             editable={!loading}
           />
 
-          <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
+          <TouchableOpacity
+            style={styles.policyRow}
+            onPress={() => setAcceptedPolicies((current) => !current)}
+            activeOpacity={0.82}
+            disabled={loading}
+          >
+            <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
+              {acceptedPolicies ? <Text style={styles.checkmark}>✓</Text> : null}
+            </View>
+            <Text style={styles.policyText}>
+              I agree to the <Link href="/(auth)/terms" style={styles.policyLink}>Terms</Link> and{' '}
+              <Link href="/(auth)/privacy" style={styles.policyLink}>Privacy Policy</Link>.
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.button, !acceptedPolicies ? styles.buttonDisabled : null]}
+            onPress={handleRegister}
+            disabled={loading || !acceptedPolicies}
+          >
             <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create account'}</Text>
           </TouchableOpacity>
 
@@ -203,10 +230,47 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 15,
   },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  checkbox: {
+    alignItems: 'center',
+    borderColor: customerTheme.border,
+    borderRadius: 7,
+    borderWidth: 1,
+    height: 24,
+    justifyContent: 'center',
+    width: 24,
+  },
+  checkboxActive: {
+    backgroundColor: customerTheme.accent,
+    borderColor: customerTheme.accent,
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  policyLink: {
+    color: customerTheme.link,
+    fontWeight: '800',
+  },
+  policyRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  policyText: {
+    color: customerTheme.textMuted,
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
   },
   link: {
     color: customerTheme.link,

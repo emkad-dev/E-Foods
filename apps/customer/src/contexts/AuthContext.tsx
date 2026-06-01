@@ -26,6 +26,11 @@ import {
 import { getUserDocument, createUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { supabase } from '../services/supabase/config';
 import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
+import {
+  getCustomerPolicyAcceptance,
+  recordCustomerPolicyAcceptance,
+} from '../services/policyAcceptance';
+import type { PolicyAcceptancePayload } from '../../../../packages/domain/src';
 
 export type User = UserDocument | null;
 
@@ -36,6 +41,8 @@ type SignUpResult = {
 interface AuthContextType {
   user: User;
   loading: boolean;
+  policyAccepted: boolean;
+  policyLoading: boolean;
   error: string | null;
   signUp: (
     email: string,
@@ -43,8 +50,10 @@ interface AuthContextType {
     userData?: {
       displayName?: string;
       phoneNumber?: string;
+      policyAcceptance?: PolicyAcceptancePayload;
     }
   ) => Promise<SignUpResult>;
+  acceptCurrentPolicies: (source?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (idToken: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -101,6 +110,8 @@ const getActionCodeSettings = (path: string) => {
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User>(null);
   const [loading, setLoading] = useState(true);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [policyLoading, setPolicyLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const clearLocalUserState = useCallback(async () => {
@@ -150,6 +161,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       activeSessionUpdatedAt: new Date().toISOString(),
     });
     await storeSessionId(sessionId);
+  }, []);
+
+  const refreshPolicyAcceptance = useCallback(async () => {
+    setPolicyLoading(true);
+
+    try {
+      const status = await getCustomerPolicyAcceptance();
+      setPolicyAccepted(status.accepted);
+      return status.accepted;
+    } catch (policyError) {
+      console.warn('Unable to load customer policy acceptance:', policyError);
+      setPolicyAccepted(false);
+      return false;
+    } finally {
+      setPolicyLoading(false);
+    }
   }, []);
 
   const releaseSingleDeviceSession = useCallback(async (userId?: string | null) => {
@@ -215,10 +242,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             return;
           }
 
+          await refreshPolicyAcceptance();
           setUser(nextUser);
           await storeUserProfile(nextUser);
         } else {
           setUser(null);
+          setPolicyAccepted(false);
           await clearLocalUserState();
         }
       } catch (err) {
@@ -255,7 +284,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
+  }, [buildNextUser, clearLocalUserState, refreshPolicyAcceptance, syncSingleDeviceSession]);
 
   const signUp = async (
     email: string,
@@ -263,21 +292,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     userData?: {
       displayName?: string;
       phoneNumber?: string;
+      policyAcceptance?: PolicyAcceptancePayload;
     }
   ): Promise<SignUpResult> => {
     setLoading(true);
     setError(null);
 
     try {
+      if (userData?.policyAcceptance?.accepted !== true) {
+        throw new Error('Accept the Terms and Privacy Policy before creating an account.');
+      }
+
       const authUser = await createUserWithEmail(supabase, email, password, {
         displayName: userData?.displayName,
       });
+      const policyAcceptance = userData.policyAcceptance;
       await createUserDocument(authUser.id, {
         email: authUser.email ?? '',
         role: DEFAULT_APP_ROLE,
         emailVerified: Boolean(authUser.email_confirmed_at),
-        ...userData,
+        displayName: userData.displayName,
+        phoneNumber: userData.phoneNumber,
       });
+      await recordCustomerPolicyAcceptance(policyAcceptance.source || 'customer_signup');
+      setPolicyAccepted(true);
       await startSingleDeviceSession(authUser.id);
 
       try {
@@ -377,6 +415,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);
+      setPolicyAccepted(false);
       router.replace('/(auth)/login');
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to sign out');
@@ -459,6 +498,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       throw new Error(formattedError);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const acceptCurrentPolicies = async (source = 'customer_policy_gate'): Promise<void> => {
+    setPolicyLoading(true);
+    setError(null);
+
+    try {
+      await recordCustomerPolicyAcceptance(source);
+      setPolicyAccepted(true);
+    } catch (err: any) {
+      const formattedError = getCustomerAuthErrorMessage(err, 'Unable to save policy acceptance');
+      setError(formattedError);
+      throw new Error(formattedError);
+    } finally {
+      setPolicyLoading(false);
     }
   };
 
@@ -553,8 +608,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       value={{
         user,
         loading,
+        policyAccepted,
+        policyLoading,
         error,
         signUp,
+        acceptCurrentPolicies,
         signIn,
         signInWithGoogle: signInWithGoogleAuth,
         signOut,

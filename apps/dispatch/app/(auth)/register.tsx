@@ -16,6 +16,7 @@ import AuthPasswordField from '../../src/components/AuthPasswordField';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
+import { buildDispatchPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { dispatchTheme } from '../../src/theme/palette';
 
 const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
@@ -34,6 +35,7 @@ export default function DispatchRegisterScreen() {
   const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
   const [vehicleType, setVehicleType] = useState<(typeof vehicleOptions)[number]>('Bike');
   const [currentAddress, setCurrentAddress] = useState('');
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
   const canSubmit = useMemo(
     () =>
@@ -42,9 +44,10 @@ export default function DispatchRegisterScreen() {
           email.trim() &&
           password.trim() &&
           phoneNumber.trim() &&
-          lga.trim()
+          lga.trim() &&
+          acceptedPolicies
       ),
-    [displayName, email, password, phoneNumber, lga]
+    [acceptedPolicies, displayName, email, password, phoneNumber, lga]
   );
 
   useEffect(() => {
@@ -66,7 +69,12 @@ export default function DispatchRegisterScreen() {
 
   const handleRegister = async () => {
     if (!canSubmit) {
-      Alert.alert('Missing details', 'Complete every rider detail before submitting your dispatch application.');
+      Alert.alert(
+        'Missing details',
+        acceptedPolicies
+          ? 'Complete every rider detail before submitting your dispatch application.'
+          : 'Accept the Terms and Privacy Policy before submitting your dispatch application.'
+      );
       return;
     }
 
@@ -76,6 +84,7 @@ export default function DispatchRegisterScreen() {
         displayName: displayName.trim(),
         lga,
         phoneNumber: phoneNumber.trim(),
+        policyAcceptance: buildDispatchPolicyAcceptance('dispatch_signup'),
         region,
         vehicleType,
       });
@@ -83,8 +92,8 @@ export default function DispatchRegisterScreen() {
       Alert.alert(
         'Application submitted',
         result.verificationEmailSent
-          ? 'Your rider application is pending admin approval. Check your inbox and confirm your email before trying to sign in.'
-          : 'Your rider application is pending admin approval. Email verification could not be confirmed from the app, so check your inbox later before signing in.'
+          ? 'Your rider account is live. Check your inbox and confirm your email before trying to sign in.'
+          : 'Your rider account is live, but email verification could not be confirmed from the app. Check your inbox and sign in once it is verified.'
       );
       router.replace('/(auth)/login');
     } catch (nextError: any) {
@@ -99,10 +108,10 @@ export default function DispatchRegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>Feasters</Text>
+          <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
           <Text style={styles.title}>Apply as a dispatch rider</Text>
           <Text style={styles.copy}>
-            Share the rider details ops needs: name, phone, state, LGA, vehicle, and your current base location. The admin team approves each rider before they can dispatch orders.
+            Share the rider details ops needs: name, phone, state, LGA, vehicle, and your current base location. Riders become live as soon as the application is submitted and email is verified.
           </Text>
         </View>
 
@@ -196,8 +205,23 @@ export default function DispatchRegisterScreen() {
           />
 
           <Text style={styles.helperText}>
-            Admin approval is required before this rider appears on the dispatch board. The selected state and LGA become the rider base, and we use that base for location fallback until live tracking is added.
+            Your rider profile goes live after signup. The selected state and LGA become the rider base, and we use that base for location fallback until live tracking is added.
           </Text>
+
+          <TouchableOpacity
+            style={styles.policyRow}
+            onPress={() => setAcceptedPolicies((current) => !current)}
+            activeOpacity={0.82}
+            disabled={loading}
+          >
+            <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
+              {acceptedPolicies ? <View style={styles.checkboxDot} /> : null}
+            </View>
+            <Text style={styles.policyText}>
+              I agree to the <Link href="./terms" style={styles.policyLink}>Terms</Link> and{' '}
+              <Link href="./privacy" style={styles.policyLink}>Privacy Policy</Link>.
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.primaryButton, !canSubmit ? styles.primaryButtonDisabled : null]}
@@ -317,6 +341,42 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     marginTop: 14,
+  },
+  policyRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginTop: 16,
+  },
+  checkbox: {
+    alignItems: 'center',
+    backgroundColor: dispatchTheme.cream,
+    borderColor: dispatchTheme.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 22,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 22,
+  },
+  checkboxActive: {
+    backgroundColor: dispatchTheme.accent,
+    borderColor: dispatchTheme.accent,
+  },
+  checkboxDot: {
+    backgroundColor: '#ffffff',
+    borderRadius: 3,
+    height: 8,
+    width: 8,
+  },
+  policyText: {
+    color: dispatchTheme.textMuted,
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  policyLink: {
+    color: dispatchTheme.accentStrong,
+    fontWeight: '800',
   },
   primaryButton: {
     alignItems: 'center',

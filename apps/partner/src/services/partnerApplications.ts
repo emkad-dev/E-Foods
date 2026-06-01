@@ -1,4 +1,5 @@
 import { callPartnerBackendRpc } from './backendRpc';
+import type { PolicyAcceptancePayload } from '../../../../packages/domain/src';
 
 export type PartnerApplicationInput = {
   address: string;
@@ -10,12 +11,14 @@ export type PartnerApplicationInput = {
   logoImage?: string | null;
   longitude?: number | null;
   phoneNumber: string;
+  policyAcceptance?: PolicyAcceptancePayload;
   restaurantName: string;
 };
 
 export const submitPartnerApplication = async (input: PartnerApplicationInput) =>
   callPartnerBackendRpc<{
-    status: 'pending';
+    status: 'approved';
     submittedAt: string;
+    restaurantId: string;
     targetUid: string;
   }>('submitPartnerApplication', input);

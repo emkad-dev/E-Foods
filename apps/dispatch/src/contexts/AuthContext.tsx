@@ -13,6 +13,7 @@ import {
 import { supabase } from '../services/supabase/config';
 import { appEnv } from '../config/env';
 import { submitDispatchApplication, type DispatchApplicationInput } from '../services/dispatchApplications';
+import { buildDispatchPolicyAcceptance } from '../services/policyAcceptance';
 import { deleteOwnAccount as deleteOwnDispatchAccount } from '../services/accountManagement';
 import {
   clearStoredUserProfile,
@@ -48,10 +49,12 @@ const MISSING_PROFILE_ERROR = 'No dispatch profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
+const DISPATCH_APPLICATION_READY_MESSAGE =
+  'Your rider account is live. Sign in again after you verify your email.';
 const DISPATCH_APPLICATION_PENDING_MESSAGE =
-  'Your rider application has been submitted. Wait for admin approval before signing into the dispatch board.';
+  'Your rider application is pending review. Sign in again after approval.';
 const DISPATCH_APPLICATION_REJECTED_FALLBACK =
-  'Your rider application was reviewed but not approved yet. Contact the operations team and update your details before trying again.';
+  'Your rider account is not active yet. Contact the operations team and update your details before trying again.';
 const DISPATCH_SIGNUP_ROLLBACK_ERROR =
   'Your rider application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the operations team.';
 const getActionCodeSettings = (path: string) => ({
@@ -306,6 +309,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         ...userData,
         displayName: userData.displayName.trim(),
         phoneNumber: userData.phoneNumber.trim(),
+        policyAcceptance: userData.policyAcceptance ?? buildDispatchPolicyAcceptance('dispatch_signup'),
         region: userData.region.trim(),
         vehicleType: userData.vehicleType.trim(),
       });
@@ -326,12 +330,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
-      setError(DISPATCH_APPLICATION_PENDING_MESSAGE);
+      setError(DISPATCH_APPLICATION_READY_MESSAGE);
       return { verificationEmailSent };
     } catch (nextError: any) {
       let nextMessage =
-        nextError?.message === DISPATCH_APPLICATION_PENDING_MESSAGE
-          ? DISPATCH_APPLICATION_PENDING_MESSAGE
+        nextError?.message === DISPATCH_APPLICATION_READY_MESSAGE
+          ? DISPATCH_APPLICATION_READY_MESSAGE
           : getDispatchAuthErrorMessage(nextError, 'Unable to sign up');
 
       if (applicantUid) {

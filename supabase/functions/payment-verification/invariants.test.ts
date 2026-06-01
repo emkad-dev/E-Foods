@@ -3,7 +3,7 @@ import { validatePaystackVerificationForOrder } from './invariants.ts';
 const order = {
   id: 'order-1',
   payment: {
-    reference: 'EBUY-CRD-ORDER-1',
+    reference: 'FEASTY-CRD-ORDER-1',
   },
   pricing: {
     total: 2500,
@@ -29,10 +29,10 @@ Deno.test('rejects a requested reference that does not match the order reference
     () =>
       validatePaystackVerificationForOrder({
         order,
-        paymentReference: 'EBUY-CRD-OTHER',
+        paymentReference: 'FEASTY-CRD-OTHER',
         transactionData: {
           amount: 250000,
-          reference: 'EBUY-CRD-OTHER',
+          reference: 'FEASTY-CRD-OTHER',
           status: 'success',
         },
       }),
@@ -45,10 +45,10 @@ Deno.test('rejects a verified Paystack reference that does not match the order r
     () =>
       validatePaystackVerificationForOrder({
         order,
-        paymentReference: 'EBUY-CRD-ORDER-1',
+        paymentReference: 'FEASTY-CRD-ORDER-1',
         transactionData: {
           amount: 250000,
-          reference: 'EBUY-CRD-OTHER',
+          reference: 'FEASTY-CRD-OTHER',
           status: 'success',
         },
       }),
@@ -59,10 +59,10 @@ Deno.test('rejects a verified Paystack reference that does not match the order r
 Deno.test('accepts a successful Paystack transaction bound to the same order reference and amount', () => {
   validatePaystackVerificationForOrder({
     order,
-    paymentReference: 'EBUY-CRD-ORDER-1',
+    paymentReference: 'FEASTY-CRD-ORDER-1',
     transactionData: {
       amount: 250000,
-      reference: 'EBUY-CRD-ORDER-1',
+      reference: 'FEASTY-CRD-ORDER-1',
       status: 'success',
     },
   });

@@ -104,6 +104,7 @@ type DeliveryAssignmentRow = {
   courierId?: string | null;
   courierName?: string | null;
   dispatchId?: string | null;
+  dispatchOwnerId?: string | null;
   orderId: string;
 };
 
@@ -233,6 +234,16 @@ const PARTNER_APPLICATION_STATUS = {
 const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'rejected', 'failed_delivery']);
 const PREPAID_PAYMENT_METHODS = new Set(['card', 'wallet', 'bank_transfer']);
 const PAYSTACK_PAYMENT_METHODS = new Set(['card', 'bank_transfer']);
+const CURRENT_TERMS_VERSION = '2026-05-31-v1';
+const CURRENT_PRIVACY_VERSION = '2026-05-31-v1';
+const POLICY_APPS = new Set(['customer', 'partner', 'dispatch']);
+const POLICY_SOURCES = new Set([
+  'customer_signup',
+  'customer_policy_gate',
+  'customer_google_gate',
+  'partner_signup',
+  'dispatch_signup',
+]);
 const DEFAULT_FUNCTION_ORDER_STATUS = 'placed';
 const DEFAULT_CURRENCY = 'NGN';
 const DEFAULT_DELIVERY_TIME = '25-35 min';
@@ -348,6 +359,100 @@ const sanitizeText = (value: unknown, fallback = '') =>
 const sanitizeOptionalText = (value: unknown) => {
   const nextValue = sanitizeText(value);
   return nextValue || null;
+};
+
+const normalizePolicyApp = (value: unknown) => {
+  const app = sanitizeText(value).toLowerCase();
+  return POLICY_APPS.has(app) ? app : '';
+};
+
+const normalizePolicySource = (value: unknown, fallback: string) => {
+  const source = sanitizeText(value, fallback);
+  return POLICY_SOURCES.has(source) ? source : fallback;
+};
+
+const validatePolicyAcceptancePayload = (
+  value: unknown,
+  expectedApp: 'customer' | 'partner' | 'dispatch',
+  fallbackSource: string
+) => {
+  const payload = typeof value === 'object' && value !== null ? (value as JsonObject) : {};
+  const app = normalizePolicyApp(payload.app);
+  const termsVersion = sanitizeText(payload.termsVersion);
+  const privacyVersion = sanitizeText(payload.privacyVersion);
+
+  if (payload.accepted !== true || app !== expectedApp) {
+    fail(412, 'Accept the current Terms and Privacy Policy before continuing.');
+  }
+
+  if (termsVersion !== CURRENT_TERMS_VERSION || privacyVersion !== CURRENT_PRIVACY_VERSION) {
+    fail(412, 'Accept the latest Terms and Privacy Policy before continuing.');
+  }
+
+  return {
+    app,
+    privacyVersion,
+    source: normalizePolicySource(payload.source, fallbackSource),
+    termsVersion,
+  };
+};
+
+const recordPolicyAcceptance = async (
+  uid: string,
+  email: string,
+  acceptance: {
+    app: string;
+    privacyVersion: string;
+    source: string;
+    termsVersion: string;
+  }
+) => {
+  const acceptedAt = nowIso();
+  const { error } = await serviceClient.from('UserPolicyAcceptance').upsert(
+    {
+      id: crypto.randomUUID(),
+      userId: uid,
+      email,
+      app: acceptance.app,
+      termsVersion: acceptance.termsVersion,
+      privacyVersion: acceptance.privacyVersion,
+      source: acceptance.source,
+      acceptedAt,
+      createdAt: acceptedAt,
+      updatedAt: acceptedAt,
+    },
+    {
+      onConflict: 'userId,app,termsVersion,privacyVersion',
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return acceptedAt;
+};
+
+const hasCurrentPolicyAcceptance = async (uid: string, app: string) => {
+  const { data, error } = await serviceClient
+    .from('UserPolicyAcceptance')
+    .select('id,acceptedAt')
+    .eq('userId', uid)
+    .eq('app', app)
+    .eq('termsVersion', CURRENT_TERMS_VERSION)
+    .eq('privacyVersion', CURRENT_PRIVACY_VERSION)
+    .maybeSingle<{ acceptedAt?: string | null; id: string }>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    accepted: Boolean(data?.id),
+    acceptedAt: data?.acceptedAt ?? null,
+    privacyVersion: CURRENT_PRIVACY_VERSION,
+    termsVersion: CURRENT_TERMS_VERSION,
+  };
 };
 
 const normalizeOperatingTime = (value: unknown, fieldLabel: string) => {
@@ -551,6 +656,7 @@ const toOrderSnapshotResponse = (
         courierName: sanitizeOptionalText(assignment.courierName),
         courierPhone: sanitizeOptionalText(options.courierPhone),
         dispatchId: sanitizeOptionalText(assignment.dispatchId),
+        dispatchOwnerId: sanitizeOptionalText(assignment.dispatchOwnerId),
       }
     : null,
   cancellation: order.cancellation ?? null,
@@ -1058,6 +1164,136 @@ const loadUserRoles = async (userIds: string[]) => {
   }
 
   return rolesByUserId;
+};
+
+type DispatchOwnerCandidate = {
+  weight: number;
+  userId: string;
+};
+
+const isDispatcherEligible = (account: UserAccountRow | null, rider: DispatchRiderRow | null) => {
+  if (!account || account.accountDisabled === true) {
+    return false;
+  }
+
+  if (!rider) {
+    return false;
+  }
+
+  const riderStatus = sanitizeText(rider.status, DEFAULT_DISPATCH_STATUS);
+  return riderStatus !== 'Offline';
+};
+
+const buildDispatchOwnerWeight = (rider: DispatchRiderRow | null) => {
+  const activeLoad = Math.max(0, Math.floor(rider?.activeLoad ?? 0));
+  return 1 / (1 + activeLoad);
+};
+
+const selectWeightedRandomCandidate = (candidates: DispatchOwnerCandidate[]) => {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const totalWeight = candidates.reduce((sum, candidate) => sum + candidate.weight, 0);
+  if (totalWeight <= 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+  }
+
+  let cursor = Math.random() * totalWeight;
+  for (const candidate of candidates) {
+    cursor -= candidate.weight;
+    if (cursor <= 0) {
+      return candidate;
+    }
+  }
+
+  return candidates[candidates.length - 1] ?? null;
+};
+
+const loadDispatchOwnerCandidates = async (restaurantId: string | null, useRestaurantScope: boolean) => {
+  if (useRestaurantScope && !restaurantId) {
+    return [] as DispatchOwnerCandidate[];
+  }
+
+  const roleQuery = serviceClient.from('UserRole').select('userId,restaurantId').eq('role', 'dispatch');
+  const { data: roleRows, error: roleError } = useRestaurantScope
+    ? await roleQuery.eq('restaurantId', restaurantId ?? '')
+    : await roleQuery;
+
+  if (roleError) {
+    throw new Error(roleError.message);
+  }
+
+  const userIds = unique(((roleRows ?? []) as { userId: string }[]).map((row) => row.userId));
+  if (userIds.length === 0) {
+    return [] as DispatchOwnerCandidate[];
+  }
+
+  const [{ data: accounts, error: accountError }, { data: riders, error: riderError }] = await Promise.all([
+    serviceClient
+      .from('UserAccount')
+      .select('uid,accountDisabled')
+      .in('uid', userIds),
+    serviceClient
+      .from('DispatchRiderRecord')
+      .select('id,status,activeLoad')
+      .in('id', userIds),
+  ]);
+
+  if (accountError) {
+    throw new Error(accountError.message);
+  }
+
+  if (riderError) {
+    throw new Error(riderError.message);
+  }
+
+  const accountsById = new Map(((accounts ?? []) as Pick<UserAccountRow, 'uid' | 'accountDisabled'>[]).map((row) => [
+    row.uid,
+    row,
+  ]));
+  const ridersById = new Map(((riders ?? []) as Pick<DispatchRiderRow, 'activeLoad' | 'id' | 'status'>[]).map((row) => [
+    row.id,
+    row,
+  ]));
+
+  return userIds
+    .map((userId) => {
+      const account = accountsById.get(userId) ?? null;
+      const rider = ridersById.get(userId) ?? null;
+
+      if (!isDispatcherEligible(account, rider)) {
+        return null;
+      }
+
+      return {
+        weight: buildDispatchOwnerWeight(rider),
+        userId,
+      } satisfies DispatchOwnerCandidate;
+    })
+    .filter(Boolean) as DispatchOwnerCandidate[];
+};
+
+const selectDispatchOwnerForRestaurant = async (restaurantId: string) => {
+  const restaurantPool = await loadDispatchOwnerCandidates(restaurantId, true);
+  const selectedRestaurantCandidate = selectWeightedRandomCandidate(restaurantPool);
+  if (selectedRestaurantCandidate) {
+    return {
+      restaurantScoped: true,
+      userId: selectedRestaurantCandidate.userId,
+    };
+  }
+
+  const fallbackPool = await loadDispatchOwnerCandidates(null, false);
+  const selectedFallbackCandidate = selectWeightedRandomCandidate(fallbackPool);
+  if (selectedFallbackCandidate) {
+    return {
+      restaurantScoped: false,
+      userId: selectedFallbackCandidate.userId,
+    };
+  }
+
+  return null;
 };
 
 const loadPartnerApplication = async (applicationId: string) => {
@@ -1572,7 +1808,7 @@ const loadOrderRelations = async (orderIds: string[]) => {
         .in('orderId', orderIds),
       serviceClient
         .from('DeliveryAssignment')
-        .select('orderId,dispatchId,courierId,courierName,assignedAt')
+        .select('orderId,dispatchId,dispatchOwnerId,courierId,courierName,assignedAt')
         .in('orderId', orderIds),
       serviceClient
         .from('DeliveryEvent')
@@ -1713,6 +1949,119 @@ const assertNonTerminalOrder = (order: CustomerOrderRow) => {
 
 const hasAssignedCourier = (assignment: DeliveryAssignmentRow | null) =>
   Boolean(sanitizeText(assignment?.courierId));
+
+const getDispatchAssignmentOwnerId = (assignment: DeliveryAssignmentRow | null) =>
+  sanitizeText(assignment?.dispatchOwnerId) ?? sanitizeText(assignment?.dispatchId);
+
+const assignDispatchOwnerForOrder = async (
+  order: CustomerOrderRow,
+  assignment: DeliveryAssignmentRow | null,
+  actorUid: string,
+  targetStatus: string
+) => {
+  const currentStatus = normalizeOrderStatus(targetStatus);
+  if (![ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+    return null;
+  }
+
+  const existingOwnerId = getDispatchAssignmentOwnerId(assignment);
+  if (existingOwnerId) {
+    return {
+      assigned: false,
+      ownerId: existingOwnerId,
+    };
+  }
+
+  const selectedOwner = await selectDispatchOwnerForRestaurant(order.restaurantId);
+  const timestamp = nowIso();
+
+  if (!selectedOwner) {
+    const { data: existingPoolEvent, error: poolEventError } = await serviceClient
+      .from('DeliveryEvent')
+      .select('id')
+      .eq('orderId', order.id)
+      .eq('eventType', 'dispatch_pool_empty')
+      .maybeSingle<{ id: string }>();
+
+    if (poolEventError) {
+      throw new Error(poolEventError.message);
+    }
+
+    if (!existingPoolEvent) {
+      await insertDeliveryEvent({
+        actorUid,
+        details: {
+          restaurantId: order.restaurantId,
+        },
+        eventType: 'dispatch_pool_empty',
+        orderId: order.id,
+      });
+      await notifySafely(async () => {
+        await sendPushNotificationsToRoles(['admin'], {
+          body: `Order ${order.id.slice(-6).toUpperCase()} is waiting for a dispatch pool assignment.`,
+          data: buildNotificationData({
+            app: 'admin',
+            orderId: order.id,
+            restaurantId: order.restaurantId,
+            routeKey: 'admin_access',
+            type: 'dispatch_pool_empty',
+          }),
+          title: 'Dispatch pool empty',
+        });
+      });
+    }
+
+    return null;
+  }
+
+  const { error } = await serviceClient.from('DeliveryAssignment').upsert(
+    {
+      assignedAt: assignment?.assignedAt ?? timestamp,
+      courierId: sanitizeText(assignment?.courierId),
+      courierName: sanitizeText(assignment?.courierName),
+      dispatchId: sanitizeText(assignment?.dispatchId),
+      dispatchOwnerId: selectedOwner.userId,
+      orderId: order.id,
+      updatedAt: timestamp,
+    },
+    { onConflict: 'orderId' }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await updateOrderRecord(order.id, {
+    updatedAt: timestamp,
+  });
+
+  await insertDeliveryEvent({
+    actorUid,
+    details: {
+      dispatchOwnerId: selectedOwner.userId,
+      restaurantId: order.restaurantId,
+      restaurantScoped: selectedOwner.restaurantScoped,
+    },
+    eventType: 'dispatch_assigned',
+    orderId: order.id,
+  });
+
+  await notifyUsers([selectedOwner.userId], {
+    title: 'New dispatch order',
+    body: `Order ${order.id.slice(-6).toUpperCase()} is now in your queue.`,
+    data: buildNotificationData({
+      app: 'dispatch',
+      orderId: order.id,
+      routeKey: 'dispatch_delivery_detail',
+      type: 'dispatch_assignment',
+    }),
+  });
+
+  return {
+    assigned: true,
+    ownerId: selectedOwner.userId,
+  };
+};
 
 const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
   const currentTimelineAt = nowIso();
@@ -1916,7 +2265,7 @@ const mapPaystackChannels = (paymentMethod: string) => {
 
 const buildPaystackReference = (orderId: string, paymentMethod: string) => {
   const prefix = paymentMethod === 'bank_transfer' ? 'BNK' : 'CRD';
-  return `EBUY-${prefix}-${orderId.slice(-8).toUpperCase()}-${Date.now()}`;
+  return `FEASTY-${prefix}-${orderId.slice(-8).toUpperCase()}-${Date.now()}`;
 };
 
 const fetchPaystackJson = async ({
@@ -2301,7 +2650,8 @@ const buildPartnerRestaurantPayload = (
     image: sanitizeOptionalText(input.image) ?? '',
     logoImage: sanitizeOptionalText(input.logoImage) ?? '',
     isOpen: input.isOpen !== false,
-    isPublished: allowPublish ? input.isPublished === true : existingPublished,
+    isPublished:
+      allowPublish && input.isPublished !== undefined ? input.isPublished === true : existingPublished,
     latitude,
     longitude,
     minOrder: roundCurrency(parseNumber(input.minOrder, 0)),
@@ -2518,6 +2868,57 @@ const syncUserRoleState = async (
   });
 };
 
+const ensureDispatchRiderRecord = async (
+  riderId: string,
+  riderData: {
+    acceptanceRate?: number | null;
+    activeLoad?: number;
+    completedTrips?: number;
+    currentAddress?: string | null;
+    displayName: string;
+    lga?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    phoneNumber?: string | null;
+    region?: string | null;
+    status?: string;
+    vehicleType?: string;
+    zone?: string;
+  }
+) => {
+  const timestamp = nowIso();
+  const { error } = await serviceClient.from('DispatchRiderRecord').upsert(
+    {
+      id: riderId,
+      displayName: sanitizeText(riderData.displayName, 'Dispatch rider'),
+      status: sanitizeText(riderData.status, DEFAULT_DISPATCH_STATUS),
+      zone: sanitizeText(riderData.zone, 'Unassigned coverage area'),
+      vehicleType: sanitizeText(riderData.vehicleType, DEFAULT_DISPATCH_VEHICLE),
+      acceptanceRate: riderData.acceptanceRate ?? null,
+      activeLoad: Math.max(0, Math.floor(riderData.activeLoad ?? 0)),
+      completedTrips: Math.max(0, Math.floor(riderData.completedTrips ?? 0)),
+      latitude:
+        riderData.latitude === null || riderData.latitude === undefined
+          ? null
+          : parseNumber(riderData.latitude, DEFAULT_NIGERIA_COORDINATE.latitude),
+      longitude:
+        riderData.longitude === null || riderData.longitude === undefined
+          ? null
+          : parseNumber(riderData.longitude, DEFAULT_NIGERIA_COORDINATE.longitude),
+      region: sanitizeOptionalText(riderData.region),
+      lga: sanitizeOptionalText(riderData.lga),
+      phoneNumber: sanitizeOptionalText(riderData.phoneNumber),
+      currentAddress: sanitizeOptionalText(riderData.currentAddress),
+      updatedAt: timestamp,
+    },
+    { onConflict: 'id' }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+};
+
 const handleNativeAction = async (
   action: string,
   request: Request,
@@ -2573,11 +2974,52 @@ const handleNativeAction = async (
 
   const context = await getAuthenticatedRequestContext(request);
 
+  if (action === 'getPolicyAcceptance') {
+    const app = normalizePolicyApp(data.app);
+    if (!app) {
+      fail(400, 'A valid app is required.');
+    }
+
+    return json(200, {
+      data: await hasCurrentPolicyAcceptance(context.uid, app),
+    });
+  }
+
+  if (action === 'recordPolicyAcceptance') {
+    const requestedApp = normalizePolicyApp(data.app);
+    if (!requestedApp) {
+      fail(400, 'A valid app is required.');
+    }
+
+    const acceptance = validatePolicyAcceptancePayload(
+      {
+        accepted: data.accepted,
+        app: requestedApp,
+        privacyVersion: data.privacyVersion,
+        source: data.source,
+        termsVersion: data.termsVersion,
+      },
+      requestedApp as 'customer' | 'partner' | 'dispatch',
+      `${requestedApp}_policy_gate`
+    );
+    const acceptedAt = await recordPolicyAcceptance(context.uid, context.email, acceptance);
+
+    return json(200, {
+      data: {
+        accepted: true,
+        acceptedAt,
+        privacyVersion: CURRENT_PRIVACY_VERSION,
+        termsVersion: CURRENT_TERMS_VERSION,
+      },
+    });
+  }
+
   if (action === 'provisionStaffAccount') {
     ensureRole(context.role, ['admin']);
     const email = sanitizeText(data.email).toLowerCase();
     const password = sanitizeText(data.password);
     const displayName = sanitizeOptionalText(data.displayName);
+    const requestedRestaurantId = sanitizeText(data.restaurantId);
     const role = sanitizeText(data.role);
 
     if (!email) {
@@ -2591,6 +3033,9 @@ const handleNativeAction = async (
     if (!['restaurant', 'dispatch', 'admin'].includes(role)) {
       fail(400, 'Only admin, restaurant, and dispatch staff can be provisioned here.');
     }
+
+    let restaurantId = ['restaurant', 'dispatch'].includes(role) ? requestedRestaurantId : null;
+    let restaurantName: string | null = null;
 
     let authUser = await findSupabaseAuthUserByEmail(email);
     let created = false;
@@ -2629,6 +3074,19 @@ const handleNativeAction = async (
 
     const existingAccount = await loadUserAccount(targetUid);
     const now = nowIso();
+    if (['restaurant', 'dispatch'].includes(role) && !restaurantId) {
+      restaurantId = sanitizeText(existingAccount?.restaurantId);
+    }
+
+    if (restaurantId) {
+      const linkedRestaurant = await loadRestaurantById(restaurantId);
+      if (!linkedRestaurant.restaurant) {
+        fail(404, 'The selected restaurant could not be found.');
+      }
+
+      restaurantName = sanitizeText(linkedRestaurant.restaurant.name, sanitizeText(existingAccount?.restaurantName, 'Restaurant'));
+    }
+
     await upsertUserAccount({
       uid: targetUid,
       email,
@@ -2638,6 +3096,8 @@ const handleNativeAction = async (
       phoneNumber: existingAccount?.phoneNumber ?? null,
       createdAt: existingAccount?.createdAt ?? now,
       updatedAt: now,
+      restaurantId,
+      restaurantName,
       roleDisplay: role,
       accountDisabled: false,
       disabledAt: null,
@@ -2649,7 +3109,23 @@ const handleNativeAction = async (
       disabledAt: null,
       disabledByUid: null,
       lastPrivilegedRole: role,
+      restaurantId,
+      restaurantLinkedAt: restaurantId ? now : null,
+      restaurantLinkSource: restaurantId ? 'staff_account_provisioned' : null,
+      restaurantName,
     });
+    if (role === 'dispatch') {
+      await ensureDispatchRiderRecord(targetUid, {
+        activeLoad: 0,
+        completedTrips: 0,
+        displayName:
+          displayName ?? sanitizeOptionalText(authUser.user_metadata?.full_name) ?? existingAccount?.displayName ?? email.split('@')[0],
+        phoneNumber: existingAccount?.phoneNumber ?? null,
+        status: DEFAULT_DISPATCH_STATUS,
+        vehicleType: DEFAULT_DISPATCH_VEHICLE,
+        zone: sanitizeText(existingAccount?.restaurantName, 'Unassigned coverage area'),
+      });
+    }
     await createAuditEntry(context.uid, 'staff_account_provisioned', 'user', targetUid, {
       created,
       email,
@@ -2681,6 +3157,7 @@ const handleNativeAction = async (
     ensureRole(context.role, ['admin']);
     const targetUid = sanitizeText(data.targetUid);
     const nextRole = sanitizeText(data.role);
+    const requestedRestaurantId = sanitizeText(data.restaurantId);
     if (!targetUid) {
       fail(400, 'A target uid is required.');
     }
@@ -2693,14 +3170,52 @@ const handleNativeAction = async (
       fail(404, 'The selected user could not be found.');
     }
 
+    const existingRestaurantId = sanitizeText(account.restaurantId);
+    const restaurantId =
+      ['restaurant', 'dispatch'].includes(nextRole) ? requestedRestaurantId ?? existingRestaurantId : null;
+    let restaurantName: string | null = null;
+    let restaurantLinkedAt: string | null | undefined;
+    let restaurantLinkSource: string | null | undefined;
+
+    if (restaurantId) {
+      const linkedRestaurant = await loadRestaurantById(restaurantId);
+      if (!linkedRestaurant.restaurant) {
+        fail(404, 'The selected restaurant could not be found.');
+      }
+
+      restaurantName = sanitizeText(linkedRestaurant.restaurant.name, sanitizeText(account.restaurantName, 'Restaurant'));
+      restaurantLinkedAt = sanitizeText(account.restaurantLinkedAt) ?? nowIso();
+      restaurantLinkSource = 'admin_role_assignment';
+    } else if (!['restaurant', 'dispatch'].includes(nextRole)) {
+      restaurantName = null;
+      restaurantLinkedAt = null;
+      restaurantLinkSource = null;
+    }
+
     await syncUserRoleState(targetUid, nextRole, context.uid, {
       accountDisabled: false,
       disabledAt: null,
       disabledByUid: null,
       lastPrivilegedRole: PRIVILEGED_APP_ROLES.has(nextRole) ? nextRole : null,
+      restaurantId,
+      restaurantLinkedAt,
+      restaurantLinkSource,
+      restaurantName,
     });
+    if (nextRole === 'dispatch') {
+      await ensureDispatchRiderRecord(targetUid, {
+        activeLoad: 0,
+        completedTrips: 0,
+        displayName: sanitizeText(account.displayName, account.email.split('@')[0]),
+        phoneNumber: sanitizeOptionalText(account.phoneNumber),
+        status: DEFAULT_DISPATCH_STATUS,
+        vehicleType: DEFAULT_DISPATCH_VEHICLE,
+        zone: sanitizeText(account.restaurantName, 'Unassigned coverage area'),
+      });
+    }
     await createAuditEntry(context.uid, 'role_assigned', 'user_role', targetUid, {
       role: nextRole,
+      restaurantId,
     });
     await notifyUsers([targetUid], {
       title: 'Access role updated',
@@ -2724,6 +3239,66 @@ const handleNativeAction = async (
       data: {
         assignedBy: context.uid,
         role: nextRole,
+        targetUid,
+        tokenRefreshRequired: true,
+      },
+    });
+  }
+
+  if (action === 'updateUserRestaurantLink') {
+    ensureRole(context.role, ['admin']);
+    const targetUid = sanitizeText(data.targetUid);
+    const requestedRestaurantId = sanitizeText(data.restaurantId);
+    if (!targetUid) {
+      fail(400, 'A target uid is required.');
+    }
+
+    const account = await loadUserAccount(targetUid);
+    if (!account) {
+      fail(404, 'The selected user could not be found.');
+    }
+
+    const roles = Array.from((await loadUserRoles([targetUid])).get(targetUid) ?? []);
+    const role = resolvePrimaryRole(account, roles);
+    if (!['restaurant', 'dispatch'].includes(role)) {
+      fail(412, 'Only partner and dispatch accounts can be linked to a restaurant.');
+    }
+
+    let restaurantId: string | null = null;
+    let restaurantName: string | null = null;
+    let restaurantLinkedAt: string | null = null;
+    let restaurantLinkSource: string | null = null;
+
+    if (requestedRestaurantId) {
+      const linkedRestaurant = await loadRestaurantById(requestedRestaurantId);
+      if (!linkedRestaurant.restaurant) {
+        fail(404, 'The selected restaurant could not be found.');
+      }
+
+      restaurantId = requestedRestaurantId;
+      restaurantName = sanitizeText(linkedRestaurant.restaurant.name, sanitizeText(account.restaurantName, 'Restaurant'));
+      restaurantLinkedAt = nowIso();
+      restaurantLinkSource = 'admin_access_console';
+    }
+
+    await syncUserRoleState(targetUid, role, context.uid, {
+      accountDisabled: false,
+      disabledAt: null,
+      disabledByUid: null,
+      lastPrivilegedRole: PRIVILEGED_APP_ROLES.has(role) ? role : null,
+      restaurantId,
+      restaurantLinkedAt,
+      restaurantLinkSource,
+      restaurantName,
+    });
+    await createAuditEntry(context.uid, 'restaurant_link_updated', 'user_role', targetUid, {
+      restaurantId,
+      role,
+    });
+
+    return json(200, {
+      data: {
+        restaurantId,
         targetUid,
         tokenRefreshRequired: true,
       },
@@ -2847,6 +3422,17 @@ const handleNativeAction = async (
       disabledByUid: null,
       lastPrivilegedRole: restoreRole,
     });
+    if (restoreRole === 'dispatch') {
+      await ensureDispatchRiderRecord(targetUid, {
+        activeLoad: 0,
+        completedTrips: 0,
+        displayName: sanitizeText(account.displayName, account.email.split('@')[0]),
+        phoneNumber: sanitizeOptionalText(account.phoneNumber),
+        status: DEFAULT_DISPATCH_STATUS,
+        vehicleType: DEFAULT_DISPATCH_VEHICLE,
+        zone: sanitizeText(account.restaurantName, 'Unassigned coverage area'),
+      });
+    }
     await updateUserAccount(targetUid, {
       activeSessionId: null,
       activeSessionUpdatedAt: nowIso(),
@@ -3038,6 +3624,11 @@ const handleNativeAction = async (
     const lga = sanitizeText(data.lga);
     const vehicleType = sanitizeText(data.vehicleType);
     const currentAddress = sanitizeOptionalText(data.currentAddress);
+    const policyAcceptance = validatePolicyAcceptancePayload(
+      data.policyAcceptance,
+      'dispatch',
+      'dispatch_signup'
+    );
 
     if (!displayName) {
       fail(400, 'A rider name is required.');
@@ -3082,10 +3673,10 @@ const handleNativeAction = async (
         currentAddress,
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
-        status: DISPATCH_APPLICATION_STATUS.PENDING,
+        status: DISPATCH_APPLICATION_STATUS.APPROVED,
         submittedAt,
-        reviewedAt: null,
-        approvedByUid: null,
+        reviewedAt: updatedAt,
+        approvedByUid: context.uid,
         rejectionReason: null,
         updatedAt,
       },
@@ -3096,27 +3687,49 @@ const handleNativeAction = async (
       throw new Error(applicationError.message);
     }
 
+    await syncUserRoleState(context.uid, 'dispatch', null, {
+      accountDisabled: false,
+      disabledAt: null,
+      disabledByUid: null,
+      lastPrivilegedRole: 'dispatch',
+    });
+    await ensureDispatchRiderRecord(context.uid, {
+      acceptanceRate: 100,
+      activeLoad: 0,
+      completedTrips: 0,
+      currentAddress,
+      displayName,
+      lga,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
+      phoneNumber,
+      region,
+      status: DEFAULT_DISPATCH_STATUS,
+      vehicleType,
+      zone: region,
+    });
     await upsertUserAccount({
       uid: context.uid,
       email: context.email,
       displayName,
       phoneNumber,
       emailVerified: true,
-      roleDisplay: 'customer',
-      dispatchApplicationStatus: DISPATCH_APPLICATION_STATUS.PENDING,
-      dispatchApplicationReviewedAt: null,
+      roleDisplay: 'dispatch',
+      dispatchApplicationStatus: DISPATCH_APPLICATION_STATUS.APPROVED,
+      dispatchApplicationReviewedAt: updatedAt,
       dispatchApplicationRejectionReason: null,
       createdAt: currentAccount?.createdAt ?? updatedAt,
       updatedAt,
     });
+    await recordPolicyAcceptance(context.uid, context.email, policyAcceptance);
     await createAuditEntry(context.uid, 'dispatch_application_submitted', 'dispatch_application', context.uid, {
       lga,
       region,
       vehicleType,
     });
     await notifyAdmins({
-      title: 'New dispatch application',
-      body: `${displayName} applied for dispatch access in ${region}.`,
+      title: 'New dispatch rider',
+      body: `${displayName} is now live for dispatch access in ${region}.`,
       data: buildNotificationData({
         app: 'admin',
         extra: {
@@ -3129,7 +3742,7 @@ const handleNativeAction = async (
 
     return json(200, {
       data: {
-        status: DISPATCH_APPLICATION_STATUS.PENDING,
+        status: DISPATCH_APPLICATION_STATUS.APPROVED,
         submittedAt,
         targetUid: context.uid,
       },
@@ -3141,10 +3754,15 @@ const handleNativeAction = async (
     const phoneNumber = sanitizeText(data.phoneNumber);
     const restaurantName = sanitizeText(data.restaurantName);
     const cuisine = sanitizeText(data.cuisine);
-      const address = sanitizeText(data.address);
-      const description = sanitizeOptionalText(data.description);
-      const logoImage = sanitizeOptionalText(data.logoImage);
-      const deliveryTime = sanitizeOptionalText(data.deliveryTime) ?? DEFAULT_DELIVERY_TIME;
+    const address = sanitizeText(data.address);
+    const description = sanitizeOptionalText(data.description);
+    const logoImage = sanitizeOptionalText(data.logoImage);
+    const deliveryTime = sanitizeOptionalText(data.deliveryTime) ?? DEFAULT_DELIVERY_TIME;
+    const policyAcceptance = validatePolicyAcceptancePayload(
+      data.policyAcceptance,
+      'partner',
+      'partner_signup'
+    );
     const latitude =
       data.latitude === null || data.latitude === undefined ? null : parseNumber(data.latitude, Number.NaN);
     const longitude =
@@ -3186,6 +3804,7 @@ const handleNativeAction = async (
 
     const submittedAt = existingApplication?.submittedAt ?? nowIso();
     const updatedAt = nowIso();
+    const restaurantId = existingApplication?.restaurantId ?? crypto.randomUUID();
 
     const { error: applicationError } = await serviceClient.from('PartnerApplicationRecord').upsert(
       {
@@ -3196,17 +3815,17 @@ const handleNativeAction = async (
         phoneNumber,
         restaurantName,
         cuisine,
-          address,
-          description,
-          logoImage,
-          latitude: hasLatitude ? latitude : null,
+        address,
+        description,
+        logoImage,
+        latitude: hasLatitude ? latitude : null,
         longitude: hasLongitude ? longitude : null,
         deliveryTime,
-        status: PARTNER_APPLICATION_STATUS.PENDING,
-        restaurantId: existingApplication?.restaurantId ?? null,
+        status: PARTNER_APPLICATION_STATUS.APPROVED,
+        restaurantId,
         submittedAt,
-        reviewedAt: null,
-        approvedByUid: null,
+        reviewedAt: updatedAt,
+        approvedByUid: context.uid,
         rejectionReason: null,
         updatedAt,
       },
@@ -3218,27 +3837,86 @@ const handleNativeAction = async (
     }
 
     const currentAccount = await loadUserAccount(context.uid);
+    await syncUserRoleState(context.uid, 'restaurant', null, {
+      accountDisabled: false,
+      disabledAt: null,
+      disabledByUid: null,
+      lastPrivilegedRole: 'restaurant',
+      restaurantId,
+      restaurantLinkedAt: updatedAt,
+      restaurantLinkSource: 'partner_application_self_publish',
+      restaurantName: restaurantName,
+    });
+    const { error: restaurantError } = await serviceClient.from('RestaurantRecord').upsert(
+      {
+        id: restaurantId,
+        ownerId: context.uid,
+        name: restaurantName,
+        nameKey: buildNameKey(restaurantName),
+        cuisine,
+        address,
+        description: description ?? '',
+        image: '',
+        logoImage: logoImage ?? '',
+        menu: [],
+        deliveryFee: 0,
+        deliveryRadiusKm: 12,
+        deliveryTime,
+        latitude: hasLatitude ? latitude : null,
+        longitude: hasLongitude ? longitude : null,
+        minOrder: 0,
+        supportsDelivery: true,
+        supportsPickup: true,
+        isOpen: true,
+        isPublished: true,
+        updatedAt,
+      },
+      { onConflict: 'id' }
+    );
+
+    if (restaurantError) {
+      throw new Error(restaurantError.message);
+    }
+
+    const { error: approvalError } = await serviceClient.from('RestaurantApproval').upsert(
+      {
+        restaurantId,
+        status: 'approved',
+        approvedByUid: context.uid,
+        approvedAt: updatedAt,
+        updatedAt,
+      },
+      { onConflict: 'restaurantId' }
+    );
+
+    if (approvalError) {
+      throw new Error(approvalError.message);
+    }
+
     await upsertUserAccount({
       uid: context.uid,
       email: context.email,
       displayName: contactName,
       phoneNumber,
       emailVerified: true,
-      roleDisplay: 'customer',
-      partnerApplicationStatus: PARTNER_APPLICATION_STATUS.PENDING,
-      partnerApplicationReviewedAt: null,
+      roleDisplay: 'restaurant',
+      partnerApplicationStatus: PARTNER_APPLICATION_STATUS.APPROVED,
+      partnerApplicationReviewedAt: updatedAt,
       partnerApplicationRejectionReason: null,
+      restaurantId,
+      restaurantName,
       createdAt: currentAccount?.createdAt ?? updatedAt,
       updatedAt,
     });
+    await recordPolicyAcceptance(context.uid, context.email, policyAcceptance);
     await createAuditEntry(context.uid, 'partner_application_submitted', 'partner_application', context.uid, {
       cuisine,
-        restaurantName,
-        logoImage: logoImage ?? null,
-      });
+      restaurantName,
+      logoImage: logoImage ?? null,
+    });
     await notifyAdmins({
-      title: 'New partner application',
-      body: `${restaurantName} submitted a partner application.`,
+      title: 'New restaurant published',
+      body: `${restaurantName} is now live for customer discovery and partner management.`,
       data: buildNotificationData({
         app: 'admin',
         extra: {
@@ -3251,8 +3929,9 @@ const handleNativeAction = async (
 
     return json(200, {
       data: {
-        status: PARTNER_APPLICATION_STATUS.PENDING,
+        status: PARTNER_APPLICATION_STATUS.APPROVED,
         submittedAt,
+        restaurantId,
         targetUid: context.uid,
       },
     });
@@ -3282,12 +3961,14 @@ const handleNativeAction = async (
         .select(
           'id,uid,email,displayName,phoneNumber,region,lga,vehicleType,currentAddress,latitude,longitude,status,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt'
         )
+        .eq('status', DISPATCH_APPLICATION_STATUS.PENDING)
         .order('submittedAt', { ascending: false }),
       serviceClient
         .from('PartnerApplicationRecord')
         .select(
           'id,uid,email,contactName,phoneNumber,restaurantName,cuisine,address,description,logoImage,latitude,longitude,deliveryTime,status,restaurantId,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt'
         )
+        .eq('status', PARTNER_APPLICATION_STATUS.PENDING)
         .order('submittedAt', { ascending: false }),
     ]);
 
@@ -3384,26 +4065,21 @@ const handleNativeAction = async (
         phoneNumber: sanitizeText(application.phoneNumber),
         updatedAt: reviewedAt,
       });
-      const { error: riderError } = await serviceClient.from('DispatchRiderRecord').upsert(
-        {
-          id: applicationId,
-          displayName: sanitizeText(application.displayName, 'Dispatch rider'),
-          status: DEFAULT_DISPATCH_STATUS,
-          zone: sanitizeText(application.region),
-          vehicleType: sanitizeText(application.vehicleType, DEFAULT_DISPATCH_VEHICLE),
-          acceptanceRate: 100,
-          activeLoad: 0,
-          completedTrips: 0,
-          latitude: parseNumber(application.latitude, DEFAULT_NIGERIA_COORDINATE.latitude),
-          longitude: parseNumber(application.longitude, DEFAULT_NIGERIA_COORDINATE.longitude),
-          updatedAt: reviewedAt,
-        },
-        { onConflict: 'id' }
-      );
-
-      if (riderError) {
-        throw new Error(riderError.message);
-      }
+      await ensureDispatchRiderRecord(applicationId, {
+        acceptanceRate: 100,
+        activeLoad: 0,
+        completedTrips: 0,
+        currentAddress: application.currentAddress,
+        displayName: sanitizeText(application.displayName, 'Dispatch rider'),
+        lga: application.lga,
+        latitude: parseNumber(application.latitude, DEFAULT_NIGERIA_COORDINATE.latitude),
+        longitude: parseNumber(application.longitude, DEFAULT_NIGERIA_COORDINATE.longitude),
+        phoneNumber: application.phoneNumber,
+        region: application.region,
+        status: DEFAULT_DISPATCH_STATUS,
+        vehicleType: sanitizeText(application.vehicleType, DEFAULT_DISPATCH_VEHICLE),
+        zone: sanitizeText(application.region),
+      });
 
       const { error: applicationError } = await serviceClient
         .from('DispatchApplicationRecord')
@@ -4261,7 +4937,7 @@ const handleNativeAction = async (
     }
 
     const profile = buildPartnerRestaurantPayload(data, context.uid, {
-      allowPublish: isAdmin,
+      allowPublish: true,
       existingPublished: currentRestaurant?.isPublished === true,
     });
 
@@ -4499,6 +5175,13 @@ const handleNativeAction = async (
       );
     }
 
+    await assignDispatchOwnerForOrder(
+      bundle.order,
+      bundle.assignment ?? null,
+      context.uid,
+      nextState.status
+    );
+
     return json(200, {
       data: {
         orderId,
@@ -4546,10 +5229,16 @@ const handleNativeAction = async (
 
       return toSortableTimestamp(left.createdAt) - toSortableTimestamp(right.createdAt);
     });
+    const scopedOrderList =
+      context.role === 'admin'
+        ? sortedOrderList
+        : sortedOrderList.filter(
+            (order) => getDispatchAssignmentOwnerId(assignmentsByOrderId.get(order.id) ?? null) === context.uid
+          );
 
     return json(200, {
       data: {
-        orders: sortedOrderList.map((order) =>
+        orders: scopedOrderList.map((order) =>
           toOrderSnapshotResponse(
             order,
             itemsByOrderId.get(order.id) ?? [],
@@ -4671,6 +5360,10 @@ const handleNativeAction = async (
     }
 
     assertOrderPaymentReadyForOperations(bundle.order);
+    const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
+    if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+      fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    }
 
     const customerPhone = await loadUserPhoneNumber(bundle.order.customerId);
 
@@ -4698,7 +5391,7 @@ const handleNativeAction = async (
       const { data: existingRider, error } = await serviceClient
         .from('DispatchRiderRecord')
         .select(
-          'id,displayName,status,zone,vehicleType,acceptanceRate,activeLoad,completedTrips,latitude,longitude,createdAt,updatedAt'
+          'id,displayName,status,zone,vehicleType,acceptanceRate,activeLoad,completedTrips,latitude,longitude,region,lga,phoneNumber,currentAddress,createdAt,updatedAt'
         )
         .eq('id', riderId)
         .maybeSingle<DispatchRiderRow>();
@@ -4707,26 +5400,19 @@ const handleNativeAction = async (
         throw new Error(error.message);
       }
 
-      if (!existingRider) {
-        fail(
-          412,
-          'Your rider profile must be provisioned by admin approval before you can update live dispatch status.'
-        );
-      }
-
       persistedDraft = {
-        acceptanceRate: existingRider.acceptanceRate ?? null,
-        activeLoad: existingRider.activeLoad ?? 0,
-        completedTrips: existingRider.completedTrips ?? 0,
-        currentAddress: null,
-        displayName: existingRider.displayName,
+        acceptanceRate: existingRider?.acceptanceRate ?? 100,
+        activeLoad: existingRider?.activeLoad ?? 0,
+        completedTrips: existingRider?.completedTrips ?? 0,
+        currentAddress: existingRider?.currentAddress ?? draft.currentAddress ?? null,
+        displayName: existingRider?.displayName ?? draft.displayName,
         lga: draft.lga,
         latitude: draft.latitude,
         longitude: draft.longitude,
-        phoneNumber: null,
+        phoneNumber: existingRider?.phoneNumber ?? draft.phoneNumber ?? null,
         region: draft.region,
-        status: draft.status,
-        vehicleType: existingRider.vehicleType,
+        status: existingRider?.status ?? draft.status,
+        vehicleType: existingRider?.vehicleType ?? draft.vehicleType,
         zone: draft.zone,
       };
     }
@@ -4744,6 +5430,10 @@ const handleNativeAction = async (
         completedTrips: persistedDraft.completedTrips,
         latitude: persistedDraft.latitude,
         longitude: persistedDraft.longitude,
+        region: persistedDraft.region,
+        lga: persistedDraft.lga,
+        phoneNumber: persistedDraft.phoneNumber,
+        currentAddress: persistedDraft.currentAddress,
         createdAt: timestamp,
         updatedAt: timestamp,
       },
@@ -4783,6 +5473,11 @@ const handleNativeAction = async (
       fail(404, 'The selected order could not be found.');
     }
 
+    const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
+    if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+      fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    }
+
     const { data: courier, error: courierError } = await serviceClient
       .from('DispatchRiderRecord')
       .select(
@@ -4819,11 +5514,12 @@ const handleNativeAction = async (
 
     const { error: assignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
       {
-        orderId,
-        dispatchId: context.uid,
+        assignedAt,
         courierId: courier.id,
         courierName,
-        assignedAt,
+        dispatchId: context.uid,
+        dispatchOwnerId: dispatchOwnerId ?? null,
+        orderId,
         updatedAt: assignedAt,
       },
       { onConflict: 'orderId' }
@@ -4893,6 +5589,10 @@ const handleNativeAction = async (
 
     assertNonTerminalOrder(bundle.order);
     assertOrderPaymentReadyForOperations(bundle.order);
+    const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
+    if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+      fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    }
 
     if (sanitizeText(bundle.order.fulfillmentType, 'delivery') !== 'delivery') {
       fail(412, 'Dispatch actions are only available for delivery orders.');

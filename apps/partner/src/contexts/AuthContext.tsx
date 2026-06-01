@@ -51,10 +51,10 @@ const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const PARTNER_APPLICATION_PENDING_MESSAGE =
-  'Your restaurant application has been submitted. Wait for admin approval before signing into the partner dashboard.';
+const PARTNER_APPLICATION_READY_MESSAGE =
+  'Your restaurant account is live. Sign in again after you verify your email.';
 const PARTNER_APPLICATION_REJECTED_FALLBACK =
-  'Your restaurant application was reviewed but not approved yet. Update your details with the onboarding team before trying again.';
+  'Your restaurant account is not active yet. Update your details with the onboarding team before trying again.';
 const PARTNER_SIGNUP_ROLLBACK_ERROR =
   'Your restaurant application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the onboarding team.';
 const getActionCodeSettings = (path: string) => ({
@@ -340,12 +340,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
-      setError(PARTNER_APPLICATION_PENDING_MESSAGE);
+      setError(PARTNER_APPLICATION_READY_MESSAGE);
       return { verificationEmailSent };
     } catch (nextError: any) {
       let resolvedMessage =
-        nextError?.message === PARTNER_APPLICATION_PENDING_MESSAGE
-          ? PARTNER_APPLICATION_PENDING_MESSAGE
+        nextError?.message === PARTNER_APPLICATION_READY_MESSAGE
+          ? PARTNER_APPLICATION_READY_MESSAGE
           : getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
 
       if (applicantUid) {
