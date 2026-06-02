@@ -52,7 +52,7 @@ const SESSION_CONFLICT_ERROR =
 const DISPATCH_APPLICATION_READY_MESSAGE =
   'Your rider account is live. Sign in again after you verify your email.';
 const DISPATCH_APPLICATION_PENDING_MESSAGE =
-  'Your rider application is pending review. Sign in again after approval.';
+  'Your rider account is being prepared. Sign in again shortly.';
 const DISPATCH_APPLICATION_REJECTED_FALLBACK =
   'Your rider account is not active yet. Contact the operations team and update your details before trying again.';
 const DISPATCH_SIGNUP_ROLLBACK_ERROR =

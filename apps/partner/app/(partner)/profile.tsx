@@ -408,9 +408,9 @@ export default function PartnerProfileScreen() {
           />
         </View>
         <View style={styles.approvalNotice}>
-          <Text style={styles.approvalNoticeTitle}>Self-publish enabled</Text>
+          <Text style={styles.approvalNoticeTitle}>Self-publish active</Text>
           <Text style={styles.approvalNoticeCopy}>
-            Your restaurant stays visible to customers as soon as you save it. Use the visibility switch below if you want to hide it temporarily.
+            Save changes and your restaurant stays visible to customers. Use the visibility switch below if you want to hide it temporarily.
           </Text>
         </View>
         <View style={styles.toggleRow}>
@@ -449,9 +449,8 @@ export default function PartnerProfileScreen() {
         <Text style={styles.metaLine}>
           Listed items: {restaurant?.menu?.reduce((sum, category) => sum + (category.items?.length ?? 0), 0) ?? 0}
         </Text>
-        <Text style={styles.metaLine}>Publishing status: {restaurant?.approvalStatus ?? (restaurant?.isPublished === true ? 'approved' : 'pending')}</Text>
-        <Text style={styles.metaLine}>Published at: {restaurant?.approvedAt ?? 'Not recorded yet'}</Text>
-        <Text style={styles.metaLine}>Published by: {restaurant?.approvedByUid ?? 'Not recorded yet'}</Text>
+        <Text style={styles.metaLine}>Live status: {restaurant?.approvalStatus ?? (restaurant?.isPublished === true ? 'live' : 'hidden')}</Text>
+        <Text style={styles.metaLine}>Last live update: {restaurant?.approvedAt ?? 'Not recorded yet'}</Text>
         <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
         <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
         <Text style={styles.metaLine}>

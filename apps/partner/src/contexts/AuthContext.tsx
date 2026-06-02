@@ -54,7 +54,7 @@ const SESSION_CONFLICT_ERROR =
 const PARTNER_APPLICATION_READY_MESSAGE =
   'Your restaurant account is live. Sign in again after you verify your email.';
 const PARTNER_APPLICATION_REJECTED_FALLBACK =
-  'Your restaurant account is not active yet. Update your details with the onboarding team before trying again.';
+  'Your restaurant account is not active yet. Update your details with the operations team before trying again.';
 const PARTNER_SIGNUP_ROLLBACK_ERROR =
   'Your restaurant application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the onboarding team.';
 const getActionCodeSettings = (path: string) => ({
@@ -96,7 +96,7 @@ const getPartnerAccessStateMessage = (userDocument: Partial<UserDocument> | null
   }
 
   if (userDocument.partnerApplicationStatus === 'pending') {
-    return PARTNER_APPLICATION_PENDING_MESSAGE;
+    return 'Your restaurant account is being prepared. Sign in again shortly.';
   }
 
   if (userDocument.partnerApplicationStatus === 'rejected') {
