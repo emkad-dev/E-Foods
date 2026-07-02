@@ -1,4 +1,4 @@
-package com.ebuy.admin
+package com.feasty.admin
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

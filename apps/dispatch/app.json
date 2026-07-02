@@ -1,15 +1,15 @@
 {
   "expo": {
     "name": "FEASTY Dispatch",
-    "slug": "ebuy-dispatch",
+    "slug": "feasty-dispatch",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "../customer/assets/images/icon.png",
-    "scheme": "ebuy-dispatch",
+    "scheme": "feasty-dispatch",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ebuy.dispatch"
+      "bundleIdentifier": "com.feasty.dispatch"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "backgroundImage": "../customer/assets/images/android-icon-background.png",
         "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
       },
-      "package": "com.ebuy.dispatch"
+      "package": "com.feasty.dispatch"
     },
     "web": {
       "favicon": "../customer/assets/images/favicon.png"
@@ -47,7 +47,7 @@
       "autolinkingModuleResolution": true
     },
     "extra": {
-      "EXPO_PUBLIC_APP_SCHEME": "ebuy-dispatch",
+      "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
     }

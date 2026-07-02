@@ -1,5 +1,5 @@
 {
-  "name": "@ebuy/admin",
+  "name": "@feasty/admin",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "private": true,

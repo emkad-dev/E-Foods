@@ -32,12 +32,12 @@ export const appEnv = {
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_DOMAIN,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN
-    ) ?? 'ebuy.com',
+    ) ?? 'feasty.com',
   appScheme:
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_SCHEME,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_SCHEME
-    ) ?? 'ebuy-admin',
+    ) ?? 'feasty-admin',
   verifyEmailPath:
     getEnvValue(
       process.env.EXPO_PUBLIC_VERIFY_EMAIL_PATH,

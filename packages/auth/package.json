@@ -1,5 +1,5 @@
 {
-  "name": "@ebuy/auth",
+  "name": "@feasty/auth",
   "private": true,
   "version": "0.0.0",
   "main": "src/index.ts",

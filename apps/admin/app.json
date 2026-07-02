@@ -1,15 +1,15 @@
 {
   "expo": {
     "name": "FEASTY Admin",
-    "slug": "ebuy-admin",
+    "slug": "feasty-admin",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "../customer/assets/images/icon.png",
-    "scheme": "ebuy-admin",
+    "scheme": "feasty-admin",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ebuy.admin"
+      "bundleIdentifier": "com.feasty.admin"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "backgroundImage": "../customer/assets/images/android-icon-background.png",
         "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
       },
-      "package": "com.ebuy.admin"
+      "package": "com.feasty.admin"
     },
     "web": {
       "favicon": "../customer/assets/images/favicon.png"
@@ -47,8 +47,8 @@
       "autolinkingModuleResolution": true
     },
     "extra": {
-      "EXPO_PUBLIC_APP_DOMAIN": "ebuy.com",
-      "EXPO_PUBLIC_APP_SCHEME": "ebuy-admin",
+      "EXPO_PUBLIC_APP_DOMAIN": "feasty.com",
+      "EXPO_PUBLIC_APP_SCHEME": "feasty-admin",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
     }

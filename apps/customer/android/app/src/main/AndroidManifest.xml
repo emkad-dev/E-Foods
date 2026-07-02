@@ -29,14 +29,14 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="ebuy-customer"/>
-        <data android:scheme="exp+ebuy-customer"/>
+        <data android:scheme="feasty-customer"/>
+        <data android:scheme="exp+feasty-customer"/>
       </intent-filter>
       <intent-filter data-generated="true">
         <action android:name="android.intent.action.VIEW"/>
-        <data android:scheme="https" android:host="ebuy.com"/>
-        <data android:scheme="ebuy-customer"/>
-        <data android:scheme="exp+ebuy-customer"/>
+        <data android:scheme="https" android:host="feasty.com"/>
+        <data android:scheme="feasty-customer"/>
+        <data android:scheme="exp+feasty-customer"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>

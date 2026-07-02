@@ -28,8 +28,8 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="ebuy-admin"/>
-        <data android:scheme="exp+ebuy-admin"/>
+        <data android:scheme="feasty-admin"/>
+        <data android:scheme="exp+feasty-admin"/>
       </intent-filter>
     </activity>
   </application>

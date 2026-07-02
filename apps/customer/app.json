@@ -1,17 +1,17 @@
 {
   "expo": {
     "name": "FEASTY Customer",
-    "slug": "ebuy-customer",
+    "slug": "feasty-customer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "ebuy-customer",
+    "scheme": "feasty-customer",
     "userInterfaceStyle": "automatic",
     "owner": "ghosty_xx",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ebuy.customer",
-      "associatedDomains": ["applinks:ebuy.com"]
+      "bundleIdentifier": "com.feasty.customer",
+      "associatedDomains": ["applinks:feasty.com"]
     },
     "android": {
       "adaptiveIcon": {
@@ -21,13 +21,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.ebuy.customer",
+      "package": "com.feasty.customer",
       "intentFilters": [
         {
           "action": "VIEW",
           "data": [
-            { "scheme": "https", "host": "ebuy.com" },
-            { "scheme": "ebuy-customer" }
+            { "scheme": "https", "host": "feasty.com" },
+            { "scheme": "feasty-customer" }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
@@ -68,8 +68,8 @@
         "projectId": "dcd9458a-36cb-4f88-bd22-b53a99e1332b"
       },
       "EXPO_PUBLIC_PROJECT_ID": "G-VM017RKW5Q",
-      "EXPO_PUBLIC_APP_DOMAIN": "ebuy.com",
-      "EXPO_PUBLIC_APP_SCHEME": "ebuy-customer",
+      "EXPO_PUBLIC_APP_DOMAIN": "feasty.com",
+      "EXPO_PUBLIC_APP_SCHEME": "feasty-customer",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password",
       "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "309665605080-vfjg90ffdc8sbtot6t4bgkti1c5ldd8i.apps.googleusercontent.com"

@@ -1,4 +1,4 @@
-package com.ebuy.admin
+package com.feasty.customer
 
 import android.app.Application
 import android.content.res.Configuration

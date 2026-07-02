@@ -22,8 +22,8 @@ Enable Google in Supabase Auth and provide the same web client credentials there
 
 Local Supabase config placeholders live in:
 
-- [supabase/.env.example](/c:/Users/emkad/EBuy/E-Foods/supabase/.env.example)
-- [supabase/config.toml](/c:/Users/emkad/EBuy/E-Foods/supabase/config.toml)
+- [supabase/.env.example](/c:/Users/emkad/EBuy/FEASTY/supabase/.env.example)
+- [supabase/config.toml](/c:/Users/emkad/EBuy/FEASTY/supabase/config.toml)
 
 Set:
 
@@ -40,7 +40,7 @@ Set the customer-facing Google client ID in the shared Expo env file:
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com"
 ```
 
-The shared template now includes this in [`.env.apps.example`](/c:/Users/emkad/EBuy/E-Foods/.env.apps.example).
+The shared template now includes this in [`.env.apps.example`](/c:/Users/emkad/EBuy/FEASTY/.env.apps.example).
 
 ## Google Cloud requirements
 
