@@ -43,7 +43,12 @@ export interface PeriodComparison {
 
 export interface PartnerKpis {
   orders: PeriodComparison;
-  revenue: PeriodComparison;
+  /** Net earnings: food subtotal minus discounts — what the kitchen keeps. */
+  earnings: PeriodComparison;
+  /** Total cost: delivery + service fees passed through to dispatch/platform. */
+  cost: PeriodComparison;
+  /** Current-window cost as a percentage of gross order value (0-100). */
+  costShareOfGross: number;
   avgOrder: PeriodComparison;
 }
 
@@ -54,18 +59,25 @@ export const computePartnerKpis = (orders: OrderDocument[], rangeDays: RangeDays
   const currentOrders = ordersBetween(orders, currentStart, now);
   const previousOrders = ordersBetween(orders, previousStart, currentStart);
 
-  const revenueOf = (windowOrders: OrderDocument[]) =>
-    windowOrders.reduce((total, order) => (isCountedTowardRevenue(order) ? total + orderTotal(order) : total), 0);
+  const sumOf = (windowOrders: OrderDocument[], pick: (order: OrderDocument) => number) =>
+    windowOrders.reduce((total, order) => (isCountedTowardRevenue(order) ? total + pick(order) : total), 0);
 
-  const currentRevenue = revenueOf(currentOrders);
-  const previousRevenue = revenueOf(previousOrders);
+  const netOf = (order: OrderDocument) => (order.pricing?.subtotal ?? orderTotal(order)) - (order.pricing?.discount ?? 0);
+  const costOf = (order: OrderDocument) => (order.pricing?.deliveryFee ?? 0) + (order.pricing?.serviceFee ?? 0);
+
+  const currentEarnings = sumOf(currentOrders, netOf);
+  const previousEarnings = sumOf(previousOrders, netOf);
+  const currentCost = sumOf(currentOrders, costOf);
+  const currentGross = sumOf(currentOrders, orderTotal);
 
   return {
     orders: { current: currentOrders.length, previous: previousOrders.length },
-    revenue: { current: currentRevenue, previous: previousRevenue },
+    earnings: { current: currentEarnings, previous: previousEarnings },
+    cost: { current: currentCost, previous: sumOf(previousOrders, costOf) },
+    costShareOfGross: currentGross > 0 ? (currentCost / currentGross) * 100 : 0,
     avgOrder: {
-      current: currentOrders.length > 0 ? currentRevenue / currentOrders.length : 0,
-      previous: previousOrders.length > 0 ? previousRevenue / previousOrders.length : 0,
+      current: currentOrders.length > 0 ? currentEarnings / currentOrders.length : 0,
+      previous: previousOrders.length > 0 ? previousEarnings / previousOrders.length : 0,
     },
   };
 };

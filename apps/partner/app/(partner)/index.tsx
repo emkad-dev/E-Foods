@@ -35,15 +35,20 @@ function KpiCard({
   value,
   current,
   previous,
+  note,
+  noteColor,
   wide,
 }: {
   label: string;
   value: string;
   current?: number;
   previous?: number;
+  note?: string;
+  noteColor?: string;
   wide: boolean;
 }) {
-  const delta = typeof current === 'number' && typeof previous === 'number' ? formatDelta(current, previous) : null;
+  const delta =
+    !note && typeof current === 'number' && typeof previous === 'number' ? formatDelta(current, previous) : null;
   const deltaColor =
     delta?.direction === 'up'
       ? partnerTheme.success
@@ -57,9 +62,15 @@ function KpiCard({
       <Text style={styles.kpiValue} numberOfLines={1}>
         {value}
       </Text>
-      <Text style={[styles.kpiDelta, { color: deltaColor }]}>
-        {delta ? `${delta.direction === 'up' ? '▲ ' : delta.direction === 'down' ? '▼ ' : ''}${delta.label}` : 'Live count'}
-      </Text>
+      {note ? (
+        <Text style={[styles.kpiDelta, { color: noteColor ?? partnerTheme.textSoft }]}>{note}</Text>
+      ) : (
+        <Text style={[styles.kpiDelta, { color: deltaColor }]}>
+          {delta
+            ? `${delta.direction === 'up' ? '▲ ' : delta.direction === 'down' ? '▼ ' : ''}${delta.label}`
+            : 'Live count'}
+        </Text>
+      )}
     </View>
   );
 }
@@ -162,9 +173,16 @@ export default function PartnerHome() {
             />
             <KpiCard
               label={`Earnings (${rangeDays}d)`}
-              value={formatPartnerMoney(kpis.revenue.current)}
-              current={kpis.revenue.current}
-              previous={kpis.revenue.previous}
+              value={formatPartnerMoney(kpis.earnings.current)}
+              current={kpis.earnings.current}
+              previous={kpis.earnings.previous}
+              wide={isWide}
+            />
+            <KpiCard
+              label={`Total costs (${rangeDays}d)`}
+              value={formatPartnerMoney(kpis.cost.current)}
+              note={`−${Math.round(kpis.costShareOfGross * 10) / 10}% of gross`}
+              noteColor={partnerTheme.danger}
               wide={isWide}
             />
             <KpiCard
