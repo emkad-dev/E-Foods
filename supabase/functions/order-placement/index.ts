@@ -8,6 +8,7 @@ import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
 } from '../_shared/notifications.ts';
+import { broadcastOrderChanged } from '../_shared/realtime.ts';
 
 const ORDER_STATUS = {
   PLACED: 'placed',
@@ -94,6 +95,8 @@ const handleOrderPlacement = async (job: OrderPlacementJob) => {
         },
       })
       .eq('id', orderId);
+
+    await broadcastOrderChanged(orderId, { restaurantId });
 
     await updateJobStatus(serviceClient, 'order-placement', orderId, 'completed', {
       orderId,

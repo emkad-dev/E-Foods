@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getDispatchDeliveryQueue } from '../services/dispatchReadModel';
+import { supabase } from '../services/supabase/config';
 import { sortDispatchHistoryOrders } from '../utils/dispatchQueue';
 
 export type DispatchOrder = OrderDocument;
@@ -51,13 +53,18 @@ export const useDispatchOrders = () => {
     };
 
     void guardedLoad();
+    const unsubscribe = subscribeToRealtimeChanges(supabase, [ORDERS_REALTIME_TOPIC], () => {
+      void guardedLoad('background');
+    });
+    // Slow fallback poll in case the realtime connection drops silently.
     const interval = setInterval(() => {
       void guardedLoad('background');
-    }, 15000);
+    }, 30000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
   }, [loadOrders]);
 

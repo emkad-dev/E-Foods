@@ -7,6 +7,14 @@ import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
 } from '../_shared/notifications.ts';
+import { broadcastOrderChanged } from '../_shared/realtime.ts';
+import {
+  buildTransactionalEmailHtml,
+  formatNairaAmount,
+  loadUserEmailRecipient,
+  sendTransactionalEmail,
+  shortOrderCode,
+} from '../_shared/email.ts';
 import {
   toKoboAmount,
   toNumber,
@@ -147,6 +155,8 @@ const markOrderPaymentState = async (
 
   if (error) throw new Error(`Failed to update order: ${error.message}`);
 
+  await broadcastOrderChanged(order.id, { restaurantId: order.restaurantId });
+
   await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent);
 
   const restaurantUsers = await loadRestaurantRecipientUserIds(order.restaurantId);
@@ -163,6 +173,23 @@ const markOrderPaymentState = async (
           type: 'payment_confirmed',
         }),
       },
+    });
+  }
+
+  const recipient = await loadUserEmailRecipient(order.customerId);
+  if (recipient) {
+    await sendTransactionalEmail({
+      to: recipient.email,
+      subject: `Payment received for order ${shortOrderCode(order.id)}`,
+      html: buildTransactionalEmailHtml({
+        heading: 'Payment confirmed',
+        recipientName: recipient.displayName,
+        lines: [
+          `We received your payment of ${formatNairaAmount(toNumber((order.pricing ?? {}).total, 0))} for order ${shortOrderCode(order.id)}.`,
+          `Reference: ${normalizeStatus((order.payment ?? {}).reference, 'n/a')}.`,
+          'The restaurant has been notified and will start preparing your order.',
+        ],
+      }),
     });
   }
 
@@ -217,6 +244,8 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
         },
       })
       .eq('id', orderId);
+
+    await broadcastOrderChanged(orderId);
 
     await updateJobStatus(
       serviceClient,

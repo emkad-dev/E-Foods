@@ -14,7 +14,7 @@ const resolveSupabaseEnvValue = (value: string | undefined, label: string) => {
   return value.trim();
 };
 
-export const createEbuySupabaseClient = (env: SupabaseRuntimeEnv) => {
+export const createFeastySupabaseClient = (env: SupabaseRuntimeEnv) => {
   const url = resolveSupabaseEnvValue(env.url, 'EXPO_PUBLIC_SUPABASE_URL');
   const anonKey = resolveSupabaseEnvValue(env.anonKey, 'EXPO_PUBLIC_SUPABASE_ANON_KEY');
 
@@ -30,7 +30,7 @@ export const createEbuySupabaseClient = (env: SupabaseRuntimeEnv) => {
 
 export const getSharedSupabaseClient = (env: SupabaseRuntimeEnv) => {
   if (!sharedClient) {
-    sharedClient = createEbuySupabaseClient(env);
+    sharedClient = createFeastySupabaseClient(env);
   }
 
   return sharedClient;

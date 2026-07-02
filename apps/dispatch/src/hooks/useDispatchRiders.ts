@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { RIDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import { getDispatchRiders as getDispatchRidersReadModel } from '../services/dispatchReadModel';
+import { supabase } from '../services/supabase/config';
 import { resolveDispatchRiderCoordinate } from '../utils/dispatchRiderLocation';
 
 export type DispatchRider = {
@@ -157,13 +159,18 @@ export const useDispatchRiders = () => {
     };
 
     void loadRiders();
+    const unsubscribe = subscribeToRealtimeChanges(supabase, [RIDERS_REALTIME_TOPIC], () => {
+      void loadRiders();
+    });
+    // Slow fallback poll in case the realtime connection drops silently.
     const interval = setInterval(() => {
       void loadRiders();
-    }, 15000);
+    }, 30000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
   }, []);
 

@@ -3,15 +3,15 @@ const { PrismaClient } = require("@prisma/client");
 const globalForPrisma = globalThis;
 
 const prisma =
-  globalForPrisma.__ebuyPrisma ??
+  globalForPrisma.__feastyPrisma ??
   new PrismaClient({
     log: ["error"],
   });
 
 let validatedDatabaseUrl = null;
 
-if (!globalForPrisma.__ebuyPrisma) {
-  globalForPrisma.__ebuyPrisma = prisma;
+if (!globalForPrisma.__feastyPrisma) {
+  globalForPrisma.__feastyPrisma = prisma;
 }
 
 const validateDatabaseUrl = (rawValue) => {

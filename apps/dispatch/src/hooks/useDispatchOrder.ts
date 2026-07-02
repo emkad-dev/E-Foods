@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import { getDispatchOrderDetail } from '../services/dispatchReadModel';
+import { supabase } from '../services/supabase/config';
 
 export type DispatchOrderDetail = {
   id: string;
@@ -85,13 +87,18 @@ export const useDispatchOrder = (orderId: string) => {
     };
 
     void loadOrder();
+    const unsubscribe = subscribeToRealtimeChanges(supabase, [orderRealtimeTopic(orderId)], () => {
+      void loadOrder();
+    });
+    // Slow fallback poll in case the realtime connection drops silently.
     const interval = setInterval(() => {
       void loadOrder();
-    }, 15000);
+    }, 30000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
   }, [orderId]);
 

@@ -10,6 +10,17 @@ import {
   sendPushNotificationsToUsers,
 } from '../_shared/notifications.ts';
 import { getAuthenticatedRequestContext } from '../_shared/request-context.ts';
+import {
+  broadcastOrderChanged,
+  broadcastRestaurantsChanged,
+  broadcastRidersChanged,
+} from '../_shared/realtime.ts';
+import {
+  buildTransactionalEmailHtml,
+  formatNairaAmount,
+  sendTransactionalEmail,
+  shortOrderCode,
+} from '../_shared/email.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -1759,6 +1770,8 @@ const createOrderWithItems = async ({
     throw new Error(itemsError.message);
   }
 
+  await broadcastOrderChanged(orderId, { restaurantId });
+
   return {
     createdAt,
     timeline,
@@ -1789,6 +1802,8 @@ const updateOrderRecord = async (orderId: string, updates: JsonObject) => {
   if (error) {
     throw new Error(error.message);
   }
+
+  await broadcastOrderChanged(orderId);
 };
 
 const loadOrderRelations = async (orderIds: string[]) => {
@@ -2917,6 +2932,8 @@ const ensureDispatchRiderRecord = async (
   if (error) {
     throw new Error(error.message);
   }
+
+  await broadcastRidersChanged();
 };
 
 const handleNativeAction = async (
@@ -3591,6 +3608,7 @@ const handleNativeAction = async (
         if (error) {
           throw new Error(error.message);
         }
+        await broadcastRidersChanged();
       })(),
       deleteUserRoleLinks(context.uid),
       deleteUserAccount(context.uid),
@@ -3877,6 +3895,8 @@ const handleNativeAction = async (
     if (restaurantError) {
       throw new Error(restaurantError.message);
     }
+
+    await broadcastRestaurantsChanged({ restaurantId });
 
     const { error: approvalError } = await serviceClient.from('RestaurantApproval').upsert(
       {
@@ -4256,6 +4276,8 @@ const handleNativeAction = async (
         throw new Error(restaurantError.message);
       }
 
+      await broadcastRestaurantsChanged({ restaurantId });
+
       const { error: approvalError } = await serviceClient.from('RestaurantApproval').upsert(
         {
           restaurantId,
@@ -4513,6 +4535,24 @@ const handleNativeAction = async (
       }),
     });
 
+    await notifySafely(async () => {
+      const restaurantName = sanitizeText(orderDraft.restaurant.name, 'the restaurant');
+      await sendTransactionalEmail({
+        to: context.email,
+        subject: `Order ${shortOrderCode(orderId)} placed`,
+        html: buildTransactionalEmailHtml({
+          heading: 'Your order has been placed',
+          lines: [
+            `We received your order ${shortOrderCode(orderId)} for ${restaurantName}.`,
+            `Total: ${formatNairaAmount(orderDraft.pricing.total)} (pay with cash on ${
+              orderDraft.fulfillmentType === 'delivery' ? 'delivery' : 'pickup'
+            }).`,
+            'We will keep you posted as the restaurant confirms and prepares your order.',
+          ],
+        }),
+      });
+    });
+
     return json(200, { data: response });
   }
 
@@ -4580,7 +4620,7 @@ const handleNativeAction = async (
           orderId,
           paymentMethod: orderDraft.paymentMethod,
           restaurantId: orderDraft.restaurantId,
-          source: 'ebuy_customer_checkout',
+          source: 'feasty_customer_checkout',
         },
         callbackUrl: getPaystackCallbackUrl(),
       });
@@ -4975,6 +5015,8 @@ const handleNativeAction = async (
       throw new Error(error.message);
     }
 
+    await broadcastRestaurantsChanged({ restaurantId });
+
     await updateUserAccount(context.uid, {
       restaurantId,
       restaurantLinkedAt: savedAt,
@@ -5029,6 +5071,8 @@ const handleNativeAction = async (
     if (restaurantError) {
       throw new Error(restaurantError.message);
     }
+
+    await broadcastRestaurantsChanged({ restaurantId });
 
     await updateUserAccount(context.uid, {
       restaurantId,
@@ -5087,6 +5131,8 @@ const handleNativeAction = async (
     if (error) {
       throw new Error(error.message);
     }
+
+    await broadcastRestaurantsChanged({ restaurantId });
 
     await createAuditEntry(context.uid, 'partner_menu_upserted', 'restaurant', restaurantId, {
       categories: menu.length,
@@ -5444,6 +5490,8 @@ const handleNativeAction = async (
       throw new Error(error.message);
     }
 
+    await broadcastRidersChanged();
+
     await createAuditEntry(context.uid, 'dispatch_rider_upserted', 'dispatch_rider', riderId, {
       status: persistedDraft.status,
       zone: persistedDraft.zone,
@@ -5754,7 +5802,7 @@ const handleNativeAction = async (
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
-    return new Response('ok', {
+    return new Response(null, {
       headers: corsHeaders,
       status: 204,
     });

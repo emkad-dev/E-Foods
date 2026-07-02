@@ -135,7 +135,7 @@ const parseQueryRows = (rawOutput) => {
 const loadRemotePrismaMigrations = (directUrl) => {
   const queryFile = writeTempSql(
     PRISMA_MIGRATIONS_QUERY,
-    `ebuy-prisma-migrations-${Date.now()}.sql`
+    `feasty-prisma-migrations-${Date.now()}.sql`
   );
 
   try {
@@ -199,7 +199,7 @@ where not exists (
 
   const queryFile = writeTempSql(
     insertSql,
-    `ebuy-prisma-record-${migrationName}-${Date.now()}.sql`
+    `feasty-prisma-record-${migrationName}-${Date.now()}.sql`
   );
 
   try {

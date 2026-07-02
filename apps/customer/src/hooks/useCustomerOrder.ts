@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreakdown } from '../domain/entities';
 import type { FulfillmentType } from '../domain/orders';
 import { getCustomerOrderDetail } from '../services/customerReadModel';
+import { supabase } from '../services/supabase/config';
 
 export type Order = OrderDocument & {
   id: string;
@@ -58,13 +60,18 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     };
 
     void loadOrder();
+    const unsubscribe = subscribeToRealtimeChanges(supabase, [orderRealtimeTopic(orderId)], () => {
+      void loadOrder();
+    });
+    // Slow fallback poll in case the realtime connection drops silently.
     const interval = setInterval(() => {
       void loadOrder();
-    }, 10000);
+    }, 30000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
   }, [customerId, orderId]);
 

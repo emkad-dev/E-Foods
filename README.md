@@ -78,6 +78,34 @@ Push delivery now uses Expo tokens stored in `UserAccount.expoPushToken`, with S
 
 Notification tap routes are path-driven, so each app can deep-link directly into its order, approvals, access, or profile surface from the push payload.
 
+## Realtime updates
+
+Order, rider, and restaurant screens refresh over Supabase Realtime Broadcast instead of tight polling. Edge functions publish best-effort "changed" signals after every relevant mutation (see `supabase/functions/_shared/realtime.ts`), and the apps subscribe through `packages/auth/src/realtime.ts`:
+
+- `order-{orderId}` — order detail screens (customer, partner, dispatch)
+- `orders` — partner kitchen queue and dispatch delivery queue
+- `dispatch-riders` — dispatch fleet views
+- `restaurants` — partner restaurant context (approvals, profile, menu)
+
+Payloads are contentless refresh pokes (`{ orderId, restaurantId? }`); clients refetch through the existing RPC read models, so no data access rules change. Every hook keeps a slow 30–60s polling fallback in case the websocket drops silently. Broadcast is enabled by default on Supabase projects — no database or dashboard configuration is required, but the updated functions must be deployed:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-realtime-email-functions.ps1
+```
+
+## Transactional email
+
+Order confirmation (cash checkout) and payment receipt (Paystack) emails are sent from Edge functions via Resend (`supabase/functions/_shared/email.ts`). Email is best-effort: when `RESEND_API_KEY` is missing the send is skipped with a warning and order flows are unaffected.
+
+Set the secrets on the project:
+
+```bash
+supabase secrets set RESEND_API_KEY=re_xxx --project-ref YOUR_PROJECT_REF
+supabase secrets set "TRANSACTIONAL_EMAIL_FROM=FEASTy <orders@yourdomain.com>" --project-ref YOUR_PROJECT_REF
+```
+
+`TRANSACTIONAL_EMAIL_FROM` defaults to Resend's onboarding sender, which only delivers to the Resend account owner's inbox — verify a domain in Resend and set a real sender before launch.
+
 ## Backend model
 
 Today the stack is:
@@ -182,7 +210,7 @@ PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxx
 PAYSTACK_CALLBACK_URL=https://your-web-app-or-confirmation-page.example.com/payment-return
 ```
 
-The checked-in example lives in [`functions/.env.example`](/c:/Users/emkad/EBuy/E-Foods/functions/.env.example).
+The checked-in example lives in [`functions/.env.example`](/c:/Users/emkad/EBuy/FEASTY/functions/.env.example).
 
 ### Prisma
 

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface BackendRpcEnv {
   backendRpcUrl?: string;
+  supabaseAnonKey?: string;
   projectId?: string;
   region?: string;
   supabaseUrl?: string;
@@ -35,12 +36,18 @@ export const callBackendRpc = async <T>(
     throw new Error('You must be signed in before calling the protected backend.');
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${session.access_token}`,
+    'Content-Type': 'application/json',
+  };
+
+  if (env.supabaseAnonKey?.trim()) {
+    headers.apikey = env.supabaseAnonKey.trim();
+  }
+
   const response = await fetch(resolveRpcUrl(env), {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       action,
       data: data ?? {},

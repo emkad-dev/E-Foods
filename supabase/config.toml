@@ -1,4 +1,4 @@
-project_id = "ebuy-platform"
+project_id = "feasty-platform"
 
 [auth.external.google]
 enabled = false
