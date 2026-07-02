@@ -90,7 +90,7 @@ export default function OrdersPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Order</th>
+                  <th>Order id</th>
                   <th>Restaurant</th>
                   <th>Fulfillment</th>
                   <th>Status</th>

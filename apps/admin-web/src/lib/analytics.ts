@@ -131,6 +131,14 @@ export interface BreakdownSlice {
   value: number;
 }
 
+// Pinned display order: confirmed first, placed second, cancelled always last;
+// everything else lands in between, ranked by volume.
+const STATUS_DISPLAY_PRIORITY: Record<string, number> = {
+  confirmed: 0,
+  placed: 1,
+  cancelled: 999,
+};
+
 export const buildStatusBreakdown = (orders: OrderDocument[]): BreakdownSlice[] => {
   const counts = new Map<string, number>();
 
@@ -141,7 +149,16 @@ export const buildStatusBreakdown = (orders: OrderDocument[]): BreakdownSlice[] 
 
   return [...counts.entries()]
     .map(([name, value]) => ({ name, value }))
-    .sort((left, right) => right.value - left.value);
+    .sort((left, right) => {
+      const leftPriority = STATUS_DISPLAY_PRIORITY[left.name] ?? 100;
+      const rightPriority = STATUS_DISPLAY_PRIORITY[right.name] ?? 100;
+
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+
+      return right.value - left.value;
+    });
 };
 
 export const buildTopRestaurants = (orders: OrderDocument[], limit = 6): { name: string; orders: number; revenue: number }[] => {

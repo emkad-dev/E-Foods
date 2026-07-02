@@ -35,9 +35,13 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <form className="card login-card" onSubmit={handleSubmit}>
-        <div className="login-logo">EBuy Admin</div>
+        <div className="login-logo">
+          <span className="wordmark-green">FEAST</span>
+          <span className="wordmark-orange">Y</span>
+          <span className="login-logo-suffix"> Admin</span>
+        </div>
         <p className="muted" style={{ textAlign: 'center', margin: 0 }}>
-          Sign in with your admin account to manage the platform.
+          Sign in with your admin provissioned account given by the super user to access the platform.
         </p>
         {error ? <ErrorBanner message={error} /> : null}
         {signedInWithoutAdminRole ? (

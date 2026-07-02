@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react()],
+  envPrefix: ['VITE_', 'EXPO_PUBLIC_'],
   server: {
     port: 5180,
   },

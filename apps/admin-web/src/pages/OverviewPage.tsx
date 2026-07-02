@@ -15,9 +15,7 @@ import {
   type RangeDays,
 } from '../lib/analytics';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
-import { getApprovalTone, getOrderTone } from '../theme/tones';
-
-const STATUS_COLORS = ['#18b26b', '#b5e48c', '#f4a261', '#117c6a', '#c54a43', '#5b6978', '#0f7f4c', '#b86f1f'];
+import { getApprovalTone, getOrderTone, getStatusChartColor } from '../theme/tones';
 
 export default function OverviewPage() {
   const { snapshot, loading, error, refresh } = useSnapshot();
@@ -106,7 +104,7 @@ export default function OverviewPage() {
                       paddingAngle={3}
                     >
                       {statusBreakdown.map((slice, index) => (
-                        <Cell key={slice.name} fill={STATUS_COLORS[index % STATUS_COLORS.length]} />
+                        <Cell key={slice.name} fill={getStatusChartColor(slice.name, index)} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
@@ -121,7 +119,7 @@ export default function OverviewPage() {
                             width: 10,
                             height: 10,
                             borderRadius: 999,
-                            background: STATUS_COLORS[index % STATUS_COLORS.length],
+                            background: getStatusChartColor(slice.name, index),
                             display: 'inline-block',
                           }}
                         />
@@ -175,7 +173,7 @@ export default function OverviewPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Order</th>
+                    <th>Order id</th>
                     <th>Restaurant</th>
                     <th>Status</th>
                     <th>Date &amp; time</th>

@@ -29,7 +29,7 @@ export const getOrderTone = (status?: string | null): AdminTone => {
     return 'info';
   }
 
-  if (['accepted', 'preparing'].includes(normalizedStatus)) {
+  if (['confirmed', 'accepted', 'preparing'].includes(normalizedStatus)) {
     return 'primary';
   }
 
@@ -49,6 +49,18 @@ export const getRoleTone = (role?: string | null): AdminTone => {
       return 'neutral';
   }
 };
+
+const STATUS_CHART_COLORS: Record<string, string> = {
+  confirmed: '#03b833',
+  placed: '#ff951f',
+  cancelled: '#c54a43',
+  delivered: '#028a26',
+};
+
+const FALLBACK_CHART_COLORS = ['#7fd99a', '#ffc175', '#117c6a', '#5b6978', '#e07c00', '#b5e48c'];
+
+export const getStatusChartColor = (status: string, index: number) =>
+  STATUS_CHART_COLORS[status.toLowerCase()] ?? FALLBACK_CHART_COLORS[index % FALLBACK_CHART_COLORS.length];
 
 export const getApplicationTone = (status?: string | null): AdminTone => {
   switch ((status ?? '').toLowerCase()) {

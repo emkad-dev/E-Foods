@@ -27,8 +27,7 @@ import {
   type RangeDays,
 } from '../lib/analytics';
 import { formatCurrency, formatNumber, humanizeStatus } from '../lib/format';
-
-const STATUS_COLORS = ['#18b26b', '#b5e48c', '#f4a261', '#117c6a', '#c54a43', '#5b6978', '#0f7f4c', '#b86f1f'];
+import { getStatusChartColor } from '../theme/tones';
 
 export default function StatisticsPage() {
   const { snapshot, loading, error, refresh } = useSnapshot();
@@ -75,7 +74,7 @@ export default function StatisticsPage() {
               <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 12 }} width={80} />
               <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0), currency)} />
-              <Line type="monotone" dataKey="revenue" stroke="#18b26b" strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="revenue" stroke="#03b833" strokeWidth={2.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -93,7 +92,7 @@ export default function StatisticsPage() {
               <PieChart>
                 <Pie data={statusBreakdown} dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} paddingAngle={3}>
                   {statusBreakdown.map((slice, index) => (
-                    <Cell key={slice.name} fill={STATUS_COLORS[index % STATUS_COLORS.length]} />
+                    <Cell key={slice.name} fill={getStatusChartColor(slice.name, index)} />
                   ))}
                 </Pie>
                 <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
@@ -115,7 +114,7 @@ export default function StatisticsPage() {
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
                 <Tooltip formatter={(value) => [formatNumber(Number(value ?? 0)), 'Orders']} />
-                <Bar dataKey="orders" fill="#18b26b" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="orders" fill="#ff951f" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}

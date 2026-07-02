@@ -1,4 +1,4 @@
-# EBuy Admin Web Hub — Design
+# FEASTY Admin Web Hub — Design
 
 **Date:** 2026-07-02
 **Status:** Approved approach (Option A) — user directed autonomous execution ("commence with A, report when done").

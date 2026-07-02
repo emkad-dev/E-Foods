@@ -7,15 +7,17 @@
   --text: #0d1522;
   --text-muted: #5b6978;
   --text-soft: #6a7d76;
-  --accent: #18b26b;
-  --accent-strong: #0f7f4c;
-  --accent-soft: #c9f0dc;
+  --brand-green: #03b833;
+  --brand-orange: #ff951f;
+  --accent: #03b833;
+  --accent-strong: #028a26;
+  --accent-soft: #d3f7dc;
   --info: #117c6a;
   --info-soft: #d7f3ee;
-  --success: #14804a;
-  --success-soft: #d7efe0;
-  --warning: #b86f1f;
-  --warning-soft: #f8ead4;
+  --success: #028a26;
+  --success-soft: #d7f5de;
+  --warning: #e07c00;
+  --warning-soft: #fff0dd;
   --danger: #c54a43;
   --danger-soft: #f8dfdc;
   --shadow: 0 10px 30px rgba(9, 15, 29, 0.06);
@@ -65,12 +67,20 @@ button {
 }
 
 .sidebar-logo {
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  color: var(--accent);
+  font-size: 40px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: -2px;
   padding: 0 12px 24px;
   text-transform: uppercase;
+}
+
+.wordmark-green {
+  color: var(--brand-green);
+}
+
+.wordmark-orange {
+  color: var(--brand-orange);
 }
 
 .nav-section-label {
@@ -108,7 +118,7 @@ button {
 
 .sidebar-footer {
   margin-top: auto;
-  padding: 12px;
+  padding: 3px;
 }
 
 .main {
@@ -299,19 +309,19 @@ button {
 .badge-primary {
   background: var(--accent-soft);
   color: var(--accent-strong);
-  border-color: #a7e6c8;
+  border-color: #a9ecb9;
 }
 
 .badge-success {
   background: var(--success-soft);
   color: var(--success);
-  border-color: #bbf7d0;
+  border-color: #a9ecb9;
 }
 
 .badge-warning {
   background: var(--warning-soft);
   color: var(--warning);
-  border-color: #fed7aa;
+  border-color: #ffd6a3;
 }
 
 .badge-danger {
@@ -374,8 +384,8 @@ button {
 }
 
 .btn-ghost {
-  background: var(--surface);
-  color: var(--text-muted);
+  background: var(--danger);
+  color: var(--danger-soft);
   border-color: var(--border-strong);
 }
 
@@ -517,12 +527,16 @@ button {
 }
 
 .login-logo {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--accent);
-  letter-spacing: 1px;
+  font-size: 26px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: -1px;
   text-transform: uppercase;
   text-align: center;
+}
+
+.login-logo-suffix {
+  color: var(--text);
 }
 
 .section-stack {

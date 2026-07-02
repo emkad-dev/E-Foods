@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Overview', end: true },
+  { to: '/', label: 'Dashboard', end: true },
   { to: '/orders', label: 'Orders' },
   { to: '/approvals', label: 'Approvals' },
   { to: '/access', label: 'Access' },
@@ -20,8 +20,11 @@ export default function AppLayout() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-logo">EBuy Admin</div>
-        <div className="nav-section-label">Main</div>
+        <div className="sidebar-logo">
+          <span className="wordmark-green">FEAST</span>
+          <span className="wordmark-orange">Y</span>
+        </div>
+        
         <nav>
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
