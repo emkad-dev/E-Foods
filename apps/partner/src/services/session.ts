@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const SESSION_STORAGE_KEY = '@ebuy/partner-active-session-id';
-const USER_STORAGE_KEY = '@ebuy/partner-user-cache';
+const SESSION_STORAGE_KEY = '@feasty/partner-active-session-id';
+const USER_STORAGE_KEY = '@feasty/partner-user-cache';
 
 export const createSessionId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`;

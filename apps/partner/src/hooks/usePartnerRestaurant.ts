@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import { useAuth } from '../contexts/AuthContext';
 import type { RestaurantDocument } from '../domain/entities';
 import { getPartnerRestaurantContext } from '../services/partnerReadModel';
+import { supabase } from '../services/supabase/config';
 
 export type RestaurantProfile = RestaurantDocument;
 
@@ -57,13 +59,18 @@ export const usePartnerRestaurant = () => {
     };
 
     void loadContext();
+    const unsubscribe = subscribeToRealtimeChanges(supabase, [RESTAURANTS_REALTIME_TOPIC], () => {
+      void loadContext();
+    });
+    // Slow fallback poll in case the realtime connection drops silently.
     const interval = setInterval(() => {
       void loadContext();
-    }, 20000);
+    }, 60000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
   }, [user]);
 

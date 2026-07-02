@@ -28,8 +28,8 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="ebuy-partner"/>
-        <data android:scheme="exp+ebuy-partner"/>
+        <data android:scheme="feasty-partner"/>
+        <data android:scheme="exp+feasty-partner"/>
       </intent-filter>
     </activity>
   </application>

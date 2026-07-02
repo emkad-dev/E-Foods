@@ -32,7 +32,7 @@ export const appEnv = {
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_SCHEME,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_SCHEME
-    ) ?? 'ebuy-partner',
+    ) ?? 'feasty-partner',
   verifyEmailPath:
     getEnvValue(
       process.env.EXPO_PUBLIC_VERIFY_EMAIL_PATH,

@@ -1,4 +1,4 @@
-package com.ebuy.partner
+package com.feasty.partner
 
 import android.app.Application
 import android.content.res.Configuration

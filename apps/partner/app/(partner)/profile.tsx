@@ -536,8 +536,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
+    alignSelf: 'center',
+    maxWidth: 1100,
     paddingBottom: 30,
     paddingHorizontal: 18,
+    width: '100%',
   },
   title: {
     color: partnerTheme.text,

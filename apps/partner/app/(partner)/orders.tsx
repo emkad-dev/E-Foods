@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { formatOrderStatusLabel, formatPaymentStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
+import { formatOrderStatusLabel, formatPaymentStatusLabel } from '../../src/domain/orders';
+import { getPartnerStatusColor } from '../../src/theme/statusColors';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
 import {
@@ -164,8 +165,8 @@ export default function PartnerOrdersScreen() {
                 >
                   <View style={styles.orderHeader}>
                     <Text style={styles.orderTitle}>Order #{order.id.slice(-6)}</Text>
-                    <View style={[styles.statusPill, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
-                      <Text style={[styles.statusText, { color: getOrderStatusColor(order.status) }]}>
+                    <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
+                      <Text style={[styles.statusText, { color: getPartnerStatusColor(order.status) }]}>
                         {formatOrderStatusLabel(order.status)}
                       </Text>
                     </View>
@@ -202,8 +203,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
+    alignSelf: 'center',
+    maxWidth: 1100,
     paddingHorizontal: 18,
     paddingBottom: 30,
+    width: '100%',
   },
   loadingState: {
     alignItems: 'center',

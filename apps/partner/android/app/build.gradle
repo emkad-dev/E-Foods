@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.ebuy.partner'
+    namespace 'com.feasty.partner'
     defaultConfig {
-        applicationId 'com.ebuy.partner'
+        applicationId 'com.feasty.partner'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

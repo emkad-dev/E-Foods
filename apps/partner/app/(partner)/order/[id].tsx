@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { formatOrderStatusLabel, getOrderStatusColor, normalizeOrderStatus } from '../../../src/domain/orders';
+import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
+import { getPartnerStatusColor } from '../../../src/theme/statusColors';
 import { usePartnerOrder } from '../../../src/hooks/usePartnerOrder';
 import {
   acceptPartnerOrder,
@@ -88,8 +89,8 @@ export default function PartnerOrderDetailScreen() {
           {(order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0)} items ·{' '}
           {(order.fulfillmentType ?? 'delivery').toUpperCase()} · {formatPartnerMoney(order.pricing?.total ?? order.total ?? 0)}
         </Text>
-        <View style={[styles.statusPill, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
-          <Text style={[styles.statusText, { color: getOrderStatusColor(order.status) }]}>
+        <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
+          <Text style={[styles.statusText, { color: getPartnerStatusColor(order.status) }]}>
             {formatOrderStatusLabel(order.status)}
           </Text>
         </View>
@@ -158,8 +159,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
+    alignSelf: 'center',
+    maxWidth: 1100,
     paddingHorizontal: 18,
     paddingBottom: 30,
+    width: '100%',
   },
   loadingState: {
     alignItems: 'center',
