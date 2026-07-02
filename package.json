@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "dev:admin": "npm --prefix apps/admin run start",
+    "dev:admin-web": "npm --prefix apps/admin-web run dev",
+    "build:admin-web": "npm --prefix apps/admin-web run build",
     "dev:customer": "npm --prefix apps/customer run start",
     "dev:partner": "npm --prefix apps/partner run start",
     "dev:dispatch": "npm --prefix apps/dispatch run start",
