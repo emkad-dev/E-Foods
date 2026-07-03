@@ -1,12 +1,22 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { customerTheme } from '../../src/theme/palette';
+
+export const unstable_settings = {
+  initialRouteName: 'home',
+};
+
+const renderTabIcon = (iconName: React.ComponentProps<typeof FontAwesome>['name'], color: string, focused: boolean) => (
+  <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
+    <FontAwesome name={iconName} size={focused ? 21 : 20} color={focused ? '#ffffff' : color} />
+  </View>
+);
 
 export default function CustomerLayout() {
   const { loading } = useAuth();
@@ -27,16 +37,18 @@ export default function CustomerLayout() {
           tabBarActiveTintColor: customerTheme.accentStrong,
           tabBarInactiveTintColor: customerTheme.textMuted,
           tabBarLabelStyle: { fontSize: 11, fontWeight: '700', paddingBottom: 2 },
-          tabBarItemStyle: { paddingVertical: 4 },
+          tabBarItemStyle: { paddingVertical: 6 },
           tabBarStyle: {
             backgroundColor: customerTheme.surface,
-            borderTopColor: 'transparent',
+            borderTopColor: customerTheme.border,
+            borderTopWidth: 1,
             borderRadius: 22,
             bottom: 10,
-            elevation: 6,
-            height: 62,
+            elevation: 8,
+            height: 70,
             left: 10,
-            paddingTop: 4,
+            paddingBottom: 10,
+            paddingTop: 8,
             position: 'absolute',
             right: 10,
             shadowColor: '#684612',
@@ -51,7 +63,7 @@ export default function CustomerLayout() {
           name="home"
           options={{
             title: 'Home',
-            tabBarIcon: ({ color }) => <FontAwesome name="home" size={24} color={color} />,
+            tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
           }}
         />
         <Tabs.Screen
@@ -59,9 +71,9 @@ export default function CustomerLayout() {
           options={{
             title: 'Favorites',
             headerShown: true,
-            headerLeft: () => <CustomerHeaderBackButton href="/(customer)/home" />,
+            headerLeft: () => <CustomerHeaderBackButton href="/home" />,
             headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
-            tabBarIcon: ({ color }) => <FontAwesome name="heart" size={22} color={color} />,
+            tabBarIcon: ({ color, focused }) => renderTabIcon('heart', color, focused),
           }}
         />
         <Tabs.Screen
@@ -69,10 +81,10 @@ export default function CustomerLayout() {
           options={{
             title: 'Cart',
             headerShown: true,
-            headerLeft: () => <CustomerHeaderBackButton href="/(customer)/home" />,
+            headerLeft: () => <CustomerHeaderBackButton href="/home" />,
             headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
             tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color }) => <FontAwesome name="shopping-cart" size={22} color={color} />,
+            tabBarIcon: ({ color, focused }) => renderTabIcon('shopping-cart', color, focused),
           }}
         />
         <Tabs.Screen
@@ -81,7 +93,7 @@ export default function CustomerLayout() {
             title: 'Order',
             headerShown: false,
             tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color }) => <FontAwesome name="list" size={22} color={color} />,
+            tabBarIcon: ({ color, focused }) => renderTabIcon('list', color, focused),
           }}
         />
         <Tabs.Screen
@@ -90,7 +102,7 @@ export default function CustomerLayout() {
             title: 'Profile',
             headerShown: false,
             tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color }) => <FontAwesome name="user" size={22} color={color} />,
+            tabBarIcon: ({ color, focused }) => renderTabIcon('user', color, focused),
           }}
         />
         <Tabs.Screen
@@ -100,6 +112,13 @@ export default function CustomerLayout() {
             headerShown: true,
             title: 'Promotions',
             headerRight: () => <AuthHeaderActions />,
+          }}
+        />
+        <Tabs.Screen
+          name="search"
+          options={{
+            href: null,
+            headerShown: false,
           }}
         />
         <Tabs.Screen
@@ -113,3 +132,18 @@ export default function CustomerLayout() {
     </FavoritesProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  tabIconWrap: {
+    alignItems: 'center',
+    borderRadius: 14,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  tabIconWrapActive: {
+    backgroundColor: customerTheme.accentSoft,
+    borderColor: customerTheme.accent,
+    borderWidth: 1,
+  },
+});

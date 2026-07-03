@@ -81,7 +81,9 @@ function RootLayoutNav() {
   }, [router]);
 
   useEffect(() => {
-    if (loading) return;
+    // Wait until <Slot /> is mounted; a replace dispatched while the loading
+    // screen is up has no navigator to handle it.
+    if (loading || policyLoading) return;
 
     const inCustomerGroup = segments[0] === '(customer)';
     const currentScreen = segments[1];
@@ -110,7 +112,7 @@ function RootLayoutNav() {
     if (user.role === 'customer' && !inCustomerGroup) {
       router.replace('/(customer)/home');
     }
-  }, [loading, policyAccepted, router, segments, user]);
+  }, [loading, policyAccepted, policyLoading, router, segments, user]);
 
   useEffect(() => {
     if (loading || policyLoading || user?.role !== 'customer' || !user.emailVerified || !policyAccepted) {
@@ -132,11 +134,18 @@ function RootLayoutNav() {
     );
   }
 
-  if (showLaunch) {
-    return <FeastyLaunchScreen />;
-  }
-
-  return <Slot />;
+  // Keep <Slot /> mounted while the launch wordmark shows, otherwise the
+  // auth redirect fires with no navigator to handle it.
+  return (
+    <View style={styles.appShell}>
+      <Slot />
+      {showLaunch ? (
+        <View style={styles.launchOverlay}>
+          <FeastyLaunchScreen />
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 export default function RootLayout() {
@@ -165,6 +174,12 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  appShell: {
+    flex: 1,
+  },
+  launchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
   launchScreen: {
     alignItems: 'center',
     backgroundColor: customerTheme.launchBackground,

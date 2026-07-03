@@ -19,6 +19,7 @@ import { useAuth } from '../../../../src/contexts/AuthContext';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { customerTheme } from '../../../../src/theme/palette';
 import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
+import { toCustomerFacingItemPrice } from '../../../../src/domain/orders';
 import { promptForAuth } from '../../../../src/utils/authPrompt';
 import {
   type DiscoveryRestaurant,
@@ -133,7 +134,7 @@ export default function RestaurantDetail() {
                 {
                   id: item.id,
                   name: item.name,
-                  price: item.price,
+                  price: toCustomerFacingItemPrice(item.price),
                   quantity: 1,
                   restaurantId: id as string,
                   restaurantName: restaurant?.name ?? 'Restaurant',
@@ -154,7 +155,7 @@ export default function RestaurantDetail() {
       {
         id: item.id,
         name: item.name,
-        price: item.price,
+        price: toCustomerFacingItemPrice(item.price),
         quantity: 1,
         restaurantId: id as string,
         restaurantName: restaurant?.name ?? 'Restaurant',
@@ -300,7 +301,7 @@ export default function RestaurantDetail() {
                 <View style={styles.menuItemInfo}>
                   <Text style={styles.itemName}>{menuItem.name}</Text>
                   {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
-                  <Text style={styles.itemPrice}>{formatMoney(menuItem.price)}</Text>
+                  <Text style={styles.itemPrice}>{formatMoney(toCustomerFacingItemPrice(menuItem.price))}</Text>
                 </View>
                 <TouchableOpacity
                   style={[styles.addButton, restaurant.isOpen === false ? styles.addButtonDisabled : null]}

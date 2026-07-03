@@ -261,6 +261,11 @@ const DEFAULT_DELIVERY_TIME = '25-35 min';
 const DEFAULT_DISPATCH_STATUS = 'Available';
 const DEFAULT_DISPATCH_VEHICLE = 'Bike';
 const PLATFORM_COMMISSION_RATE = 0.15;
+// Flat per-item marketplace markup charged to the customer on top of the
+// restaurant's own menu price. Kept entirely by the platform — the restaurant is
+// always settled on its own price (see calculateSettlementBreakdown).
+// Mirrored on the client via CUSTOMER_ITEM_MARKUP in src/domain/orders.ts.
+const CUSTOMER_ITEM_MARKUP = 150;
 const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')?.trim() ?? '';
@@ -1464,7 +1469,8 @@ const buildOrderItems = (requestedItems: unknown, restaurantId: string, restaura
     return {
       id: menuItem.id,
       name: menuItem.name,
-      price: menuItem.price,
+      // Customer-facing price = restaurant's authoritative menu price + platform markup.
+      price: roundCurrency(menuItem.price + CUSTOMER_ITEM_MARKUP),
       quantity,
       restaurantId,
       restaurantName: sanitizeText(restaurant.name, 'Restaurant'),
@@ -1508,21 +1514,29 @@ const calculateServiceFee = (subtotal: number) => {
 
 const calculateSettlementBreakdown = ({
   deliveryFee,
+  marketplaceMarkup = 0,
   subtotal,
 }: {
   deliveryFee: number;
+  marketplaceMarkup?: number;
   subtotal: number;
 }) => {
   const safeSubtotal = roundCurrency(subtotal);
+  const markup = roundCurrency(Math.max(marketplaceMarkup, 0));
+  // The restaurant is settled on its own menu prices only; the per-item marketplace
+  // markup is platform margin and is excluded from the restaurant's commission basis.
+  const restaurantBasis = roundCurrency(Math.max(safeSubtotal - markup, 0));
   const dispatchFee = roundCurrency(deliveryFee);
-  const platformFee = roundCurrency(safeSubtotal * PLATFORM_COMMISSION_RATE);
-  const restaurantPayable = roundCurrency(Math.max(safeSubtotal - platformFee, 0));
+  const commission = roundCurrency(restaurantBasis * PLATFORM_COMMISSION_RATE);
+  const restaurantPayable = roundCurrency(Math.max(restaurantBasis - commission, 0));
+  const platformFee = roundCurrency(commission + markup);
   const netSettlement = roundCurrency(restaurantPayable + dispatchFee);
 
   return {
-    basis: 'subtotal',
+    basis: 'menu_subtotal',
     commissionRate: PLATFORM_COMMISSION_RATE,
     dispatchFee,
+    marketplaceMarkup: markup,
     netSettlement,
     platformFee,
     restaurantPayable,
@@ -1531,10 +1545,12 @@ const calculateSettlementBreakdown = ({
 
 const calculatePricing = ({
   deliveryFee,
+  marketplaceMarkup = 0,
   subtotal,
   tip,
 }: {
   deliveryFee: number;
+  marketplaceMarkup?: number;
   subtotal: number;
   tip: number;
 }) => {
@@ -1544,6 +1560,7 @@ const calculatePricing = ({
   const serviceFee = calculateServiceFee(safeSubtotal);
   const settlement = calculateSettlementBreakdown({
     deliveryFee: safeDeliveryFee,
+    marketplaceMarkup,
     subtotal: safeSubtotal,
   });
   const total = roundCurrency(safeSubtotal + safeDeliveryFee + serviceFee + safeTip);
@@ -1667,10 +1684,13 @@ const prepareCustomerOrderDraft = async (
 
   const items = buildOrderItems(requestData.items, restaurantId, restaurant);
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  // Total platform markup baked into the subtotal above (CUSTOMER_ITEM_MARKUP per unit),
+  // so settlement can credit the restaurant on its own menu prices.
+  const marketplaceMarkup = items.reduce((sum, item) => sum + CUSTOMER_ITEM_MARKUP * item.quantity, 0);
   const deliveryFee = fulfillmentType === 'delivery' ? parseNumber(restaurant.deliveryFee, 0) : 0;
   const minOrder = parseNumber(restaurant.minOrder, 0);
 
-  if (subtotal < minOrder) {
+  if (subtotal - marketplaceMarkup < minOrder) {
     fail(412, `This restaurant requires a minimum order of ${minOrder.toFixed(2)}.`);
   }
 
@@ -1682,6 +1702,7 @@ const prepareCustomerOrderDraft = async (
 
   const pricing = calculatePricing({
     deliveryFee,
+    marketplaceMarkup,
     subtotal,
     tip: tipAmount,
   });

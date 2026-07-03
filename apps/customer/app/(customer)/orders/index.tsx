@@ -29,6 +29,25 @@ type Order = {
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
+// Supabase returns ISO date strings. (Legacy Firestore Timestamps exposed a .toDate()
+// helper — tolerate those too so old rows still render a real date instead of "Updating...".)
+const formatOrderDate = (value: unknown): string => {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    try {
+      return (value as { toDate: () => Date }).toDate().toLocaleDateString();
+    } catch {
+      return '';
+    }
+  }
+
+  const timestamp = typeof value === 'number' ? value : Date.parse(String(value));
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString() : '';
+};
+
 export default function OrdersList() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -134,9 +153,7 @@ export default function OrdersList() {
               <Text style={styles.payment}>
                 {formatPaymentStatusLabel(item.payment?.status ?? 'pending', item.payment?.method)}
               </Text>
-              <Text style={styles.date}>
-                {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'Updating...'}
-              </Text>
+              <Text style={styles.date}>{formatOrderDate(item.createdAt)}</Text>
             </View>
           </TouchableOpacity>
         </Animated.View>

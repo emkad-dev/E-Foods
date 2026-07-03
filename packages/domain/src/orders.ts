@@ -15,6 +15,16 @@ export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHODS)[number];
 export const PAYMENT_STATUSES = ['pending', 'authorized', 'paid', 'failed', 'refunded'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
+// Flat per-item marketplace markup added on top of the restaurant's menu price for
+// the customer. MUST stay in sync with CUSTOMER_ITEM_MARKUP in the app-rpc Edge
+// Function (the server re-derives the charge authoritatively).
+export const CUSTOMER_ITEM_MARKUP = 150;
+
+export const toCustomerFacingItemPrice = (basePrice: number | null | undefined): number => {
+  const base = typeof basePrice === 'number' && Number.isFinite(basePrice) ? basePrice : 0;
+  return base + CUSTOMER_ITEM_MARKUP;
+};
+
 export const ORDER_STATUSES = [
   'draft',
   'placed',

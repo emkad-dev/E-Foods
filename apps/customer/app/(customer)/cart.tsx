@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import * as WebBrowser from 'expo-web-browser';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -14,8 +15,6 @@ import {
 } from '../../src/domain/orders';
 import {
   initializeCustomerPayment,
-  placeCustomerOrder,
-  PREPAID_CHECKOUT_DISABLED_MESSAGE,
   refreshCustomerPaymentStatus,
 } from '../../src/services/customerOrderActions';
 import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
@@ -23,10 +22,12 @@ import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 
-const tipOptions = [0, 2, 5, 10] as const;
-const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer', 'wallet', 'cash'];
-const comingSoonPayments: CheckoutPaymentMethod[] = ['wallet'];
+const tipOptions = [0, 100, 150, 200] as const;
+const DEFAULT_TIP_AMOUNT = tipOptions[0];
+const CHECKOUT_FAILURE_MESSAGE = 'Check network and try again.';
+const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer'];
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+const formatPlainNumber = (amount: number) => Math.round(amount).toLocaleString('en-US');
 
 export default function CartScreen() {
   const {
@@ -44,16 +45,20 @@ export default function CartScreen() {
   } = useCart();
   const { user } = useAuth();
   const [deliveryNote, setDeliveryNote] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
   const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [tipAmount, setTipAmount] = useState(2);
+  const [tipAmount, setTipAmount] = useState<number>(DEFAULT_TIP_AMOUNT);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const router = useRouter();
+  const isMountedRef = useRef(true);
+  const isCheckoutScreenFocusedRef = useRef(false);
   const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
+  const safeTipAmount = tipOptions.includes(tipAmount as (typeof tipOptions)[number]) ? tipAmount : DEFAULT_TIP_AMOUNT;
   const pricingPreview = calculateCheckoutTotal({
     deliveryFee,
     subtotal: total,
-    tip: tipAmount,
+    tip: safeTipAmount,
   });
   const minOrder = restaurant?.minOrder ?? 0;
   const belowMinimum = total > 0 && total < minOrder;
@@ -72,12 +77,36 @@ export default function CartScreen() {
             : fulfillmentType === 'pickup' && !isPickupSupported
               ? 'Pickup is no longer available for this restaurant.'
               : belowMinimum
-                ? `Add ${formatMoney(minOrder - total)} more to meet the minimum order.`
+                ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
                 : null;
 
   useEffect(() => {
     setDeliveryNote(deliveryLocation?.note ?? '');
   }, [deliveryLocation?.note]);
+
+  useEffect(() => {
+    if (!user) {
+      setTipAmount(DEFAULT_TIP_AMOUNT);
+      setCheckoutError(null);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      isCheckoutScreenFocusedRef.current = true;
+      setSubmitting(false);
+
+      return () => {
+        isCheckoutScreenFocusedRef.current = false;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     if (!restaurantId) {
@@ -95,8 +124,8 @@ export default function CartScreen() {
         }
 
         setRestaurant(nextRestaurant as RestaurantDocument | null);
-      } catch (error) {
-        console.error('Error loading checkout restaurant:', error);
+      } catch {
+        console.warn('Unable to load checkout restaurant.');
         if (active) {
           setRestaurant(null);
         }
@@ -123,6 +152,7 @@ export default function CartScreen() {
       return;
     }
 
+    setCheckoutError(null);
     setFulfillmentType(nextType);
   };
 
@@ -142,6 +172,8 @@ export default function CartScreen() {
       return;
     }
 
+    setCheckoutError(null);
+
     if (!user) {
       promptForAuth({
         title: 'Sign in to place your order',
@@ -156,7 +188,7 @@ export default function CartScreen() {
     }
 
     if (belowMinimum) {
-      Alert.alert('Minimum order not reached', `This restaurant requires a minimum subtotal of ${formatMoney(minOrder)}.`);
+      Alert.alert('Minimum order not reached', `This restaurant requires a minimum subtotal of ${formatPlainNumber(minOrder)}.`);
       return;
     }
 
@@ -174,15 +206,8 @@ export default function CartScreen() {
         items,
         paymentMethod,
         restaurantId,
-        tipAmount,
+        tipAmount: safeTipAmount,
       };
-
-      if (paymentMethod === 'cash') {
-        const { orderId } = await placeCustomerOrder(checkoutPayload);
-        clearCart();
-        router.replace(`/orders/${orderId}`);
-        return;
-      }
 
       const { authorizationUrl, orderId } = await initializeCustomerPayment(checkoutPayload);
       clearCart();
@@ -199,9 +224,13 @@ export default function CartScreen() {
         router.replace(`/orders/${orderId}`);
       }
     } catch (error: any) {
-      Alert.alert('Order failed', error.message ?? 'Something went wrong while placing your order.');
+      if (isCheckoutScreenFocusedRef.current) {
+        setCheckoutError(typeof error?.message === 'string' && error.message.trim() ? error.message : CHECKOUT_FAILURE_MESSAGE);
+      }
     } finally {
-      setSubmitting(false);
+      if (isMountedRef.current) {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -374,35 +403,22 @@ export default function CartScreen() {
               <View style={styles.optionGrid}>
                 {paymentOptions.map((option) => {
                   const isActive = paymentMethod === option;
-                  const isDisabled = comingSoonPayments.includes(option);
                   const supportingCopy =
-                    option === 'cash'
-                      ? fulfillmentType === 'pickup'
-                        ? 'Pay at pickup'
-                        : 'Pay on delivery'
-                      : option === 'bank_transfer'
-                        ? 'Pay with transfer'
-                      : option === 'wallet'
-                        ? 'Coming soon'
-                        : 'Pay with card';
+                    option === 'bank_transfer'
+                      ? 'Pay with transfer'
+                      : 'Pay with card';
 
                   return (
-                    <TouchableOpacity
-                      key={option}
-                      style={[
-                        styles.optionCard,
-                        isActive ? styles.optionCardActive : null,
-                        isDisabled ? styles.optionCardDisabled : null,
-                      ]}
+                      <TouchableOpacity
+                        key={option}
+                        style={[
+                          styles.optionCard,
+                          isActive ? styles.optionCardActive : null,
+                        ]}
                       onPress={() => {
-                        if (isDisabled) {
-                          Alert.alert('Coming soon', PREPAID_CHECKOUT_DISABLED_MESSAGE);
-                          return;
-                        }
-
+                        setCheckoutError(null);
                         setPaymentMethod(option);
                       }}
-                      disabled={isDisabled}
                     >
                       <Text style={[styles.optionTitle, isActive ? styles.optionTitleActive : null]}>
                         {formatPaymentMethodLabel(option)}
@@ -415,7 +431,7 @@ export default function CartScreen() {
             </View>
 
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionLabel}>Courier tip</Text>
+              <Text style={styles.sectionLabel}>{fulfillmentType === 'pickup' ? 'Tip restaurant' : 'Tip rider'}</Text>
               <View style={styles.tipRow}>
                 {tipOptions.map((option) => {
                   const isActive = tipAmount === option;
@@ -424,7 +440,10 @@ export default function CartScreen() {
                     <TouchableOpacity
                       key={option}
                       style={[styles.tipChip, isActive ? styles.tipChipActive : null]}
-                      onPress={() => setTipAmount(option)}
+                      onPress={() => {
+                        setCheckoutError(null);
+                        setTipAmount(option);
+                      }}
                     >
                       <Text style={[styles.tipChipText, isActive ? styles.tipChipTextActive : null]}>
                         {option === 0 ? 'No tip' : formatMoney(option)}
@@ -436,6 +455,12 @@ export default function CartScreen() {
             </View>
 
             <View style={styles.summaryCard}>
+              {checkoutError ? (
+                <View style={styles.checkoutErrorCard}>
+                  <Text style={styles.checkoutErrorTitle}>Payment failed</Text>
+                  <Text style={styles.checkoutErrorCopy}>{checkoutError}</Text>
+                </View>
+              ) : null}
               <Text style={styles.sectionLabel}>Summary</Text>
               <View style={styles.summarySplit}>
                 <Text style={styles.summaryDetailLabel}>Subtotal</Text>
@@ -444,7 +469,7 @@ export default function CartScreen() {
               <View style={styles.summarySplit}>
                 <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
                 <Text style={styles.summaryDetailValue}>
-                  {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'Free'}
+                  {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'No delivery fee'}
                 </Text>
               </View>
               <View style={styles.summarySplit}>
@@ -472,27 +497,17 @@ export default function CartScreen() {
                     ? fulfillmentType === 'delivery'
                       ? deliveryLocation
                         ? submitting
-                          ? paymentMethod === 'cash'
-                            ? 'Placing cash order...'
-                            : 'Opening Paystack...'
-                          : paymentMethod === 'cash'
-                            ? 'Place cash order'
-                            : 'Continue to payment'
+                          ? 'Opening payment...'
+                          : 'Pay and place order'
                         : 'Choose delivery location'
                       : submitting
-                        ? paymentMethod === 'cash'
-                          ? 'Placing pickup order...'
-                          : 'Opening Paystack...'
-                        : paymentMethod === 'cash'
-                          ? 'Place pickup order'
-                          : 'Continue to payment'
+                        ? 'Opening payment...'
+                        : 'Pay and place order'
                     : 'Sign in to place order'}
                 </Text>
               </TouchableOpacity>
               <Text style={styles.paymentHint}>
-                {paymentMethod === 'cash'
-                  ? `Cash will be collected ${fulfillmentType === 'pickup' ? 'when you collect the order' : 'at drop-off'}.`
-                  : 'Paystack will open in your browser. Your order only becomes live for the restaurant after payment verification succeeds.'}
+                Paystack opens in your browser. The order goes live after payment confirms.
               </Text>
             </View>
           </View>
@@ -771,9 +786,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 12,
   },
-  optionCardDisabled: {
-    opacity: 0.6,
-  },
   optionCardActive: {
     backgroundColor: customerTheme.surfaceStrong,
     borderColor: customerTheme.accent,
@@ -826,6 +838,25 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     padding: 14,
+  },
+  checkoutErrorCard: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 12,
+  },
+  checkoutErrorTitle: {
+    color: '#991b1b',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  checkoutErrorCopy: {
+    color: '#7f1d1d',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
   },
   summarySplit: {
     flexDirection: 'row',
