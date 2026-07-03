@@ -1,14 +1,11 @@
 {
   "expo": {
+    "name": "FEASTY Root",
+    "slug": "feasty-root",
+    "version": "0.0.0",
     "extra": {
       "eas": {
         "projectId": "84e2dc03-0f12-4764-946b-868f92cd22cf"
-      }
-    },
-    "ios": {
-      "bundleIdentifier": "FeastY",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
       }
     }
   }

@@ -4,8 +4,8 @@ import { supabase } from './supabase/config';
 
 export const callCustomerBackendRpc = <T>(action: string, data?: Record<string, unknown>) =>
   callBackendRpc<T>(supabase, {
+    anonKey: supabaseEnv.anonKey,
     backendRpcUrl: appEnv.backendRpcUrl,
-    supabaseAnonKey: supabaseEnv.anonKey,
     projectId: appEnv.projectId,
     region: appEnv.functionsRegion,
     supabaseUrl: supabaseEnv.url,

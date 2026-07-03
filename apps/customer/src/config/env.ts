@@ -68,8 +68,4 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_FUNCTIONS_REGION,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_FUNCTIONS_REGION
     ) ?? 'us-central1',
-  googleMapsApiKey: getEnvValue(
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
-  ),
 };

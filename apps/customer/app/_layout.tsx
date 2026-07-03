@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Linking from 'expo-linking';
 import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
+import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRouting';
+import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
+import { initializeSentry } from '../../../packages/observability/src/sentry';
 import { customerTheme } from '../src/theme/palette';
 
 function FeastyLaunchScreen() {
@@ -13,13 +16,13 @@ function FeastyLaunchScreen() {
   useEffect(() => {
     Animated.sequence([
       Animated.timing(opacity, {
-        duration: 260,
+        duration: 320,
         toValue: 1,
         useNativeDriver: true,
       }),
-      Animated.delay(520),
+      Animated.delay(650),
       Animated.timing(opacity, {
-        duration: 300,
+        duration: 360,
         toValue: 0,
         useNativeDriver: true,
       }),
@@ -28,10 +31,13 @@ function FeastyLaunchScreen() {
 
   return (
     <View style={styles.launchScreen}>
-      <Animated.Text style={[styles.launchWordmark, { opacity }]}>
-        <Text style={styles.launchWordmarkGreen}>FEAST</Text>
-        <Text style={styles.launchWordmarkOrange}>Y</Text>
-      </Animated.Text>
+      <Animated.View style={[styles.launchBrand, { opacity }]}>
+        <Text style={styles.launchWordmark}>
+          <Text style={styles.launchWordmarkGreen}>FEAST</Text>
+          <Text style={styles.launchWordmarkOrange}>Y</Text>
+        </Text>
+        <Text style={styles.launchSubtitle}>Crafted for fast, polished delivery.</Text>
+      </Animated.View>
     </View>
   );
 }
@@ -41,16 +47,18 @@ function RootLayoutNav() {
   const router = useRouter();
   const segments = useSegments();
   const [showLaunch, setShowLaunch] = useState(false);
+  const launchShownForUserRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleDeepLink = ({ url }: { url: string }) => {
       const { hostname, path, queryParams } = Linking.parse(url);
       const targetPath =
         typeof path === 'string' && path.trim() ? path.trim() : typeof hostname === 'string' ? hostname.trim() : '';
+      const normalizedPaymentPath = normalizeCustomerPaymentCallbackPath(url);
 
       if (targetPath === 'verify-email') {
         router.replace({
-          pathname: '/(auth)/verify-email',
+          pathname: '/verify-email',
           params: {
             ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
             ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
@@ -59,13 +67,25 @@ function RootLayoutNav() {
         });
       } else if (targetPath === 'reset-password') {
         router.replace({
-          pathname: '/(auth)/reset-password',
+          pathname: '/reset-password',
           params: {
             ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
             ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
             ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
           },
         });
+      } else if (targetPath === 'payment/callback' || normalizedPaymentPath === 'payment/callback') {
+        router.replace(
+          {
+            pathname: '/payment/callback',
+            params: {
+              ...(typeof queryParams?.orderId === 'string' ? { orderId: queryParams.orderId } : null),
+              ...(typeof queryParams?.reference === 'string' ? { reference: queryParams.reference } : null),
+              ...(typeof queryParams?.trxref === 'string' ? { trxref: queryParams.trxref } : null),
+              ...(typeof queryParams?.status === 'string' ? { status: queryParams.status } : null),
+            },
+          } as never
+        );
       } else if (targetPath.startsWith('order/')) {
         const orderId = targetPath.split('/')[1];
         router.push(`/orders/${orderId}`);
@@ -81,47 +101,65 @@ function RootLayoutNav() {
   }, [router]);
 
   useEffect(() => {
-    // Wait until <Slot /> is mounted; a replace dispatched while the loading
+    // Wait until the Stack is mounted; a replace dispatched while the loading
     // screen is up has no navigator to handle it.
     if (loading || policyLoading) return;
 
-    const inCustomerGroup = segments[0] === '(customer)';
-    const currentScreen = segments[1];
-    const inAuthGroup = segments[0] === '(auth)';
-    const isPublicAuthScreen =
-      inAuthGroup &&
-      ['accept-policy', 'forgot-password', 'login', 'privacy', 'register', 'reset-password', 'terms', 'verify-email'].includes(currentScreen ?? '');
+    const currentPath = `/${segments.filter((segment) => !segment.startsWith('(')).join('/')}`;
+    const isAuthRoute =
+      currentPath === '/login' ||
+      currentPath === '/register' ||
+      currentPath === '/forgot-password' ||
+      currentPath === '/reset-password' ||
+      currentPath === '/verify-email' ||
+      currentPath === '/accept-policy' ||
+      currentPath === '/complete-profile';
 
     if (!user) {
-      if (!isPublicAuthScreen) {
-        router.replace('/(auth)/login');
-      }
       return;
     }
 
-    if (!user.emailVerified && currentScreen !== 'verify-email') {
-      router.replace('/(auth)/verify-email');
+    if (!user.emailVerified && currentPath !== '/verify-email') {
+      router.replace('/verify-email');
       return;
     }
 
-    if (!policyAccepted && currentScreen !== 'accept-policy' && currentScreen !== 'terms' && currentScreen !== 'privacy') {
-      router.replace('/(auth)/accept-policy');
+    if (user.role === 'customer' && !user.phoneNumber && currentPath !== '/complete-profile') {
+      router.replace('/complete-profile' as never);
       return;
     }
 
-    if (user.role === 'customer' && !inCustomerGroup) {
-      router.replace('/(customer)/home');
+    if (
+      !policyAccepted &&
+      currentPath !== '/accept-policy' &&
+      currentPath !== '/complete-profile' &&
+      currentPath !== '/terms' &&
+      currentPath !== '/privacy'
+    ) {
+      router.replace('/accept-policy' as never);
+      return;
     }
+
+    if (isAuthRoute) {
+      router.replace('/home' as never);
+    }
+
   }, [loading, policyAccepted, policyLoading, router, segments, user]);
 
   useEffect(() => {
     if (loading || policyLoading || user?.role !== 'customer' || !user.emailVerified || !policyAccepted) {
       setShowLaunch(false);
+      launchShownForUserRef.current = null;
       return;
     }
 
+    if (launchShownForUserRef.current === user.uid) {
+      return;
+    }
+
+    launchShownForUserRef.current = user.uid;
     setShowLaunch(true);
-    const timer = setTimeout(() => setShowLaunch(false), 1150);
+    const timer = setTimeout(() => setShowLaunch(false), 2000);
 
     return () => clearTimeout(timer);
   }, [loading, policyAccepted, policyLoading, user?.emailVerified, user?.role, user?.uid]);
@@ -134,11 +172,21 @@ function RootLayoutNav() {
     );
   }
 
-  // Keep <Slot /> mounted while the launch wordmark shows, otherwise the
+  // Keep the Stack mounted while the launch wordmark shows, otherwise the
   // auth redirect fires with no navigator to handle it.
   return (
     <View style={styles.appShell}>
-      <Slot />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+        }}
+      >
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(customer)" />
+        <Stack.Screen name="payment/index" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="payment/callback" options={{ headerShown: false }} />
+        <Stack.Screen name="+not-found" />
+      </Stack>
       {showLaunch ? (
         <View style={styles.launchOverlay}>
           <FeastyLaunchScreen />
@@ -149,6 +197,14 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    void initializeSentry('customer');
+    initializeAnalytics('customer');
+    trackAnalyticsEvent('app_opened', {
+      surface: 'customer',
+    });
+  }, []);
+
   useEffect(() => {
     if (!hasGoogleSignInConfig()) {
       return;
@@ -186,17 +242,31 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
+  launchBrand: {
+    alignItems: 'center',
+  },
   launchWordmark: {
     fontSize: 54,
     fontStyle: 'italic',
     fontWeight: '900',
     letterSpacing: -2,
+    lineHeight: 56,
+    marginTop: 10,
   },
   launchWordmarkGreen: {
     color: customerTheme.brandGreen,
   },
   launchWordmarkOrange: {
     color: customerTheme.brandOrange,
+  },
+  launchSubtitle: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginTop: 6,
+    textAlign: 'center',
+    textTransform: 'uppercase',
   },
   loadingScreen: {
     alignItems: 'center',

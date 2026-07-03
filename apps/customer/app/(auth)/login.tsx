@@ -3,6 +3,7 @@ import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
+import AuthLegalFooter from '../../src/components/AuthLegalFooter';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 import { customerTheme } from '../../src/theme/palette';
@@ -76,12 +77,14 @@ export default function LoginScreen() {
         </>
       ) : null}
 
-      <Link href="/(auth)/register" style={styles.link}>
+      <Link href="/register" style={styles.link}>
         Create an account
       </Link>
       <Link href="/(auth)/forgot-password" style={styles.link}>
         Forgot password?
       </Link>
+
+      <AuthLegalFooter />
     </ScrollView>
   );
 }

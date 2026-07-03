@@ -3,7 +3,6 @@ import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } 
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import * as WebBrowser from 'expo-web-browser';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
@@ -15,8 +14,8 @@ import {
 } from '../../src/domain/orders';
 import {
   initializeCustomerPayment,
-  refreshCustomerPaymentStatus,
 } from '../../src/services/customerOrderActions';
+import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
@@ -31,7 +30,6 @@ const formatPlainNumber = (amount: number) => Math.round(amount).toLocaleString(
 
 export default function CartScreen() {
   const {
-    clearCart,
     deliveryLocation,
     fulfillmentType,
     items,
@@ -154,6 +152,9 @@ export default function CartScreen() {
 
     setCheckoutError(null);
     setFulfillmentType(nextType);
+    trackAnalyticsEvent('customer_checkout_fulfillment_changed', {
+      fulfillment_type: nextType,
+    });
   };
 
   const handleDeliveryNoteChange = (note: string) => {
@@ -192,6 +193,14 @@ export default function CartScreen() {
       return;
     }
 
+    trackAnalyticsEvent('customer_checkout_started', {
+      fulfillment_type: fulfillmentType,
+      items_count: items.length,
+      payment_method: paymentMethod,
+      restaurant_id: restaurantId,
+      tip_amount: safeTipAmount,
+      has_delivery_location: Boolean(deliveryLocation),
+    });
     setSubmitting(true);
     try {
       const checkoutPayload = {
@@ -210,22 +219,23 @@ export default function CartScreen() {
       };
 
       const { authorizationUrl, orderId } = await initializeCustomerPayment(checkoutPayload);
-      clearCart();
-
-      try {
-        await WebBrowser.openBrowserAsync(authorizationUrl);
-      } finally {
-        try {
-          await refreshCustomerPaymentStatus(orderId);
-        } catch (refreshError) {
-          console.error('Unable to refresh payment status after Paystack handoff:', refreshError);
-        }
-
-        router.replace(`/orders/${orderId}`);
-      }
-    } catch (error: any) {
+      trackAnalyticsEvent('customer_payment_redirect_requested', {
+        order_id: orderId,
+        payment_method: paymentMethod,
+      });
+      router.push({
+        pathname: '/payment',
+        params: {
+          authorizationUrl,
+          orderId,
+        },
+      } as never);
+    } catch {
+      trackAnalyticsEvent('customer_checkout_failed', {
+        reason: 'payment_flow_error',
+      });
       if (isCheckoutScreenFocusedRef.current) {
-        setCheckoutError(typeof error?.message === 'string' && error.message.trim() ? error.message : CHECKOUT_FAILURE_MESSAGE);
+        setCheckoutError(CHECKOUT_FAILURE_MESSAGE);
       }
     } finally {
       if (isMountedRef.current) {
@@ -418,6 +428,9 @@ export default function CartScreen() {
                       onPress={() => {
                         setCheckoutError(null);
                         setPaymentMethod(option);
+                        trackAnalyticsEvent('customer_checkout_payment_method_changed', {
+                          payment_method: option,
+                        });
                       }}
                     >
                       <Text style={[styles.optionTitle, isActive ? styles.optionTitleActive : null]}>
@@ -507,7 +520,7 @@ export default function CartScreen() {
                 </Text>
               </TouchableOpacity>
               <Text style={styles.paymentHint}>
-                Paystack opens in your browser. The order goes live after payment confirms.
+                A secure in-app payment screen will open. The order goes live after payment confirms.
               </Text>
             </View>
           </View>

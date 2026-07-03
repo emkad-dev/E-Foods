@@ -33,11 +33,6 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_APP_DOMAIN,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN
     ) ?? 'feasty.com',
-  appScheme:
-    getEnvValue(
-      process.env.EXPO_PUBLIC_APP_SCHEME,
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_SCHEME
-    ) ?? 'feasty-admin',
   verifyEmailPath:
     getEnvValue(
       process.env.EXPO_PUBLIC_VERIFY_EMAIL_PATH,

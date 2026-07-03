@@ -48,7 +48,7 @@ export default function AdminLoginScreen() {
     >
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>FEASTY Admin</Text>
-        <Text style={styles.title}>Company control center</Text>
+        <Text style={styles.title}>Company control console</Text>
         <Text style={styles.copy}>
           Use your internal admin account to review restaurants, monitor platform access, and keep operations clean.
         </Text>
@@ -78,7 +78,7 @@ export default function AdminLoginScreen() {
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter admin app'}</Text>
+          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter admin console'}</Text>
         </TouchableOpacity>
 
         <Link href="/(auth)/register" style={styles.link}>

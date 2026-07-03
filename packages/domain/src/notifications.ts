@@ -4,7 +4,7 @@ export type NotificationApp = (typeof NOTIFICATION_APPS)[number];
 
 export const NOTIFICATION_ROUTE_KEYS = [
   'customer_home',
-  'customer_promotions',
+  'customer_deals',
   'customer_profile',
   'customer_orders',
   'customer_order_detail',
@@ -52,57 +52,62 @@ const isNotificationRouteKey = (value: unknown): value is NotificationRouteKey =
 
 const resolveLegacyPath = (app: NotificationApp, path: string) => {
   if (path.startsWith('/(')) {
-    return path;
+    return path
+      .replace('/(customer)/', '/')
+      .replace('/(partner)/', '/')
+      .replace('/(dispatch)/', '/')
+      .replace('/(admin)/', '/')
+      .replace('/(auth)/', '/');
   }
 
   if (app === 'customer') {
     if (/^\/orders\/[^/]+$/.test(path)) {
-      return `/(customer)${path}`;
+      return path;
     }
     if (/^\/home\/restaurant\/[^/]+$/.test(path)) {
-      return `/(customer)${path}`;
+      return path;
     }
-    if (path === '/orders' || path === '/profile' || path === '/promotions' || path === '/delivery-location' || path === '/cart') {
-      return `/(customer)${path}`;
+    if (path === '/orders' || path === '/profile' || path === '/deals' || path === '/delivery-location' || path === '/cart') {
+      return path;
     }
     if (path === '/home') {
-      return '/(customer)/home';
+      return '/home';
     }
     if (path === '/login') {
-      return '/(auth)/login';
+      return '/login';
     }
   }
 
   if (app === 'partner') {
     if (/^\/order\/[^/]+$/.test(path)) {
-      return `/(partner)${path}`;
+      return path;
     }
     if (path === '/orders' || path === '/profile') {
-      return `/(partner)${path}`;
+      return path;
     }
     if (path === '/login') {
-      return '/(auth)/login';
+      return '/login';
     }
   }
 
   if (app === 'dispatch') {
     if (/^\/delivery\/[^/]+$/.test(path)) {
-      return `/(dispatch)${path}`;
+      return path;
     }
     if (path === '/deliveries' || path === '/profile' || path === '/fleet') {
-      return `/(dispatch)${path}`;
+      return path;
     }
     if (path === '/login') {
-      return '/(auth)/login';
+      return '/login';
     }
   }
 
   if (app === 'admin') {
     if (path === '/access' || path === '/approvals' || path === '/profile') {
-      return `/(admin)${path}`;
+      return path;
     }
     if (path === '/login') {
-      return '/(auth)/login';
+      return '/login';
     }
   }
 
@@ -112,47 +117,47 @@ const resolveLegacyPath = (app: NotificationApp, path: string) => {
 const resolveRouteKeyPath = (routeKey: NotificationRouteKey, data: AppNotificationPayload) => {
   switch (routeKey) {
     case 'customer_home':
-      return '/(customer)/home';
-    case 'customer_promotions':
-      return '/(customer)/promotions';
+      return '/home';
+    case 'customer_deals':
+      return '/deals';
     case 'customer_profile':
-      return '/(customer)/profile';
+      return '/profile';
     case 'customer_orders':
-      return '/(customer)/orders';
+      return '/orders';
     case 'customer_order_detail':
-      return data.orderId ? `/(customer)/orders/${data.orderId}` : null;
+      return data.orderId ? `/orders/${data.orderId}` : null;
     case 'customer_delivery_location':
-      return '/(customer)/delivery-location';
+      return '/delivery-location';
     case 'customer_restaurant_detail':
-      return data.restaurantId ? `/(customer)/home/restaurant/${data.restaurantId}` : null;
+      return data.restaurantId ? `/home/restaurant/${data.restaurantId}` : null;
     case 'customer_login':
-      return '/(auth)/login';
+      return '/login';
     case 'partner_profile':
-      return '/(partner)/profile';
+      return '/profile';
     case 'partner_orders':
-      return '/(partner)/orders';
+      return '/orders';
     case 'partner_order_detail':
-      return data.orderId ? `/(partner)/order/${data.orderId}` : null;
+      return data.orderId ? `/order/${data.orderId}` : null;
     case 'partner_login':
-      return '/(auth)/login';
+      return '/login';
     case 'dispatch_profile':
-      return '/(dispatch)/profile';
+      return '/profile';
     case 'dispatch_deliveries':
-      return '/(dispatch)/deliveries';
+      return '/deliveries';
     case 'dispatch_delivery_detail':
-      return data.orderId ? `/(dispatch)/delivery/${data.orderId}` : null;
+      return data.orderId ? `/delivery/${data.orderId}` : null;
     case 'dispatch_fleet':
-      return '/(dispatch)/fleet';
+      return '/fleet';
     case 'dispatch_login':
-      return '/(auth)/login';
+      return '/login';
     case 'admin_access':
-      return '/(admin)/access';
+      return '/access';
     case 'admin_approvals':
-      return '/(admin)/approvals';
+      return '/approvals';
     case 'admin_profile':
-      return '/(admin)/profile';
+      return '/profile';
     case 'admin_login':
-      return '/(auth)/login';
+      return '/login';
     default:
       return null;
   }
@@ -161,18 +166,18 @@ const resolveRouteKeyPath = (routeKey: NotificationRouteKey, data: AppNotificati
 const resolveFallbackPath = (app: NotificationApp, data: AppNotificationPayload) => {
   if (data.orderId) {
     if (app === 'customer') {
-      return `/(customer)/orders/${data.orderId}`;
+      return `/orders/${data.orderId}`;
     }
     if (app === 'partner') {
-      return `/(partner)/order/${data.orderId}`;
+      return `/order/${data.orderId}`;
     }
     if (app === 'dispatch') {
-      return `/(dispatch)/delivery/${data.orderId}`;
+      return `/delivery/${data.orderId}`;
     }
   }
 
   if (app === 'admin' && data.applicationId) {
-    return '/(admin)/approvals';
+    return '/approvals';
   }
 
   return null;

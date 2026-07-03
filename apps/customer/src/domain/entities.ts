@@ -120,7 +120,10 @@ export interface OrderAssignmentSummary extends DocumentData {
   dispatchOwnerId?: string | null;
   courierId?: string | null;
   courierName?: string | null;
+  courierLatitude?: number | null;
+  courierLongitude?: number | null;
   courierPhone?: string | null;
+  courierUpdatedAt?: string | null;
 }
 
 export interface OrderTimeline extends DocumentData {

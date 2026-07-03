@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,6 +21,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const { loading, signUp, error, clearError } = useAuth();
   const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
@@ -47,8 +46,13 @@ export default function RegisterScreen() {
     setConfirmPassword(value);
   };
 
+  const handlePhoneNumberChange = (value: string) => {
+    if (error) clearError();
+    setPhoneNumber(value);
+  };
+
   const handleRegister = async () => {
-    if (!nickname.trim() || !email.trim() || !password.trim()) {
+    if (!nickname.trim() || !email.trim() || !password.trim() || !phoneNumber.trim()) {
       Alert.alert('Missing information', 'Please complete all fields before continuing.');
       return;
     }
@@ -71,6 +75,7 @@ export default function RegisterScreen() {
     try {
       const { verificationEmailSent } = await signUp(email.trim(), password, {
         displayName: nickname.trim(),
+        phoneNumber: phoneNumber.trim(),
         policyAcceptance: buildCustomerPolicyAcceptance('customer_signup'),
       });
 
@@ -86,10 +91,7 @@ export default function RegisterScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardAvoider}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={styles.keyboardAvoider}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -118,6 +120,15 @@ export default function RegisterScreen() {
             keyboardType="email-address"
             editable={!loading}
           />
+          <TextInput
+            style={styles.input}
+            placeholder="Phone number"
+            value={phoneNumber}
+            onChangeText={handlePhoneNumberChange}
+            keyboardType="phone-pad"
+            editable={!loading}
+          />
+          <Text style={styles.helperText}>We use this for order updates and rider contact.</Text>
           <AuthPasswordField
             placeholder="Password"
             value={password}
@@ -139,11 +150,18 @@ export default function RegisterScreen() {
             disabled={loading}
           >
             <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
-              {acceptedPolicies ? <Text style={styles.checkmark}>✓</Text> : null}
+              {acceptedPolicies ? <View style={styles.checkboxDot} /> : null}
             </View>
             <Text style={styles.policyText}>
-              I agree to the <Link href="/(auth)/terms" style={styles.policyLink}>Terms</Link> and{' '}
-              <Link href="/(auth)/privacy" style={styles.policyLink}>Privacy Policy</Link>.
+              I agree to the{' '}
+              <Link href="/terms" style={styles.policyLink}>
+                Terms
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" style={styles.policyLink}>
+                Privacy Policy
+              </Link>
+              .
             </Text>
           </TouchableOpacity>
 
@@ -167,12 +185,12 @@ export default function RegisterScreen() {
             </>
           ) : null}
 
-          <Link href="/(auth)/login" style={styles.link}>
+          <Link href="/login" style={styles.link}>
             Already have an account? Sign in
           </Link>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -255,6 +273,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '900',
+  },
+  checkboxDot: {
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    height: 10,
+    width: 10,
   },
   policyLink: {
     color: customerTheme.link,

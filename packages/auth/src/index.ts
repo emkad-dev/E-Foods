@@ -3,5 +3,6 @@ export * from './claims';
 export * from './client';
 export * from './profileApi';
 export * from './realtime';
+export * from './session';
 export * from './supabaseAuth';
 export * from './types';

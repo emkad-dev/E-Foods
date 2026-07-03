@@ -41,7 +41,7 @@ export default function AdminForgotPasswordScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>Reset admin password</Text>
         <Text style={styles.copy}>
-          Enter the email for your company admin account and we’ll send a secure reset link.
+          Enter the email for your company admin account and we&apos;ll send a secure reset link.
         </Text>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}

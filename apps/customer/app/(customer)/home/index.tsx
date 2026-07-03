@@ -16,13 +16,14 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
-import RestaurantLogoBadge from '../../../src/components/RestaurantLogoBadge';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
+import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
 import {
   type DiscoveryRestaurant,
   getDiscoveryEmptyState,
@@ -30,6 +31,7 @@ import {
   getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
+  normalizeRestaurantQuery,
 } from '../../../src/utils/restaurantAvailability';
 import { customerTheme } from '../../../src/theme/palette';
 
@@ -55,16 +57,6 @@ type SpotlightSlide = {
   restaurantId?: string;
   title: string;
 };
-
-type CategoryId = 'all' | 'rice' | 'swallow' | 'snacks' | 'drinks';
-
-const CATEGORY_OPTIONS: { icon: React.ComponentProps<typeof FontAwesome>['name']; id: CategoryId; label: string }[] = [
-  { icon: 'cutlery', id: 'all', label: 'All' },
-  { icon: 'leaf', id: 'rice', label: 'Rice' },
-  { icon: 'spoon', id: 'swallow', label: 'Swallow' },
-  { icon: 'coffee', id: 'snacks', label: 'Snacks' },
-  { icon: 'glass', id: 'drinks', label: 'Drinks' },
-];
 
 const FEATURED_CURATIONS: {
   accent: 'amber' | 'hero' | 'cream';
@@ -101,42 +93,30 @@ const getCustomerName = (displayName: string | undefined, email: string | undefi
   return rawValue.charAt(0).toUpperCase() + rawValue.slice(1);
 };
 
-const normalizeMenuCategoryId = (value: string | undefined | null) =>
-  value
-    ?.trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') ?? '';
+const getMealPreview = (restaurant: Restaurant, searchQuery: string) => {
+  const normalizedQuery = normalizeRestaurantQuery(searchQuery);
+  const seen = new Set<string>();
 
-const CATEGORY_MATCHES: Record<Exclude<CategoryId, 'all'>, string[]> = {
-  drinks: ['drinks'],
-  rice: ['rice'],
-  snacks: ['snacks', 'proteins'],
-  swallow: ['swallow', 'soups'],
-};
+  (restaurant.menu ?? []).forEach((menuCategory) => {
+    (menuCategory.items ?? []).forEach((item) => {
+      if (item.isAvailable === false) {
+        return;
+      }
 
-const matchesCategory = (restaurant: Restaurant, categoryId: CategoryId) => {
-  if (categoryId === 'all') {
-    return true;
-  }
-
-  const acceptedCategoryIds = CATEGORY_MATCHES[categoryId];
-
-  return (
-    restaurant.menu?.some((menuCategory) => {
-      const categoryFallback = normalizeMenuCategoryId(menuCategory.category);
-
-      return menuCategory.items.some((item) => {
-        if (item.isAvailable === false) {
-          return false;
+      if (normalizedQuery) {
+        const haystack = [item.name, item.categoryLabel ?? '', menuCategory.category ?? ''].join(' ').toLowerCase();
+        if (!haystack.includes(normalizedQuery)) {
+          return;
         }
+      }
 
-        const itemCategoryId =
-          normalizeMenuCategoryId(item.categoryId ?? item.categoryLabel) || categoryFallback;
-        return acceptedCategoryIds.includes(itemCategoryId);
-      });
-    }) ?? false
-  );
+      if (!seen.has(item.name)) {
+        seen.add(item.name);
+      }
+    });
+  });
+
+  return Array.from(seen).slice(0, 2);
 };
 
 const toShelfEntries = (entries: DiscoveryEntry[], limit?: number) => (limit ? entries.slice(0, limit) : entries);
@@ -147,8 +127,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<CategoryId>('all');
-  const [expandedShelf, setExpandedShelf] = useState<'nearby' | 'suggested' | 'topRated' | null>(null);
+  const [expandedShelf, setExpandedShelf] = useState<'nearby' | null>(null);
   const [activeSpotlightIndex, setActiveSpotlightIndex] = useState(0);
   const catalogRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spotlightRef = useRef<FlatList<SpotlightSlide> | null>(null);
@@ -176,11 +155,19 @@ export default function HomeScreen() {
         const { restaurants: catalog } = await getPublishedRestaurants();
         setRestaurants(catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as Restaurant[]);
         setCatalogError(null);
+        trackAnalyticsEvent('customer_catalog_loaded', {
+          mode,
+          restaurant_count: catalog.length,
+        });
         return true;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'The restaurant service is unavailable right now. Please try again.';
         setCatalogError(message);
+        trackAnalyticsEvent('customer_catalog_load_failed', {
+          mode,
+          error_message: message.slice(0, 120),
+        });
         return false;
       } finally {
         if (showSpinner) {
@@ -234,12 +221,11 @@ export default function HomeScreen() {
   const discoveryResults = useMemo(() => {
     return restaurants
       .filter((restaurant) => matchesRestaurantQuery(restaurant, search))
-      .filter((restaurant) => matchesCategory(restaurant, selectedCategory))
       .map((restaurant) => ({
         restaurant,
         availability: getRestaurantAvailability(restaurant, deliveryLocation),
       }));
-  }, [deliveryLocation, restaurants, search, selectedCategory]);
+  }, [deliveryLocation, restaurants, search]);
 
   const availableRestaurants = useMemo(
     () => discoveryResults.filter((entry) => entry.availability.isAvailable),
@@ -273,12 +259,6 @@ export default function HomeScreen() {
     [availableRestaurants]
   );
 
-  const suggestedRestaurants = useMemo(() => {
-    const topRatedIds = new Set(topRatedRestaurants.slice(0, 4).map((entry) => entry.restaurant.id));
-    const remaining = availableRestaurants.filter((entry) => !topRatedIds.has(entry.restaurant.id));
-    return remaining.length > 0 ? remaining : availableRestaurants;
-  }, [availableRestaurants, topRatedRestaurants]);
-
   const featuredRestaurants = useMemo(
     () => topRatedRestaurants.slice(0, Math.min(topRatedRestaurants.length, FEATURED_CURATIONS.length)),
     [topRatedRestaurants]
@@ -292,7 +272,7 @@ export default function HomeScreen() {
           copy: spotlight?.cuisine
             ? `${feature.copy} ${spotlight.cuisine} is live on this slot.`
             : feature.copy,
-          cta: spotlight ? 'Open restaurant' : 'See promotions',
+          cta: spotlight ? 'Open restaurant' : 'See deals',
           id: feature.id,
           image: spotlight?.image,
           meta:
@@ -324,20 +304,25 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [spotlightSlides.length]);
 
-  const topRatedVisible = toShelfEntries(topRatedRestaurants, expandedShelf === 'topRated' ? undefined : 4);
   const nearbyVisible = toShelfEntries(nearbyRestaurants, expandedShelf === 'nearby' ? undefined : 4);
-  const suggestedVisible = toShelfEntries(suggestedRestaurants, expandedShelf === 'suggested' ? undefined : 5);
 
   const emptyState = getDiscoveryEmptyState({
     availableCount: availableRestaurants.length,
     matchedCount: discoveryResults.length,
+    unavailableReasons: unavailableRestaurants.map((entry) => entry.availability.reason),
     query: search,
     unavailableCount: unavailableRestaurants.length,
     deliveryLocation,
   });
 
   const handleSearchSubmit = () => {
-    setSearch((currentSearch) => currentSearch.trim());
+    setSearch((currentSearch) => {
+      const nextSearch = currentSearch.trim();
+      trackAnalyticsEvent('customer_restaurant_search_submitted', {
+        query_length: nextSearch.length,
+      });
+      return nextSearch;
+    });
     Keyboard.dismiss();
   };
 
@@ -442,26 +427,6 @@ export default function HomeScreen() {
         </Animated.View>
       ) : null}
 
-      <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.categorySection}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-          {CATEGORY_OPTIONS.map((category) => {
-            const active = category.id === selectedCategory;
-            return (
-              <TouchableOpacity
-                key={category.id}
-                style={[styles.categoryCard, active ? styles.categoryCardActive : null]}
-                onPress={() => setSelectedCategory(category.id)}
-              >
-                <View style={[styles.categoryIconWrap, active ? styles.categoryIconWrapActive : null]}>
-                  <FontAwesome name={category.icon} size={16} color={active ? '#ffffff' : customerTheme.accentStrong} />
-                </View>
-                <Text style={active ? styles.categoryTextActive : styles.categoryText}>{category.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </Animated.View>
-
       <Animated.View entering={FadeInDown.delay(240).duration(500)} style={styles.featureSection}>
         <View style={styles.spotlightStack}>
           <View style={styles.spotlightCardBack} />
@@ -488,30 +453,57 @@ export default function HomeScreen() {
                   : item.accent === 'cream'
                     ? styles.featureCardCream
                     : styles.featureCardAmber;
+              const hasImage = Boolean(item.image);
 
               return (
                 <TouchableOpacity
                   activeOpacity={0.92}
-                  style={[styles.featureCard, accentStyle, { width: spotlightWidth }]}
+                  style={[styles.featureCard, hasImage ? styles.featureCardImage : accentStyle, { width: spotlightWidth }]}
                   onPress={() => {
                     if (item.restaurantId) {
+                      trackAnalyticsEvent('customer_spotlight_opened', {
+                        destination: 'restaurant',
+                      });
                       router.push(`/home/restaurant/${item.restaurantId}`);
                       return;
                     }
 
-                    router.push('/promotions');
+                    trackAnalyticsEvent('customer_spotlight_opened', {
+                      destination: 'deals',
+                    });
+                    router.push('/deals');
                   }}
                 >
-                  {item.image ? <Image source={{ uri: item.image }} style={styles.featureImage} /> : null}
-                  <View style={styles.featureContent}>
-                    <Text style={styles.featureTag}>{item.meta}</Text>
-                    <Text style={styles.featureTitle}>{item.title}</Text>
-                    <Text style={styles.featureCopy}>{item.copy}</Text>
-                    <View style={styles.featureFooter}>
-                      <Text style={styles.featureMeta}>{item.cta}</Text>
-                      <FontAwesome name="long-arrow-right" size={16} color={customerTheme.text} />
+                  {hasImage ? (
+                    <>
+                      <Image source={{ uri: item.image }} style={styles.featureImageBackdrop} />
+                      <LinearGradient
+                        colors={['transparent', 'rgba(9,15,29,0.85)']}
+                        style={styles.featureImageGradient}
+                      />
+                      <View style={styles.featureContentOverlay}>
+                        <Text style={styles.featureTagLight}>{item.meta}</Text>
+                        <Text style={styles.featureTitleLight}>{item.title}</Text>
+                        <Text style={styles.featureCopyLight} numberOfLines={2}>
+                          {item.copy}
+                        </Text>
+                        <View style={styles.featureCtaPill}>
+                          <Text style={styles.featureCtaPillText}>{item.cta}</Text>
+                          <FontAwesome name="long-arrow-right" size={15} color="#ffffff" />
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={styles.featureContent}>
+                      <Text style={styles.featureTag}>{item.meta}</Text>
+                      <Text style={styles.featureTitle}>{item.title}</Text>
+                      <Text style={styles.featureCopy}>{item.copy}</Text>
+                      <View style={styles.featureFooter}>
+                        <Text style={styles.featureMeta}>{item.cta}</Text>
+                        <FontAwesome name="long-arrow-right" size={16} color={customerTheme.text} />
+                      </View>
                     </View>
-                  </View>
+                  )}
                 </TouchableOpacity>
               );
             }}
@@ -527,137 +519,12 @@ export default function HomeScreen() {
         </View>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(280).duration(500)} style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Top rated bukas</Text>
-          </View>
-          {topRatedRestaurants.length > 4 ? (
-            <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'topRated' ? null : 'topRated')}>
-              <Text style={styles.sectionActionText}>{expandedShelf === 'topRated' ? 'Show less' : 'See all'}</Text>
-              <FontAwesome name="arrow-right" size={12} color={customerTheme.text} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.topRatedRow}>
-          {topRatedVisible.map(({ restaurant, availability }) => (
-            <TouchableOpacity
-              key={restaurant.id}
-              style={styles.topRatedCard}
-              activeOpacity={0.92}
-              onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
-            >
-              {restaurant.image ? (
-                <Image source={{ uri: restaurant.image }} style={styles.topRatedImage} />
-              ) : (
-                <View style={styles.topRatedImageFallback}>
-                  <Text style={styles.topRatedImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
-                </View>
-              )}
-              <RestaurantLogoBadge
-                logoImage={restaurant.logoImage}
-                name={restaurant.name}
-                size={42}
-                style={styles.topRatedLogoBadge}
-              />
-              <RestaurantFavoriteButton
-                restaurantId={restaurant.id}
-                size={15}
-                style={styles.topRatedFavoriteButton}
-              />
-              <View style={styles.topRatedInfo}>
-                <Text style={styles.topRatedName} numberOfLines={1}>
-                  {restaurant.name}
-                </Text>
-                <Text style={styles.topRatedMeta} numberOfLines={1}>
-                  {restaurant.address ?? 'Local kitchen'}
-                </Text>
-                {getRestaurantOperatingHoursLabel(restaurant) ? (
-                  <Text style={styles.topRatedHours} numberOfLines={1}>
-                    Hours {getRestaurantOperatingHoursLabel(restaurant)}
-                  </Text>
-                ) : null}
-                <View style={styles.topRatedFacts}>
-                  <Text style={styles.topRatedFact}>Rated {restaurant.rating ?? 4.2}</Text>
-                  <Text style={styles.topRatedFact}>
-                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km` : restaurant.deliveryTime ?? '25-35 min'}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(320).duration(500)} style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Suggested bukas</Text>
-          </View>
-          {suggestedRestaurants.length > 5 ? (
-            <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'suggested' ? null : 'suggested')}>
-              <Text style={styles.sectionActionText}>{expandedShelf === 'suggested' ? 'Show less' : 'See all'}</Text>
-              <FontAwesome name="arrow-right" size={12} color={customerTheme.text} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {suggestedVisible.map(({ restaurant, availability }, index) => (
-          <Animated.View key={restaurant.id} entering={FadeInDown.delay(360 + index * 70).duration(420)}>
-            <TouchableOpacity style={styles.suggestedCard} activeOpacity={0.92} onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}>
-              {restaurant.image ? (
-                <Image source={{ uri: restaurant.image }} style={styles.suggestedImage} />
-              ) : (
-                <View style={styles.suggestedImageFallback}>
-                  <Text style={styles.suggestedImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
-                </View>
-              )}
-              <RestaurantLogoBadge
-                logoImage={restaurant.logoImage}
-                name={restaurant.name}
-                size={38}
-                style={styles.suggestedLogoBadge}
-              />
-              <View style={styles.suggestedInfo}>
-                <View style={styles.suggestedTitleRow}>
-                  <Text style={styles.suggestedName} numberOfLines={1}>
-                    {restaurant.name}
-                  </Text>
-                  <RestaurantFavoriteButton restaurantId={restaurant.id} size={14} style={styles.suggestedFavoriteButton} />
-                </View>
-                <Text style={styles.suggestedCuisine} numberOfLines={1}>
-                  {restaurant.cuisine ?? 'Cuisine coming soon'}
-                </Text>
-                <Text style={styles.suggestedAddress} numberOfLines={1}>
-                  {restaurant.address ?? deliveryLocation?.shortAddress ?? 'Area details coming soon'}
-                </Text>
-                {getRestaurantOperatingHoursLabel(restaurant) ? (
-                  <Text style={styles.suggestedHours} numberOfLines={1}>
-                    Hours {getRestaurantOperatingHoursLabel(restaurant)}
-                  </Text>
-                ) : null}
-                <View style={styles.suggestedFacts}>
-                  <Text style={styles.suggestedFact}>
-                    {restaurant.rating ? `Rated ${restaurant.rating}` : 'New listing'}
-                  </Text>
-                  <Text style={styles.suggestedFact}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
-                  <Text style={styles.suggestedFact}>
-                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Nearby kitchen'}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        ))}
-      </Animated.View>
-
       {deliveryLocation ? (
         <Animated.View entering={FadeInDown.delay(360).duration(500)} style={styles.sectionBlock}>
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Near your delivery point</Text>
-          </View>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>Near your delivery point</Text>
+            </View>
             {nearbyRestaurants.length > 4 ? (
               <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'nearby' ? null : 'nearby')}>
                 <Text style={styles.sectionActionText}>{expandedShelf === 'nearby' ? 'Show less' : 'See all'}</Text>
@@ -667,30 +534,45 @@ export default function HomeScreen() {
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nearbyRow}>
-            {nearbyVisible.map(({ restaurant, availability }) => (
-              <TouchableOpacity
-                key={restaurant.id}
-                style={styles.nearbyCard}
-                activeOpacity={0.92}
-                onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
-              >
-                <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
-                <Text style={styles.nearbyName} numberOfLines={1}>
-                  {restaurant.name}
-                </Text>
-                <Text style={styles.nearbyMeta} numberOfLines={1}>
-                  {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
-                </Text>
-                <Text style={styles.nearbyMeta} numberOfLines={1}>
-                  {restaurant.deliveryTime ?? '25-35 min'}
-                </Text>
-                {getRestaurantOperatingHoursLabel(restaurant) ? (
-                  <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {getRestaurantOperatingHoursLabel(restaurant)}
+            {nearbyVisible.map(({ restaurant, availability }) => {
+              const mealPreview = getMealPreview(restaurant, search);
+
+              return (
+                <TouchableOpacity
+                  key={restaurant.id}
+                  style={styles.nearbyCard}
+                  activeOpacity={0.92}
+                  onPress={() => {
+                    trackAnalyticsEvent('customer_restaurant_opened', {
+                      restaurant_id: restaurant.id,
+                      source: 'nearby',
+                    });
+                    router.push(`/home/restaurant/${restaurant.id}`);
+                  }}
+                >
+                  <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
+                  <Text style={styles.nearbyName} numberOfLines={1}>
+                    {restaurant.name}
                   </Text>
-                ) : null}
-              </TouchableOpacity>
-            ))}
+                  <Text style={styles.nearbyMeta} numberOfLines={1}>
+                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
+                  </Text>
+                  <Text style={styles.nearbyMeta} numberOfLines={1}>
+                    {restaurant.deliveryTime ?? '25-35 min'}
+                  </Text>
+                  {mealPreview.length > 0 ? (
+                    <Text style={styles.nearbyMealPreview} numberOfLines={2}>
+                      Meals: {mealPreview.join(' / ')}
+                    </Text>
+                  ) : null}
+                  {getRestaurantOperatingHoursLabel(restaurant) ? (
+                    <Text style={styles.nearbyMeta} numberOfLines={1}>
+                      {getRestaurantOperatingHoursLabel(restaurant)}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </Animated.View>
       ) : null}
@@ -708,35 +590,53 @@ export default function HomeScreen() {
           <Text style={styles.unavailableCopy}>
             These kitchens are visible, but your current delivery point places them outside their supported range.
           </Text>
-          {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => (
-            <TouchableOpacity
-              key={restaurant.id}
-              style={styles.unavailableCard}
-              onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
-            >
-              <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
-              <View style={styles.unavailableInfo}>
-                <View style={styles.unavailableHeader}>
-                  <Text style={styles.unavailableName}>{restaurant.name}</Text>
-                  <View style={styles.unavailableBadge}>
-                    <Text style={styles.unavailableBadgeText}>
-                      {availability.reason === 'delivery_disabled'
-                        ? 'Pickup only'
-                        : availability.reason === 'closed'
-                          ? 'Closed'
-                          : 'Out of area'}
-                    </Text>
+          {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => {
+            const mealPreview = getMealPreview(restaurant, search);
+            const isClosed = availability.reason === 'closed';
+
+              return (
+                <TouchableOpacity
+                  key={restaurant.id}
+                  style={[styles.unavailableCard, isClosed ? styles.unavailableCardClosed : null]}
+                  onPress={() => {
+                    trackAnalyticsEvent('customer_restaurant_opened', {
+                      restaurant_id: restaurant.id,
+                      source: 'unavailable',
+                    });
+                    router.push(`/home/restaurant/${restaurant.id}`);
+                  }}
+                >
+                  <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
+                  <View style={styles.unavailableInfo}>
+                  <View style={styles.unavailableHeader}>
+                    <Text style={styles.unavailableName}>{restaurant.name}</Text>
+                    <View style={[styles.unavailableBadge, isClosed ? styles.unavailableBadgeClosed : null]}>
+                      <Text style={[styles.unavailableBadgeText, isClosed ? styles.unavailableBadgeTextClosed : null]}>
+                        {availability.reason === 'delivery_disabled'
+                          ? 'Pickup only'
+                          : availability.reason === 'closed'
+                            ? 'Closed'
+                            : 'Out of area'}
+                      </Text>
+                    </View>
                   </View>
+                  <Text style={styles.unavailableCuisine}>{restaurant.cuisine ?? 'Kitchen update pending'}</Text>
+                  {mealPreview.length > 0 ? (
+                    <Text style={styles.unavailableMealPreview} numberOfLines={2}>
+                      Meals: {mealPreview.join(' • ')}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.unavailableMeta}>
+                    {availability.distanceKm && availability.radiusKm
+                      ? `${availability.distanceKm.toFixed(1)} km away, outside ${availability.radiusKm.toFixed(0)} km range`
+                      : isClosed
+                        ? 'This restaurant is published but currently closed.'
+                        : 'Delivery is not available for this restaurant yet'}
+                  </Text>
                 </View>
-                <Text style={styles.unavailableCuisine}>{restaurant.cuisine ?? 'Kitchen update pending'}</Text>
-                <Text style={styles.unavailableMeta}>
-                  {availability.distanceKm && availability.radiusKm
-                    ? `${availability.distanceKm.toFixed(1)} km away, outside ${availability.radiusKm.toFixed(0)} km range`
-                    : 'Delivery is not available for this restaurant yet'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       ) : null}
     </ScrollView>
@@ -911,59 +811,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  categorySection: {
-    marginTop: 14,
-    marginBottom: 6,
-    position: 'relative',
-    zIndex: 3,
-  },
-  categoryRow: {
-    paddingRight: 12,
-  },
-  categoryCard: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginRight: 10,
-    minWidth: 78,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  categoryCardActive: {
-    backgroundColor: customerTheme.accentStrong,
-    borderColor: customerTheme.accentStrong,
-  },
-  categoryIconWrap: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accentTint,
-    borderRadius: 14,
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  categoryIconWrapActive: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
-  categoryText: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 8,
-  },
-  categoryTextActive: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 8,
-  },
   featureSection: {
-    marginTop: 22,
+    marginTop: 12,
     zIndex: 1,
   },
   spotlightStack: {
-    minHeight: 198,
+    minHeight: 220,
     position: 'relative',
   },
   spotlightCardBack: {
@@ -986,8 +839,11 @@ const styles = StyleSheet.create({
   },
   featureCard: {
     borderRadius: 22,
-    minHeight: 186,
+    minHeight: 210,
     overflow: 'hidden',
+  },
+  featureCardImage: {
+    backgroundColor: customerTheme.hero,
   },
   featureCardAmber: {
     backgroundColor: customerTheme.surfaceStrong,
@@ -998,9 +854,63 @@ const styles = StyleSheet.create({
   featureCardCream: {
     backgroundColor: customerTheme.surface,
   },
-  featureImage: {
-    height: 88,
+  featureImageBackdrop: {
+    bottom: 0,
+    height: '100%',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
     width: '100%',
+  },
+  featureImageGradient: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  featureContentOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 18,
+  },
+  featureTagLight: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    opacity: 0.92,
+    textTransform: 'uppercase',
+  },
+  featureTitleLight: {
+    color: '#ffffff',
+    fontSize: 21,
+    fontWeight: '900',
+    lineHeight: 26,
+    marginTop: 8,
+  },
+  featureCopyLight: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  featureCtaPill: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: customerTheme.brandOrange,
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  featureCtaPillText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
   },
   featureContent: {
     flex: 1,
@@ -1043,7 +953,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
   spotlightDot: {
     backgroundColor: customerTheme.border,
@@ -1057,7 +967,7 @@ const styles = StyleSheet.create({
     width: 22,
   },
   sectionBlock: {
-    marginTop: 20,
+    marginTop: 16,
   },
   sectionHeader: {
     alignItems: 'center',
@@ -1243,7 +1153,7 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.surface,
     borderRadius: 16,
     marginRight: 10,
-    minHeight: 96,
+    minHeight: 126,
     padding: 14,
     width: 158,
   },
@@ -1263,6 +1173,13 @@ const styles = StyleSheet.create({
     color: customerTheme.textMuted,
     fontSize: 12,
     marginTop: 6,
+  },
+  nearbyMealPreview: {
+    color: customerTheme.text,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 8,
   },
   emptyState: {
     alignItems: 'center',
@@ -1304,16 +1221,22 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
+    minHeight: 132,
     marginBottom: 12,
+    width: '100%',
     overflow: 'hidden',
   },
+  unavailableCardClosed: {
+    backgroundColor: '#fdecec',
+    borderColor: '#ef4444',
+  },
   unavailableImage: {
-    height: 100,
-    width: 100,
+    height: 132,
+    width: 112,
   },
   unavailableInfo: {
     flex: 1,
-    padding: 12,
+    padding: 14,
   },
   unavailableHeader: {
     alignItems: 'center',
@@ -1333,16 +1256,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 5,
   },
+  unavailableBadgeClosed: {
+    backgroundColor: '#fee2e2',
+  },
   unavailableBadgeText: {
     color: '#9a312c',
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
   },
+  unavailableBadgeTextClosed: {
+    color: '#b91c1c',
+  },
   unavailableCuisine: {
     color: customerTheme.textSoft,
     fontSize: 12,
     marginTop: 6,
+  },
+  unavailableMealPreview: {
+    color: customerTheme.text,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 8,
   },
   unavailableMeta: {
     color: '#9a312c',

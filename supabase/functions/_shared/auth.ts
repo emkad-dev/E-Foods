@@ -1,11 +1,6 @@
 /// <reference path="./edge-runtime.d.ts" />
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-
-const authClient = createClient(supabaseUrl, supabaseAnonKey);
+import { serviceClient } from './client.ts';
 
 export const getBearerToken = (request: Request) => {
   const authHeader = request.headers.get('authorization');
@@ -24,14 +19,19 @@ export const getBearerToken = (request: Request) => {
 
 export const verifySupabaseJwt = async (request: Request) => {
   const token = getBearerToken(request);
-  const { data, error } = await authClient.auth.getClaims(token);
+  const { data, error } = await serviceClient.auth.getUser(token);
 
-  if (error || !data?.claims?.sub) {
+  if (error || !data?.user?.id) {
     throw new Error(error?.message ?? 'Invalid JWT');
   }
 
+  const user = data.user;
   return {
-    claims: data.claims,
+    claims: {
+      sub: user.id,
+      email: user.email ?? undefined,
+      ...user.app_metadata,
+    } as Record<string, unknown>,
     token,
   };
 };

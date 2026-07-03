@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
@@ -8,8 +8,11 @@ import {
   formatOrderStatusLabel,
   formatPaymentStatusLabel,
   getOrderStatusColor,
+  isTerminalOrderStatus,
+  normalizeOrderStatus,
 } from '../../../src/domain/orders';
 import { getCustomerOrders } from '../../../src/services/customerReadModel';
+import { supabase } from '../../../src/services/supabase/config';
 import { customerTheme } from '../../../src/theme/palette';
 
 type Order = {
@@ -48,10 +51,62 @@ const formatOrderDate = (value: unknown): string => {
   return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString() : '';
 };
 
+type OrderFilter = 'all' | 'ongoing' | 'placed' | 'cancelled';
+
+const ORDER_FILTERS: { label: string; value: OrderFilter }[] = [
+  { label: 'All', value: 'all' },
+  { label: 'Ongoing', value: 'ongoing' },
+  { label: 'Placed', value: 'placed' },
+  { label: 'Cancelled', value: 'cancelled' },
+  
+];
+
+const matchesOrderFilter = (order: Order, filter: OrderFilter) => {
+  const status = normalizeOrderStatus(order.status);
+
+  switch (filter) {
+    case 'ongoing':
+      return !isTerminalOrderStatus(status);
+    case 'placed':
+      return status === 'delivered' && (order.payment?.status ?? '') === 'paid';
+    case 'cancelled':
+      return ['cancelled', 'rejected', 'failed_delivery'].includes(status);
+    default:
+      return true;
+  }
+};
+
+const getEmptyStateCopy = (filter: OrderFilter) => {
+  switch (filter) {
+    case 'ongoing':
+      return 'No ongoing orders yet.';
+    case 'placed':
+      return 'No paid orders yet.';
+    case 'cancelled':
+      return 'No cancelled orders yet.';
+    default:
+      return 'No orders yet.';
+  }
+};
+
+const getEmptyStateTitle = (filter: OrderFilter) => {
+  switch (filter) {
+    case 'ongoing':
+      return 'No ongoing orders yet';
+    case 'placed':
+      return 'No placed orders yet';
+    case 'cancelled':
+      return 'No cancelled orders yet';
+    default:
+      return 'No orders yet';
+  }
+};
+
 export default function OrdersList() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<OrderFilter>('all');
   const router = useRouter();
 
   useEffect(() => {
@@ -87,15 +142,41 @@ export default function OrdersList() {
     };
 
     void loadOrders();
+    const channel = supabase
+      .channel(`customer-orders:${user.uid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'CustomerOrder',
+          filter: `customerId=eq.${user.uid}`,
+        },
+        () => {
+          void loadOrders();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          void loadOrders();
+        }
+      });
+
     const interval = setInterval(() => {
       void loadOrders();
-    }, 10000);
+    }, 30000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      void supabase.removeChannel(channel);
     };
   }, [user]);
+
+  const visibleOrders = useMemo(
+    () => orders.filter((order) => matchesOrderFilter(order, activeFilter)),
+    [activeFilter, orders]
+  );
 
   if (!user) {
     return (
@@ -116,25 +197,36 @@ export default function OrdersList() {
     );
   }
 
-  if (orders.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>No orders yet</Text>
-      </View>
-    );
-  }
-
   return (
     <FlatList
-      data={orders}
+      data={visibleOrders}
       keyExtractor={(item) => item.id}
       ListHeaderComponent={
-        <View style={styles.headerCard}>
-          <Text style={styles.headerEyebrow}>Order queue</Text>
-          <Text style={styles.headerTitle}>Track every customer order in one place.</Text>
-          <Text style={styles.headerCopy}>
-            Active, paid, and past orders stay here so you can jump into details without digging through the app.
-          </Text>
+        <View style={styles.filterShell}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+            {ORDER_FILTERS.map((filter) => {
+              const active = filter.value === activeFilter;
+
+              return (
+                <TouchableOpacity
+                  key={filter.value}
+                  activeOpacity={0.9}
+                  onPress={() => setActiveFilter(filter.value)}
+                  style={[styles.filterButton, active ? styles.filterButtonActive : null]}
+                >
+                  <Text style={[styles.filterButtonText, active ? styles.filterButtonTextActive : null]}>
+                    {filter.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      }
+      ListEmptyComponent={
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>{getEmptyStateTitle(activeFilter)}</Text>
+          <Text style={styles.emptyStateCopy}>{getEmptyStateCopy(activeFilter)}</Text>
         </View>
       }
       renderItem={({ item, index }) => (
@@ -170,16 +262,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
-  emptyContainer: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
+  emptyStateCard: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginTop: 10,
+    padding: 18,
   },
-  emptyText: {
-    color: customerTheme.textMuted,
+  emptyStateTitle: {
+    color: customerTheme.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
+  },
+  emptyStateCopy: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
   },
   list: {
     padding: 14,
@@ -190,32 +290,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 20,
   },
-  headerCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
+  filterShell: {
+    backgroundColor: customerTheme.headerSurface,
+    borderColor: 'rgba(3, 184, 51, 0.12)',
     borderRadius: 20,
     borderWidth: 1,
     marginBottom: 14,
-    padding: 16,
+    padding: 4,
   },
-  headerEyebrow: {
-    color: customerTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
+  filterRow: {
+    flexDirection: 'row',
   },
-  headerTitle: {
+  filterButton: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginRight: 8,
+    minWidth: 80,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  filterButtonActive: {
+    backgroundColor: customerTheme.accentStrong,
+    borderColor: customerTheme.accentStrong,
+    shadowColor: customerTheme.accentStrong,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  filterButtonText: {
     color: customerTheme.text,
-    fontSize: 20,
+    fontSize: 12,
     fontWeight: '800',
-    marginTop: 8,
   },
-  headerCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
+  filterButtonTextActive: {
+    color: '#ffffff',
   },
   orderCard: {
     backgroundColor: customerTheme.surface,

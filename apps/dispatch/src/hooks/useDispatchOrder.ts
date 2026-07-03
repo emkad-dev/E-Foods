@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { useAuth } from '../contexts/AuthContext';
 import { getDispatchOrderDetail } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
 
@@ -8,6 +9,10 @@ export type DispatchOrderDetail = {
   assignment?: {
     courierId?: string | null;
     courierName?: string | null;
+    courierPhone?: string | null;
+    courierLatitude?: number | null;
+    courierLongitude?: number | null;
+    courierUpdatedAt?: string | null;
     dispatchId?: string | null;
     dispatchOwnerId?: string | null;
   } | null;
@@ -47,15 +52,27 @@ export type DispatchOrderDetail = {
 };
 
 export const useDispatchOrder = (orderId: string) => {
+  const { loading: authLoading, user } = useAuth();
   const [order, setOrder] = useState<DispatchOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     if (!orderId) {
       setOrder(null);
       setLoading(false);
       setError('Missing order id');
+      return;
+    }
+
+    if (!user) {
+      setOrder(null);
+      setError(null);
+      setLoading(false);
       return;
     }
 
@@ -100,7 +117,7 @@ export const useDispatchOrder = (orderId: string) => {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [orderId]);
+  }, [authLoading, orderId, user]);
 
   return { error, loading, order };
 };

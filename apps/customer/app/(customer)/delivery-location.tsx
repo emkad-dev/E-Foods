@@ -1,7 +1,7 @@
 import { FontAwesome } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -27,28 +27,36 @@ export default function DeliveryLocationScreen() {
   const [latitude, setLatitude] = useState<number | null>(deliveryLocation?.latitude ?? null);
   const [longitude, setLongitude] = useState<number | null>(deliveryLocation?.longitude ?? null);
   const [coordinateSource, setCoordinateSource] = useState(deliveryLocation ? 'Saved coordinates' : 'Manual address');
+  const [liveTracking, setLiveTracking] = useState(false);
   const [locating, setLocating] = useState(false);
+  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const reverseGeocodeCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleUseCurrentLocation = async () => {
-    setLocating(true);
+  const stopLiveTracking = useCallback(() => {
+    locationSubscriptionRef.current?.remove();
+    locationSubscriptionRef.current = null;
+    if (reverseGeocodeCooldownRef.current) {
+      clearTimeout(reverseGeocodeCooldownRef.current);
+      reverseGeocodeCooldownRef.current = null;
+    }
+    setLiveTracking(false);
+  }, []);
 
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Location off', 'Enter your address manually or allow location access.');
+  useEffect(() => {
+    return () => {
+      stopLiveTracking();
+    };
+  }, [stopLiveTracking]);
+
+  const updateAddressFromCoordinates = useCallback(
+    async (nextLatitude: number, nextLongitude: number) => {
+      if (reverseGeocodeCooldownRef.current) {
         return;
       }
 
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        mayShowUserSettingsDialog: true,
-      });
-
-      const nextLatitude = position.coords.latitude;
-      const nextLongitude = position.coords.longitude;
-      setLatitude(nextLatitude);
-      setLongitude(nextLongitude);
-      setCoordinateSource('Current location');
+      reverseGeocodeCooldownRef.current = setTimeout(() => {
+        reverseGeocodeCooldownRef.current = null;
+      }, 10000);
 
       const geocoded = await Location.reverseGeocodeAsync({
         latitude: nextLatitude,
@@ -63,13 +71,59 @@ export default function DeliveryLocationScreen() {
       if (!label.trim()) {
         setLabel(formatted.shortAddress);
       }
+    },
+    [address, label]
+  );
+
+  const handleUseCurrentLocation = useCallback(async () => {
+    setLocating(true);
+
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Location off', 'Enter your address manually or allow location access.');
+        return;
+      }
+
+      stopLiveTracking();
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        mayShowUserSettingsDialog: true,
+      });
+
+      const nextLatitude = position.coords.latitude;
+      const nextLongitude = position.coords.longitude;
+      setLatitude(nextLatitude);
+      setLongitude(nextLongitude);
+      setCoordinateSource('Current location');
+      await updateAddressFromCoordinates(nextLatitude, nextLongitude);
+
+      const subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 10,
+          timeInterval: 5000,
+        },
+        async (nextPosition) => {
+          const liveLatitude = nextPosition.coords.latitude;
+          const liveLongitude = nextPosition.coords.longitude;
+          setLatitude(liveLatitude);
+          setLongitude(liveLongitude);
+          setCoordinateSource('Live location');
+          await updateAddressFromCoordinates(liveLatitude, liveLongitude);
+        }
+      );
+
+      locationSubscriptionRef.current = subscription;
+      setLiveTracking(true);
     } catch (error) {
       console.error('Failed to use current delivery location:', error);
       Alert.alert('Location unavailable', 'Enter your address manually for now.');
     } finally {
       setLocating(false);
     }
-  };
+  }, [stopLiveTracking, updateAddressFromCoordinates]);
 
   const handleSave = () => {
     const trimmedAddress = address.trim();
@@ -90,6 +144,7 @@ export default function DeliveryLocationScreen() {
       coordinateSource,
     });
 
+    stopLiveTracking();
     router.replace('/cart');
   };
 
@@ -156,7 +211,7 @@ export default function DeliveryLocationScreen() {
               <FontAwesome name="location-arrow" size={16} color="#07140c" />
             )}
             <Text style={styles.locationButtonText}>
-              {locating ? 'Getting location' : 'Use current location'}
+              {locating ? 'Getting location' : liveTracking ? 'Live location on' : 'Use current location'}
             </Text>
           </TouchableOpacity>
 
@@ -164,6 +219,18 @@ export default function DeliveryLocationScreen() {
             <FontAwesome name="map-marker" size={14} color="#069b3f" />
             <Text style={styles.coordinateText}>{coordinateSource}</Text>
           </View>
+          {liveTracking ? <Text style={styles.liveHint}>Location keeps updating while this screen is open.</Text> : null}
+
+          {liveTracking ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={stopLiveTracking}
+              style={[styles.locationButton, styles.stopButton]}
+            >
+              <FontAwesome name="pause" size={14} color="#07140c" />
+              <Text style={styles.locationButtonText}>Stop live updates</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <TouchableOpacity activeOpacity={0.9} onPress={handleSave} style={styles.saveButton}>
@@ -281,5 +348,15 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '900',
+  },
+  liveHint: {
+    color: '#25613a',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  stopButton: {
+    backgroundColor: '#dff4e7',
+    marginTop: 12,
   },
 });

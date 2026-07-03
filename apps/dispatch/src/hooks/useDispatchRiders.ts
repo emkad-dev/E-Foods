@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RIDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { useAuth } from '../contexts/AuthContext';
 import { getDispatchRiders as getDispatchRidersReadModel } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
 import { resolveDispatchRiderCoordinate } from '../utils/dispatchRiderLocation';
@@ -122,11 +123,23 @@ const normalizeDispatchRider = (id: string, data: Record<string, unknown>): Disp
 };
 
 export const useDispatchRiders = () => {
+  const { loading: authLoading, user } = useAuth();
   const [riders, setRiders] = useState<DispatchRider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!user) {
+      setRiders([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     const loadRiders = async () => {
@@ -172,7 +185,7 @@ export const useDispatchRiders = () => {
       clearInterval(interval);
       unsubscribe();
     };
-  }, []);
+  }, [authLoading, user]);
 
   const onlineRiders = useMemo(
     () => riders.filter((rider) => !rider.status.toLowerCase().includes('offline')),

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreakdown } from '../domain/entities';
 import type { FulfillmentType } from '../domain/orders';
 import { getCustomerOrderDetail } from '../services/customerReadModel';
@@ -60,10 +59,38 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     };
 
     void loadOrder();
-    const unsubscribe = subscribeToRealtimeChanges(supabase, [orderRealtimeTopic(orderId)], () => {
-      void loadOrder();
-    });
-    // Slow fallback poll in case the realtime connection drops silently.
+    const channel = supabase
+      .channel(`customer-order:${orderId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'CustomerOrder',
+          filter: `id=eq.${orderId}`,
+        },
+        () => {
+          void loadOrder();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'DeliveryAssignment',
+          filter: `orderId=eq.${orderId}`,
+        },
+        () => {
+          void loadOrder();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          void loadOrder();
+        }
+      });
+
     const interval = setInterval(() => {
       void loadOrder();
     }, 30000);
@@ -71,7 +98,7 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     return () => {
       cancelled = true;
       clearInterval(interval);
-      unsubscribe();
+      void supabase.removeChannel(channel);
     };
   }, [customerId, orderId]);
 

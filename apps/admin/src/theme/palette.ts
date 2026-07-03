@@ -21,4 +21,8 @@ export const adminTheme = {
   hero: '#090f1d',
   cream: '#fbfcfc',
   shadow: 'rgba(9, 15, 29, 0.08)',
+  // FEASTY wordmark colors — kept identical to the customer app palette so the
+  // brand reads the same across surfaces.
+  brandGreen: '#03b833',
+  brandOrange: '#ff951f',
 };

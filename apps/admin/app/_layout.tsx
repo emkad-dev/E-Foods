@@ -1,9 +1,25 @@
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import { initializeSentry } from '../../../packages/observability/src/sentry';
 import { adminTheme } from '../src/theme/palette';
+
+function NativeUnsupportedScreen() {
+  return (
+    <View style={styles.nativeOnlyScreen}>
+      <View style={styles.nativeOnlyCard}>
+        <Text style={styles.nativeOnlyEyebrow}>Web only</Text>
+        <Text style={styles.nativeOnlyTitle}>FEASTY Admin opens in the browser</Text>
+        <Text style={styles.nativeOnlyCopy}>
+          This console is restricted to the web surface for team access. Open the browser console from a trusted
+          desktop session.
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 function RootLayoutNav() {
   const { loading, user } = useAuth();
@@ -94,9 +110,55 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    void initializeSentry('admin');
+  }, []);
+
+  if (Platform.OS !== 'web') {
+    return <NativeUnsupportedScreen />;
+  }
+
   return (
     <AuthProvider>
       <RootLayoutNav />
     </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  nativeOnlyScreen: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.background,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  nativeOnlyCard: {
+    backgroundColor: adminTheme.surface,
+    borderColor: adminTheme.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    maxWidth: 440,
+    padding: 22,
+    width: '100%',
+  },
+  nativeOnlyEyebrow: {
+    color: adminTheme.accentStrong,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  nativeOnlyTitle: {
+    color: adminTheme.text,
+    fontSize: 26,
+    fontWeight: '800',
+    marginTop: 10,
+  },
+  nativeOnlyCopy: {
+    color: adminTheme.textMuted,
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 10,
+  },
+});

@@ -15,10 +15,10 @@ export default function AuthPromptCard({ title, message }: AuthPromptCardProps) 
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.message}>{message}</Text>
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/(auth)/login')}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => router.replace('/login')}>
           <Text style={styles.secondaryText}>Sign in</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/(auth)/register')}>
+        <TouchableOpacity style={styles.primaryButton} onPress={() => router.replace('/register')}>
           <Text style={styles.primaryText}>Sign up</Text>
         </TouchableOpacity>
       </View>

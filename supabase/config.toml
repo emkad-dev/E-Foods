@@ -1,4 +1,4 @@
-project_id = "feasty-platform"
+project_id = "ebuy-platform"
 
 [auth.external.google]
 enabled = false
@@ -17,6 +17,9 @@ verify_jwt = true
 
 [functions.payment-verification]
 verify_jwt = true
+
+[functions.queue-drainer]
+verify_jwt = false
 
 [functions.paystack-webhook]
 verify_jwt = false

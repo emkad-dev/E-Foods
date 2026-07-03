@@ -4,6 +4,8 @@ import type { UserDocument } from '../domain/entities';
 import {
   createUserWithEmail,
   getUserRoleClaim,
+  isStaleSupabaseSessionError,
+  SESSION_EXPIRED_ERROR_MESSAGE,
   signInWithEmail,
   signOutUser,
   formatAuthError,
@@ -58,7 +60,7 @@ const DISPATCH_APPLICATION_REJECTED_FALLBACK =
 const DISPATCH_SIGNUP_ROLLBACK_ERROR =
   'Your rider application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the operations team.';
 const getActionCodeSettings = (path: string) => ({
-  url: `${appEnv.appScheme}://${path}`,
+  url: `https://${appEnv.appDomain}${path.startsWith('/') ? path : `/${path}`}`,
 });
 
 const isProfileOfflineError = (error: unknown) => {
@@ -115,6 +117,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
+
+  const clearExpiredSession = useCallback(async () => {
+    await clearLocalUserState();
+    await signOutUser(supabase).catch(() => undefined);
+    setUser(null);
+    setError(SESSION_EXPIRED_ERROR_MESSAGE);
+  }, [clearLocalUserState]);
 
   const rollbackPendingApplicant = useCallback(async () => {
     pendingApplicantUidRef.current = null;
@@ -252,6 +261,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await storeUserProfile(nextUser);
       } catch (nextError) {
         const authUser = session?.user ?? null;
+        if (isStaleSupabaseSessionError(nextError)) {
+          await clearExpiredSession();
+          return;
+        }
+
         if (authUser && isProfileOfflineError(nextError)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
@@ -384,6 +398,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       await startSingleDeviceSession(authUser.id);
     } catch (nextError: any) {
+      if (isStaleSupabaseSessionError(nextError)) {
+        await clearExpiredSession();
+        throw new Error(SESSION_EXPIRED_ERROR_MESSAGE);
+      }
+
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign in');
       setError(nextMessage);
       throw new Error(nextMessage);

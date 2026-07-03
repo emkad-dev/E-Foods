@@ -9,7 +9,7 @@ export const PAYMENT_METHODS = [
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-export const CHECKOUT_PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'wallet'] as const;
+export const CHECKOUT_PAYMENT_METHODS = ['card', 'bank_transfer', 'wallet'] as const;
 export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHODS)[number];
 
 export const PAYMENT_STATUSES = ['pending', 'authorized', 'paid', 'failed', 'refunded'] as const;
@@ -43,6 +43,9 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export const LEGACY_ORDER_STATUS_MAP = {
   pending: 'placed',
+  // 'confirmed' was written by the async order/payment handlers but is not a valid
+  // OrderStatus; map it to 'placed' so existing paid orders stay actionable.
+  confirmed: 'placed',
   preparing: 'preparing',
   ready: 'ready_for_pickup',
   delivered: 'delivered',
@@ -61,12 +64,13 @@ export const DELIVERY_TRACKING_STEPS: OrderStatus[] = [
   'delivered',
 ];
 
+// Pickup orders end at "ready for pickup" — the customer collects in person, so the
+// tracking timeline must not show a "Delivered" step.
 export const PICKUP_TRACKING_STEPS: OrderStatus[] = [
   'placed',
   'accepted',
   'preparing',
   'ready_for_pickup',
-  'delivered',
 ];
 
 export const normalizeOrderStatus = (status: string | null | undefined): OrderStatus => {
@@ -176,8 +180,9 @@ export const formatPaymentStatusLabel = (status: string | null | undefined, meth
 };
 
 export const canCustomerCancelOrder = (status: string | null | undefined) => {
+  // Once the kitchen starts preparing, the order can no longer be self-cancelled.
   const normalizedStatus = normalizeOrderStatus(status);
-  return ['placed', 'accepted', 'preparing', 'ready_for_pickup'].includes(normalizedStatus);
+  return ['placed', 'accepted'].includes(normalizedStatus);
 };
 
 export const getCustomerRefundPolicyLabel = (status: string | null | undefined) => {

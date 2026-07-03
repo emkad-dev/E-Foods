@@ -3,6 +3,12 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { getAuthenticatedRequestContext } from '../_shared/request-context.ts';
 import { sendPushNotificationsToRoles, sendPushNotificationsToUsers } from '../_shared/notifications.ts';
+import {
+  createEdgeObservation,
+  finishEdgeObservation,
+  jsonResponse,
+  runWithBackpressure,
+} from '../_shared/observability.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -15,15 +21,6 @@ class NotificationError extends Error {
     this.status = status;
   }
 }
-
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), {
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json',
-    },
-    status,
-  });
 
 const sanitizeText = (value: unknown, fallback = '') =>
   typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -39,19 +36,24 @@ const ensureAdmin = async (request: Request) => {
 };
 
 Deno.serve(async (request) => {
+  const observation = createEdgeObservation(request, 'notifications');
   if (request.method === 'OPTIONS') {
-    return new Response('ok', {
+    const response = new Response('ok', {
       headers: corsHeaders,
       status: 204,
     });
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   }
 
   if (request.method !== 'POST') {
-    return json(405, {
+    const response = jsonResponse(405, {
       error: {
         message: 'Use POST for notification requests.',
       },
-    });
+    }, corsHeaders);
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   }
 
   try {
@@ -78,39 +80,49 @@ Deno.serve(async (request) => {
       throw new NotificationError(400, 'Provide at least one target user id or target role.');
     }
 
-    let sent = 0;
+    const sendWork = async () => {
+      let sent = 0;
 
-    if (targetUserIds.length > 0) {
-      const result = await sendPushNotificationsToUsers(targetUserIds, {
-        body,
-        data: payload.data ?? {},
-        title,
-      });
-      sent += result.sent;
-    }
+      if (targetUserIds.length > 0) {
+        const result = await sendPushNotificationsToUsers(targetUserIds, {
+          body,
+          data: payload.data ?? {},
+          title,
+        });
+        sent += result.sent;
+      }
 
-    if (targetRoles.length > 0) {
-      const result = await sendPushNotificationsToRoles(targetRoles, {
-        body,
-        data: payload.data ?? {},
-        title,
-      });
-      sent += result.sent;
-    }
+      if (targetRoles.length > 0) {
+        const result = await sendPushNotificationsToRoles(targetRoles, {
+          body,
+          data: payload.data ?? {},
+          title,
+        });
+        sent += result.sent;
+      }
 
-    return json(200, {
+      return sent;
+    };
+
+    const sent = await runWithBackpressure('notifications', { maxConcurrent: 3, retryAfterSeconds: 3 }, sendWork);
+
+    const response = jsonResponse(200, {
       data: {
         sent,
         targetRoles,
         targetUserIds,
       },
-    });
+    }, corsHeaders);
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   } catch (error) {
     const status = error instanceof NotificationError ? error.status : 500;
-    return json(status, {
+    const response = jsonResponse(status, {
       error: {
         message: error instanceof Error ? error.message : 'Unexpected notification failure.',
       },
-    });
+    }, corsHeaders);
+    finishEdgeObservation(observation, { status: response.status, error });
+    return response;
   }
 });

@@ -5,10 +5,12 @@ import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getDispatchDeliveryQueue } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
 import { sortDispatchHistoryOrders } from '../utils/dispatchQueue';
+import { useAuth } from '../contexts/AuthContext';
 
 export type DispatchOrder = OrderDocument;
 
 export const useDispatchOrders = () => {
+  const { loading: authLoading, user } = useAuth();
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,6 +44,18 @@ export const useDispatchOrders = () => {
   );
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!user) {
+      setOrders([]);
+      setError(null);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     let cancelled = false;
 
     const guardedLoad = async (mode: 'initial' | 'background' = 'initial') => {
@@ -66,7 +80,7 @@ export const useDispatchOrders = () => {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [loadOrders]);
+  }, [authLoading, loadOrders, user]);
 
   const deliveryOrders = useMemo(
     () => orders.filter((order) => (order.fulfillmentType ?? 'delivery') === 'delivery'),

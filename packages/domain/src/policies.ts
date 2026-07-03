@@ -81,24 +81,142 @@ const sharedPrivacy: PolicySection[] = [
 export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: PolicySection[] }> = {
   customer: {
     terms: [
-      ...sharedTerms,
       {
-        title: 'Customer use',
+        title: 'Who We Are',
+        bullets: ['FEASTy is a food delivery service operated by Feasty.'],
+      },
+      {
+        title: 'Scope',
+        bullets: ['Our service is currently intended for users in Nigeria only.'],
+      },
+      {
+        title: 'Acceptance of These Terms',
+        bullets: ['By using FEASTy, you agree to these terms. If you do not agree, do not use the service.'],
+      },
+      {
+        title: 'Accounts',
         bullets: [
-          'Place orders with correct contact details and delivery instructions.',
-          'Use rider contact buttons only for the assigned active delivery.',
-          'Do not make false orders, false disputes, or unsafe delivery requests.',
+          'You are responsible for your account activity and for keeping your information accurate.',
+          'You must keep your login credentials secure.',
+          'You may request account deletion in the app.',
         ],
+      },
+      {
+        title: 'Orders and Payments',
+        bullets: [
+          'Orders may require payment verification before they are processed.',
+          'Payments are handled through Paystack.',
+          'Prices, availability, and delivery times may change based on restaurant and dispatch conditions.',
+        ],
+      },
+      {
+        title: 'Cancellations and Refunds',
+        bullets: [
+          'You may cancel an order before it is processed by the restaurant.',
+          'If an order has been delivered, we generally do not allow cancellation.',
+          'If a delivered order cannot be reached or handed over, refund or reversal decisions are handled case by case through support and applicable law.',
+        ],
+      },
+      {
+        title: 'Acceptable Use',
+        bullets: [
+          'You agree not to misuse FEASTy, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.',
+        ],
+      },
+      {
+        title: 'Service Availability',
+        bullets: [
+          'We may update, suspend, or discontinue any part of the service at any time.',
+          'We may also change features, routes, or access rules as needed to keep the service operating safely.',
+        ],
+      },
+      {
+        title: 'Intellectual Property',
+        bullets: [
+          'The FEASTy name, branding, app design, and related content belong to us or our licensors and may not be used without permission.',
+        ],
+      },
+      {
+        title: 'Limitation of Liability',
+        bullets: [
+          'To the fullest extent allowed by law, FEASTy is not liable for indirect, incidental, or consequential damages arising from use of the service.',
+        ],
+      },
+      {
+        title: 'Changes to These Terms',
+        bullets: ['We may update these terms from time to time. The revised version will apply once published.'],
+      },
+      {
+        title: 'Contact',
+        bullets: ['For terms questions, email feastyfooders@gmail.com.'],
       },
     ],
     privacy: [
-      ...sharedPrivacy,
       {
-        title: 'Customer data',
+        title: 'Who We Are',
+        bullets: ['FEASTy is a food delivery service operated by Feasty.'],
+      },
+      {
+        title: 'Scope',
+        bullets: ['Our service is currently intended for users in Nigeria only.'],
+      },
+      {
+        title: 'Information We Collect',
         bullets: [
-          'Restaurants and assigned riders see only the order details needed to prepare or deliver your order.',
-          'Payment references and order records are used to verify checkout and support disputes.',
+          'Account information such as name, email address, phone number, and password',
+          'Delivery information such as saved addresses and delivery location',
+          'Order history and support requests',
+          'Payment and transaction metadata handled through Paystack',
+          'Device and session information needed to run the service securely',
         ],
+      },
+      {
+        title: 'How We Use Information',
+        bullets: [
+          'Create and manage your account',
+          'Process, fulfill, and track orders',
+          'Verify payments and prevent fraud',
+          'Provide customer support',
+          'Send service-related notices about your account or orders',
+        ],
+      },
+      {
+        title: 'How We Share Information',
+        bullets: [
+          'Paystack, for payment processing',
+          'Restaurants, for order preparation and fulfillment',
+          'Delivery partners and dispatch users, for delivery completion',
+          'Service providers that help us operate the apps and backend',
+        ],
+      },
+      {
+        title: 'Data Retention',
+        bullets: [
+          'We keep personal information only as long as needed for account management, order fulfillment, legal obligations, dispute resolution, and support.',
+        ],
+      },
+      {
+        title: 'Your Choices and Rights',
+        bullets: [
+          'Access and update your account information in the app',
+          'Request deletion of your account in the app',
+          'Contact us for help with account or privacy issues',
+          'If you request deletion, we will remove or deactivate your account subject to legal, security, and operational retention needs.',
+        ],
+      },
+      {
+        title: "Children's Privacy",
+        bullets: ['FEASTy is not intended for children under 18.'],
+      },
+      {
+        title: 'Changes to This Policy',
+        bullets: [
+          'We may update this policy from time to time. If we make material changes, we will update the date above and publish the revised policy.',
+        ],
+      },
+      {
+        title: 'Contact',
+        bullets: ['For privacy questions, email feastyfooders@gmail.com.'],
       },
     ],
   },
@@ -111,6 +229,8 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
           'Keep restaurant profile, menu, prices, availability, and preparation status accurate.',
           'Only upload images and content you own or have permission to use.',
           'Prepare accepted orders safely and update order status on time.',
+          'Pickup orders routed from customers to restaurants keep 10% of the food subtotal on completed orders.',
+          'Delivery orders keep 15% of the food subtotal on completed orders.',
         ],
       },
     ],

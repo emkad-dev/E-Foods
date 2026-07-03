@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.feasty.dispatch"
+      "bundleIdentifier": "com.ebuy.dispatch",
+      "associatedDomains": ["applinks:feasty.com"]
     },
     "android": {
       "adaptiveIcon": {
@@ -18,13 +19,29 @@
         "backgroundImage": "../customer/assets/images/android-icon-background.png",
         "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
       },
-      "package": "com.feasty.dispatch"
+      "package": "com.ebuy.dispatch",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            { "scheme": "https", "host": "feasty.com" },
+            { "scheme": "feasty-dispatch" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "../customer/assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow FEASTY Dispatch to use your location for live delivery tracking."
+        }
+      ],
       [
         "expo-notifications",
         {
@@ -47,6 +64,7 @@
       "autolinkingModuleResolution": true
     },
     "extra": {
+      "EXPO_PUBLIC_APP_DOMAIN": "feasty.com",
       "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"

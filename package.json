@@ -10,12 +10,10 @@
   ],
   "scripts": {
     "dev:admin": "npm --prefix apps/admin run start",
-    "dev:admin-web": "npm --prefix apps/admin-web run dev",
-    "build:admin-web": "npm --prefix apps/admin-web run build",
     "dev:customer": "npm --prefix apps/customer run start",
     "dev:partner": "npm --prefix apps/partner run start",
     "dev:dispatch": "npm --prefix apps/dispatch run start",
-    "android:admin": "npm --prefix apps/admin run android",
+    "web:admin": "npm --prefix apps/admin run start",
     "android:customer": "npm --prefix apps/customer run android",
     "android:partner": "npm --prefix apps/partner run android",
     "android:dispatch": "npm --prefix apps/dispatch run android",
@@ -23,17 +21,25 @@
     "lint:customer": "npm --prefix apps/customer run lint",
     "lint:partner": "npm --prefix apps/partner run lint",
     "lint:dispatch": "npm --prefix apps/dispatch run lint",
+    "test:admin:live-refresh": "node --test apps/admin/src/hooks/adminLiveRefreshController.test.mjs",
+    "load:test": "node ./scripts/load-test-backend.mjs",
     "db:doctor": "npm --prefix functions run db:doctor",
     "db:generate": "npm --prefix functions run prisma:generate",
     "db:migrate:deploy": "npm --prefix functions run prisma:migrate:deploy",
     "db:validate": "npm --prefix functions run prisma:validate",
-    "deploy:paystack": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\deploy-paystack-functions.ps1"
+    "deploy:paystack": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\deploy-paystack-functions.ps1",
+    "dev:admin-web": "npm --prefix apps/admin-web run dev",
+    "build:admin-web": "npm --prefix apps/admin-web run build",
+    "android:admin": "npm --prefix apps/admin run android",
+    "deploy:functions": "powershell -NoProfile -ExecutionPolicy Bypass -File .scriptsdeploy-realtime-email-functions.ps1"
   },
   "dependencies": {
+    "@sentry/browser": "^10.62.0",
     "@supabase/supabase-js": "^2.105.4",
     "jose": "^6.2.3",
     "jwt-decode": "^4.0.0",
-    "react-native-url-polyfill": "^3.0.0"
+    "react-native-url-polyfill": "^3.0.0",
+    "react-native-webview": "^13.16.1"
   },
   "devDependencies": {
     "@supabase/cli-windows-x64": "^2.101.0",

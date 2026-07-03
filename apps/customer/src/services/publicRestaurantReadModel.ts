@@ -1,76 +1,115 @@
 import type { RestaurantDocument } from '../domain/entities';
-import { appEnv, supabaseEnv } from '../config/env';
+import {
+  FunctionsFetchError,
+  FunctionsHttpError,
+  FunctionsRelayError,
+} from '@supabase/supabase-js';
+import { supabase } from './supabase/config';
 
-const PUBLIC_CATALOG_TIMEOUT_MS = 12000;
+type CacheEntry<T> = {
+  expiresAt: number;
+  value: T;
+};
 
-const resolvePublicCatalogUrl = () => {
-  if (supabaseEnv.url?.trim()) {
-    return `${supabaseEnv.url.trim().replace(/\/+$/, '')}/functions/v1/public-catalog`;
+const PUBLIC_CATALOG_CACHE_TTL_MS = 30_000;
+const publicCatalogCache = new Map<string, CacheEntry<unknown>>();
+
+const readCache = <T>(key: string): T | null => {
+  const entry = publicCatalogCache.get(key);
+  if (!entry) {
+    return null;
   }
 
-  if (appEnv.backendRpcUrl?.trim()) {
-    const backendRpcUrl = appEnv.backendRpcUrl.trim();
-
-    if (backendRpcUrl.endsWith('/functions/v1/app-rpc')) {
-      return `${backendRpcUrl.slice(0, -'/app-rpc'.length)}/public-catalog`;
-    }
-
-    if (backendRpcUrl.endsWith('/functions/v1/public-catalog')) {
-      return backendRpcUrl;
-    }
-
-    throw new Error(
-      'EXPO_PUBLIC_BACKEND_RPC_URL must point to the Supabase app-rpc or public-catalog Edge Function.'
-    );
+  if (entry.expiresAt <= Date.now()) {
+    publicCatalogCache.delete(key);
+    return null;
   }
 
-  throw new Error(
-    'Missing public catalog configuration. Set EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_BACKEND_RPC_URL for the Supabase Edge Function.'
-  );
+  return entry.value as T;
+};
+
+const writeCache = <T>(key: string, value: T, ttlMs = PUBLIC_CATALOG_CACHE_TTL_MS) => {
+  publicCatalogCache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value,
+  });
 };
 
 const callPublicCatalog = async <T>(action: string, data?: Record<string, unknown>) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PUBLIC_CATALOG_TIMEOUT_MS);
-
-  let response: Response;
+  const cacheKey = `${action}:${JSON.stringify(data ?? {})}`;
+  const cached = readCache<T>(cacheKey);
+  if (cached) {
+    return cached;
+  }
 
   try {
-    response = await fetch(resolvePublicCatalogUrl(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    const { data: responseData, error } = await supabase.functions.invoke<T>('public-catalog', {
+      body: {
         action,
         data: data ?? {},
-      }),
-      signal: controller.signal,
+      },
     });
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('The restaurant service timed out. Check your network or Supabase Edge deployment and try again.');
+
+    if (error) {
+      if (error instanceof FunctionsHttpError) {
+        const response = error.context as Response | undefined;
+
+        if (response) {
+          const responseForJson = response.clone();
+          let parsedMessage: string | null = null;
+
+          try {
+            const body = await responseForJson.json();
+            const message =
+              typeof body === 'object' && body !== null
+                ? (body as { message?: unknown }).message ?? (body as { error?: unknown }).error
+                : null;
+
+            if (typeof message === 'string' && message.trim()) {
+              parsedMessage = message.trim();
+            }
+          } catch {
+            // Ignore JSON parse errors and fall back to text below.
+          }
+
+          if (parsedMessage) {
+            throw new Error(parsedMessage);
+          }
+
+          const text = await response.text().catch(() => '');
+
+          if (text.trim()) {
+            throw new Error(text.trim());
+          }
+
+          throw new Error(`Public catalog request failed with HTTP ${response.status}.`);
+        }
+      }
+
+      if (error instanceof FunctionsRelayError || error instanceof FunctionsFetchError) {
+        throw new Error(`The restaurant service is unreachable right now. Check your internet connection, DNS, or Supabase Edge deployment.`);
+      }
+
+      throw new Error(error instanceof Error ? error.message : 'Unexpected public catalog failure.');
     }
 
-    throw new Error(
-      'The restaurant service is unreachable right now. Check your internet connection, DNS, or Supabase Edge deployment.'
-    );
-  } finally {
-    clearTimeout(timeoutId);
+    if (responseData && typeof responseData === 'object' && 'data' in responseData) {
+      const dataValue = (responseData as { data: T }).data;
+      writeCache(cacheKey, dataValue);
+      return dataValue;
+    }
+
+    writeCache(cacheKey, responseData as T);
+    return responseData as T;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Missing Supabase configuration value')) {
+      throw new Error('Missing public catalog configuration. Check your Supabase runtime env and try again.');
+    }
+
+    throw error instanceof Error
+      ? error
+      : new Error('The restaurant service is unreachable right now. Check your internet connection, DNS, or Supabase Edge deployment.');
   }
-
-  const payload = (await response.json().catch(() => null)) as
-    | {
-        data?: T;
-        error?: { message?: string };
-      }
-    | null;
-
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || `Public catalog request failed with status ${response.status}`);
-  }
-
-  return payload?.data as T;
 };
 
 export const getPublishedRestaurants = async () =>

@@ -2,6 +2,12 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import {
+  createEdgeObservation,
+  finishEdgeObservation,
+  jsonResponse,
+  logEdgeEvent,
+} from '../_shared/observability.ts';
 
 type RestaurantApprovalRow = {
   approvedAt?: string | null;
@@ -33,15 +39,6 @@ type RestaurantRecordRow = {
   supportsPickup?: boolean | null;
   updatedAt?: string | null;
 };
-
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), {
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json',
-    },
-    status,
-  });
 
 const sanitizeText = (value: unknown, fallback = '') =>
   typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -80,20 +77,21 @@ const toRestaurantResponse = (
   updatedAt: restaurant.updatedAt ?? null,
 });
 
-const loadApprovedRestaurantCatalog = async () => {
-  const [{ data: restaurants, error: restaurantError }, { data: approvals, error: approvalError }] = await Promise.all([
-    serviceClient
-      .from('RestaurantRecord')
-      .select(
-        'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
-      )
-      .eq('isPublished', true)
-      .order('updatedAt', { ascending: false }),
-    serviceClient
-      .from('RestaurantApproval')
-      .select('restaurantId,status,approvedAt')
-      .eq('status', 'approved'),
-  ]);
+const loadPublishedRestaurantCatalog = async () => {
+  const [{ data: restaurants, error: restaurantError }, { data: approvals, error: approvalError }] =
+    await Promise.all([
+      serviceClient
+        .from('RestaurantRecord')
+        .select(
+          'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
+        )
+        .eq('isPublished', true)
+        .order('updatedAt', { ascending: false }),
+      serviceClient
+        .from('RestaurantApproval')
+        .select('restaurantId,status,approvedAt')
+        .eq('status', 'approved'),
+    ]);
 
   if (restaurantError) {
     throw new Error(restaurantError.message);
@@ -107,25 +105,35 @@ const loadApprovedRestaurantCatalog = async () => {
     (approvals ?? []).map((approval) => [approval.restaurantId, approval] as const)
   );
 
-  return (restaurants ?? [])
-    .filter((restaurant) => approvalByRestaurantId.has(restaurant.id))
-    .map((restaurant) => toRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null));
+  return (restaurants ?? []).map((restaurant) =>
+    toRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)
+  );
 };
 
 Deno.serve(async (request) => {
+  const observation = createEdgeObservation(request, 'public-catalog');
+
   if (request.method === 'OPTIONS') {
-    return new Response('ok', {
+    const response = new Response('ok', {
       headers: corsHeaders,
       status: 204,
     });
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   }
 
   if (request.method !== 'POST') {
-    return json(405, {
-      error: {
-        message: 'Use POST for public catalog requests.',
+    const response = jsonResponse(
+      405,
+      {
+        error: {
+          message: 'Use POST for public catalog requests.',
+        },
       },
-    });
+      corsHeaders
+    );
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   }
 
   try {
@@ -134,36 +142,77 @@ Deno.serve(async (request) => {
       data?: { restaurantId?: string };
     };
 
+    logEdgeEvent('debug', 'public-catalog action received', {
+      action: action ?? null,
+      requestId: observation.requestId,
+    });
+
     if (action === 'customerGetPublishedRestaurants') {
-      const restaurants = await loadApprovedRestaurantCatalog();
-      return json(200, { data: { restaurants } });
+      const restaurants = await loadPublishedRestaurantCatalog();
+      const response = jsonResponse(
+        200,
+        { data: { restaurants } },
+        {
+          ...corsHeaders,
+          'Cache-Control': 'public, max-age=45, stale-while-revalidate=120',
+        }
+      );
+      finishEdgeObservation(observation, { status: response.status });
+      return response;
     }
 
     if (action === 'customerGetPublishedRestaurantDetail') {
       const restaurantId = sanitizeText(data?.restaurantId);
       if (!restaurantId) {
-        return json(400, {
-          error: {
-            message: 'A restaurant id is required.',
+        const response = jsonResponse(
+          400,
+          {
+            error: {
+              message: 'A restaurant id is required.',
+            },
           },
-        });
+          corsHeaders
+        );
+        finishEdgeObservation(observation, { status: response.status });
+        return response;
       }
 
-      const restaurants = await loadApprovedRestaurantCatalog();
+      const restaurants = await loadPublishedRestaurantCatalog();
       const restaurant = restaurants.find((entry) => entry.id === restaurantId) ?? null;
-      return json(200, { data: { restaurant } });
+      const response = jsonResponse(
+        200,
+        { data: { restaurant } },
+        {
+          ...corsHeaders,
+          'Cache-Control': 'public, max-age=30, stale-while-revalidate=90',
+        }
+      );
+      finishEdgeObservation(observation, { status: response.status });
+      return response;
     }
 
-    return json(404, {
-      error: {
-        message: 'The requested public action was not found.',
+    const response = jsonResponse(
+      404,
+      {
+        error: {
+          message: 'The requested public action was not found.',
+        },
       },
-    });
+      corsHeaders
+    );
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   } catch (error) {
-    return json(500, {
-      error: {
-        message: error instanceof Error ? error.message : 'Unexpected public catalog failure.',
+    const response = jsonResponse(
+      500,
+      {
+        error: {
+          message: error instanceof Error ? error.message : 'Unexpected public catalog failure.',
+        },
       },
-    });
+      corsHeaders
+    );
+    finishEdgeObservation(observation, { status: response.status, error });
+    return response;
   }
 });

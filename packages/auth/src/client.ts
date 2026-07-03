@@ -14,7 +14,27 @@ const resolveSupabaseEnvValue = (value: string | undefined, label: string) => {
   return value.trim();
 };
 
-export const createFeastySupabaseClient = (env: SupabaseRuntimeEnv) => {
+const createSessionStorage = () => {
+  const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+  if (!isBrowser) {
+    // Native (iOS/Android): persist the Supabase session in AsyncStorage so the
+    // access token survives reloads and is attached to authenticated requests.
+    return AsyncStorage;
+  }
+
+  return {
+    getItem: async (key: string) => window.localStorage.getItem(key),
+    setItem: async (key: string, value: string) => {
+      window.localStorage.setItem(key, value);
+    },
+    removeItem: async (key: string) => {
+      window.localStorage.removeItem(key);
+    },
+  };
+};
+
+export const createEbuySupabaseClient = (env: SupabaseRuntimeEnv) => {
   const url = resolveSupabaseEnvValue(env.url, 'EXPO_PUBLIC_SUPABASE_URL');
   const anonKey = resolveSupabaseEnvValue(env.anonKey, 'EXPO_PUBLIC_SUPABASE_ANON_KEY');
 
@@ -23,14 +43,14 @@ export const createFeastySupabaseClient = (env: SupabaseRuntimeEnv) => {
       autoRefreshToken: true,
       detectSessionInUrl: false,
       persistSession: true,
-      storage: AsyncStorage as never,
+      storage: createSessionStorage() as never,
     },
   });
 };
 
 export const getSharedSupabaseClient = (env: SupabaseRuntimeEnv) => {
   if (!sharedClient) {
-    sharedClient = createFeastySupabaseClient(env);
+    sharedClient = createEbuySupabaseClient(env);
   }
 
   return sharedClient;

@@ -21,3 +21,12 @@ export const updateDispatchRider = async (riderId: string, draft: DispatchRiderD
     ...draft,
   });
 };
+
+export const syncDispatchRiderLocation = async (payload: {
+  accuracy?: number;
+  latitude: number;
+  longitude: number;
+  timestamp: number;
+}) => {
+  await callDispatchBackendRpc('syncDispatchRiderLocation', payload);
+};

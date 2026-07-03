@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
@@ -21,6 +21,30 @@ import { customerTheme } from '../../../src/theme/palette';
 import { openPhoneDialer } from '../../../src/utils/phoneLinking';
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+
+const formatRelativeAge = (value?: string | null) => {
+  if (!value) {
+    return 'updated recently';
+  }
+
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return 'updated recently';
+  }
+
+  const elapsedMinutes = Math.max(1, Math.round((Date.now() - timestamp) / 60000));
+  if (elapsedMinutes < 60) {
+    return `updated ${elapsedMinutes} min ago`;
+  }
+
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `updated ${elapsedHours}h ago`;
+  }
+
+  const elapsedDays = Math.round(elapsedHours / 24);
+  return `updated ${elapsedDays}d ago`;
+};
 
 export default function OrderTracking() {
   const { id } = useLocalSearchParams();
@@ -70,6 +94,20 @@ export default function OrderTracking() {
   const isPendingPrepaidPayment =
     isPrepaidPaymentMethod(order.payment?.method) && (order.payment?.status ?? 'pending') === 'pending';
   const courierPhone = order.assignment?.courierPhone ?? null;
+  const courierLatitude = order.assignment?.courierLatitude ?? null;
+  const courierLongitude = order.assignment?.courierLongitude ?? null;
+  const hasCourierCoordinates =
+    typeof courierLatitude === 'number' &&
+    Number.isFinite(courierLatitude) &&
+    typeof courierLongitude === 'number' &&
+    Number.isFinite(courierLongitude);
+  const courierLocationUpdatedAt = formatRelativeAge(order.assignment?.courierUpdatedAt);
+  const courierLocationStatus = hasCourierCoordinates ? 'Live' : courierPhone ? 'Assigned' : 'Waiting';
+  const courierLocationCopy = hasCourierCoordinates
+    ? 'Live rider coordinates mirror the backend snapshot.'
+    : courierPhone
+      ? 'The rider is assigned. Live coordinates will appear once GPS sync is available.'
+      : 'Assign a rider to see live location data here.';
   const refundCopy = !canCancel
     ? 'This order has moved too far along for self-service cancellation.'
     : !isPrepaidPaymentMethod(order.payment?.method)
@@ -135,6 +173,22 @@ export default function OrderTracking() {
       await openPhoneDialer(courierPhone);
     } catch (nextError: any) {
       Alert.alert('Call failed', nextError.message ?? 'Could not open the phone app.');
+    }
+  };
+
+  const handleOpenRiderMap = async () => {
+    if (!hasCourierCoordinates) {
+      return;
+    }
+
+    try {
+      await Linking.openURL(
+        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+          `${courierLatitude},${courierLongitude}`
+        )}`
+      );
+    } catch (nextError: any) {
+      Alert.alert('Map unavailable', nextError.message ?? 'Could not open maps right now.');
     }
   };
 
@@ -207,6 +261,47 @@ export default function OrderTracking() {
         ) : null}
       </View>
 
+      {fulfillmentType === 'delivery' ? (
+        <View style={styles.riderCard}>
+          <View style={styles.riderHeader}>
+            <View>
+          <Text style={styles.sectionTitle}>Live rider location</Text>
+          <Text style={styles.riderName}>{order.assignment?.courierName ?? 'Your rider'}</Text>
+            </View>
+            <View style={styles.liveBadge}>
+              <Text style={styles.liveBadgeText}>{courierLocationStatus}</Text>
+            </View>
+          </View>
+
+          {hasCourierCoordinates ? (
+            <>
+              <View style={styles.coordinateGrid}>
+                <View style={styles.coordinateChip}>
+                  <Text style={styles.coordinateLabel}>Latitude</Text>
+                  <Text style={styles.coordinateValue}>{courierLatitude?.toFixed(5)}</Text>
+                </View>
+                <View style={styles.coordinateChip}>
+                  <Text style={styles.coordinateLabel}>Longitude</Text>
+                  <Text style={styles.coordinateValue}>{courierLongitude?.toFixed(5)}</Text>
+                </View>
+              </View>
+              <Text style={styles.riderMeta}>Live position {courierLocationUpdatedAt}</Text>
+              <TouchableOpacity style={styles.mapButton} onPress={handleOpenRiderMap}>
+                <Text style={styles.mapButtonText}>Open rider on maps</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.riderEmptyState}>{courierLocationCopy}</Text>
+          )}
+
+          {courierPhone ? (
+            <TouchableOpacity style={[styles.callButton, styles.riderCallButton]} onPress={handleCallRider}>
+              <Text style={styles.callButtonText}>Call rider</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+
       <View style={styles.policyCard}>
         <Text style={styles.policyTitle}>Cancellation policy</Text>
         <Text style={styles.policyCopy}>{refundCopy}</Text>
@@ -259,7 +354,7 @@ const styles = StyleSheet.create({
     borderColor: customerTheme.border,
     borderRadius: 20,
     borderWidth: 1,
-    padding: 16,
+    padding: 18,
   },
   eyebrow: {
     color: customerTheme.accentStrong,
@@ -287,23 +382,25 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.surfaceStrong,
     borderRadius: 999,
     marginRight: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   fulfillmentBadgeText: {
     color: customerTheme.accentStrong,
     fontSize: 11,
     fontWeight: '800',
+    letterSpacing: 0.4,
   },
   statusBadge: {
     backgroundColor: customerTheme.accentTint,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   statusBadgeText: {
     fontSize: 11,
     fontWeight: '800',
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
   callButton: {
@@ -321,16 +418,18 @@ const styles = StyleSheet.create({
   progressCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     marginTop: 12,
-    padding: 16,
+    padding: 18,
   },
   sectionTitle: {
     color: customerTheme.text,
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '800',
-    marginBottom: 10,
+    letterSpacing: 0.2,
+    marginBottom: 8,
   },
   stepRow: {
     alignItems: 'center',
@@ -362,10 +461,10 @@ const styles = StyleSheet.create({
   detailCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     marginTop: 12,
-    padding: 16,
+    padding: 18,
   },
   total: {
     color: customerTheme.accentStrong,
@@ -396,13 +495,98 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  riderCard: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 18,
+  },
+  riderHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  riderName: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  liveBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: customerTheme.accentTint,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  liveBadgeText: {
+    color: customerTheme.accentStrong,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  coordinateGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  coordinateChip: {
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    flex: 1,
+    padding: 12,
+  },
+  coordinateLabel: {
+    color: customerTheme.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  coordinateValue: {
+    color: customerTheme.text,
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  riderMeta: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    marginTop: 10,
+  },
+  riderEmptyState: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 10,
+  },
+  mapButton: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.hero,
+    borderRadius: 12,
+    marginTop: 14,
+    paddingVertical: 12,
+  },
+  mapButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  riderCallButton: {
+    marginTop: 10,
+  },
   policyCard: {
     backgroundColor: customerTheme.warningSoft,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     marginTop: 12,
-    padding: 16,
+    padding: 18,
   },
   policyTitle: {
     color: '#8a4f12',
@@ -434,7 +618,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,19 +10,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Animated, { FadeIn, FadeInDown, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
-import { useAuth } from '../../../../src/contexts/AuthContext';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { customerTheme } from '../../../../src/theme/palette';
 import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
 import { toCustomerFacingItemPrice } from '../../../../src/domain/orders';
-import { promptForAuth } from '../../../../src/utils/authPrompt';
 import {
   type DiscoveryRestaurant,
+  getRestaurantAvailability,
   getRestaurantAvailabilityBadge,
   getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
@@ -46,15 +46,20 @@ type MenuCategory = {
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
+const formatPlainNumber = (value: number | null | undefined) =>
+  value === null || value === undefined ? 'Not set' : Math.round(value).toLocaleString('en-US');
+
 export default function RestaurantDetail() {
   const { id } = useLocalSearchParams();
   const [restaurant, setRestaurant] = useState<DiscoveryRestaurant | null>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const { user } = useAuth();
+  const [addedToCartVisible, setAddedToCartVisible] = useState(false);
   const { addItem, items, restaurantId: cartRestaurantId } = useCart();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const addedToCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [cartButtonScale, setCartButtonScale] = useState(1);
   const cartButtonStyle = useAnimatedStyle(() => ({
@@ -112,15 +117,27 @@ export default function RestaurantDetail() {
     };
   }, [id]);
 
-  const handleAddToCart = (item: MenuItem) => {
-    if (!user) {
-      promptForAuth({
-        title: 'Sign in to add items',
-        message: 'Create an account or sign in before adding meals to your cart.',
-      });
-      return;
+  useEffect(() => {
+    return () => {
+      if (addedToCartTimerRef.current) {
+        clearTimeout(addedToCartTimerRef.current);
+      }
+    };
+  }, []);
+
+  const triggerAddedToCartToast = () => {
+    if (addedToCartTimerRef.current) {
+      clearTimeout(addedToCartTimerRef.current);
     }
 
+    setAddedToCartVisible(true);
+    addedToCartTimerRef.current = setTimeout(() => {
+      setAddedToCartVisible(false);
+      addedToCartTimerRef.current = null;
+    }, 1500);
+  };
+
+  const handleAddToCart = (item: MenuItem) => {
     if (cartRestaurantId && cartRestaurantId !== id) {
       Alert.alert(
         'Replace cart?',
@@ -144,6 +161,7 @@ export default function RestaurantDetail() {
               );
               setCartButtonScale(1.25);
               setTimeout(() => setCartButtonScale(1), 180);
+              triggerAddedToCartToast();
             },
           },
         ]
@@ -165,6 +183,7 @@ export default function RestaurantDetail() {
     );
     setCartButtonScale(1.25);
     setTimeout(() => setCartButtonScale(1), 180);
+    triggerAddedToCartToast();
   };
 
   const visibleMenu = useMemo(() => {
@@ -176,15 +195,17 @@ export default function RestaurantDetail() {
   }, [menu, selectedCategory]);
 
   const totalItemsInCart = items.reduce((sum, item) => sum + item.quantity, 0);
-  const availabilityBadge = restaurant ? getRestaurantAvailabilityBadge({ isAvailable: true } as any) : null;
+  const availability = restaurant ? getRestaurantAvailability(restaurant, null) : null;
+  const availabilityBadge = availability ? getRestaurantAvailabilityBadge(availability) : null;
   const operatingHoursLabel = restaurant ? getRestaurantOperatingHoursLabel(restaurant) : null;
+  const cartFooterBottom = insets.bottom + 92;
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
       return;
     }
 
-    router.replace('/(customer)/home');
+    router.replace('/home' as never);
   };
 
   if (loading) {
@@ -242,7 +263,13 @@ export default function RestaurantDetail() {
                 <View style={styles.factsRow}>
                   <Text style={styles.factPill}>{restaurant.rating ? `Rated ${restaurant.rating}` : 'New'}</Text>
                   <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
-                  <Text style={styles.factPill}>
+                  <Text
+                    style={[
+                      styles.factPill,
+                      availabilityBadge === 'Closed' ? styles.closedBadge : null,
+                      availabilityBadge === 'Closed' ? styles.closedBadgeText : null,
+                    ]}
+                  >
                     {restaurant.isOpen === false ? 'Closed' : availabilityBadge ?? 'Open'}
                   </Text>
                   <Text style={styles.factPill}>
@@ -255,7 +282,7 @@ export default function RestaurantDetail() {
                 <View style={styles.metaPanel}>
                   <Text style={styles.metaPanelText}>{restaurant.address ?? 'Address details coming soon'}</Text>
                   <Text style={styles.metaPanelText}>
-                    Minimum order {restaurant.minOrder ? formatMoney(Number(restaurant.minOrder)) : 'Not set'}
+                    Minimum order {formatPlainNumber(restaurant.minOrder)}
                   </Text>
                   {operatingHoursLabel ? (
                     <Text style={styles.metaPanelText}>Open daily {operatingHoursLabel}</Text>
@@ -298,6 +325,13 @@ export default function RestaurantDetail() {
             </View>
             {category.items.map((menuItem) => (
               <View key={menuItem.id} style={styles.menuItemCard}>
+                {menuItem.image ? (
+                  <Image source={{ uri: menuItem.image }} style={styles.menuItemImage} />
+                ) : (
+                  <View style={[styles.menuItemImage, styles.menuItemImagePlaceholder]}>
+                    <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
+                  </View>
+                )}
                 <View style={styles.menuItemInfo}>
                   <Text style={styles.itemName}>{menuItem.name}</Text>
                   {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
@@ -324,7 +358,7 @@ export default function RestaurantDetail() {
       />
 
       {totalItemsInCart > 0 ? (
-        <Animated.View style={[styles.cartFooter, cartButtonStyle]}>
+        <Animated.View style={[styles.cartFooter, { bottom: cartFooterBottom }, cartButtonStyle]}>
           <TouchableOpacity style={styles.viewCartButton} onPress={() => router.push('/cart')}>
             <View>
               <Text style={styles.viewCartLabel}>Cart ready</Text>
@@ -332,6 +366,20 @@ export default function RestaurantDetail() {
             </View>
             <FontAwesome name="arrow-right" size={16} color="#ffffff" />
           </TouchableOpacity>
+        </Animated.View>
+      ) : null}
+
+      {addedToCartVisible ? (
+        <Animated.View
+          entering={FadeIn.duration(160)}
+          exiting={FadeOut.duration(140)}
+          pointerEvents="none"
+          style={styles.toastOverlay}
+        >
+          <View style={styles.toastCard}>
+            <Text style={styles.toastTitle}>Added to cart</Text>
+            <Text style={styles.toastCopy}>Item saved. You can keep browsing or open your cart.</Text>
+          </View>
         </Animated.View>
       ) : null}
     </View>
@@ -343,8 +391,35 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.background,
     flex: 1,
   },
+  toastOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    zIndex: 30,
+  },
+  toastCard: {
+    backgroundColor: 'rgba(15, 23, 42, 0.94)',
+    borderRadius: 22,
+    maxWidth: 280,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  toastTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  toastCopy: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+    textAlign: 'center',
+  },
   container: {
-    paddingBottom: 130,
+    paddingBottom: 220,
   },
   centered: {
     alignItems: 'center',
@@ -537,16 +612,26 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   menuItemCard: {
-    alignItems: 'center',
+    alignItems: 'stretch',
     backgroundColor: customerTheme.surface,
     borderRadius: 20,
     flexDirection: 'row',
     marginBottom: 10,
-    padding: 16,
+    overflow: 'hidden',
+  },
+  menuItemImage: {
+    alignSelf: 'stretch',
+    backgroundColor: customerTheme.surfaceMuted,
+    width: 104,
+  },
+  menuItemImagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   menuItemInfo: {
     flex: 1,
-    paddingRight: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
   },
   itemName: {
     color: customerTheme.text,
@@ -567,12 +652,15 @@ const styles = StyleSheet.create({
   },
   addButton: {
     alignItems: 'center',
+    alignSelf: 'center',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: 18,
     justifyContent: 'center',
+    marginRight: 10,
     minWidth: 72,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    marginTop: 80,
   },
   addButtonDisabled: {
     backgroundColor: '#b9b0a0',
@@ -605,7 +693,6 @@ const styles = StyleSheet.create({
   cartFooter: {
     backgroundColor: customerTheme.hero,
     borderRadius: 24,
-    bottom: 20,
     left: 14,
     padding: 14,
     position: 'absolute',
@@ -629,7 +716,7 @@ const styles = StyleSheet.create({
   viewCartText: {
     color: '#ffffff',
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     marginTop: 4,
   },
 });

@@ -1,7 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
-import { formatAuthError, getUserRoleClaim, sendPasswordReset, signInWithEmail, signOutUser } from '../services/supabase/auth';
+import {
+  formatAuthError,
+  getUserRoleClaim,
+  isStaleSupabaseSessionError,
+  sendPasswordReset,
+  SESSION_EXPIRED_ERROR_MESSAGE,
+  signInWithEmail,
+  signOutUser,
+} from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
 import { callAdminBackendRpc } from '../services/backendRpc';
 import { appEnv } from '../config/env';
@@ -35,9 +43,16 @@ const NO_INTERNET_ERROR = 'No internet connection. Check your network and try ag
 const SESSION_CONFLICT_ERROR =
   'This admin account was signed in on another device. Sign in again here if you want to continue on this device.';
 const BOOTSTRAP_WAIT_MESSAGE = 'Preparing first admin access...';
-const getActionCodeSettings = (path: string) => ({
-  url: `${appEnv.appScheme}://${path}`,
-});
+const getActionCodeSettings = (path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const webOrigin = appEnv.appDomain.startsWith('http')
+    ? appEnv.appDomain
+    : `https://${appEnv.appDomain}`;
+
+  return {
+    url: new URL(normalizedPath, `${webOrigin.replace(/\/$/, '')}/`).toString(),
+  };
+};
 
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -77,6 +92,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
+
+  const clearExpiredSession = useCallback(async () => {
+    await clearLocalUserState();
+    await signOutUser(supabase).catch(() => undefined);
+    setUser(null);
+    setError(SESSION_EXPIRED_ERROR_MESSAGE);
+  }, [clearLocalUserState]);
 
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
@@ -199,6 +221,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await storeUserProfile(nextUser);
       } catch (nextError) {
         const authUser = session?.user ?? null;
+        if (isStaleSupabaseSessionError(nextError)) {
+          await clearExpiredSession();
+          return;
+        }
+
         if (authUser && isProfileOfflineError(nextError)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
@@ -262,6 +289,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       await startSingleDeviceSession(authUser.id);
     } catch (nextError: any) {
+      if (isStaleSupabaseSessionError(nextError)) {
+        await clearExpiredSession();
+        throw new Error(SESSION_EXPIRED_ERROR_MESSAGE);
+      }
+
       const nextMessage = getAdminAuthErrorMessage(nextError, 'Unable to sign in');
       setError(nextMessage);
       throw new Error(nextMessage);
@@ -313,6 +345,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(nextUser);
       await storeUserProfile(nextUser);
     } catch (nextError: any) {
+      if (isStaleSupabaseSessionError(nextError)) {
+        await clearExpiredSession();
+        throw new Error(SESSION_EXPIRED_ERROR_MESSAGE);
+      }
+
       await signOutUser(supabase).catch(() => undefined);
       const nextMessage = getAdminAuthErrorMessage(nextError, 'Unable to bootstrap the first admin account');
       setError(nextMessage);

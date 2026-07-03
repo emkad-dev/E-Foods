@@ -1,9 +1,12 @@
 import type { CartItem, DeliveryLocation } from '../contexts/CartContext';
 import type { CheckoutPaymentMethod, FulfillmentType } from '../domain/orders';
 import { callCustomerBackendRpc } from './backendRpc';
+import { clearCustomerReadCache } from './customerReadModel';
+import { buildCustomerPaymentCallbackUrl } from './paymentRouting';
+import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 
 export const PREPAID_CHECKOUT_DISABLED_MESSAGE =
-  'Wallet payments are still coming soon. Use card, bank transfer, or cash for now.';
+  'Use card or bank transfer for checkout.';
 
 type PlaceCustomerOrderInput = {
   deliveryLocation: DeliveryLocation | null;
@@ -12,13 +15,6 @@ type PlaceCustomerOrderInput = {
   paymentMethod: CheckoutPaymentMethod;
   restaurantId: string;
   tipAmount: number;
-};
-
-type PlaceCustomerOrderResult = {
-  orderId: string;
-  paymentStatus: string;
-  status: string;
-  total: number;
 };
 
 type InitializeCustomerPaymentResult = {
@@ -32,32 +28,6 @@ type InitializeCustomerPaymentResult = {
 };
 
 const createIdempotencyKey = () => `cust-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-export const placeCustomerOrder = async ({
-  deliveryLocation,
-  fulfillmentType,
-  items,
-  paymentMethod,
-  restaurantId,
-  tipAmount,
-}: PlaceCustomerOrderInput): Promise<PlaceCustomerOrderResult> => {
-  if (paymentMethod !== 'cash') {
-    throw new Error(PREPAID_CHECKOUT_DISABLED_MESSAGE);
-  }
-
-  return callCustomerBackendRpc<PlaceCustomerOrderResult>('placeCustomerOrder', {
-    deliveryLocation,
-    fulfillmentType,
-    idempotencyKey: createIdempotencyKey(),
-    items: items.map((item) => ({
-      id: item.id,
-      quantity: item.quantity,
-    })),
-    paymentMethod,
-    restaurantId,
-    tipAmount,
-  });
-};
 
 export const initializeCustomerPayment = async ({
   deliveryLocation,
@@ -79,9 +49,21 @@ export const initializeCustomerPayment = async ({
       id: item.id,
       quantity: item.quantity,
     })),
+    callbackUrl: buildCustomerPaymentCallbackUrl(),
     paymentMethod,
     restaurantId,
     tipAmount,
+  }).then((result) => {
+    clearCustomerReadCache();
+    trackAnalyticsEvent('customer_payment_initialized', {
+      fulfillment_type: fulfillmentType,
+      items_count: items.length,
+      payment_method: paymentMethod,
+      restaurant_id: restaurantId,
+      tip_amount: tipAmount,
+      total: result.total,
+    });
+    return result;
   });
 };
 
@@ -93,7 +75,17 @@ type RefreshCustomerPaymentStatusResult = {
 };
 
 export const refreshCustomerPaymentStatus = async (orderId: string): Promise<RefreshCustomerPaymentStatusResult> =>
-  callCustomerBackendRpc<RefreshCustomerPaymentStatusResult>('refreshCustomerPaymentStatus', { orderId });
+  callCustomerBackendRpc<RefreshCustomerPaymentStatusResult>('refreshCustomerPaymentStatus', { orderId }).then(
+    (result) => {
+      clearCustomerReadCache();
+      trackAnalyticsEvent('customer_payment_status_refreshed', {
+        order_id: orderId,
+        payment_status: result.paymentStatus,
+        status: result.status,
+      });
+      return result;
+    }
+  );
 
 type CancelCustomerOrderResult = {
   orderId: string;
@@ -102,4 +94,12 @@ type CancelCustomerOrderResult = {
 };
 
 export const cancelCustomerOrder = async (orderId: string): Promise<CancelCustomerOrderResult> =>
-  callCustomerBackendRpc<CancelCustomerOrderResult>('cancelCustomerOrder', { orderId });
+  callCustomerBackendRpc<CancelCustomerOrderResult>('cancelCustomerOrder', { orderId }).then((result) => {
+    clearCustomerReadCache();
+    trackAnalyticsEvent('customer_order_cancelled', {
+      order_id: orderId,
+      refund_rate: result.refundRate,
+      status: result.status,
+    });
+    return result;
+  });

@@ -19,7 +19,7 @@ export default function AdminBootstrapScreen() {
 
     try {
       await bootstrapFirstAdmin(email.trim(), password);
-      Alert.alert('Bootstrap complete', 'This account is now the first admin. You can continue into the admin app.');
+      Alert.alert('Bootstrap complete', 'This account is now the first admin. You can continue into the admin console.');
     } catch (nextError: any) {
       Alert.alert('Bootstrap failed', nextError.message ?? 'Unable to bootstrap the first admin account.');
     }

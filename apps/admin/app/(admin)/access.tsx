@@ -10,14 +10,17 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AdminBackendStatusBanner from '../../src/components/AdminBackendStatusBanner';
 import AdminCard from '../../src/components/AdminCard';
 import AdminEmptyState from '../../src/components/AdminEmptyState';
 import AdminScreenHeader from '../../src/components/AdminScreenHeader';
-import AdminStatusBadge from '../../src/components/AdminStatusBadge';
+import AdminUserCard, { describeRole } from '../../src/components/AdminUserCard';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useVisibilityRefresh } from '../../src/hooks/useVisibilityRefresh';
 import type { AppRole, UserDocument } from '../../src/domain/entities';
 import {
   assignUserRole,
+  deleteAdminAccess,
   disableUserAccess,
   enableUserAccess,
   provisionStaffAccount,
@@ -26,22 +29,6 @@ import {
 } from '../../src/services/accessManagement';
 import { getAdminAccessOverview } from '../../src/services/platformReads';
 import { adminTheme } from '../../src/theme/palette';
-import { getRoleTone } from '../../src/theme/status';
-
-const describeRole = (role: UserDocument['role']) => {
-  switch (role) {
-    case 'restaurant':
-      return 'Partner';
-    case 'dispatch':
-      return 'Dispatch';
-    case 'customer':
-      return 'Customer';
-    case 'admin':
-      return 'Admin';
-    default:
-      return role;
-  }
-};
 
 export default function AdminAccessScreen() {
   const insets = useSafeAreaInsets();
@@ -57,6 +44,8 @@ export default function AdminAccessScreen() {
   const [provisionRestaurantId, setProvisionRestaurantId] = useState('');
   const [provisionRole, setProvisionRole] = useState<Extract<AppRole, 'restaurant' | 'dispatch' | 'admin'>>('restaurant');
   const [restaurantLinks, setRestaurantLinks] = useState<Record<string, string>>({});
+  const [backendSource, setBackendSource] = useState<'live' | 'cache' | 'fallback'>('live');
+  const [query, setQuery] = useState('');
 
   const loadAccessOverview = async (cancelled = false) => {
     try {
@@ -66,11 +55,12 @@ export default function AdminAccessScreen() {
         return;
       }
 
-      setUsers(nextData.users);
+      setUsers(nextData.data.users);
+      setBackendSource(nextData.source);
       setRestaurantLinks((current) => {
         const nextLinks = { ...current };
 
-        for (const entry of nextData.users) {
+        for (const entry of nextData.data.users) {
           if (nextLinks[entry.uid] === undefined) {
             nextLinks[entry.uid] = entry.restaurantId ?? '';
           }
@@ -107,6 +97,10 @@ export default function AdminAccessScreen() {
     };
   }, []);
 
+  useVisibilityRefresh(() => {
+    void loadAccessOverview();
+  });
+
   const opsUsers = useMemo(
     () =>
       [...users]
@@ -124,6 +118,20 @@ export default function AdminAccessScreen() {
         }),
     [users]
   );
+
+  const filteredUsers = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return opsUsers;
+    }
+
+    return opsUsers.filter((entry) =>
+      [entry.displayName, entry.email, entry.phoneNumber]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLowerCase().includes(normalizedQuery))
+    );
+  }, [opsUsers, query]);
 
   const handleProvisionStaff = async () => {
     if (!provisionEmail.trim() || !provisionPassword.trim()) {
@@ -214,6 +222,39 @@ export default function AdminAccessScreen() {
     }
   };
 
+  const handleDeleteAdminAccess = async (targetUid: string, email: string) => {
+    Alert.alert(
+      'Delete admin access?',
+      `This will ban ${email}, remove the auth user, and delete the local access records. You can recreate the account with the same email from the provisioning form.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setPendingUid(targetUid);
+
+            try {
+              await deleteAdminAccess(targetUid);
+              await loadAccessOverview();
+            } catch (nextError: any) {
+              Alert.alert('Delete failed', nextError.message ?? 'Unable to delete this admin access right now.');
+            } finally {
+              setPendingUid(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleChangeRestaurantLink = (targetUid: string, value: string) => {
+    setRestaurantLinks((current) => ({
+      ...current,
+      [targetUid]: value,
+    }));
+  };
+
   const handleUpdateRestaurantLink = async (targetUid: string) => {
     setPendingUid(targetUid);
 
@@ -238,6 +279,8 @@ export default function AdminAccessScreen() {
         title="Access overview"
         subtitle="Review internal accounts, partner ownership links, and which sessions are currently active on-device."
       />
+
+      <AdminBackendStatusBanner source={backendSource} />
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -306,6 +349,20 @@ export default function AdminAccessScreen() {
         </TouchableOpacity>
       </AdminCard>
 
+      {!loading && opsUsers.length > 0 ? (
+        <View style={styles.searchShell}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name, email, or phone"
+            placeholderTextColor={adminTheme.textMuted}
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+      ) : null}
+
       {!loading && opsUsers.length === 0 ? (
         <AdminEmptyState
           title="No internal accounts found"
@@ -313,123 +370,28 @@ export default function AdminAccessScreen() {
         />
       ) : null}
 
-      {opsUsers.map((entry) => (
-        <AdminCard key={entry.uid}>
-          <View style={styles.headerRow}>
-            <View style={styles.headerMeta}>
-              <Text style={styles.name}>{entry.displayName ?? entry.email ?? 'Unnamed account'}</Text>
-              <Text style={styles.email}>{entry.email}</Text>
-            </View>
-            <AdminStatusBadge label={describeRole(entry.role)} tone={getRoleTone(entry.role)} />
-            {entry.accountDisabled ? <AdminStatusBadge label="Disabled" tone="danger" /> : null}
-          </View>
+      {!loading && opsUsers.length > 0 && filteredUsers.length === 0 ? (
+        <AdminEmptyState
+          title="No matching accounts"
+          body="No account matches that search. Try a different name, email, or phone number."
+        />
+      ) : null}
 
-          <Text style={styles.detailLine}>UID: {entry.uid}</Text>
-          <Text style={styles.detailLine}>Verified email: {entry.emailVerified ? 'Yes' : 'No'}</Text>
-          <Text style={styles.detailLine}>Sign-in disabled: {entry.accountDisabled ? 'Yes' : 'No'}</Text>
-          <Text style={styles.detailLine}>Last privileged role: {entry.lastPrivilegedRole ?? 'Not recorded'}</Text>
-          <Text style={styles.detailLine}>Disabled at: {entry.disabledAt ?? 'Not disabled'}</Text>
-          <Text style={styles.detailLine}>Restaurant link: {entry.restaurantId ?? 'Not linked'}</Text>
-          <Text style={styles.detailLine}>Single-device session: {entry.activeSessionId ? 'Active' : 'Idle'}</Text>
-          <Text style={styles.detailLine}>Last session update: {entry.activeSessionUpdatedAt ?? 'Not recorded'}</Text>
-          <Text style={styles.detailLine}>Created: {entry.createdAt}</Text>
-
-          <View style={styles.actionWrap}>
-            {(['admin', 'restaurant', 'dispatch'] as const).map((role) => (
-              <TouchableOpacity
-                key={role}
-                style={[
-                  styles.inlineAction,
-                  entry.role === role ? styles.inlineActionActive : null,
-                  pendingUid === entry.uid || entry.accountDisabled ? styles.inlineActionDisabled : null,
-                ]}
-                onPress={() =>
-                  handleAssignRole(
-                    entry.uid,
-                    role,
-                    ['restaurant', 'dispatch'].includes(role) ? restaurantLinks[entry.uid] ?? entry.restaurantId ?? null : null
-                  )
-                }
-                disabled={pendingUid === entry.uid || entry.accountDisabled}
-              >
-                <Text style={[styles.inlineActionText, entry.role === role ? styles.inlineActionTextActive : null]}>
-                  {entry.role === role ? `Current: ${describeRole(role)}` : `Make ${describeRole(role)}`}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            {['restaurant', 'dispatch'].includes(entry.role) ? (
-              <View style={styles.linkBlock}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Restaurant ID for this account"
-                  placeholderTextColor={adminTheme.textMuted}
-                  value={restaurantLinks[entry.uid] ?? entry.restaurantId ?? ''}
-                  onChangeText={(value) =>
-                    setRestaurantLinks((current) => ({
-                      ...current,
-                      [entry.uid]: value,
-                    }))
-                  }
-                  editable={pendingUid !== entry.uid && !entry.accountDisabled}
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.inlineAction,
-                    pendingUid === entry.uid || entry.accountDisabled ? styles.inlineActionDisabled : null,
-                  ]}
-                  onPress={() => handleUpdateRestaurantLink(entry.uid)}
-                  disabled={pendingUid === entry.uid || entry.accountDisabled}
-                >
-                  <Text style={styles.inlineActionText}>Save restaurant link</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-            <TouchableOpacity
-              style={[
-                styles.inlineDanger,
-                pendingUid === entry.uid || entry.uid === user?.uid || entry.accountDisabled ? styles.inlineActionDisabled : null,
-              ]}
-              onPress={() => handleRevokeRole(entry.uid)}
-              disabled={pendingUid === entry.uid || entry.uid === user?.uid || entry.accountDisabled}
-            >
-              <Text style={styles.inlineDangerText}>
-                {entry.uid === user?.uid ? 'Signed-in admin' : 'Revert to Customer'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.inlineDanger,
-                pendingUid === entry.uid || entry.uid === user?.uid || entry.accountDisabled
-                  ? styles.inlineActionDisabled
-                  : null,
-              ]}
-              onPress={() => handleDisableAccess(entry.uid)}
-              disabled={pendingUid === entry.uid || entry.uid === user?.uid || entry.accountDisabled}
-            >
-              <Text style={styles.inlineDangerText}>
-                {entry.accountDisabled ? 'Access disabled' : entry.uid === user?.uid ? 'Signed-in admin' : 'Disable sign-in'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.inlineAction,
-                entry.accountDisabled ? styles.inlineActionActive : null,
-                pendingUid === entry.uid || !entry.accountDisabled ? styles.inlineActionDisabled : null,
-              ]}
-              onPress={() => handleEnableAccess(entry.uid)}
-              disabled={pendingUid === entry.uid || !entry.accountDisabled}
-            >
-              <Text
-                style={[
-                  styles.inlineActionText,
-                  entry.accountDisabled ? styles.inlineActionTextActive : null,
-                ]}
-              >
-                {entry.accountDisabled ? 'Restore last access' : 'Active'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </AdminCard>
+      {filteredUsers.map((entry) => (
+        <AdminUserCard
+          key={entry.uid}
+          user={entry}
+          pending={pendingUid === entry.uid}
+          isSelf={entry.uid === user?.uid}
+          restaurantLinkValue={restaurantLinks[entry.uid] ?? entry.restaurantId ?? ''}
+          onAssignRole={handleAssignRole}
+          onRevoke={handleRevokeRole}
+          onDisable={handleDisableAccess}
+          onEnable={handleEnableAccess}
+          onDelete={(uid, email) => void handleDeleteAdminAccess(uid, email)}
+          onChangeRestaurantLink={handleChangeRestaurantLink}
+          onUpdateRestaurantLink={handleUpdateRestaurantLink}
+        />
       ))}
     </ScrollView>
   );
@@ -455,30 +417,18 @@ const styles = StyleSheet.create({
     marginTop: 16,
     textAlign: 'center',
   },
-  headerRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
+  searchShell: {
+    backgroundColor: adminTheme.surface,
+    borderColor: adminTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 16,
+    paddingHorizontal: 14,
   },
-  headerMeta: {
-    flex: 1,
-  },
-  name: {
+  searchInput: {
     color: adminTheme.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  email: {
-    color: adminTheme.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  detailLine: {
-    color: adminTheme.textMuted,
     fontSize: 14,
-    lineHeight: 22,
-    marginTop: 8,
+    minHeight: 48,
   },
   input: {
     backgroundColor: adminTheme.cream,
@@ -524,45 +474,6 @@ const styles = StyleSheet.create({
   primaryActionText: {
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '800',
-  },
-  actionWrap: {
-    gap: 10,
-    marginTop: 14,
-  },
-  linkBlock: {
-    gap: 10,
-    marginTop: 2,
-  },
-  inlineAction: {
-    backgroundColor: adminTheme.surfaceMuted,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  inlineActionActive: {
-    backgroundColor: adminTheme.accentSoft,
-  },
-  inlineActionDisabled: {
-    opacity: 0.55,
-  },
-  inlineActionText: {
-    color: adminTheme.accentStrong,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  inlineActionTextActive: {
-    color: adminTheme.accentStrong,
-  },
-  inlineDanger: {
-    backgroundColor: adminTheme.dangerSoft,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  inlineDangerText: {
-    color: adminTheme.danger,
-    fontSize: 13,
     fontWeight: '800',
   },
 });

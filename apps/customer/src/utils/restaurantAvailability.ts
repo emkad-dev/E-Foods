@@ -131,10 +131,16 @@ export const matchesRestaurantQuery = (restaurant: DiscoveryRestaurant, query: s
     return true;
   }
 
-  return (
-    restaurant.name.toLowerCase().includes(normalizedQuery) ||
-    (restaurant.cuisine ?? '').toLowerCase().includes(normalizedQuery)
-  );
+  const haystacks = [
+    restaurant.name,
+    restaurant.cuisine ?? '',
+    ...(restaurant.menu ?? []).map((category) => category.category ?? ''),
+    ...(restaurant.menu ?? []).flatMap((category) =>
+      (category.items ?? []).flatMap((item) => [item.name ?? '', item.categoryLabel ?? '', item.categoryId ?? ''])
+    ),
+  ];
+
+  return haystacks.some((value) => value.toLowerCase().includes(normalizedQuery));
 };
 
 export const extractRestaurantCoordinates = (restaurant: DiscoveryRestaurant): CoordinatePoint | null => {
@@ -149,12 +155,15 @@ export const extractRestaurantCoordinates = (restaurant: DiscoveryRestaurant): C
 };
 
 export const getRestaurantServiceRadiusKm = (restaurant: DiscoveryRestaurant) => {
-  return (
+  const configured =
     toNumber(restaurant.deliveryRadiusKm) ??
     toNumber(restaurant.serviceRadiusKm) ??
-    toNumber(restaurant.deliveryAreaKm) ??
-    DEFAULT_SERVICE_RADIUS_KM
-  );
+    toNumber(restaurant.deliveryAreaKm);
+
+  // A non-positive radius (0 or negative, e.g. a partner that opted into delivery
+  // but never set a range) must not make the restaurant undeliverable everywhere —
+  // fall back to the default service radius.
+  return configured !== null && configured > 0 ? configured : DEFAULT_SERVICE_RADIUS_KM;
 };
 
 const getPublishedMenuItemCount = (restaurant: DiscoveryRestaurant) =>
@@ -169,21 +178,6 @@ export const isRestaurantVisibleToCustomers = (restaurant: DiscoveryRestaurant) 
   }
 
   if (restaurant.isPublished !== true) {
-    return false;
-  }
-
-  if (
-    restaurant.approvalStatus &&
-    restaurant.approvalStatus !== 'approved'
-  ) {
-    return false;
-  }
-
-  if (restaurant.isOpen === false) {
-    return false;
-  }
-
-  if (!isInsideOperatingWindow(restaurant)) {
     return false;
   }
 
@@ -279,6 +273,7 @@ export const getRestaurantAvailability = (
 export const getDiscoveryEmptyState = (params: {
   availableCount: number;
   matchedCount: number;
+  unavailableReasons: RestaurantAvailability['reason'][];
   query: string;
   unavailableCount: number;
   deliveryLocation: AddressRecord | null;
@@ -288,21 +283,34 @@ export const getDiscoveryEmptyState = (params: {
   if (normalizedQuery && params.matchedCount === 0) {
     return {
       title: 'Coming soon',
-      copy: `We have not listed "${params.query.trim()}" yet, but more cuisines are on the way.`,
+      copy: `We have not listed "${params.query.trim()}" yet, but more cuisines and categories are on the way.`,
+    };
+  }
+
+  const hasClosedRestaurants = params.unavailableReasons.includes('closed');
+  const allUnavailableAreClosed =
+    params.unavailableReasons.length > 0 && params.unavailableReasons.every((reason) => reason === 'closed');
+
+  if (params.availableCount === 0 && params.unavailableCount > 0 && allUnavailableAreClosed) {
+    return {
+      title: 'Closed right now',
+      copy: 'These restaurants are published, but they are currently closed. Check back again soon.',
     };
   }
 
   if (params.deliveryLocation && params.matchedCount > 0 && params.availableCount === 0 && params.unavailableCount > 0) {
     return {
       title: 'Not available in your area',
-      copy: 'We found matching restaurants, but they are outside the delivery range for this pinned location.',
+      copy: hasClosedRestaurants
+        ? 'We found matching restaurants, but they are currently closed or outside the delivery range for this pinned location.'
+        : 'We found matching restaurants, but they are outside the delivery range for this pinned location.',
     };
   }
 
   return {
     title: 'No restaurants found',
     copy: normalizedQuery
-      ? 'Try another food, restaurant name, or cuisine.'
+      ? 'Try another food, restaurant name, cuisine, or category.'
       : 'Restaurant listings will appear here once partners are available.',
   };
 };

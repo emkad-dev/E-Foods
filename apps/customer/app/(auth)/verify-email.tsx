@@ -91,7 +91,7 @@ export default function VerifyEmailScreen() {
 
   useEffect(() => {
     if (user?.emailVerified) {
-      router.replace('/(customer)/home');
+      router.replace('/home' as never);
     }
   }, [router, user?.emailVerified]);
 

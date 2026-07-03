@@ -10,7 +10,6 @@
 
 import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity } from 'react-native';
-import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import {
   getGoogleSignInUnavailableMessage,
@@ -32,9 +31,6 @@ export default function GoogleSignInButton() {
     try {
       const idToken = await signInWithGoogleIdToken();
       await signInWithGoogle(idToken);
-      
-      // Redirect to home page after successful sign-in
-      router.replace('/(customer)/home');
     } catch (error: any) {
       console.error('Google Sign-In Error:', error);
       if (error.code === 'PLAYGROUND_REDIRECT_URI_MISMATCH') {

@@ -1,0 +1,54 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ 'main' ]
+
+jobs:
+  deploy:
+    name: Deploy to staging/prod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      - name: Deploy Prisma migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: npm run db:migrate:deploy
+
+      - name: Deploy Supabase Edge Functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          npx supabase --version
+          supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          supabase functions deploy app-rpc payment-verification paystack-webhook public-catalog --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
+
+      - name: Deploy admin web to Vercel (optional)
+        if: ${{ env.VERCEL_TOKEN != '' }}
+        uses: amondnet/vercel-action@v20
+        with:
+          vercel-token: ${{ env.VERCEL_TOKEN }}
+          vercel-org-id: ${{ env.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ env.VERCEL_PROJECT_ID }}
+          working-directory: ./apps/admin
+
+      - name: Notify
+        run: echo "Deploy steps finished (check logs for details)."

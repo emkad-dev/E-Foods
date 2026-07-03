@@ -1,149 +1,47 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { corsHeaders } from '../_shared/cors.ts';
-import { serviceClient } from '../_shared/client.ts';
-import { enqueueNotification, updateJobStatus, incrementRetry } from '../_shared/queue.ts';
-import { OrderPlacementJob } from '../_shared/queue.ts';
 import {
-  buildNotificationData,
-  loadRestaurantRecipientUserIds,
-} from '../_shared/notifications.ts';
-import { broadcastOrderChanged } from '../_shared/realtime.ts';
-
-const ORDER_STATUS = {
-  PLACED: 'placed',
-  CONFIRMED: 'confirmed',
-  CANCELLED: 'cancelled',
-  COMPLETED: 'completed',
-};
-
-const handleOrderPlacement = async (job: OrderPlacementJob) => {
-  const { orderId, customerId, restaurantId, items } = job;
-
-  try {
-    // Insert order
-    const { data: orderData, error: orderError } = await serviceClient
-      .from('CustomerOrder')
-      .insert({
-        id: orderId,
-        customerId,
-        restaurantId,
-        status: ORDER_STATUS.PLACED,
-        timeline: {
-          placedAt: new Date().toISOString(),
-        },
-      })
-      .select()
-      .single();
-
-    if (orderError) throw new Error(`Failed to create order: ${orderError.message}`);
-
-    // Insert items
-    const itemsInsert = items.map((item) => ({
-      orderId,
-      menuItemId: item.menuItemId,
-      quantity: item.quantity,
-      specialInstructions: item.specialInstructions || null,
-    }));
-
-    const { error: itemsError } = await serviceClient
-      .from('OrderItem')
-      .insert(itemsInsert);
-
-    if (itemsError) {
-      // Rollback: delete order if items insert fails
-      await serviceClient.from('CustomerOrder').delete().eq('id', orderId);
-      throw new Error(`Failed to create order items: ${itemsError.message}`);
-    }
-
-    // Insert delivery event
-    const { error: eventError } = await serviceClient.from('DeliveryEvent').insert({
-      orderId,
-      eventType: 'order_placed',
-      timestamp: new Date().toISOString(),
-      details: { source: 'queue' },
-    });
-
-    if (eventError) console.warn(`Failed to log event: ${eventError.message}`);
-
-    // Enqueue notification
-    const restaurantUsers = await loadRestaurantRecipientUserIds(restaurantId);
-    if (restaurantUsers.length > 0) {
-      await enqueueNotification(serviceClient, {
-        userIds: restaurantUsers,
-        payload: {
-          title: 'New Order Received',
-          body: `Order ${orderId} is waiting for confirmation`,
-          data: buildNotificationData({
-            app: 'partner',
-            orderId,
-            routeKey: 'partner_order_detail',
-            type: 'order_update',
-          }),
-        },
-      });
-    }
-
-    // Update order status to confirmed
-    await serviceClient
-      .from('CustomerOrder')
-      .update({
-        status: ORDER_STATUS.CONFIRMED,
-        timeline: {
-          ...orderData?.timeline,
-          confirmedAt: new Date().toISOString(),
-        },
-      })
-      .eq('id', orderId);
-
-    await broadcastOrderChanged(orderId, { restaurantId });
-
-    await updateJobStatus(serviceClient, 'order-placement', orderId, 'completed', {
-      orderId,
-      status: ORDER_STATUS.CONFIRMED,
-    });
-
-    return { success: true, orderId, status: ORDER_STATUS.CONFIRMED };
-  } catch (error: any) {
-    console.error('Order placement error:', error.message);
-
-    // Attempt retry
-    const canRetry = await incrementRetry(serviceClient, 'order-placement', orderId, 3);
-    if (canRetry) {
-      await updateJobStatus(serviceClient, 'order-placement', orderId, 'pending');
-      throw new Error(`Order placement failed, will retry: ${error.message}`);
-    }
-
-    await updateJobStatus(
-      serviceClient,
-      'order-placement',
-      orderId,
-      'failed',
-      undefined,
-      error.message
-    );
-
-    throw error;
-  }
-};
+  createEdgeObservation,
+  finishEdgeObservation,
+  isEdgeBackpressureError,
+  jsonResponse,
+  runWithBackpressure,
+} from '../_shared/observability.ts';
+import type { OrderPlacementJob } from '../_shared/queue.ts';
+import { handleOrderPlacement } from './handler.ts';
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  const observation = createEdgeObservation(req, 'order-placement');
+
+  if (req.method === 'OPTIONS') {
+    const response = new Response('ok', { headers: corsHeaders });
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
+  }
 
   try {
     const job: OrderPlacementJob = await req.json();
-    const result = await handleOrderPlacement(job);
-    return new Response(JSON.stringify(result), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    const result = await runWithBackpressure('order-placement', { maxConcurrent: 4, retryAfterSeconds: 3 }, async () =>
+      handleOrderPlacement(job)
+    );
+    const response = jsonResponse(200, result, corsHeaders);
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error.message }),
+    const response = jsonResponse(
+      isEdgeBackpressureError(error) ? 429 : 500,
       {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        error: error.message,
+      },
+      {
+        ...corsHeaders,
+        ...(isEdgeBackpressureError(error)
+          ? { 'Retry-After': String(error.retryAfterSeconds) }
+          : {}),
       }
     );
+    finishEdgeObservation(observation, { status: response.status, error });
+    return response;
   }
 });

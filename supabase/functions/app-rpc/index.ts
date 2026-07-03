@@ -21,6 +21,13 @@ import {
   sendTransactionalEmail,
   shortOrderCode,
 } from '../_shared/email.ts';
+import {
+  createEdgeObservation,
+  finishEdgeObservation,
+  jsonResponse,
+  isEdgeBackpressureError,
+  runWithBackpressure,
+} from '../_shared/observability.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -227,6 +234,9 @@ type DispatchOrderDetailResponse = ReturnType<typeof toOrderSnapshotResponse>;
 
 type OrderSnapshotOptions = {
   courierPhone?: string | null;
+  courierLatitude?: number | null;
+  courierLongitude?: number | null;
+  courierUpdatedAt?: string | null;
   customerPhone?: string | null;
 };
 
@@ -255,21 +265,38 @@ const POLICY_SOURCES = new Set([
   'partner_signup',
   'dispatch_signup',
 ]);
+const HOT_WRITE_ACTIONS = new Set([
+  'placeCustomerOrder',
+  'initializeCustomerPayment',
+  'refreshCustomerPaymentStatus',
+  'cancelCustomerOrder',
+]);
+const HOT_WRITE_BACKPRESSURE_LIMITS: Record<string, number> = {
+  cancelCustomerOrder: 8,
+  initializeCustomerPayment: 8,
+  placeCustomerOrder: 6,
+  refreshCustomerPaymentStatus: 10,
+};
 const DEFAULT_FUNCTION_ORDER_STATUS = 'placed';
 const DEFAULT_CURRENCY = 'NGN';
 const DEFAULT_DELIVERY_TIME = '25-35 min';
 const DEFAULT_DISPATCH_STATUS = 'Available';
 const DEFAULT_DISPATCH_VEHICLE = 'Bike';
-const PLATFORM_COMMISSION_RATE = 0.15;
+const PLATFORM_COMMISSION_RATES = {
+  delivery: 0.15,
+  pickup: 0.1,
+} as const;
 // Flat per-item marketplace markup charged to the customer on top of the
 // restaurant's own menu price. Kept entirely by the platform — the restaurant is
 // always settled on its own price (see calculateSettlementBreakdown).
-// Mirrored on the client via CUSTOMER_ITEM_MARKUP in src/domain/orders.ts.
+// Mirrored on the client via CUSTOMER_ITEM_MARKUP in packages/domain/src/orders.ts.
 const CUSTOMER_ITEM_MARKUP = 150;
 const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')?.trim() ?? '';
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim() ?? '';
+const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY')?.trim() ?? '';
+const ADMIN_REQUEST_TIMEOUT_MS = 10_000;
+const PAYSTACK_REQUEST_TIMEOUT_MS = 10_000;
 const PAYMENT_STATUS = {
   AUTHORIZED: 'authorized',
   FAILED: 'failed',
@@ -330,6 +357,7 @@ const ORDER_STATUS = {
   READY_FOR_PICKUP: 'ready_for_pickup',
   REJECTED: 'rejected',
 } as const;
+const ORDER_PAYMENT_TIMEOUT_MS = 15 * 60 * 1000;
 
 const toSortableTimestamp = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -358,13 +386,10 @@ const fail = (status: number, message: string): never => {
   throw new RpcError(status, message);
 };
 
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), {
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json',
-    },
-    status,
+const json = (status: number, body: unknown, headers: HeadersInit = {}) =>
+  jsonResponse(status, body, {
+    ...corsHeaders,
+    ...headers,
   });
 
 const nowIso = () => new Date().toISOString();
@@ -376,6 +401,8 @@ const sanitizeOptionalText = (value: unknown) => {
   const nextValue = sanitizeText(value);
   return nextValue || null;
 };
+
+const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 
 const normalizePolicyApp = (value: unknown) => {
   const app = sanitizeText(value).toLowerCase();
@@ -526,6 +553,9 @@ const normalizeOrderStatus = (value: unknown) => {
   const status = sanitizeText(value, 'draft');
   switch (status) {
     case 'pending':
+    // 'confirmed' was written by the async order/payment handlers but is not a valid
+    // order status; treat it as 'placed' so paid orders stay actionable.
+    case 'confirmed':
       return ORDER_STATUS.PLACED;
     case 'ready':
       return ORDER_STATUS.READY_FOR_PICKUP;
@@ -670,7 +700,10 @@ const toOrderSnapshotResponse = (
     ? {
         courierId: sanitizeOptionalText(assignment.courierId),
         courierName: sanitizeOptionalText(assignment.courierName),
+        courierLatitude: options.courierLatitude ?? null,
+        courierLongitude: options.courierLongitude ?? null,
         courierPhone: sanitizeOptionalText(options.courierPhone),
+        courierUpdatedAt: options.courierUpdatedAt ?? null,
         dispatchId: sanitizeOptionalText(assignment.dispatchId),
         dispatchOwnerId: sanitizeOptionalText(assignment.dispatchOwnerId),
       }
@@ -703,7 +736,7 @@ const toOrderSnapshotResponse = (
   pricing: order.pricing ?? null,
   restaurantId: order.restaurantId,
   restaurantName: order.restaurantName,
-  status: sanitizeText(order.status, DEFAULT_FUNCTION_ORDER_STATUS),
+  status: normalizeOrderStatus(sanitizeText(order.status, DEFAULT_FUNCTION_ORDER_STATUS)),
   timeline: order.timeline ?? null,
   total: Number((order.pricing as JsonObject | null)?.total ?? 0),
   updatedAt: order.updatedAt ?? null,
@@ -917,7 +950,7 @@ const createAuditEntry = async (
 };
 
 const assertSupabaseAdminConfigured = () => {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     fail(500, 'Supabase admin credentials are not configured for this Edge function.');
   }
 };
@@ -925,8 +958,8 @@ const assertSupabaseAdminConfigured = () => {
 const toSupabaseAdminHeaders = () => {
   assertSupabaseAdminConfigured();
   return {
-    apikey: SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    apikey: SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
     'Content-Type': 'application/json',
   };
 };
@@ -936,13 +969,22 @@ const adminAuthRequest = async <T = Record<string, unknown>>(
   init: RequestInit = {}
 ): Promise<T> => {
   assertSupabaseAdminConfigured();
-  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, '')}${path}`, {
-    ...init,
-    headers: {
-      ...toSupabaseAdminHeaders(),
-      ...(init.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${SUPABASE_URL.replace(/\/+$/, '')}${path}`, {
+      ...init,
+      headers: {
+        ...toSupabaseAdminHeaders(),
+        ...(init.headers ?? {}),
+      },
+      signal: init.signal ?? AbortSignal.timeout(ADMIN_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      fail(504, `Supabase admin request timed out after ${ADMIN_REQUEST_TIMEOUT_MS}ms.`);
+    }
+    throw error;
+  }
   const payload = (await response.json().catch(() => null)) as T & { message?: string; msg?: string } | null;
 
   if (!response.ok) {
@@ -1026,10 +1068,19 @@ const updateSupabaseAuthUser = async (
   ).then((payload) => payload.user ?? payload);
 
 const deleteSupabaseAuthUser = async (uid: string) => {
-  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/admin/users/${uid}`, {
-    method: 'DELETE',
-    headers: toSupabaseAdminHeaders(),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/admin/users/${uid}`, {
+      method: 'DELETE',
+      headers: toSupabaseAdminHeaders(),
+      signal: AbortSignal.timeout(ADMIN_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      fail(504, `Supabase admin request timed out after ${ADMIN_REQUEST_TIMEOUT_MS}ms.`);
+    }
+    throw error;
+  }
 
   if (!response.ok && response.status !== 404) {
     const payload = (await response.json().catch(() => null)) as { message?: string; msg?: string } | null;
@@ -1139,6 +1190,29 @@ const loadUserPhoneNumber = async (uid: string) => {
   return sanitizeOptionalText(data?.phoneNumber);
 };
 
+const loadUserPhoneNumbers = async (uids: string[]) => {
+  const phoneByUid = new Map<string, string | null>();
+  const safeUids = unique(uids.map((uid) => sanitizeText(uid)).filter(Boolean));
+  if (safeUids.length === 0) {
+    return phoneByUid;
+  }
+
+  const { data, error } = await serviceClient
+    .from('UserAccount')
+    .select('uid,phoneNumber')
+    .in('uid', safeUids);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const row of (data ?? []) as Pick<UserAccountRow, 'uid' | 'phoneNumber'>[]) {
+    phoneByUid.set(row.uid, sanitizeOptionalText(row.phoneNumber));
+  }
+
+  return phoneByUid;
+};
+
 const loadDispatchRiderPhoneNumber = async (riderId: string | null | undefined) => {
   const safeRiderId = sanitizeText(riderId);
   if (!safeRiderId) {
@@ -1156,6 +1230,35 @@ const loadDispatchRiderPhoneNumber = async (riderId: string | null | undefined) 
   }
 
   return sanitizeOptionalText(data?.phoneNumber);
+};
+
+const loadDispatchRiderSnapshot = async (riderId: string | null | undefined) => {
+  const safeRiderId = sanitizeText(riderId);
+  if (!safeRiderId) {
+    return {
+      courierLatitude: null,
+      courierLongitude: null,
+      courierUpdatedAt: null,
+      courierPhone: null,
+    };
+  }
+
+  const { data, error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .select('phoneNumber,latitude,longitude,updatedAt')
+    .eq('id', safeRiderId)
+    .maybeSingle<Pick<DispatchRiderRow, 'latitude' | 'longitude' | 'phoneNumber' | 'updatedAt'>>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    courierLatitude: data?.latitude ?? null,
+    courierLongitude: data?.longitude ?? null,
+    courierPhone: sanitizeOptionalText(data?.phoneNumber),
+    courierUpdatedAt: data?.updatedAt ?? null,
+  };
 };
 
 const loadUserRoles = async (userIds: string[]) => {
@@ -1310,6 +1413,169 @@ const selectDispatchOwnerForRestaurant = async (restaurantId: string) => {
   }
 
   return null;
+};
+
+const toRadians = (value: number) => (value * Math.PI) / 180;
+
+const getDistanceKm = (
+  origin: { latitude: number; longitude: number },
+  target: { latitude: number; longitude: number }
+) => {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(target.latitude - origin.latitude);
+  const dLon = toRadians(target.longitude - origin.longitude);
+  const lat1 = toRadians(origin.latitude);
+  const lat2 = toRadians(target.latitude);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const adjustDispatchRiderLoad = async (riderId: string | null | undefined, delta: number) => {
+  const safeRiderId = sanitizeText(riderId);
+  if (!safeRiderId || !Number.isFinite(delta) || delta === 0) {
+    return;
+  }
+
+  const { data: rider, error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .select('id,activeLoad')
+    .eq('id', safeRiderId)
+    .maybeSingle<Pick<DispatchRiderRow, 'id' | 'activeLoad'>>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!rider) {
+    return;
+  }
+
+  const nextLoad = Math.max(0, Math.floor(parseInteger(rider.activeLoad, 0) + delta));
+  const { error: updateError } = await serviceClient
+    .from('DispatchRiderRecord')
+    .update({
+      activeLoad: nextLoad,
+      updatedAt: nowIso(),
+    })
+    .eq('id', safeRiderId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+};
+
+type DispatchCourierCandidate = {
+  rider: DispatchRiderRow;
+  userId: string;
+  weight: number;
+};
+
+const buildDispatchCourierWeight = (rider: DispatchRiderRow | null, distanceKm: number | null) => {
+  const activeLoad = Math.max(0, Math.floor(rider?.activeLoad ?? 0));
+  const distancePenalty = distanceKm === null || !Number.isFinite(distanceKm) ? 0 : Math.min(10, distanceKm / 5);
+  return 1 / (1 + activeLoad + distancePenalty);
+};
+
+const loadDispatchCourierCandidates = async (restaurantId: string) => {
+  const [{ data: restaurant, error: restaurantError }, { data: roles, error: roleError }] = await Promise.all([
+    serviceClient
+      .from('RestaurantRecord')
+      .select('id,latitude,longitude')
+      .eq('id', restaurantId)
+      .maybeSingle<{ id: string; latitude?: number | null; longitude?: number | null }>(),
+    serviceClient.from('UserRole').select('userId').eq('role', 'dispatch'),
+  ]);
+
+  if (restaurantError) {
+    throw new Error(restaurantError.message);
+  }
+
+  if (roleError) {
+    throw new Error(roleError.message);
+  }
+
+  const userIds = unique(((roles ?? []) as { userId: string }[]).map((row) => row.userId));
+  if (userIds.length === 0) {
+    return [] as DispatchCourierCandidate[];
+  }
+
+  const [{ data: accounts, error: accountError }, { data: riders, error: riderError }] = await Promise.all([
+    serviceClient.from('UserAccount').select('uid,accountDisabled').in('uid', userIds),
+    serviceClient
+      .from('DispatchRiderRecord')
+      .select('id,displayName,status,activeLoad,latitude,longitude')
+      .in('id', userIds),
+  ]);
+
+  if (accountError) {
+    throw new Error(accountError.message);
+  }
+
+  if (riderError) {
+    throw new Error(riderError.message);
+  }
+
+  const accountsById = new Map(((accounts ?? []) as Pick<UserAccountRow, 'uid' | 'accountDisabled'>[]).map((row) => [
+    row.uid,
+    row,
+  ]));
+  const ridersById = new Map(
+    ((riders ?? []) as Pick<DispatchRiderRow, 'activeLoad' | 'id' | 'latitude' | 'longitude' | 'status' | 'displayName'>[]).map(
+      (row) => [row.id, row]
+    )
+  );
+  const restaurantCoordinates =
+    restaurant?.latitude !== null &&
+    restaurant?.latitude !== undefined &&
+    restaurant?.longitude !== null &&
+    restaurant?.longitude !== undefined
+      ? { latitude: Number(restaurant.latitude), longitude: Number(restaurant.longitude) }
+      : null;
+
+  return userIds
+    .map((userId) => {
+      const account = accountsById.get(userId) ?? null;
+      const rider = ridersById.get(userId) ?? null;
+
+      if (!isDispatcherEligible(account, rider)) {
+        return null;
+      }
+
+      const riderCoordinates =
+        rider?.latitude !== null &&
+        rider?.latitude !== undefined &&
+        rider?.longitude !== null &&
+        rider?.longitude !== undefined
+          ? { latitude: Number(rider.latitude), longitude: Number(rider.longitude) }
+          : null;
+      const distanceKm =
+        restaurantCoordinates && riderCoordinates ? getDistanceKm(restaurantCoordinates, riderCoordinates) : null;
+
+      return {
+        rider: rider as DispatchRiderRow,
+        userId,
+        weight: buildDispatchCourierWeight(rider, distanceKm),
+      } satisfies DispatchCourierCandidate;
+    })
+    .filter(Boolean) as DispatchCourierCandidate[];
+};
+
+const selectDispatchCourierForRestaurant = async (restaurantId: string) => {
+  const candidates = await loadDispatchCourierCandidates(restaurantId);
+  const selectedCandidate = selectWeightedRandomCandidate(candidates);
+
+  if (!selectedCandidate) {
+    return null;
+  }
+
+  return {
+    rider: selectedCandidate.rider,
+    userId: selectedCandidate.userId,
+  };
 };
 
 const loadPartnerApplication = async (applicationId: string) => {
@@ -1514,10 +1780,12 @@ const calculateServiceFee = (subtotal: number) => {
 
 const calculateSettlementBreakdown = ({
   deliveryFee,
+  fulfillmentType,
   marketplaceMarkup = 0,
   subtotal,
 }: {
   deliveryFee: number;
+  fulfillmentType: 'delivery' | 'pickup';
   marketplaceMarkup?: number;
   subtotal: number;
 }) => {
@@ -1527,14 +1795,16 @@ const calculateSettlementBreakdown = ({
   // markup is platform margin and is excluded from the restaurant's commission basis.
   const restaurantBasis = roundCurrency(Math.max(safeSubtotal - markup, 0));
   const dispatchFee = roundCurrency(deliveryFee);
-  const commission = roundCurrency(restaurantBasis * PLATFORM_COMMISSION_RATE);
+  const commissionRate = PLATFORM_COMMISSION_RATES[fulfillmentType];
+  const commission = roundCurrency(restaurantBasis * commissionRate);
   const restaurantPayable = roundCurrency(Math.max(restaurantBasis - commission, 0));
   const platformFee = roundCurrency(commission + markup);
   const netSettlement = roundCurrency(restaurantPayable + dispatchFee);
 
   return {
     basis: 'menu_subtotal',
-    commissionRate: PLATFORM_COMMISSION_RATE,
+    commissionRate,
+    fulfillmentType,
     dispatchFee,
     marketplaceMarkup: markup,
     netSettlement,
@@ -1545,11 +1815,13 @@ const calculateSettlementBreakdown = ({
 
 const calculatePricing = ({
   deliveryFee,
+  fulfillmentType,
   marketplaceMarkup = 0,
   subtotal,
   tip,
 }: {
   deliveryFee: number;
+  fulfillmentType: 'delivery' | 'pickup';
   marketplaceMarkup?: number;
   subtotal: number;
   tip: number;
@@ -1560,6 +1832,7 @@ const calculatePricing = ({
   const serviceFee = calculateServiceFee(safeSubtotal);
   const settlement = calculateSettlementBreakdown({
     deliveryFee: safeDeliveryFee,
+    fulfillmentType,
     marketplaceMarkup,
     subtotal: safeSubtotal,
   });
@@ -1657,7 +1930,7 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This checkout flow does not support the selected payment method.');
   }
 
-  if (tipAmount < 0 || tipAmount > 100) {
+  if (tipAmount < 0 || tipAmount > 200) {
     fail(400, 'Tip amount is outside the allowed range.');
   }
 
@@ -1702,6 +1975,7 @@ const prepareCustomerOrderDraft = async (
 
   const pricing = calculatePricing({
     deliveryFee,
+    fulfillmentType,
     marketplaceMarkup,
     subtotal,
     tip: tipAmount,
@@ -1800,9 +2074,26 @@ const createOrderWithItems = async ({
 };
 
 const upsertPaymentTransaction = async (payload: JsonObject & { reference: string }) => {
-  const { error } = await serviceClient.from('PaymentTransaction').upsert(payload, {
+  const { data: existingTransaction, error: lookupError } = await serviceClient
+    .from('PaymentTransaction')
+    .select('id')
+    .eq('reference', payload.reference)
+    .maybeSingle<{ id: string }>();
+
+  if (lookupError) {
+    throw new Error(`Failed to resolve payment transaction id: ${lookupError.message}`);
+  }
+
+  const { error } = await serviceClient.from('PaymentTransaction').upsert(
+    {
+      id: existingTransaction?.id?.trim() || payload.reference.trim(),
+      ...payload,
+      updatedAt: new Date().toISOString(),
+    },
+    {
     onConflict: 'reference',
-  });
+    }
+  );
 
   if (error) {
     throw new Error(error.message);
@@ -1810,7 +2101,11 @@ const upsertPaymentTransaction = async (payload: JsonObject & { reference: strin
 };
 
 const insertDeliveryEvent = async (payload: JsonObject) => {
-  const { error } = await serviceClient.from('DeliveryEvent').insert(payload);
+  const eventPayload = {
+    id: crypto.randomUUID(),
+    ...payload,
+  };
+  const { error } = await serviceClient.from('DeliveryEvent').insert(eventPayload);
 
   if (error) {
     throw new Error(error.message);
@@ -1903,7 +2198,7 @@ const loadOrdersForCustomer = async (customerId: string) => {
     throw new Error(error.message);
   }
 
-  const orderList = (orders ?? []) as CustomerOrderRow[];
+  const orderList = await Promise.all(((orders ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order)));
   const { assignmentsByOrderId, itemsByOrderId } = await loadOrderRelations(orderList.map((order) => order.id));
 
   return orderList.map((order) =>
@@ -1946,12 +2241,13 @@ const loadOrderBundle = async (orderId: string, includeEvents = false) => {
     return null;
   }
 
+  const normalizedOrder = await maybeExpireUnpaidOrder(order);
   const { assignmentsByOrderId, eventsByOrderId, itemsByOrderId } = await loadOrderRelations([orderId]);
   return {
     assignment: assignmentsByOrderId.get(orderId) ?? null,
     events: includeEvents ? eventsByOrderId.get(orderId) ?? [] : [],
     items: itemsByOrderId.get(orderId) ?? [],
-    order,
+    order: normalizedOrder,
   };
 };
 
@@ -1983,6 +2279,90 @@ const assertNonTerminalOrder = (order: CustomerOrderRow) => {
   }
 };
 
+const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
+  const currentStatus = normalizeOrderStatus(order.status);
+  if (TERMINAL_ORDER_STATUSES.has(currentStatus)) {
+    return order;
+  }
+
+  const paymentMethod = sanitizeText(order.payment?.method);
+  const paymentStatus = sanitizeText(order.payment?.status, PAYMENT_STATUS.PENDING);
+  if (!PAYSTACK_PAYMENT_METHODS.has(paymentMethod) || paymentStatus !== PAYMENT_STATUS.PENDING) {
+    return order;
+  }
+
+  const createdAt = toSortableTimestamp(order.createdAt);
+  if (!createdAt || Date.now() - createdAt < ORDER_PAYMENT_TIMEOUT_MS) {
+    return order;
+  }
+
+  const timedOutAt = nowIso();
+  const payment = {
+    ...(order.payment ?? {}),
+    lastEvent: 'payment_timeout',
+    failedAt: timedOutAt,
+    status: PAYMENT_STATUS.FAILED,
+    verifiedAt: timedOutAt,
+  };
+  const cancellation = {
+    actor: 'system',
+    reason: 'payment_timeout',
+    timedOutAt,
+  };
+  const timeline = {
+    ...(order.timeline ?? {}),
+    cancelledAt: timedOutAt,
+    paymentTimedOutAt: timedOutAt,
+  };
+
+  await updateOrderRecord(order.id, {
+    cancellation,
+    payment,
+    status: ORDER_STATUS.CANCELLED,
+    timeline,
+    updatedAt: timedOutAt,
+  });
+
+  await insertDeliveryEvent({
+    actorUid: null,
+    details: {
+      timeoutMinutes: ORDER_PAYMENT_TIMEOUT_MS / 60000,
+    },
+    eventType: 'payment_timeout',
+    orderId: order.id,
+  });
+
+  await notifyUsers([order.customerId], {
+    title: 'Order timed out',
+    body: `Order ${order.id.slice(-6).toUpperCase()} was cancelled because payment was not completed in time.`,
+    data: buildNotificationData({
+      app: 'customer',
+      orderId: order.id,
+      routeKey: 'customer_order_detail',
+      type: 'order_update',
+    }),
+  });
+  await notifyRestaurantUsers(order.restaurantId, {
+    title: 'Unpaid order cancelled',
+    body: `Order ${order.id.slice(-6).toUpperCase()} expired after the payment window closed.`,
+    data: buildNotificationData({
+      app: 'partner',
+      orderId: order.id,
+      routeKey: 'partner_order_detail',
+      type: 'order_update',
+    }),
+  });
+
+  return {
+    ...order,
+    cancellation,
+    payment,
+    status: ORDER_STATUS.CANCELLED,
+    timeline,
+    updatedAt: timedOutAt,
+  };
+};
+
 const hasAssignedCourier = (assignment: DeliveryAssignmentRow | null) =>
   Boolean(sanitizeText(assignment?.courierId));
 
@@ -1997,6 +2377,10 @@ const assignDispatchOwnerForOrder = async (
 ) => {
   const currentStatus = normalizeOrderStatus(targetStatus);
   if (![ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+    return null;
+  }
+
+  if (sanitizeText(order.fulfillmentType, 'delivery') !== 'delivery') {
     return null;
   }
 
@@ -2274,7 +2658,34 @@ const getCustomerCancellationRefundRate = (currentStatus: string) => {
 
 const getPaystackSecretKey = () => sanitizeText(Deno.env.get('PAYSTACK_SECRET_KEY'));
 const getPaystackPublicKey = () => sanitizeText(Deno.env.get('PAYSTACK_PUBLIC_KEY'));
-const getPaystackCallbackUrl = () => sanitizeOptionalText(Deno.env.get('PAYSTACK_CALLBACK_URL'));
+const DEFAULT_PAYSTACK_CALLBACK_URL = 'https://feasty.com/payment/callback';
+const getPaystackCallbackUrl = () =>
+  sanitizeOptionalText(Deno.env.get('PAYSTACK_CALLBACK_URL')) ?? DEFAULT_PAYSTACK_CALLBACK_URL;
+const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
+  const rawCallbackUrl = sanitizeOptionalText(callbackUrl);
+
+  if (!rawCallbackUrl) {
+    return getPaystackCallbackUrl();
+  }
+
+  try {
+    const parsed = new URL(rawCallbackUrl);
+    const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+    const pathname = parsed.pathname.replace(/^\/+|\/+$/g, '');
+
+    if ((scheme === 'http' || scheme === 'https') && pathname === 'payment/callback') {
+      return parsed.toString();
+    }
+
+    if (scheme === 'feasty-customer' && pathname === 'payment/callback') {
+      return parsed.toString();
+    }
+  } catch {
+    // Fall back to the configured environment callback below.
+  }
+
+  return getPaystackCallbackUrl();
+};
 
 const assertPaystackConfigured = () => {
   if (!getPaystackSecretKey() || !getPaystackPublicKey()) {
@@ -2315,14 +2726,23 @@ const fetchPaystackJson = async ({
 }) => {
   assertPaystackConfigured();
 
-  const response = await fetch(`https://api.paystack.co${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${getPaystackSecretKey()}`,
-      'Content-Type': 'application/json',
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://api.paystack.co${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${getPaystackSecretKey()}`,
+        'Content-Type': 'application/json',
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(PAYSTACK_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      fail(504, `Paystack request to ${path} timed out after ${PAYSTACK_REQUEST_TIMEOUT_MS}ms.`);
+    }
+    throw error;
+  }
 
   const payload = (await response.json().catch(() => null)) as
     | {
@@ -2859,6 +3279,104 @@ const deleteUserAccount = async (uid: string) => {
   if (error) {
     throw new Error(error.message);
   }
+};
+
+const validateOffboardingEligibility = async (targetUid: string, role: string, account: UserAccountRow) => {
+  if (role === 'restaurant') {
+    const managedRestaurant = await loadManagedRestaurantForUser(targetUid, role);
+    if (managedRestaurant.restaurant || sanitizeOptionalText(account.restaurantId)) {
+      fail(
+        412,
+        'Partner accounts linked to a restaurant must be offboarded by admin so store ownership and order history stay traceable.'
+      );
+    }
+  }
+
+  if (role === 'dispatch') {
+    const [{ data: rider, error: riderError }, { data: assignments, error: assignmentError }] = await Promise.all([
+      serviceClient
+        .from('DispatchRiderRecord')
+        .select('id,activeLoad')
+        .eq('id', targetUid)
+        .maybeSingle<{ id: string; activeLoad?: number | null }>(),
+      serviceClient.from('DeliveryAssignment').select('orderId,courierId').eq('courierId', targetUid),
+    ]);
+
+    if (riderError) {
+      throw new Error(riderError.message);
+    }
+    if (assignmentError) {
+      throw new Error(assignmentError.message);
+    }
+
+    const orderIds = (assignments ?? []).map((entry) => sanitizeText((entry as { orderId?: string }).orderId)).filter(Boolean);
+    let hasOpenAssignments = false;
+    if (orderIds.length > 0) {
+      const { data: orders, error: orderError } = await serviceClient
+        .from('CustomerOrder')
+        .select('id,status')
+        .in('id', orderIds);
+
+      if (orderError) {
+        throw new Error(orderError.message);
+      }
+
+      hasOpenAssignments = (orders ?? []).some(
+        (order) => !TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus((order as { status?: string }).status))
+      );
+    }
+
+    if (parseInteger(rider?.activeLoad, 0) > 0 || hasOpenAssignments) {
+      fail(
+        412,
+        'Dispatch accounts with active delivery work must be offboarded by admin after assignments are cleared.'
+      );
+    }
+  }
+};
+
+const offboardUserAccount = async (targetUid: string, actorUid: string, auditAction: string, details: JsonObject = {}) => {
+  await createAuditEntry(actorUid, auditAction, 'user', targetUid, details);
+  await updateSupabaseAuthUser(targetUid, {
+    ban_duration: '876000h',
+  }).catch(() => undefined);
+
+  const cleanupOperations = await Promise.allSettled([
+    (async () => {
+      const { error } = await serviceClient.from('DispatchApplicationRecord').delete().eq('id', targetUid);
+      if (error) {
+        throw new Error(error.message);
+      }
+    })(),
+    (async () => {
+      const { error } = await serviceClient.from('PartnerApplicationRecord').delete().eq('id', targetUid);
+      if (error) {
+        throw new Error(error.message);
+      }
+    })(),
+    (async () => {
+      const { error } = await serviceClient.from('DispatchRiderRecord').delete().eq('id', targetUid);
+      if (error) {
+        throw new Error(error.message);
+      }
+      await broadcastRidersChanged();
+    })(),
+    deleteUserRoleLinks(targetUid),
+    deleteUserAccount(targetUid),
+  ]);
+
+  const cleanupFailures = cleanupOperations.filter((result) => result.status === 'rejected');
+  if (cleanupFailures.length > 0) {
+    await updateSupabaseAuthUser(targetUid, {
+      ban_duration: 'none',
+    }).catch(() => undefined);
+    fail(
+      409,
+      'Account deletion could not be completed cleanly. No records were removed from sign-in, so try again or contact support.'
+    );
+  }
+
+  await deleteSupabaseAuthUser(targetUid);
 };
 
 const syncUserRoleState = async (
@@ -3549,109 +4067,53 @@ const handleNativeAction = async (
       fail(404, 'The signed-in account could not be found.');
     }
 
-    if (context.role === 'restaurant') {
-      const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role);
-      if (managedRestaurant.restaurant || sanitizeOptionalText(account.restaurantId)) {
-        fail(
-          412,
-          'Partner accounts linked to a restaurant must be offboarded by admin so store ownership and order history stay traceable.'
-        );
-      }
+    if (context.role === 'restaurant' || context.role === 'dispatch') {
+      await validateOffboardingEligibility(context.uid, context.role, account);
     }
 
-    if (context.role === 'dispatch') {
-      const [{ data: rider, error: riderError }, { data: assignments, error: assignmentError }] = await Promise.all([
-        serviceClient
-          .from('DispatchRiderRecord')
-          .select('id,activeLoad')
-          .eq('id', context.uid)
-          .maybeSingle<{ id: string; activeLoad?: number | null }>(),
-        serviceClient
-          .from('DeliveryAssignment')
-          .select('orderId,courierId')
-          .eq('courierId', context.uid),
-      ]);
-
-      if (riderError) {
-        throw new Error(riderError.message);
-      }
-      if (assignmentError) {
-        throw new Error(assignmentError.message);
-      }
-
-      const orderIds = (assignments ?? []).map((entry) => sanitizeText((entry as { orderId?: string }).orderId)).filter(Boolean);
-      let hasOpenAssignments = false;
-      if (orderIds.length > 0) {
-        const { data: orders, error: orderError } = await serviceClient
-          .from('CustomerOrder')
-          .select('id,status')
-          .in('id', orderIds);
-
-        if (orderError) {
-          throw new Error(orderError.message);
-        }
-
-        hasOpenAssignments = (orders ?? []).some(
-          (order) => !TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus((order as { status?: string }).status))
-        );
-      }
-
-      if (parseInteger(rider?.activeLoad, 0) > 0 || hasOpenAssignments) {
-        fail(
-          412,
-          'Dispatch accounts with active delivery work must be offboarded by admin after assignments are cleared.'
-        );
-      }
-    }
-
-    await createAuditEntry(context.uid, 'self_account_deleted', 'user', context.uid, {
+    await offboardUserAccount(context.uid, context.uid, 'self_account_deleted', {
       role: context.role,
     });
-    await updateSupabaseAuthUser(context.uid, {
-      ban_duration: '876000h',
-    }).catch(() => undefined);
-
-    const cleanupOperations = await Promise.allSettled([
-      (async () => {
-        const { error } = await serviceClient.from('DispatchApplicationRecord').delete().eq('id', context.uid);
-        if (error) {
-          throw new Error(error.message);
-        }
-      })(),
-      (async () => {
-        const { error } = await serviceClient.from('PartnerApplicationRecord').delete().eq('id', context.uid);
-        if (error) {
-          throw new Error(error.message);
-        }
-      })(),
-      (async () => {
-        const { error } = await serviceClient.from('DispatchRiderRecord').delete().eq('id', context.uid);
-        if (error) {
-          throw new Error(error.message);
-        }
-        await broadcastRidersChanged();
-      })(),
-      deleteUserRoleLinks(context.uid),
-      deleteUserAccount(context.uid),
-    ]);
-
-    const cleanupFailures = cleanupOperations.filter((result) => result.status === 'rejected');
-    if (cleanupFailures.length > 0) {
-      await updateSupabaseAuthUser(context.uid, {
-        ban_duration: 'none',
-      }).catch(() => undefined);
-      fail(
-        409,
-        'Account deletion could not be completed cleanly. No records were removed from sign-in, so try again or contact support.'
-      );
-    }
-
-    await deleteSupabaseAuthUser(context.uid);
 
     return json(200, {
       data: {
         deleted: true,
         targetUid: context.uid,
+      },
+    });
+  }
+
+  if (action === 'deleteAdminAccess') {
+    ensureRole(context.role, ['admin']);
+    const targetUid = sanitizeText(data.targetUid);
+    if (!targetUid) {
+      fail(400, 'A target uid is required.');
+    }
+    if (targetUid === context.uid) {
+      fail(412, 'Use the signed-in admin offboarding flow for your own account.');
+    }
+
+    const account = await loadUserAccount(targetUid);
+    if (!account) {
+      fail(404, 'The selected user could not be found.');
+    }
+
+    const roles = Array.from((await loadUserRoles([targetUid])).get(targetUid) ?? []);
+    const resolvedRole = resolvePrimaryRole(account, roles);
+    if (resolvedRole !== 'admin') {
+      fail(412, 'This action only deletes admin access. Use role revoke or disable access for other accounts.');
+    }
+
+    await offboardUserAccount(targetUid, context.uid, 'admin_account_deleted', {
+      email: account.email,
+      role: resolvedRole,
+    });
+
+    return json(200, {
+      data: {
+        deleted: true,
+        role: resolvedRole,
+        targetUid,
       },
     });
   }
@@ -4394,7 +4856,11 @@ const handleNativeAction = async (
     ensureRole(context.role, ['customer', 'admin']);
     const targetCustomerId = context.role === 'admin' ? sanitizeText(data.customerId, context.uid) : context.uid;
     const orders = await loadOrdersForCustomer(targetCustomerId);
-    return json(200, { data: { orders } });
+    return json(
+      200,
+      { data: { orders } },
+      { 'Cache-Control': 'private, max-age=10, must-revalidate' }
+    );
   }
 
   if (action === 'customerGetOrderDetail') {
@@ -4413,15 +4879,19 @@ const handleNativeAction = async (
       fail(403, 'You can only view your own orders.');
     }
 
-    const courierPhone = await loadDispatchRiderPhoneNumber(bundle.assignment?.courierId);
+    const riderSnapshot = await loadDispatchRiderSnapshot(bundle.assignment?.courierId);
 
-    return json(200, {
-      data: {
-        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], {
-          courierPhone,
-        }),
+    return json(
+      200,
+      {
+        data: {
+          order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], {
+            ...riderSnapshot,
+          }),
+        },
       },
-    });
+      { 'Cache-Control': 'private, max-age=6, must-revalidate' }
+    );
   }
 
   if (action === 'customerListFavoriteRestaurants') {
@@ -4441,8 +4911,8 @@ const handleNativeAction = async (
       fail(400, 'A restaurant id is required.');
     }
 
-    const { restaurant, approval } = await loadRestaurantById(restaurantId);
-    if (!restaurant || restaurant.isPublished !== true || approval?.status !== 'approved') {
+    const { restaurant } = await loadRestaurantById(restaurantId);
+    if (!restaurant || restaurant.isPublished !== true) {
       fail(404, 'This restaurant is not available for favorites.');
     }
 
@@ -4511,7 +4981,7 @@ const handleNativeAction = async (
       settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
     });
 
-    await createOrderWithItems({
+    const orderCreation = await createOrderWithItems({
       customerId: context.uid,
       deliveryLocation: orderDraft.deliveryLocation,
       fulfillmentType: orderDraft.fulfillmentType,
@@ -4605,7 +5075,7 @@ const handleNativeAction = async (
       settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
     });
 
-    await createOrderWithItems({
+    const orderCreation = await createOrderWithItems({
       customerId: context.uid,
       deliveryLocation: orderDraft.deliveryLocation,
       fulfillmentType: orderDraft.fulfillmentType,
@@ -4641,9 +5111,9 @@ const handleNativeAction = async (
           orderId,
           paymentMethod: orderDraft.paymentMethod,
           restaurantId: orderDraft.restaurantId,
-          source: 'feasty_customer_checkout',
+          source: 'ebuy_customer_checkout',
         },
-        callbackUrl: getPaystackCallbackUrl(),
+        callbackUrl: getNormalizedPaystackCallbackUrl(data.callbackUrl),
       });
 
       const paymentWithAuthorization = buildInitialPaymentSummary({
@@ -4716,7 +5186,16 @@ const handleNativeAction = async (
       };
 
       await updateOrderRecord(orderId, {
+        cancellation: {
+          actor: 'system',
+          reason: 'payment_initialization_failed',
+        },
         payment: failedPayment,
+        status: ORDER_STATUS.CANCELLED,
+        timeline: {
+          ...orderCreation.timeline,
+          paymentInitializationFailedAt: nowIso(),
+        },
         updatedAt: nowIso(),
       });
 
@@ -4793,7 +5272,8 @@ const handleNativeAction = async (
     }
 
     const currentStatus = normalizeOrderStatus(bundle.order.status);
-    if (![ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+    // Cancellation is only allowed before the kitchen starts preparing.
+    if (![ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
       fail(412, 'This order can no longer be cancelled.');
     }
 
@@ -4820,6 +5300,8 @@ const handleNativeAction = async (
       timeline,
       updatedAt: nowIso(),
     });
+
+    await adjustDispatchRiderLoad(bundle.assignment?.courierId, -1);
 
     await insertDeliveryEvent({
       orderId,
@@ -4931,8 +5413,12 @@ const handleNativeAction = async (
       throw new Error(error.message);
     }
 
-    const orderList = sortPartnerKitchenQueue(((orders ?? []) as CustomerOrderRow[]).filter(isOrderOperationallyVisible));
+    const orderList = sortPartnerKitchenQueue(
+      (await Promise.all(((orders ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order))))
+        .filter(isOrderOperationallyVisible)
+    );
     const { assignmentsByOrderId, itemsByOrderId } = await loadOrderRelations(orderList.map((order) => order.id));
+    const customerPhoneByUid = await loadUserPhoneNumbers(orderList.map((order) => order.customerId));
 
     return json(200, {
       data: {
@@ -4940,7 +5426,9 @@ const handleNativeAction = async (
           toOrderSnapshotResponse(
             order,
             itemsByOrderId.get(order.id) ?? [],
-            assignmentsByOrderId.get(order.id) ?? null
+            assignmentsByOrderId.get(order.id) ?? null,
+            [],
+            { customerPhone: customerPhoneByUid.get(order.customerId) ?? null }
           )
         ),
         restaurant: buildRestaurantResponse(managedRestaurant.restaurant, managedRestaurant.approval),
@@ -4967,9 +5455,11 @@ const handleNativeAction = async (
 
     assertOrderPaymentReadyForOperations(bundle.order);
 
+    const customerPhone = await loadUserPhoneNumber(bundle.order.customerId);
+
     return json(200, {
       data: {
-        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment),
+        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], { customerPhone }),
       },
     });
   }
@@ -5249,6 +5739,67 @@ const handleNativeAction = async (
       nextState.status
     );
 
+    if (
+      nextState.status === ORDER_STATUS.READY_FOR_PICKUP &&
+      sanitizeText(bundle.order.fulfillmentType, 'delivery') === 'delivery'
+    ) {
+      const refreshedBundle = await loadOrderBundle(orderId);
+      const currentAssignment = refreshedBundle?.assignment ?? bundle.assignment ?? null;
+
+      if (refreshedBundle && !sanitizeText(currentAssignment?.courierId)) {
+        const selectedCourier = await selectDispatchCourierForRestaurant(bundle.order.restaurantId);
+
+        if (selectedCourier) {
+          const assignedAt = nowIso();
+          const courierName = sanitizeText(
+            selectedCourier.rider.displayName,
+            `Rider ${selectedCourier.userId.slice(-4)}`
+          );
+          const dispatchOwnerId = getDispatchAssignmentOwnerId(currentAssignment);
+
+          const { error: courierAssignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
+            {
+              assignedAt: currentAssignment?.assignedAt ?? assignedAt,
+              courierId: selectedCourier.userId,
+              courierName,
+              dispatchId: sanitizeText(currentAssignment?.dispatchId),
+              dispatchOwnerId: dispatchOwnerId ?? null,
+              orderId,
+              updatedAt: assignedAt,
+            },
+            { onConflict: 'orderId' }
+          );
+
+          if (courierAssignmentError) {
+            throw new Error(courierAssignmentError.message);
+          }
+
+          await adjustDispatchRiderLoad(selectedCourier.userId, 1);
+          await insertDeliveryEvent({
+            actorUid: context.uid,
+            details: {
+              courierId: selectedCourier.userId,
+              courierName,
+              restaurantId: bundle.order.restaurantId,
+            },
+            eventType: 'courier_auto_assigned',
+            orderId,
+          });
+          await notifyUsers([selectedCourier.userId], {
+            title: 'Delivery assigned',
+            body: `Order ${orderId.slice(-6).toUpperCase()} is ready for pickup.`,
+            data: buildNotificationData({
+              app: 'dispatch',
+              orderId,
+              routeKey: 'dispatch_delivery_detail',
+              status: nextState.status,
+              type: 'dispatch_assignment',
+            }),
+          });
+        }
+      }
+    }
+
     return json(200, {
       data: {
         orderId,
@@ -5271,7 +5822,8 @@ const handleNativeAction = async (
       throw new Error(error.message);
     }
 
-    const orderList = ((orders ?? []) as CustomerOrderRow[]).filter(isOrderOperationallyVisible);
+    const orderList = (await Promise.all(((orders ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order))))
+      .filter(isOrderOperationallyVisible);
     const { assignmentsByOrderId, itemsByOrderId } = await loadOrderRelations(orderList.map((order) => order.id));
     const sortedOrderList = [...orderList].sort((left, right) => {
       const leftStatus = normalizeOrderStatus(left.status);
@@ -5529,6 +6081,58 @@ const handleNativeAction = async (
     });
   }
 
+  if (action === 'syncDispatchRiderLocation') {
+    ensureRole(context.role, ['dispatch', 'admin']);
+    const requestedRiderId = sanitizeText(data.riderId);
+    const riderId = context.role === 'admin' ? requestedRiderId || context.uid : context.uid;
+    const latitude = parseNumber(data.latitude, Number.NaN);
+    const longitude = parseNumber(data.longitude, Number.NaN);
+    if (!riderId) {
+      fail(400, 'A rider id is required.');
+    }
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      fail(400, 'A valid rider location is required.');
+    }
+
+    const { data: existingRider, error: riderError } = await serviceClient
+      .from('DispatchRiderRecord')
+      .select('id')
+      .eq('id', riderId)
+      .maybeSingle<{ id: string }>();
+
+    if (riderError) {
+      throw new Error(riderError.message);
+    }
+
+    if (!existingRider) {
+      fail(404, 'The selected rider could not be found.');
+    }
+
+    const timestamp = nowIso();
+    const { error } = await serviceClient
+      .from('DispatchRiderRecord')
+      .update({
+        latitude,
+        longitude,
+        updatedAt: timestamp,
+      })
+      .eq('id', riderId);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return json(200, {
+      data: {
+        accuracy: parseNumber(data.accuracy, null),
+        latitude,
+        longitude,
+        riderId,
+        timestamp,
+      },
+    });
+  }
+
   if (action === 'dispatchAssignOrderCourier') {
     ensureRole(context.role, ['dispatch', 'admin']);
     const orderId = sanitizeText(data.orderId);
@@ -5577,8 +6181,9 @@ const handleNativeAction = async (
 
     const assignedAt = nowIso();
     const courierName = sanitizeText(courier.displayName, `Rider ${courier.id.slice(-4)}`);
+    const previousCourierId = sanitizeText(bundle.assignment?.courierId);
     const wasReassigned = Boolean(
-      sanitizeText(bundle.assignment?.courierId) && sanitizeText(bundle.assignment?.courierId) !== courier.id
+      previousCourierId && previousCourierId !== courier.id
     );
 
     const { error: assignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
@@ -5596,6 +6201,13 @@ const handleNativeAction = async (
 
     if (assignmentError) {
       throw new Error(assignmentError.message);
+    }
+
+    if (previousCourierId && previousCourierId !== courier.id) {
+      await adjustDispatchRiderLoad(previousCourierId, -1);
+    }
+    if (!previousCourierId || previousCourierId !== courier.id) {
+      await adjustDispatchRiderLoad(courier.id, 1);
     }
 
     await updateOrderRecord(orderId, {
@@ -5690,6 +6302,10 @@ const handleNativeAction = async (
       timeline,
       updatedAt: nowIso(),
     });
+
+    if ([ORDER_STATUS.DELIVERED, ORDER_STATUS.FAILED_DELIVERY].includes(nextState.status)) {
+      await adjustDispatchRiderLoad(bundle.assignment?.courierId, -1);
+    }
 
     await insertDeliveryEvent({
       orderId,
@@ -5822,19 +6438,29 @@ const handleNativeAction = async (
 };
 
 Deno.serve(async (request) => {
+  const observation = createEdgeObservation(request, 'app-rpc');
+  let response: Response | undefined;
+  let capturedError: unknown = null;
+
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
+    // A 204 response must not carry a body — Deno throws a TypeError otherwise,
+    // which crashed the CORS preflight once gateway JWT verification was disabled.
+    response = new Response(null, {
       headers: corsHeaders,
       status: 204,
     });
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   }
 
   if (request.method !== 'POST') {
-    return json(405, {
+    response = json(405, {
       error: {
         message: 'Use POST for app RPC requests.',
       },
     });
+    finishEdgeObservation(observation, { status: response.status });
+    return response;
   }
 
   let payload: { action?: string; data?: Record<string, unknown> } = {};
@@ -5842,39 +6468,71 @@ Deno.serve(async (request) => {
   try {
     payload = (await request.json().catch(() => ({}))) as typeof payload;
     const action = sanitizeText(payload.action);
+    observation.action = action || undefined;
 
     if (!action) {
-      return json(400, {
+      response = json(400, {
         error: {
           message: 'An RPC action is required.',
         },
       });
+      return response;
     }
 
-    const nativeResponse = await handleNativeAction(action, request, payload.data ?? {});
-    if (nativeResponse) {
-      return nativeResponse;
-    }
+    const executeAction = async () => {
+      const nativeResponse = await handleNativeAction(action, request, payload.data ?? {});
+      return (
+        nativeResponse ??
+        json(501, {
+          error: {
+            message: `The RPC action "${action}" is not implemented in the native Supabase backend.`,
+          },
+        })
+      );
+    };
 
-    return json(501, {
-      error: {
-        message: `The RPC action "${action}" is not implemented in the native Supabase backend.`,
-      },
-    });
+    response = HOT_WRITE_ACTIONS.has(action)
+      ? await runWithBackpressure(
+          `app-rpc:${action}`,
+          {
+            maxConcurrent: HOT_WRITE_BACKPRESSURE_LIMITS[action] ?? 8,
+            retryAfterSeconds: 3,
+          },
+          executeAction
+        )
+      : await executeAction();
+
+    return response;
   } catch (error) {
+    capturedError = error;
     const status =
-      error instanceof RpcError
+      isEdgeBackpressureError(error)
         ? error.status
-        : error instanceof Error && error.message === 'Missing authorization header'
-          ? 401
-          : error instanceof Error && error.message === 'This account is disabled.'
-            ? 403
-            : 500;
+        : error instanceof RpcError
+          ? error.status
+          : error instanceof Error && error.message === 'Missing authorization header'
+            ? 401
+            : error instanceof Error && error.message === 'This account is disabled.'
+              ? 403
+              : 500;
 
-    return json(status, {
-      error: {
-        message: error instanceof Error ? error.message : 'Unexpected Edge RPC failure.',
+    response = json(
+      status,
+      {
+        error: {
+          message:
+            error instanceof Error ? error.message : 'Unexpected Edge RPC failure.',
+        },
       },
+      error instanceof Error && 'retryAfterSeconds' in error
+        ? { 'Retry-After': String((error as { retryAfterSeconds?: number }).retryAfterSeconds ?? 3) }
+        : {}
+    );
+    return response;
+  } finally {
+    finishEdgeObservation(observation, {
+      error: capturedError ?? undefined,
+      status: response?.status ?? 500,
     });
   }
 });

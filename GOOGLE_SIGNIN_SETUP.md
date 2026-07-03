@@ -1,29 +1,29 @@
-# Google Sign-In Setup Guide
+# Google Sign-In Setup
 
 ## Scope
 
-Google auth is enabled for the `customer` app only.
+Google auth is enabled for the customer app only.
 
-- `customer`: Google auth allowed
-- `partner`: email/password only
-- `dispatch`: email/password only
-- `admin`: email/password only
+- Customer: Google auth allowed
+- Partner: email and password only
+- Dispatch: email and password only
+- Admin: email and password only
 
 ## Flow
 
 1. The customer app gets a Google ID token from the native Google Sign-In module.
 2. The app exchanges that token with Supabase using `signInWithIdToken`.
 3. Supabase creates or refreshes the customer session.
-4. The normal customer profile/session enforcement path continues from there.
+4. Normal customer profile and session enforcement continues from there.
 
-## Supabase setup
+## Supabase Setup
 
 Enable Google in Supabase Auth and provide the same web client credentials there.
 
-Local Supabase config placeholders live in:
+Local placeholders live in:
 
-- [supabase/.env.example](/c:/Users/emkad/EBuy/FEASTY/supabase/.env.example)
-- [supabase/config.toml](/c:/Users/emkad/EBuy/FEASTY/supabase/config.toml)
+- [`supabase/.env.example`](supabase/.env.example)
+- [`supabase/config.toml`](supabase/config.toml)
 
 Set:
 
@@ -32,7 +32,7 @@ SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID="YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleus
 SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET="your-google-oauth-client-secret"
 ```
 
-## Customer app setup
+## Customer App Setup
 
 Set the customer-facing Google client ID in the shared Expo env file:
 
@@ -40,26 +40,26 @@ Set the customer-facing Google client ID in the shared Expo env file:
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com"
 ```
 
-The shared template now includes this in [`.env.apps.example`](/c:/Users/emkad/EBuy/FEASTY/.env.apps.example).
+The shared template includes this in [`.env.apps.example`](.env.apps.example).
 
-## Google Cloud requirements
+## Google Cloud Requirements
 
 1. Open Google Cloud Console.
-2. Open the project that owns your OAuth client.
-3. Go to `APIs & Services` -> `Credentials`.
+2. Open the project that owns the OAuth client.
+3. Go to APIs and Services, then Credentials.
 4. Copy the web client ID that ends with `.apps.googleusercontent.com`.
 5. Copy the client secret for that same web OAuth client.
 
-Use that same pair in:
+Use the same pair in:
 
 - Supabase Google provider config
 - `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` for the customer app
 
-## Runtime notes
+## Runtime Notes
 
 - Customer Google auth is native-build only.
 - It does not work in Expo Go.
-- If `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` is missing, the app now stays quiet instead of warning on startup.
+- If `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` is missing, the app stays quiet instead of warning on startup.
 - The Google button only appears where the customer auth UI already exposes it.
 
 ## Verification
@@ -68,7 +68,7 @@ Use that same pair in:
 2. Restart the customer app dev server.
 3. Run a native customer build, not Expo Go.
 4. Tap Google sign-in from the customer login or register screen.
-5. Confirm:
+5. Confirm that:
    - Supabase session is created
-   - customer profile is created or refreshed
-   - user lands in the customer app
+   - Customer profile is created or refreshed
+   - User lands in the customer app

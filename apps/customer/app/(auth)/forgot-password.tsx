@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import AuthLegalFooter from '../../src/components/AuthLegalFooter';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function ForgotPasswordScreen() {
@@ -27,7 +28,7 @@ export default function ForgotPasswordScreen() {
       Alert.alert('Reset email sent', 'Open the link in your inbox to choose a new password.', [
         {
           text: 'Back to login',
-          onPress: () => router.replace('/(auth)/login'),
+          onPress: () => router.replace('/login'),
         },
       ]);
     } catch (error: any) {
@@ -62,9 +63,11 @@ export default function ForgotPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Sending...' : 'Send reset email'}</Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/login" style={styles.link}>
+      <Link href="/login" style={styles.link}>
         Back to login
       </Link>
+
+      <AuthLegalFooter />
     </ScrollView>
   );
 }

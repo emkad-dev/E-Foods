@@ -10,6 +10,8 @@ import {
   formatAuthError,
   createUserWithEmail,
   getUserRoleClaim,
+  isStaleSupabaseSessionError,
+  SESSION_EXPIRED_ERROR_MESSAGE,
   signInWithEmail,
   signOutUser,
   signInWithGoogle,
@@ -30,6 +32,11 @@ import {
   getCustomerPolicyAcceptance,
   recordCustomerPolicyAcceptance,
 } from '../services/policyAcceptance';
+import {
+  clearAnalyticsUser,
+  identifyAnalyticsUser,
+  trackAnalyticsEvent,
+} from '../../../../packages/observability/src/analytics';
 import type { PolicyAcceptancePayload } from '../../../../packages/domain/src';
 
 export type User = UserDocument | null;
@@ -49,7 +56,7 @@ interface AuthContextType {
     password: string,
     userData?: {
       displayName?: string;
-      phoneNumber?: string;
+      phoneNumber: string;
       policyAcceptance?: PolicyAcceptancePayload;
     }
   ) => Promise<SignUpResult>;
@@ -60,6 +67,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
   updateDisplayName: (displayName: string) => Promise<void>;
+  updatePhoneNumber: (phoneNumber: string) => Promise<void>;
   reloadUser: () => Promise<boolean>;
   sendVerificationEmail: () => Promise<void>;
   clearError: () => void;
@@ -102,8 +110,10 @@ const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) =>
  * Get the app domain from environment variables for action code settings
  */
 const getActionCodeSettings = (path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
   return {
-    url: `${appEnv.appScheme}://${path}`,
+    url: `https://${appEnv.appDomain}${normalizedPath}`,
   };
 };
 
@@ -117,6 +127,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
+
+  const clearExpiredSession = useCallback(async () => {
+    await clearLocalUserState();
+    await signOutUser(supabase).catch(() => undefined);
+    setUser(null);
+    setPolicyAccepted(false);
+    setError(SESSION_EXPIRED_ERROR_MESSAGE);
+    clearAnalyticsUser();
+  }, [clearLocalUserState]);
 
   const buildNextUser = useCallback(
     async (authUser: SupabaseAuthUser) => {
@@ -138,9 +157,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
-        setError(CUSTOMER_ACCESS_ERROR);
-        return null;
-      }
+      setError(CUSTOMER_ACCESS_ERROR);
+      return null;
+    }
+
+      identifyAnalyticsUser(authUser.id);
 
       return {
         ...userData,
@@ -252,6 +273,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       } catch (err) {
         const authUser = session?.user ?? null;
+        if (isStaleSupabaseSessionError(err)) {
+          await clearExpiredSession();
+          return;
+        }
+
         if (authUser && isOfflineError(err)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
@@ -274,6 +300,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         }
 
+        if (authUser) {
+          const fallbackCachedUser = await getStoredUserProfile<UserDocument>();
+          const fallbackUser: UserDocument = {
+            uid: authUser.id,
+            email: authUser.email ?? fallbackCachedUser?.email ?? '',
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: fallbackCachedUser?.role ?? DEFAULT_APP_ROLE,
+            displayName:
+              fallbackCachedUser?.displayName ??
+              (authUser.user_metadata?.full_name as string | undefined) ??
+              undefined,
+            photoURL:
+              fallbackCachedUser?.photoURL ?? (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
+            phoneNumber: fallbackCachedUser?.phoneNumber ?? undefined,
+            createdAt: fallbackCachedUser?.createdAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          setUser(fallbackUser);
+          setError(getCustomerAuthErrorMessage(err, 'Failed to load user data'));
+          await storeUserProfile(fallbackUser).catch(() => undefined);
+          setLoading(false);
+          return;
+        }
+
         console.error('Error syncing user authentication state:', err);
         setError(getCustomerAuthErrorMessage(err, 'Failed to load user data'));
         setUser(null);
@@ -291,7 +342,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     password: string,
     userData?: {
       displayName?: string;
-      phoneNumber?: string;
+      phoneNumber: string;
       policyAcceptance?: PolicyAcceptancePayload;
     }
   ): Promise<SignUpResult> => {
@@ -317,6 +368,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await recordCustomerPolicyAcceptance(policyAcceptance.source || 'customer_signup');
       setPolicyAccepted(true);
       await startSingleDeviceSession(authUser.id);
+      identifyAnalyticsUser(authUser.id);
 
       try {
         await sendVerificationEmailWithFallback(
@@ -324,9 +376,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           authUser.email ?? email,
           getActionCodeSettings(appEnv.verifyEmailPath)
         );
+        trackAnalyticsEvent('customer_sign_up_completed', {
+          auth_method: 'email',
+          policy_source: policyAcceptance.source || 'customer_signup',
+          verification_email_sent: true,
+        });
         return { verificationEmailSent: true };
       } catch (verificationError) {
         console.warn('Account created, but verification email could not be sent:', verificationError);
+        trackAnalyticsEvent('customer_sign_up_completed', {
+          auth_method: 'email',
+          policy_source: policyAcceptance.source || 'customer_signup',
+          verification_email_sent: false,
+        });
         return { verificationEmailSent: false };
       }
     } catch (err: any) {
@@ -352,7 +414,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setError(CUSTOMER_ACCESS_ERROR);
         throw new Error(CUSTOMER_ACCESS_ERROR);
       }
+      const nextUser = await buildNextUser(authUser);
+      if (!nextUser) {
+        throw new Error(CUSTOMER_ACCESS_ERROR);
+      }
+
+      // Explicit sign-in deliberately claims this device as the active session.
+      // Takeover detection lives in the passive onAuthStateChange path; re-checking
+      // here against the pre-claim snapshot would always false-positive on re-login.
       await startSingleDeviceSession(authUser.id);
+
+      identifyAnalyticsUser(authUser.id);
+      trackAnalyticsEvent('customer_sign_in_completed', {
+        auth_method: 'email',
+      });
+      setUser(nextUser);
+      await storeUserProfile(nextUser);
+      await refreshPolicyAcceptance();
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to sign in');
       setError(formattedError);
@@ -368,32 +446,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const authUser = await signInWithGoogle(supabase, idToken);
-      const userData = await getUserDocument(authUser.id);
+      const claimRole = await getUserRoleClaim(authUser);
+      if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(CUSTOMER_ACCESS_ERROR);
+        throw new Error(CUSTOMER_ACCESS_ERROR);
+      }
 
-      if (!userData) {
-        await createUserDocument(authUser.id, {
-          email: authUser.email ?? '',
-          displayName: (authUser.user_metadata?.full_name as string | undefined) ?? undefined,
-          photoURL: (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
-          role: DEFAULT_APP_ROLE,
-          emailVerified: Boolean(authUser.email_confirmed_at),
-        });
-      } else {
-        const claimRole = await getUserRoleClaim(authUser);
-        if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
-          await clearLocalUserState();
-          await signOutUser(supabase);
-          setUser(null);
-          setError(CUSTOMER_ACCESS_ERROR);
-          throw new Error(CUSTOMER_ACCESS_ERROR);
-        }
+      const nextUser = await buildNextUser(authUser);
+      if (!nextUser) {
+        throw new Error(CUSTOMER_ACCESS_ERROR);
+      }
+
+      const userData = await getUserDocument(authUser.id);
+      if (userData) {
         await updateUserDocument(authUser.id, {
           displayName: (authUser.user_metadata?.full_name as string | undefined) ?? undefined,
           photoURL: (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
         });
       }
 
+      // Explicit sign-in deliberately claims this device as the active session.
+      // Takeover detection lives in the passive onAuthStateChange path; re-checking
+      // here against the pre-claim snapshot would always false-positive on re-login.
       await startSingleDeviceSession(authUser.id);
+
+      identifyAnalyticsUser(authUser.id);
+      trackAnalyticsEvent('customer_sign_in_completed', {
+        auth_method: 'google',
+      });
+      setUser(nextUser);
+      await storeUserProfile(nextUser);
+      await refreshPolicyAcceptance();
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to complete Google sign-in');
       setError(formattedError);
@@ -416,7 +502,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await clearLocalUserState();
       setUser(null);
       setPolicyAccepted(false);
-      router.replace('/(auth)/login');
+      trackAnalyticsEvent('customer_sign_out_completed');
+      clearAnalyticsUser();
+      router.replace('/login');
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to sign out');
       setError(formattedError);
@@ -445,7 +533,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
-      router.replace('/(auth)/login');
+      trackAnalyticsEvent('customer_account_deleted');
+      clearAnalyticsUser();
+      router.replace('/login');
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to delete this account');
       setError(formattedError);
@@ -501,6 +591,52 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const updatePhoneNumber = async (phoneNumber: string): Promise<void> => {
+    if (!user?.uid) {
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
+    }
+
+    const nextPhoneNumber = phoneNumber.trim();
+
+    if (!nextPhoneNumber) {
+      const message = 'Phone number is required';
+      setError(message);
+      throw new Error(message);
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await updateUserDocument(user.uid, {
+        phoneNumber: nextPhoneNumber,
+      });
+
+      setUser((currentUser) => {
+        if (!currentUser) {
+          return currentUser;
+        }
+
+        const nextUser = {
+          ...currentUser,
+          phoneNumber: nextPhoneNumber,
+          updatedAt: new Date().toISOString(),
+        };
+
+        void storeUserProfile(nextUser);
+        return nextUser;
+      });
+    } catch (err: any) {
+      const formattedError = getCustomerAuthErrorMessage(err, 'Unable to update phone number');
+      setError(formattedError);
+      throw new Error(formattedError);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const acceptCurrentPolicies = async (source = 'customer_policy_gate'): Promise<void> => {
     setPolicyLoading(true);
     setError(null);
@@ -508,6 +644,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       await recordCustomerPolicyAcceptance(source);
       setPolicyAccepted(true);
+      trackAnalyticsEvent('customer_policy_accepted', {
+        source,
+      });
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to save policy acceptance');
       setError(formattedError);
@@ -526,6 +665,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         email,
         getActionCodeSettings(appEnv.resetPasswordPath)
       );
+      trackAnalyticsEvent('customer_password_reset_requested', {
+        email_domain: email.includes('@') ? email.split('@').pop() ?? null : null,
+      });
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to send reset email');
       setError(formattedError);
@@ -565,10 +707,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await updateUserDocument(authUser.id, {
           emailVerified: true,
         }).catch((err) => console.error('Error updating email verification status:', err));
+        trackAnalyticsEvent('customer_email_verified');
       }
 
       return emailVerified;
     } catch (err) {
+      if (isStaleSupabaseSessionError(err)) {
+        await clearExpiredSession();
+        throw new Error(SESSION_EXPIRED_ERROR_MESSAGE);
+      }
+
       console.error('Error reloading user:', err);
       setError(getCustomerAuthErrorMessage(err, 'Failed to reload user data'));
       throw err;
@@ -592,6 +740,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         authUser.email,
         getActionCodeSettings(appEnv.verifyEmailPath)
       );
+      trackAnalyticsEvent('customer_verification_email_requested');
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to send verification email');
       setError(formattedError);
@@ -619,6 +768,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         resetPassword,
         deleteAccount,
         updateDisplayName,
+        updatePhoneNumber,
         reloadUser,
         sendVerificationEmail,
         clearError,

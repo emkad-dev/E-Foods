@@ -28,6 +28,12 @@ type EnableAccessResult = {
   tokenRefreshRequired: boolean;
 };
 
+type DeleteAdminAccessResult = {
+  deleted: boolean;
+  role: 'admin';
+  targetUid: string;
+};
+
 export const assignUserRole = async (targetUid: string, role: AppRole, restaurantId?: string | null) =>
   callAdminBackendRpc<RoleMutationResult>('assignUserRole', {
     restaurantId: restaurantId?.trim() ? restaurantId.trim() : null,
@@ -63,3 +69,6 @@ export const disableUserAccess = async (targetUid: string) =>
 
 export const enableUserAccess = async (targetUid: string) =>
   callAdminBackendRpc<EnableAccessResult>('enableUserAccess', { targetUid });
+
+export const deleteAdminAccess = async (targetUid: string) =>
+  callAdminBackendRpc<DeleteAdminAccessResult>('deleteAdminAccess', { targetUid });

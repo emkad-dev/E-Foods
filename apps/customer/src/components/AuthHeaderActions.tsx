@@ -12,10 +12,10 @@ export default function AuthHeaderActions() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/(auth)/login')}>
+      <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/login')}>
         <Text style={styles.secondaryText}>Sign in</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/(auth)/register')}>
+      <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/register')}>
         <Text style={styles.primaryText}>Sign up</Text>
       </TouchableOpacity>
     </View>

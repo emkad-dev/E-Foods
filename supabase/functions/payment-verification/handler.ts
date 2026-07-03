@@ -1,8 +1,9 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { serviceClient } from '../_shared/client.ts';
-import { enqueueNotification, incrementRetry, updateJobStatus } from '../_shared/queue.ts';
+import { enqueueNotification } from '../_shared/queue.ts';
 import type { PaymentVerificationJob } from '../_shared/queue.ts';
+import { getIdempotencyRecord, storeIdempotencyRecord } from '../_shared/idempotency.ts';
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
@@ -37,15 +38,26 @@ export type PaymentVerificationRequest = PaymentVerificationJob & {
   webhookEvent?: JsonObject | null;
 };
 
+const PAYSTACK_VERIFY_TIMEOUT_MS = 10_000;
+
 const verifyPaystackTransaction = async (reference: string) => {
   const paystackSecretKey = Deno.env.get('PAYSTACK_SECRET_KEY');
   if (!paystackSecretKey) throw new Error('PAYSTACK_SECRET_KEY not configured');
 
-  const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
-    headers: {
-      Authorization: `Bearer ${paystackSecretKey}`,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+      headers: {
+        Authorization: `Bearer ${paystackSecretKey}`,
+      },
+      signal: AbortSignal.timeout(PAYSTACK_VERIFY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error(`Paystack verification timed out after ${PAYSTACK_VERIFY_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     throw new Error(`Paystack verification failed: ${response.statusText}`);
@@ -71,14 +83,26 @@ const upsertPaymentTransaction = async (
   webhookEvent: JsonObject | null
 ) => {
   const payment = (order.payment ?? {}) as JsonObject;
+  const paymentReference = normalizeStatus(payment.reference, '');
+  const { data: existingTransaction, error: lookupError } = await serviceClient
+    .from('PaymentTransaction')
+    .select('id')
+    .eq('reference', paymentReference)
+    .maybeSingle<{ id: string }>();
+
+  if (lookupError) {
+    throw new Error(`Failed to resolve payment transaction id: ${lookupError.message}`);
+  }
 
   const payload = {
+    id: existingTransaction?.id?.trim() || paymentReference,
+    updatedAt: new Date().toISOString(),
     orderId: order.id,
     customerId: order.customerId,
     restaurantId: order.restaurantId,
     provider: 'paystack',
     method: normalizeStatus(payment.method, 'card'),
-    reference: normalizeStatus(payment.reference, ''),
+    reference: paymentReference,
     currency: normalizeStatus(payment.currency, 'NGN'),
     amount: toNumber((order.pricing ?? {}).total, 0),
     status: paymentStatus,
@@ -146,7 +170,10 @@ const markOrderPaymentState = async (
   const { error } = await serviceClient
     .from('CustomerOrder')
     .update({
-      status: 'confirmed',
+      // 'placed' = awaiting restaurant acceptance. 'confirmed' is NOT a valid order
+      // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
+      // partner's kitchen actions on paid orders.
+      status: 'placed',
       payment: nextPayment,
       timeline: nextTimeline,
       updatedAt: nowIso,
@@ -196,66 +223,94 @@ const markOrderPaymentState = async (
   return { success: true, orderId: order.id, paymentStatus: 'paid' };
 };
 
+/**
+ * Verify a Paystack payment for an order.
+ *
+ * This handler is idempotent and does NOT manage its own queue row lifecycle —
+ * the queue-drainer owns finalization (and the paystack-webhook calls it
+ * directly, without a queue row at all). On success it returns a result; on
+ * failure it throws and lets the caller decide what to do.
+ *
+ * Idempotency lets the drainer safely reclaim stale `processing` jobs and lets
+ * Paystack redeliver the webhook without double-processing. We guard on:
+ *   1. An IdempotencyRecord keyed on order id + payment reference.
+ *   2. The order's own payment status — if it is already `paid`, we skip
+ *      re-verification and (importantly) the re-notification side effect.
+ */
 export const handlePaymentVerification = async (job: PaymentVerificationRequest) => {
   const { orderId, paymentReference, webhookEvent = null } = job;
+  const idempotencyKey = `payment_verification:${orderId}:${paymentReference}`;
 
-  try {
-    const { data: order, error: orderError } = await serviceClient
-      .from('CustomerOrder')
-      .select('*')
-      .eq('id', orderId)
-      .single<CustomerOrderRow>();
+  const existingRecord = await getIdempotencyRecord(serviceClient, idempotencyKey);
+  if (existingRecord?.response) {
+    return existingRecord.response as { success: boolean; orderId: string; paymentStatus: string };
+  }
 
-    if (orderError || !order) throw new Error('Order not found');
+  const { data: order, error: orderError } = await serviceClient
+    .from('CustomerOrder')
+    .select('*')
+    .eq('id', orderId)
+    .single<CustomerOrderRow>();
 
-    const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
-    validatePaystackVerificationForOrder({
-      order,
-      paymentReference,
-      transactionData: verifiedTransaction,
-    });
+  if (orderError || !order) throw new Error('Order not found');
 
-    const result = await markOrderPaymentState(order, verifiedTransaction, webhookEvent);
-
-    await updateJobStatus(serviceClient, 'payment-verification', orderId, 'completed', {
-      orderId,
-      status: 'confirmed',
-      paymentStatus: 'paid',
-    });
-
-    return result;
-  } catch (error: any) {
-    console.error('Payment verification error:', error.message);
-
-    const canRetry = await incrementRetry(serviceClient, 'payment-verification', orderId, 5);
-    if (canRetry) {
-      await updateJobStatus(serviceClient, 'payment-verification', orderId, 'pending');
-      throw new Error(`Payment verification failed, will retry: ${error.message}`);
-    }
-
-    await serviceClient
-      .from('CustomerOrder')
-      .update({
-        payment: {
-          status: 'failed',
-          reference: paymentReference,
-          error: error.message,
-          failedAt: new Date().toISOString(),
-        },
-      })
-      .eq('id', orderId);
-
-    await broadcastOrderChanged(orderId);
-
-    await updateJobStatus(
+  const currentPayment = (order.payment ?? {}) as JsonObject;
+  if (normalizeStatus(currentPayment.status, '') === 'paid') {
+    const response = { success: true, orderId, paymentStatus: 'paid' };
+    await storeIdempotencyRecord(
       serviceClient,
-      'payment-verification',
-      orderId,
-      'failed',
-      undefined,
-      error.message
+      idempotencyKey,
+      'payment_verification',
+      order.customerId,
+      response
     );
+    return response;
+  }
 
-    throw error;
+  const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
+  validatePaystackVerificationForOrder({
+    order,
+    paymentReference,
+    transactionData: verifiedTransaction,
+  });
+
+  const result = await markOrderPaymentState(order, verifiedTransaction, webhookEvent);
+
+  await storeIdempotencyRecord(
+    serviceClient,
+    idempotencyKey,
+    'payment_verification',
+    order.customerId,
+    result
+  );
+
+  return result;
+};
+
+/**
+ * Record a terminal payment-verification failure on the order. Invoked by the
+ * queue-drainer once a job has exhausted its retries, preserving the previous
+ * "mark the order's payment as failed" behavior without coupling the handler's
+ * happy path to the queue's retry bookkeeping.
+ */
+export const markPaymentVerificationFailed = async (
+  orderId: string,
+  paymentReference: string,
+  message: string
+) => {
+  const { error } = await serviceClient
+    .from('CustomerOrder')
+    .update({
+      payment: {
+        status: 'failed',
+        reference: paymentReference,
+        error: message,
+        failedAt: new Date().toISOString(),
+      },
+    })
+    .eq('id', orderId);
+
+  if (error) {
+    console.error(`Failed to mark payment failed for ${orderId}: ${error.message}`);
   }
 };

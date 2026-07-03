@@ -28,6 +28,11 @@ export const supabaseEnv = {
 };
 
 export const appEnv = {
+  appDomain:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_APP_DOMAIN,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN
+    ) ?? 'feasty.com',
   appScheme:
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_SCHEME,
@@ -56,8 +61,4 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_FUNCTIONS_REGION,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_FUNCTIONS_REGION
     ) ?? 'us-central1',
-  googleMapsApiKey: getEnvValue(
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
-  ),
 };

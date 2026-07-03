@@ -11,11 +11,11 @@ export const promptForAuth = ({ title, message }: AuthPromptOptions) => {
     { text: 'Not now', style: 'cancel' },
     {
       text: 'Sign up',
-      onPress: () => router.push('/(auth)/register'),
+      onPress: () => router.push('/register'),
     },
     {
       text: 'Sign in',
-      onPress: () => router.push('/(auth)/login'),
+      onPress: () => router.push('/login'),
     },
   ]);
 };

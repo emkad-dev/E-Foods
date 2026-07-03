@@ -135,8 +135,8 @@ $resolvedSupabaseUrl = Resolve-ConfigValue @(
 
 $resolvedServiceRoleKey = Resolve-ConfigValue @(
   $ServiceRoleKey,
-  $env:SUPABASE_SERVICE_ROLE_KEY,
-  (Read-DotEnvValue -Path $functionsEnvPath -Key 'SUPABASE_SERVICE_ROLE_KEY')
+  $env:SERVICE_ROLE_KEY,
+  (Read-DotEnvValue -Path $functionsEnvPath -Key 'SERVICE_ROLE_KEY')
 )
 
 if (-not $resolvedProjectRef) {
@@ -148,7 +148,7 @@ if (-not $resolvedSupabaseUrl) {
 }
 
 if (-not $resolvedServiceRoleKey) {
-  throw 'Missing SUPABASE_SERVICE_ROLE_KEY. Pass -ServiceRoleKey or set it in functions/.env.'
+  throw 'Missing SERVICE_ROLE_KEY. Pass -ServiceRoleKey or set it in functions/.env.'
 }
 
 $normalizedEmail = $Email.Trim().ToLowerInvariant()

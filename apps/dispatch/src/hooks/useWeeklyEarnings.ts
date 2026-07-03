@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   getDispatchWeeklyEarnings,
   type WeeklyEarningsReport,
 } from '../services/dispatchReadModel';
 
 export const useWeeklyEarnings = () => {
+  const { loading: authLoading, user } = useAuth();
   const [report, setReport] = useState<WeeklyEarningsReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -34,8 +36,20 @@ export const useWeeklyEarnings = () => {
   }, []);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!user) {
+      setReport(null);
+      setError(null);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     void loadReport();
-  }, [loadReport]);
+  }, [authLoading, loadReport, user]);
 
   return {
     error,

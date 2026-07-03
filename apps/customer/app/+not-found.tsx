@@ -6,7 +6,7 @@ export default function NotFoundScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.title}>This screen does not exist.</Text>
       <Text style={styles.copy}>Use the link below to get back to the app.</Text>
-      <Link href="/(customer)/home" style={styles.link}>
+      <Link href="/home" style={styles.link}>
         Go to home
       </Link>
     </ScrollView>

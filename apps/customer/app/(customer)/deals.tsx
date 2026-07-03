@@ -1,19 +1,19 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-const promotions = [
+const deals = [
   { title: 'Free delivery', copy: 'Available on selected restaurants this week.' },
   { title: 'Lunch deals', copy: 'Save on midday orders from nearby kitchens.' },
-  { title: 'New restaurant drops', copy: 'Check out recently added spots in your area.' },
+  { title: 'New restaurant picks', copy: 'Check out recently added spots in your area.' },
 ];
 
-export default function PromotionsScreen() {
+export default function DealsScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Promotions</Text>
-      {promotions.map((promotion) => (
-        <View key={promotion.title} style={styles.card}>
-          <Text style={styles.cardTitle}>{promotion.title}</Text>
-          <Text style={styles.cardCopy}>{promotion.copy}</Text>
+      <Text style={styles.title}>Deals</Text>
+      {deals.map((deal) => (
+        <View key={deal.title} style={styles.card}>
+          <Text style={styles.cardTitle}>{deal.title}</Text>
+          <Text style={styles.cardCopy}>{deal.copy}</Text>
         </View>
       ))}
     </ScrollView>

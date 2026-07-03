@@ -9,7 +9,7 @@ export default function OrdersLayout() {
       <Stack.Screen
         name="index"
         options={{
-          headerLeft: () => <CustomerHeaderBackButton href="/(customer)/home" />,
+          headerLeft: () => <CustomerHeaderBackButton href="/home" />,
           headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
           title: 'Orders',
         }}

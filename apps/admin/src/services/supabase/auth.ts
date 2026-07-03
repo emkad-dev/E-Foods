@@ -1,6 +1,8 @@
 export {
   formatAuthError,
   getUserRoleClaim,
+  isStaleSupabaseSessionError,
+  SESSION_EXPIRED_ERROR_MESSAGE,
   sendPasswordResetEmailWithFallback as sendPasswordReset,
   signInWithEmail,
   signOutUser,

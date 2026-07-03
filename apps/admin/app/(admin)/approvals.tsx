@@ -1,65 +1,77 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AdminBackendStatusBanner from '../../src/components/AdminBackendStatusBanner';
 import AdminCard from '../../src/components/AdminCard';
 import AdminEmptyState from '../../src/components/AdminEmptyState';
 import AdminScreenHeader from '../../src/components/AdminScreenHeader';
 import AdminStatusBadge from '../../src/components/AdminStatusBadge';
 import type { DispatchApplicationDocument, PartnerApplicationDocument, RestaurantDocument } from '../../src/domain/entities';
+import { useAdminLiveRefresh } from '../../src/hooks/useAdminLiveRefresh';
 import { reviewDispatchApplication, reviewPartnerApplication } from '../../src/services/dispatchApplicationActions';
 import { getAdminApprovalQueue } from '../../src/services/platformReads';
 import { updateRestaurantApproval } from '../../src/services/restaurantApprovalActions';
 import { adminTheme } from '../../src/theme/palette';
 import { getApprovalTone } from '../../src/theme/status';
 
+const APPROVALS_LIVE_REFRESH_SUBSCRIPTIONS = [
+  { table: 'RestaurantRecord' },
+  { table: 'RestaurantApproval' },
+  { table: 'DispatchApplicationRecord' },
+  { table: 'PartnerApplicationRecord' },
+] as const;
+
 export default function AdminApprovalsScreen() {
   const insets = useSafeAreaInsets();
+  const mountedRef = useRef(true);
   const [restaurants, setRestaurants] = useState<RestaurantDocument[]>([]);
   const [dispatchApplications, setDispatchApplications] = useState<DispatchApplicationDocument[]>([]);
   const [partnerApplications, setPartnerApplications] = useState<PartnerApplicationDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingApprovalId, setPendingApprovalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backendSource, setBackendSource] = useState<'live' | 'cache' | 'fallback'>('live');
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadApprovalQueue = async () => {
-      try {
-        const nextData = await getAdminApprovalQueue();
-
-        if (cancelled) {
-          return;
-        }
-
-        setRestaurants(nextData.restaurants);
-        setDispatchApplications(nextData.dispatchApplications);
-        setPartnerApplications(nextData.partnerApplications);
-        setError(null);
-      } catch (nextError: any) {
-        if (cancelled) {
-          return;
-        }
-
-        console.error('Error loading restaurants for approvals:', nextError);
-        setError(nextError.message ?? 'Unable to load restaurant approvals right now.');
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void loadApprovalQueue();
-    const interval = setInterval(() => {
-      void loadApprovalQueue();
-    }, 20000);
+    mountedRef.current = true;
 
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      mountedRef.current = false;
     };
   }, []);
+
+  const loadApprovalQueue = useCallback(async () => {
+    try {
+      const nextData = await getAdminApprovalQueue();
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setRestaurants(nextData.data.restaurants);
+      setDispatchApplications(nextData.data.dispatchApplications);
+      setPartnerApplications(nextData.data.partnerApplications);
+      setBackendSource(nextData.source);
+      setError(null);
+    } catch (nextError: any) {
+      if (!mountedRef.current) {
+        return;
+      }
+
+      console.error('Error loading restaurants for approvals:', nextError);
+      setError(nextError.message ?? 'Unable to load restaurant approvals right now.');
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useAdminLiveRefresh({
+    onRefresh: loadApprovalQueue,
+    pollIntervalMs: 20000,
+    subscriptions: APPROVALS_LIVE_REFRESH_SUBSCRIPTIONS,
+  });
 
   const approvalQueue = useMemo(
     () =>
@@ -119,6 +131,7 @@ export default function AdminApprovalsScreen() {
         isOpen: typeof updates.isOpen === 'boolean' ? updates.isOpen : undefined,
         isPublished: typeof updates.isPublished === 'boolean' ? updates.isPublished : undefined,
       });
+      void loadApprovalQueue();
       Alert.alert('Update saved', successMessage);
     } catch (nextError: any) {
       Alert.alert('Update failed', nextError.message ?? 'Unable to save this restaurant change right now.');
@@ -140,16 +153,13 @@ export default function AdminApprovalsScreen() {
         decision,
         rejectionReason,
       });
+      void loadApprovalQueue();
       Alert.alert(
         decision === 'approve' ? 'Rider approved' : 'Application rejected',
         decision === 'approve'
           ? 'The rider can now sign into the dispatch app after refreshing their session.'
           : 'The rider application has been rejected.'
       );
-      const nextData = await getAdminApprovalQueue();
-      setRestaurants(nextData.restaurants);
-      setDispatchApplications(nextData.dispatchApplications);
-      setPartnerApplications(nextData.partnerApplications);
     } catch (nextError: any) {
       Alert.alert('Review failed', nextError.message ?? 'Unable to update this rider application right now.');
     } finally {
@@ -164,6 +174,8 @@ export default function AdminApprovalsScreen() {
         title="Restaurant operations"
         subtitle="Manage restaurant visibility and review any legacy partner or dispatch items that still need attention."
       />
+
+      <AdminBackendStatusBanner source={backendSource} />
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -230,14 +242,11 @@ export default function AdminApprovalsScreen() {
                       applicationId: application.id,
                       decision: 'approve',
                     });
+                    void loadApprovalQueue();
                     Alert.alert(
                       'Partner approved',
                       `The partner can now sign in. Starter restaurant record: ${result.restaurantId ?? 'created'}.`
                     );
-                    const nextData = await getAdminApprovalQueue();
-                    setRestaurants(nextData.restaurants);
-                    setDispatchApplications(nextData.dispatchApplications);
-                    setPartnerApplications(nextData.partnerApplications);
                   } catch (nextError: any) {
                     Alert.alert('Review failed', nextError.message ?? 'Unable to approve this partner application right now.');
                   } finally {
@@ -262,11 +271,8 @@ export default function AdminApprovalsScreen() {
                       decision: 'reject',
                       rejectionReason: 'The restaurant onboarding details need to be corrected before approval.',
                     });
+                    void loadApprovalQueue();
                     Alert.alert('Application rejected', 'The partner application has been rejected.');
-                    const nextData = await getAdminApprovalQueue();
-                    setRestaurants(nextData.restaurants);
-                    setDispatchApplications(nextData.dispatchApplications);
-                    setPartnerApplications(nextData.partnerApplications);
                   } catch (nextError: any) {
                     Alert.alert('Review failed', nextError.message ?? 'Unable to reject this partner application right now.');
                   } finally {

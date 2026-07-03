@@ -106,19 +106,12 @@ export default function CustomerLayout() {
           }}
         />
         <Tabs.Screen
-          name="promotions"
+          name="deals"
           options={{
             href: null,
             headerShown: true,
-            title: 'Promotions',
+            title: 'Deals',
             headerRight: () => <AuthHeaderActions />,
-          }}
-        />
-        <Tabs.Screen
-          name="search"
-          options={{
-            href: null,
-            headerShown: false,
           }}
         />
         <Tabs.Screen

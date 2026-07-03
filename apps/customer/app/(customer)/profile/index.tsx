@@ -45,12 +45,14 @@ function ProfileRow({ destructive = false, icon, label, onPress, value }: Profil
 }
 
 export default function ProfileScreen() {
-  const { deleteAccount, loading, signOut, updateDisplayName, user } = useAuth();
+  const { deleteAccount, loading, signOut, updateDisplayName, updatePhoneNumber, user } = useAuth();
   const [usernameDraft, setUsernameDraft] = useState('');
+  const [phoneDraft, setPhoneDraft] = useState('');
 
   useEffect(() => {
     setUsernameDraft(user?.displayName?.trim() ?? '');
-  }, [user?.displayName]);
+    setPhoneDraft(String(user?.phoneNumber ?? '').trim());
+  }, [user?.displayName, user?.phoneNumber]);
 
   const handleSignOut = async () => {
     try {
@@ -101,6 +103,26 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleSavePhoneNumber = async () => {
+    const nextPhone = phoneDraft.trim();
+
+    if (!nextPhone) {
+      Alert.alert('Phone number required', 'Add the phone number you want riders and support to use.');
+      return;
+    }
+
+    if (nextPhone === String(user?.phoneNumber ?? '').trim()) {
+      return;
+    }
+
+    try {
+      await updatePhoneNumber(nextPhone);
+      Alert.alert('Phone saved', 'Your customer contact number has been updated.');
+    } catch (nextError: any) {
+      Alert.alert('Save failed', nextError.message ?? 'Unable to update phone number right now.');
+    }
+  };
+
   if (!user) {
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.guestContainer}>
@@ -128,8 +150,8 @@ export default function ProfileScreen() {
 
       <View style={styles.group}>
         <Text style={styles.groupTitle}>Orders and delivery</Text>
-        <ProfileRow icon="shopping-bag" label="Order history" onPress={() => router.push('/(customer)/orders')} />
-        <ProfileRow icon="map-marker" label="Delivery location" onPress={() => router.push('/(customer)/delivery-location')} />
+        <ProfileRow icon="shopping-bag" label="Order history" onPress={() => router.push('/orders')} />
+        <ProfileRow icon="map-marker" label="Delivery location" onPress={() => router.push('/delivery-location')} />
       </View>
 
       <View style={styles.group}>
@@ -155,6 +177,32 @@ export default function ProfileScreen() {
               ]}
               onPress={handleSaveUsername}
               disabled={loading || !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()}
+            >
+              <Text style={styles.usernameSaveText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <View style={styles.usernameRow}>
+          <Text style={styles.usernameLabel}>Phone number</Text>
+          <View style={styles.usernameInputRow}>
+            <TextInput
+              style={styles.usernameInput}
+              value={phoneDraft}
+              onChangeText={setPhoneDraft}
+              placeholder="Add phone number"
+              placeholderTextColor={customerTheme.textMuted}
+              editable={!loading}
+              keyboardType="phone-pad"
+            />
+            <TouchableOpacity
+              style={[
+                styles.usernameSaveButton,
+                !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()
+                  ? styles.usernameSaveButtonDisabled
+                  : null,
+              ]}
+              onPress={handleSavePhoneNumber}
+              disabled={loading || !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()}
             >
               <Text style={styles.usernameSaveText}>Save</Text>
             </TouchableOpacity>

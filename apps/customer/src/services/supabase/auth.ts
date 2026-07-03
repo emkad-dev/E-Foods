@@ -1,5 +1,10 @@
 import type { AuthError, SupabaseClient, User } from '@supabase/supabase-js';
-import { getSupabaseUserRole, type AuthRole } from '../../../../../packages/auth/src';
+import {
+  getSupabaseUserRole,
+  isStaleSupabaseSessionError,
+  SESSION_EXPIRED_ERROR_MESSAGE,
+  type AuthRole,
+} from '../../../../../packages/auth/src';
 
 const ACTION_CODE_CONFIGURATION_ERRORS = new Set(['redirect_to_not_allowed']);
 
@@ -164,3 +169,5 @@ export const formatAuthError = (error: any): string => {
 
   return errorMap[errorCode] || errorMessage;
 };
+
+export { isStaleSupabaseSessionError, SESSION_EXPIRED_ERROR_MESSAGE };

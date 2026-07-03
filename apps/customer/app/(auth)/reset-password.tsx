@@ -80,7 +80,7 @@ export default function ResetPasswordScreen() {
       Alert.alert('Password updated', 'You can now sign in with your new password.', [
         {
           text: 'Continue to login',
-          onPress: () => router.replace('/(auth)/login'),
+          onPress: () => router.replace('/login'),
         },
       ]);
     } catch (err: any) {
@@ -124,7 +124,7 @@ export default function ResetPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/login" style={styles.link}>
+      <Link href="/login" style={styles.link}>
         Back to login
       </Link>
     </ScrollView>

@@ -9,9 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
+import DispatchLiveMap from '../../src/components/DispatchLiveMap';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
@@ -20,7 +20,7 @@ import {
   type DispatchRiderDraft,
   updateDispatchRider,
 } from '../../src/services/dispatchRiderActions';
-import { GoogleMapsLocationService } from '../../src/services/googleMapsLocation';
+import { OpenStreetMapLocationService } from '../../src/services/osmLocation';
 import { dispatchTheme } from '../../src/theme/palette';
 
 type ProfileSection =
@@ -106,7 +106,7 @@ export default function ProfileScreen() {
       longitude: rider.longitude,
     }));
 
-    return GoogleMapsLocationService.calculateMapRegionBounds(riderCoords, 0.12) || {
+    return OpenStreetMapLocationService.calculateMapRegionBounds(riderCoords, 0.12) || {
       latitude: 9.0765,
       longitude: 7.3986,
       latitudeDelta: 0.22,
@@ -368,24 +368,17 @@ export default function ProfileScreen() {
     <View style={styles.detailCard}>
       <Text style={styles.detailTitle}>Activity Insights</Text>
       <View style={styles.mapCard}>
-        <MapView
-          provider={PROVIDER_GOOGLE}
-          style={styles.map}
-          initialRegion={mapRegion}
-          zoomControlEnabled
-          zoomTapEnabled
-          minZoomLevel={5}
-          maxZoomLevel={20}
-        >
-          {riders.map((rider) => (
-            <Marker
-              key={rider.id}
-              coordinate={{ latitude: rider.latitude, longitude: rider.longitude }}
-              title={rider.name}
-              description={`${rider.zone} · ${rider.hasPreciseLocation ? 'Live' : 'LGA pin'}`}
-            />
-          ))}
-        </MapView>
+        <DispatchLiveMap
+          riders={riders.map((rider) => ({
+            id: rider.id,
+            latitude: rider.latitude,
+            longitude: rider.longitude,
+            name: rider.name,
+            zone: rider.zone,
+            hasPreciseLocation: rider.hasPreciseLocation,
+          }))}
+          region={mapRegion}
+        />
       </View>
       <View style={styles.metricRow}>
         <Metric label="Live pins" value={String(riders.filter((rider) => rider.hasPreciseLocation).length)} />

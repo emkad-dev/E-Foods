@@ -4,7 +4,7 @@ type JsonObject = Record<string, unknown>;
 type NotificationApp = 'customer' | 'partner' | 'dispatch' | 'admin';
 type NotificationRouteKey =
   | 'customer_home'
-  | 'customer_promotions'
+  | 'customer_deals'
   | 'customer_profile'
   | 'customer_orders'
   | 'customer_order_detail'
@@ -42,6 +42,7 @@ type UserPushRow = {
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 const EXPO_PUSH_TOKEN_PATTERN = /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/;
 const EXPO_BATCH_SIZE = 100;
+const EXPO_PUSH_TIMEOUT_MS = 10_000;
 
 const isExpoPushToken = (value: string | null | undefined): value is string =>
   Boolean(value && EXPO_PUSH_TOKEN_PATTERN.test(value));
@@ -69,8 +70,8 @@ const buildNotificationPath = (
   switch (routeKey) {
     case 'customer_home':
       return '/home';
-    case 'customer_promotions':
-      return '/promotions';
+    case 'customer_deals':
+      return '/deals';
     case 'customer_profile':
       return '/profile';
     case 'customer_orders':
@@ -222,13 +223,22 @@ export const sendExpoPushMessages = async (messages: ExpoPushMessage[]) => {
   let sent = 0;
 
   for (const batch of chunkArray(messages, EXPO_BATCH_SIZE)) {
-    const response = await fetch(EXPO_PUSH_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(batch),
-    });
+    let response: Response;
+    try {
+      response = await fetch(EXPO_PUSH_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(batch),
+        signal: AbortSignal.timeout(EXPO_PUSH_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new Error(`Expo push delivery timed out after ${EXPO_PUSH_TIMEOUT_MS}ms`);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const payload = await response.text();

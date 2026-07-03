@@ -3,7 +3,36 @@ import * as Linking from 'expo-linking';
 import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
+import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
+import { initializeSentry } from '../../../packages/observability/src/sentry';
 import { dispatchTheme } from '../src/theme/palette';
+
+function DispatchLocationSyncBridge() {
+  const { user } = useAuth();
+  const { location } = useRealTimeLocation({
+    enabled: user?.role === 'dispatch',
+    highAccuracy: true,
+    updateInterval: 5000,
+  });
+
+  useEffect(() => {
+    if (!user || user.role !== 'dispatch' || !location) {
+      return;
+    }
+
+    void syncDispatchRiderLocation({
+      accuracy: location.accuracy,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      timestamp: location.timestamp,
+    }).catch((error) => {
+      console.warn('Failed to sync dispatch location:', error);
+    });
+  }, [location, user]);
+
+  return null;
+}
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
@@ -80,9 +109,14 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    void initializeSentry('dispatch');
+  }, []);
+
   return (
     <AuthProvider>
       <RootLayoutNav />
+      <DispatchLocationSyncBridge />
     </AuthProvider>
   );
 }

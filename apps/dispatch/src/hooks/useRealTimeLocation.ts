@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
-import { GoogleMapsLocationService } from '../services/googleMapsLocation';
+import { OpenStreetMapLocationService } from '../services/osmLocation';
 
 export interface LiveLocation {
   latitude: number;
@@ -39,7 +39,7 @@ export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
 
     const startTracking = async () => {
       try {
-        const hasPermission = await GoogleMapsLocationService.requestLocationPermission();
+        const hasPermission = await OpenStreetMapLocationService.requestLocationPermission();
 
         if (!hasPermission) {
           if (mounted) {

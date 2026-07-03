@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.feasty.admin'
+    namespace 'com.ebuy.admin'
     defaultConfig {
-        applicationId 'com.feasty.admin'
+        applicationId 'com.ebuy.admin'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

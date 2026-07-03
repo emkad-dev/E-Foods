@@ -101,7 +101,6 @@ export const updateUserProfile = async (
     ...(updates.displayName !== undefined ? { displayName: updates.displayName ?? null } : null),
     ...(updates.photoURL !== undefined ? { photoURL: updates.photoURL ?? null } : null),
     ...(updates.phoneNumber !== undefined ? { phoneNumber: updates.phoneNumber ?? null } : null),
-    ...(updates.emailVerified !== undefined ? { emailVerified: updates.emailVerified === true } : null),
     ...(updates.expoPushToken !== undefined ? { expoPushToken: updates.expoPushToken ?? null } : null),
     ...(updates.pushTokenUpdatedAt !== undefined
       ? { pushTokenUpdatedAt: updates.pushTokenUpdatedAt ?? null }
