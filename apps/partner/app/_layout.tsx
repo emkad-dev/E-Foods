@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
-import { ActivityIndicator, View } from 'react-native';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 
 function RootLayoutNav() {
@@ -67,15 +66,17 @@ function RootLayoutNav() {
     }
   }, [loading, router, segments, user]);
 
-  if (loading) {
-    return (
-      <View style={{ alignItems: 'center', backgroundColor: '#fffaf0', flex: 1, justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color="#f5b342" />
-      </View>
-    );
-  }
-
-  return <Slot />;
+  // The navigator stays mounted across auth/loading changes. Previously this
+  // returned a spinner in place of the navigator whenever `loading` toggled,
+  // which unmounted the whole tree on every Supabase auth event and made the
+  // panel thrash and fall back to the auth group's first route. The (auth) and
+  // (partner) group layouts now own their loading + redirect guards.
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(partner)" />
+    </Stack>
+  );
 }
 
 export default function RootLayout() {

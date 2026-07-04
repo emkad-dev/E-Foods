@@ -1,5 +1,5 @@
-import { Slot, Tabs, usePathname, useRouter } from 'expo-router';
-import { Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Redirect, Slot, Tabs, usePathname, useRouter } from 'expo-router';
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import FeastyWordmark from '../../src/components/FeastyWordmark';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
@@ -65,9 +65,24 @@ function SidebarShell() {
 }
 
 export default function PartnerStackLayout() {
+  const { loading, user } = useAuth();
   usePushNotifications();
   const { width } = useWindowDimensions();
   const isWide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
+
+  if (loading) {
+    return (
+      <View style={{ alignItems: 'center', backgroundColor: partnerTheme.background, flex: 1, justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={partnerTheme.accent} />
+      </View>
+    );
+  }
+
+  // Signed-out users never render the partner shell — send them to login
+  // immediately instead of flashing the dashboard.
+  if (!user) {
+    return <Redirect href={'/(auth)/login' as never} />;
+  }
 
   if (isWide) {
     return <SidebarShell />;
