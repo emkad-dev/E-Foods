@@ -6,6 +6,7 @@ import { getPartnerStatusColor } from '../../../src/theme/statusColors';
 import { usePartnerOrder } from '../../../src/hooks/usePartnerOrder';
 import {
   acceptPartnerOrder,
+  markPartnerOrderDelivered,
   markPartnerOrderPreparing,
   markPartnerOrderReady,
   rejectPartnerOrder,
@@ -49,6 +50,16 @@ export default function PartnerOrderDetailScreen() {
     }
   };
 
+  const handleDelivered = async () => {
+    if (!order) return;
+
+    try {
+      await markPartnerOrderDelivered(order.id, order.timeline ?? null);
+    } catch (nextError: any) {
+      Alert.alert('Update failed', nextError.message ?? 'Unable to complete this order.');
+    }
+  };
+
   const handleReject = async () => {
     if (!order) return;
 
@@ -79,6 +90,8 @@ export default function PartnerOrderDetailScreen() {
   }
 
   const normalizedStatus = normalizeOrderStatus(order.status);
+  const isPickup = (order.fulfillmentType ?? 'delivery') === 'pickup';
+  const canComplete = ['preparing', 'ready_for_pickup'].includes(normalizedStatus);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
@@ -115,7 +128,9 @@ export default function PartnerOrderDetailScreen() {
         <Text style={styles.metaLine}>
           Pickup/delivery point: {order.deliveryLocation?.shortAddress ?? order.deliveryAddress ?? 'Pending'}
         </Text>
-        <Text style={styles.metaLine}>Assigned rider: {order.assignment?.courierName ?? 'Not assigned yet'}</Text>
+        <Text style={styles.metaLine}>
+          Fulfilment: {isPickup ? 'Customer pickup' : 'Restaurant delivery'}
+        </Text>
       </View>
 
       <View style={styles.card}>
@@ -139,7 +154,14 @@ export default function PartnerOrderDetailScreen() {
           disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
           onPress={handleReady}
         >
-          <Text style={styles.actionButtonText}>Mark ready for pickup</Text>
+          <Text style={styles.actionButtonText}>{isPickup ? 'Mark ready for pickup' : 'Mark ready'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, !canComplete ? styles.actionButtonDisabled : null]}
+          disabled={!canComplete}
+          onPress={handleDelivered}
+        >
+          <Text style={styles.actionButtonText}>{isPickup ? 'Mark collected' : 'Mark delivered'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.rejectButton, !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}

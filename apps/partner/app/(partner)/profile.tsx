@@ -48,7 +48,7 @@ export default function PartnerProfileScreen() {
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [deliveryRadiusKm, setDeliveryRadiusKm] = useState('');
-  const [supportsDelivery, setSupportsDelivery] = useState(true);
+  const [supportsDelivery, setSupportsDelivery] = useState(false);
   const [supportsPickup, setSupportsPickup] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
   const [isPublished, setIsPublished] = useState(true);
@@ -80,7 +80,7 @@ export default function PartnerProfileScreen() {
         ? String(restaurant.deliveryRadiusKm)
         : '12'
     );
-    setSupportsDelivery(restaurant?.supportsDelivery !== false);
+    setSupportsDelivery(restaurant?.supportsDelivery === true);
     setSupportsPickup(restaurant?.supportsPickup !== false);
     setIsOpen(restaurant?.isOpen !== false);
     setIsPublished(restaurant?.isPublished !== false);
@@ -390,7 +390,13 @@ export default function PartnerProfileScreen() {
         />
 
         <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Supports delivery</Text>
+          <View style={styles.toggleLabelGroup}>
+            <Text style={styles.toggleLabel}>I handle my own delivery</Text>
+            <Text style={styles.toggleCaption}>
+              Turn on to offer delivery with the fee and radius above — your team delivers. Leave off and
+              customers see &ldquo;delivery coming soon&rdquo; and order pickup.
+            </Text>
+          </View>
           <Switch
             value={supportsDelivery}
             onValueChange={setSupportsDelivery}
@@ -628,10 +634,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 14,
   },
+  toggleLabelGroup: {
+    flex: 1,
+    paddingRight: 12,
+  },
   toggleLabel: {
     color: partnerTheme.text,
     fontSize: 14,
     fontWeight: '700',
+  },
+  toggleCaption: {
+    color: partnerTheme.textSoft,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3,
   },
   primaryButton: {
     alignItems: 'center',

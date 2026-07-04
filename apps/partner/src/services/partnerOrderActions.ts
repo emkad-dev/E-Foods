@@ -16,5 +16,8 @@ export const markPartnerOrderPreparing = async (orderId: string, _timeline: Reco
 export const markPartnerOrderReady = async (orderId: string, _timeline: Record<string, unknown> | null) =>
   updatePartnerOrderStatus(orderId, 'ready');
 
+export const markPartnerOrderDelivered = async (orderId: string, _timeline: Record<string, unknown> | null) =>
+  updatePartnerOrderStatus(orderId, 'delivered');
+
 export const rejectPartnerOrder = async (orderId: string, _timeline: Record<string, unknown> | null) =>
   updatePartnerOrderStatus(orderId, 'reject');

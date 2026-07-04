@@ -2522,6 +2522,20 @@ const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
           readyAt: currentTimelineAt,
         },
       };
+    case 'delivered':
+      // Restaurants that self-provision delivery (and pickup handoffs) complete
+      // their own orders — no platform rider is involved.
+      if (![ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+        fail(412, 'Only orders that are ready can be marked delivered.');
+      }
+
+      return {
+        status: ORDER_STATUS.DELIVERED,
+        timelinePatch: {
+          ...(currentStatus === ORDER_STATUS.PREPARING ? { readyAt: currentTimelineAt } : {}),
+          deliveredAt: currentTimelineAt,
+        },
+      };
     case 'reject':
       if (![ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
         fail(412, 'Only active incoming orders can be rejected.');
@@ -4366,7 +4380,9 @@ const handleNativeAction = async (
         latitude: hasLatitude ? latitude : null,
         longitude: hasLongitude ? longitude : null,
         minOrder: 0,
-        supportsDelivery: true,
+        // Delivery is opt-in: restaurants self-provision it later from their
+        // profile. New restaurants launch pickup-only ("delivery coming soon").
+        supportsDelivery: false,
         supportsPickup: true,
         isOpen: true,
         isPublished: true,
@@ -4746,7 +4762,8 @@ const handleNativeAction = async (
           latitude: application.latitude ?? null,
           longitude: application.longitude ?? null,
           minOrder: 0,
-          supportsDelivery: true,
+          // Delivery is opt-in — restaurant enables its own delivery later.
+          supportsDelivery: false,
           supportsPickup: true,
           isOpen: true,
           isPublished: false,
@@ -5687,7 +5704,22 @@ const handleNativeAction = async (
       ...nextState.timelinePatch,
     };
 
+    const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
+
+    // Restaurant self-provisions delivery/pickup: when it completes the order,
+    // a cash order is collected on handoff. Platform dispatch is shelved, so no
+    // rider assignment happens here.
+    if (nextState.status === ORDER_STATUS.DELIVERED && sanitizeText(payment.method, 'cash') === 'cash') {
+      payment.capturedAmount = roundCurrency(parseNumber((bundle.order.pricing ?? {}).total, 0));
+      payment.lastEvent = 'cash_collected_on_delivery';
+      payment.paidAt = nowIso();
+      payment.processor = PAYMENT_PROVIDER_CASH;
+      payment.reference = sanitizeText(payment.reference, `CASH-${orderId.slice(-6).toUpperCase()}`);
+      payment.status = PAYMENT_STATUS.PAID;
+    }
+
     await updateOrderRecord(orderId, {
+      payment,
       status: nextState.status,
       timeline,
       updatedAt: nowIso(),
@@ -5712,93 +5744,6 @@ const handleNativeAction = async (
         type: 'order_update',
       }),
     });
-    if (
-      nextState.status === ORDER_STATUS.READY_FOR_PICKUP &&
-      sanitizeText(bundle.order.fulfillmentType, 'delivery') === 'delivery'
-    ) {
-      await notifyUsers(
-        sanitizeText(bundle.assignment?.courierId) ? [sanitizeText(bundle.assignment?.courierId)] : [],
-        {
-          title: 'Pickup ready',
-          body: `Order ${orderId.slice(-6).toUpperCase()} is ready for pickup.`,
-          data: buildNotificationData({
-            app: 'dispatch',
-            orderId,
-            routeKey: 'dispatch_delivery_detail',
-            status: nextState.status,
-            type: 'order_update',
-          }),
-        }
-      );
-    }
-
-    await assignDispatchOwnerForOrder(
-      bundle.order,
-      bundle.assignment ?? null,
-      context.uid,
-      nextState.status
-    );
-
-    if (
-      nextState.status === ORDER_STATUS.READY_FOR_PICKUP &&
-      sanitizeText(bundle.order.fulfillmentType, 'delivery') === 'delivery'
-    ) {
-      const refreshedBundle = await loadOrderBundle(orderId);
-      const currentAssignment = refreshedBundle?.assignment ?? bundle.assignment ?? null;
-
-      if (refreshedBundle && !sanitizeText(currentAssignment?.courierId)) {
-        const selectedCourier = await selectDispatchCourierForRestaurant(bundle.order.restaurantId);
-
-        if (selectedCourier) {
-          const assignedAt = nowIso();
-          const courierName = sanitizeText(
-            selectedCourier.rider.displayName,
-            `Rider ${selectedCourier.userId.slice(-4)}`
-          );
-          const dispatchOwnerId = getDispatchAssignmentOwnerId(currentAssignment);
-
-          const { error: courierAssignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
-            {
-              assignedAt: currentAssignment?.assignedAt ?? assignedAt,
-              courierId: selectedCourier.userId,
-              courierName,
-              dispatchId: sanitizeText(currentAssignment?.dispatchId),
-              dispatchOwnerId: dispatchOwnerId ?? null,
-              orderId,
-              updatedAt: assignedAt,
-            },
-            { onConflict: 'orderId' }
-          );
-
-          if (courierAssignmentError) {
-            throw new Error(courierAssignmentError.message);
-          }
-
-          await adjustDispatchRiderLoad(selectedCourier.userId, 1);
-          await insertDeliveryEvent({
-            actorUid: context.uid,
-            details: {
-              courierId: selectedCourier.userId,
-              courierName,
-              restaurantId: bundle.order.restaurantId,
-            },
-            eventType: 'courier_auto_assigned',
-            orderId,
-          });
-          await notifyUsers([selectedCourier.userId], {
-            title: 'Delivery assigned',
-            body: `Order ${orderId.slice(-6).toUpperCase()} is ready for pickup.`,
-            data: buildNotificationData({
-              app: 'dispatch',
-              orderId,
-              routeKey: 'dispatch_delivery_detail',
-              status: nextState.status,
-              type: 'dispatch_assignment',
-            }),
-          });
-        }
-      }
-    }
 
     return json(200, {
       data: {
