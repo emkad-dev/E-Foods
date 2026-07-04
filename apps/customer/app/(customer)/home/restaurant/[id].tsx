@@ -273,7 +273,9 @@ export default function RestaurantDetail() {
                     {restaurant.isOpen === false ? 'Closed' : availabilityBadge ?? 'Open'}
                   </Text>
                   <Text style={styles.factPill}>
-                    Delivery {restaurant.deliveryFee ? formatMoney(Number(restaurant.deliveryFee)) : 'Pending'}
+                    {restaurant.supportsDelivery === true
+                      ? `Delivery ${restaurant.deliveryFee ? formatMoney(Number(restaurant.deliveryFee)) : 'Pending'}`
+                      : 'Delivery coming soon'}
                   </Text>
                 </View>
 
@@ -289,8 +291,8 @@ export default function RestaurantDetail() {
                   ) : null}
                 </View>
 
-                {restaurant.supportsDelivery === false && restaurant.supportsPickup !== false ? (
-                  <Text style={styles.noticeText}>Pickup only is available for this restaurant right now.</Text>
+                {restaurant.supportsDelivery !== true && restaurant.supportsPickup !== false ? (
+                  <Text style={styles.noticeText}>Pickup only for now — delivery is coming soon.</Text>
                 ) : null}
               </Animated.View>
             </View>

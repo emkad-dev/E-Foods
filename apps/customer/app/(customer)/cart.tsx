@@ -60,8 +60,11 @@ export default function CartScreen() {
   });
   const minOrder = restaurant?.minOrder ?? 0;
   const belowMinimum = total > 0 && total < minOrder;
-  const isDeliverySupported = restaurant?.supportsDelivery !== false;
+  // Delivery is offered only when the restaurant self-provisions it (opt-in).
+  // Everyone else is pickup-only with delivery shown as "coming soon".
+  const isDeliverySupported = restaurant?.supportsDelivery === true;
   const isPickupSupported = restaurant?.supportsPickup !== false;
+  const deliveryComingSoon = Boolean(restaurant) && !isDeliverySupported;
   const isRestaurantPublished = restaurant?.isPublished === true;
   const restaurantUnavailableReason =
     !restaurant
@@ -70,17 +73,23 @@ export default function CartScreen() {
         ? 'This restaurant is currently closed.'
           : !isRestaurantPublished
           ? 'This restaurant is currently unavailable for new orders.'
-          : fulfillmentType === 'delivery' && !isDeliverySupported
-            ? 'Delivery is no longer available for this restaurant.'
-            : fulfillmentType === 'pickup' && !isPickupSupported
-              ? 'Pickup is no longer available for this restaurant.'
-              : belowMinimum
-                ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
-                : null;
+          : fulfillmentType === 'pickup' && !isPickupSupported
+            ? 'Pickup is no longer available for this restaurant.'
+            : belowMinimum
+              ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
+              : null;
 
   useEffect(() => {
     setDeliveryNote(deliveryLocation?.note ?? '');
   }, [deliveryLocation?.note]);
+
+  // If this restaurant does not self-provision delivery, delivery is "coming
+  // soon" — quietly move the customer to pickup so checkout stays unblocked.
+  useEffect(() => {
+    if (deliveryComingSoon && fulfillmentType === 'delivery') {
+      setFulfillmentType('pickup');
+    }
+  }, [deliveryComingSoon, fulfillmentType, setFulfillmentType]);
 
   useEffect(() => {
     if (!user) {
@@ -313,6 +322,11 @@ export default function CartScreen() {
                   >
                     Delivery
                   </Text>
+                  {deliveryComingSoon ? (
+                    <View style={styles.comingSoonBadge}>
+                      <Text style={styles.comingSoonBadgeText}>Coming soon</Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -339,9 +353,11 @@ export default function CartScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.fulfillmentHint}>
-                {fulfillmentType === 'delivery'
-                  ? 'We will deliver to the pinned map location you choose below.'
-                  : 'Skip the map step and collect your order directly from the restaurant.'}
+                {deliveryComingSoon
+                  ? 'This restaurant is pickup-only for now — delivery is coming soon.'
+                  : fulfillmentType === 'delivery'
+                    ? 'We will deliver to the pinned map location you choose below.'
+                    : 'Skip the map step and collect your order directly from the restaurant.'}
               </Text>
               {restaurantUnavailableReason ? <Text style={styles.warningText}>{restaurantUnavailableReason}</Text> : null}
             </View>
@@ -691,6 +707,19 @@ const styles = StyleSheet.create({
   },
   fulfillmentOptionTextActive: {
     color: '#fff',
+  },
+  comingSoonBadge: {
+    backgroundColor: customerTheme.warningSoft,
+    borderRadius: 999,
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  comingSoonBadgeText: {
+    color: customerTheme.warning,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   fulfillmentHint: {
     color: customerTheme.textMuted,
