@@ -6,7 +6,13 @@ import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
 import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
 import { initializeSentry } from '../../../packages/observability/src/sentry';
+import DispatchComingSoon from '../src/components/DispatchComingSoon';
 import { dispatchTheme } from '../src/theme/palette';
+
+// Standalone rider dispatch is shelved for the MVP (restaurants self-provision
+// their own delivery). Set to true to bring the full authenticated rider app,
+// login, and live location tracking back online — no deleted code to restore.
+const DISPATCH_ENABLED = false;
 
 function DispatchLocationSyncBridge() {
   const { user } = useAuth();
@@ -112,6 +118,12 @@ export default function RootLayout() {
   useEffect(() => {
     void initializeSentry('dispatch');
   }, []);
+
+  // While dispatch is shelved, render only the coming-soon screen. Auth, live
+  // location tracking, and the rider routes are never mounted (login disabled).
+  if (!DISPATCH_ENABLED) {
+    return <DispatchComingSoon />;
+  }
 
   return (
     <AuthProvider>
