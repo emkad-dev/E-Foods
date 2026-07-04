@@ -533,47 +533,52 @@ export default function HomeScreen() {
             ) : null}
           </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nearbyRow}>
-            {nearbyVisible.map(({ restaurant, availability }) => {
-              const mealPreview = getMealPreview(restaurant, search);
+          {nearbyVisible.map(({ restaurant, availability }) => {
+            const mealPreview = getMealPreview(restaurant, search);
 
-              return (
-                <TouchableOpacity
-                  key={restaurant.id}
-                  style={styles.nearbyCard}
-                  activeOpacity={0.92}
-                  onPress={() => {
-                    trackAnalyticsEvent('customer_restaurant_opened', {
-                      restaurant_id: restaurant.id,
-                      source: 'nearby',
-                    });
-                    router.push(`/home/restaurant/${restaurant.id}`);
-                  }}
-                >
-                  <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
-                  <Text style={styles.nearbyName} numberOfLines={1}>
-                    {restaurant.name}
-                  </Text>
-                  <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
-                  </Text>
-                  <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {restaurant.deliveryTime ?? '25-35 min'}
+            return (
+              <TouchableOpacity
+                key={restaurant.id}
+                style={styles.nearbyCard}
+                activeOpacity={0.92}
+                onPress={() => {
+                  trackAnalyticsEvent('customer_restaurant_opened', {
+                    restaurant_id: restaurant.id,
+                    source: 'nearby',
+                  });
+                  router.push(`/home/restaurant/${restaurant.id}`);
+                }}
+              >
+                <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
+                <View style={styles.nearbyInfo}>
+                  <View style={styles.nearbyHeader}>
+                    <Text style={styles.nearbyName} numberOfLines={1}>
+                      {restaurant.name}
+                    </Text>
+                    <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
+                  </View>
+                  <Text style={styles.nearbyCuisine} numberOfLines={1}>
+                    {restaurant.cuisine ?? 'Kitchen update pending'}
                   </Text>
                   {mealPreview.length > 0 ? (
                     <Text style={styles.nearbyMealPreview} numberOfLines={2}>
-                      Meals: {mealPreview.join(' / ')}
+                      Meals: {mealPreview.join(' • ')}
                     </Text>
                   ) : null}
+                  <Text style={styles.nearbyMeta} numberOfLines={1}>
+                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
+                    {' · '}
+                    {restaurant.deliveryTime ?? '25-35 min'}
+                  </Text>
                   {getRestaurantOperatingHoursLabel(restaurant) ? (
                     <Text style={styles.nearbyMeta} numberOfLines={1}>
                       {getRestaurantOperatingHoursLabel(restaurant)}
                     </Text>
                   ) : null}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </Animated.View>
       ) : null}
 
@@ -1146,28 +1151,46 @@ const styles = StyleSheet.create({
     marginRight: 10,
     marginTop: 4,
   },
-  nearbyRow: {
-    paddingRight: 12,
-  },
   nearbyCard: {
     backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
     borderRadius: 16,
-    marginRight: 10,
-    minHeight: 126,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginBottom: 12,
+    minHeight: 132,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  nearbyImage: {
+    height: 132,
+    width: 112,
+  },
+  nearbyInfo: {
+    flex: 1,
     padding: 14,
-    width: 158,
+  },
+  nearbyHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   nearbyFavoriteButton: {
-    alignSelf: 'flex-end',
     backgroundColor: customerTheme.surfaceMuted,
     height: 30,
-    marginBottom: 4,
     width: 30,
   },
   nearbyName: {
     color: customerTheme.text,
+    flex: 1,
     fontSize: 15,
     fontWeight: '800',
+    marginRight: 8,
+  },
+  nearbyCuisine: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    marginTop: 4,
   },
   nearbyMeta: {
     color: customerTheme.textMuted,
