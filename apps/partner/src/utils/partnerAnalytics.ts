@@ -10,6 +10,10 @@ export const RANGE_OPTIONS: { label: string; value: RangeDays }[] = [
   { label: '90 days', value: 90 },
 ];
 
+// Only fully completed orders count toward earnings. Cancelled, rejected,
+// failed, and still-in-progress orders (placed/accepted/preparing/…) do not.
+const COMPLETED_STATUSES = ['delivered'];
+// Void statuses are sorted to the bottom of the status breakdown chart.
 const VOID_STATUSES = ['cancelled', 'rejected', 'failed_delivery'];
 
 export const parseOrderDate = (value: unknown): Date | null => {
@@ -26,7 +30,7 @@ export const parseOrderDate = (value: unknown): Date | null => {
 };
 
 const isCountedTowardRevenue = (order: OrderDocument) =>
-  !VOID_STATUSES.includes(normalizeOrderStatus(order.status));
+  COMPLETED_STATUSES.includes(normalizeOrderStatus(order.status));
 
 const orderTotal = (order: OrderDocument) => order.pricing?.total ?? (order as { total?: number }).total ?? 0;
 
@@ -70,14 +74,18 @@ export const computePartnerKpis = (orders: OrderDocument[], rangeDays: RangeDays
   const currentCost = sumOf(currentOrders, costOf);
   const currentGross = sumOf(currentOrders, orderTotal);
 
+  // Averages are per completed order, so they line up with earnings above.
+  const currentCompleted = currentOrders.filter(isCountedTowardRevenue).length;
+  const previousCompleted = previousOrders.filter(isCountedTowardRevenue).length;
+
   return {
     orders: { current: currentOrders.length, previous: previousOrders.length },
     earnings: { current: currentEarnings, previous: previousEarnings },
     cost: { current: currentCost, previous: sumOf(previousOrders, costOf) },
     costShareOfGross: currentGross > 0 ? (currentCost / currentGross) * 100 : 0,
     avgOrder: {
-      current: currentOrders.length > 0 ? currentEarnings / currentOrders.length : 0,
-      previous: previousOrders.length > 0 ? previousEarnings / previousOrders.length : 0,
+      current: currentCompleted > 0 ? currentEarnings / currentCompleted : 0,
+      previous: previousCompleted > 0 ? previousEarnings / previousCompleted : 0,
     },
   };
 };

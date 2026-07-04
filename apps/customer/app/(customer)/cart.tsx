@@ -314,19 +314,19 @@ export default function CartScreen() {
                     size={15}
                     color={fulfillmentType === 'delivery' ? '#fff' : customerTheme.accentStrong}
                   />
-                  <Text
-                    style={[
-                      styles.fulfillmentOptionText,
-                      fulfillmentType === 'delivery' ? styles.fulfillmentOptionTextActive : null,
-                    ]}
-                  >
-                    Delivery
-                  </Text>
-                  {deliveryComingSoon ? (
-                    <View style={styles.comingSoonBadge}>
-                      <Text style={styles.comingSoonBadgeText}>Coming soon</Text>
-                    </View>
-                  ) : null}
+                  <View style={styles.fulfillmentOptionLabel}>
+                    <Text
+                      style={[
+                        styles.fulfillmentOptionText,
+                        fulfillmentType === 'delivery' ? styles.fulfillmentOptionTextActive : null,
+                      ]}
+                    >
+                      Delivery
+                    </Text>
+                    {deliveryComingSoon ? (
+                      <Text style={styles.fulfillmentSoonText}>Coming soon</Text>
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -342,14 +342,16 @@ export default function CartScreen() {
                     size={15}
                     color={fulfillmentType === 'pickup' ? '#fff' : customerTheme.accentStrong}
                   />
-                  <Text
-                    style={[
-                      styles.fulfillmentOptionText,
-                      fulfillmentType === 'pickup' ? styles.fulfillmentOptionTextActive : null,
-                    ]}
-                  >
-                    Pickup
-                  </Text>
+                  <View style={styles.fulfillmentOptionLabel}>
+                    <Text
+                      style={[
+                        styles.fulfillmentOptionText,
+                        fulfillmentType === 'pickup' ? styles.fulfillmentOptionTextActive : null,
+                      ]}
+                    >
+                      Pickup
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               </View>
               <Text style={styles.fulfillmentHint}>
@@ -697,29 +699,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   fulfillmentOptionDisabled: {
-    opacity: 0.45,
+    opacity: 0.6,
+  },
+  fulfillmentOptionLabel: {
+    alignItems: 'center',
+    marginLeft: 8,
   },
   fulfillmentOptionText: {
     color: customerTheme.accentStrong,
     fontSize: 13,
     fontWeight: '800',
-    marginLeft: 8,
   },
   fulfillmentOptionTextActive: {
     color: '#fff',
   },
-  comingSoonBadge: {
-    backgroundColor: customerTheme.warningSoft,
-    borderRadius: 999,
-    marginLeft: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  comingSoonBadgeText: {
+  fulfillmentSoonText: {
     color: customerTheme.warning,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
+    marginTop: 1,
   },
   fulfillmentHint: {
     color: customerTheme.textMuted,
