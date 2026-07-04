@@ -36,7 +36,7 @@ function FeastyLaunchScreen() {
           <Text style={styles.launchWordmarkGreen}>FEAST</Text>
           <Text style={styles.launchWordmarkOrange}>Y</Text>
         </Text>
-        <Text style={styles.launchSubtitle}>Crafted for fast, polished delivery.</Text>
+        <Text style={styles.launchSubtitle}>Feast You deserve.</Text>
       </Animated.View>
     </View>
   );

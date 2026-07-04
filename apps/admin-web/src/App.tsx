@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SnapshotProvider } from './contexts/SnapshotContext';
 import AccessPage from './pages/AccessPage';
 import ApprovalsPage from './pages/ApprovalsPage';
+import DispatchPage from './pages/DispatchPage';
 import LoginPage from './pages/LoginPage';
 import OrdersPage from './pages/OrdersPage';
 import OverviewPage from './pages/OverviewPage';
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/access" element={<AccessPage />} />
+          <Route path="/dispatch" element={<DispatchPage />} />
           <Route path="/statistics" element={<StatisticsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -7,7 +7,7 @@ export const callAdminRpc = <T>(action: string, data?: Record<string, unknown>) 
     supabase,
     {
       backendRpcUrl: appEnv.backendRpcUrl,
-      supabaseAnonKey: appEnv.supabaseAnonKey,
+      anonKey: appEnv.supabaseAnonKey,
       supabaseUrl: appEnv.supabaseUrl,
     },
     action,

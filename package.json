@@ -9,29 +9,24 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:admin": "npm --prefix apps/admin run start",
+    "dev:admin": "npm --prefix apps/admin-web run dev",
     "dev:customer": "npm --prefix apps/customer run start",
     "dev:partner": "npm --prefix apps/partner run start",
     "dev:dispatch": "npm --prefix apps/dispatch run start",
-    "web:admin": "npm --prefix apps/admin run start",
+    "build:admin": "npm --prefix apps/admin-web run build",
     "android:customer": "npm --prefix apps/customer run android",
     "android:partner": "npm --prefix apps/partner run android",
     "android:dispatch": "npm --prefix apps/dispatch run android",
-    "lint:admin": "npm --prefix apps/admin run lint",
     "lint:customer": "npm --prefix apps/customer run lint",
     "lint:partner": "npm --prefix apps/partner run lint",
     "lint:dispatch": "npm --prefix apps/dispatch run lint",
-    "test:admin:live-refresh": "node --test apps/admin/src/hooks/adminLiveRefreshController.test.mjs",
     "load:test": "node ./scripts/load-test-backend.mjs",
     "db:doctor": "npm --prefix functions run db:doctor",
     "db:generate": "npm --prefix functions run prisma:generate",
     "db:migrate:deploy": "npm --prefix functions run prisma:migrate:deploy",
     "db:validate": "npm --prefix functions run prisma:validate",
     "deploy:paystack": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\deploy-paystack-functions.ps1",
-    "dev:admin-web": "npm --prefix apps/admin-web run dev",
-    "build:admin-web": "npm --prefix apps/admin-web run build",
-    "android:admin": "npm --prefix apps/admin run android",
-    "deploy:functions": "powershell -NoProfile -ExecutionPolicy Bypass -File .scriptsdeploy-realtime-email-functions.ps1"
+    "deploy:functions": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\deploy-realtime-email-functions.ps1"
   },
   "dependencies": {
     "@sentry/browser": "^10.62.0",
