@@ -39,7 +39,9 @@
     "react-native-webview": "^13.16.1"
   },
   "devDependencies": {
-    "@supabase/cli-windows-x64": "^2.101.0",
     "supabase": "^2.101.0"
+  },
+  "optionalDependencies": {
+    "@supabase/cli-windows-x64": "^2.101.0"
   }
 }
