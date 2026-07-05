@@ -19,9 +19,12 @@ import {
 import {
   clearStoredUserProfile,
   clearStoredSessionId,
+  clearStoredPolicyAccepted,
   createSessionId,
   getStoredUserProfile,
+  getStoredPolicyAccepted,
   getStoredSessionId,
+  storePolicyAccepted,
   storeSessionId,
   storeUserProfile,
 } from '../services/session';
@@ -125,7 +128,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   const clearLocalUserState = useCallback(async () => {
-    await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
+    await Promise.all([clearStoredSessionId(), clearStoredUserProfile(), clearStoredPolicyAccepted()]);
   }, []);
 
   const clearExpiredSession = useCallback(async () => {
@@ -184,19 +187,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await storeSessionId(sessionId);
   }, []);
 
-  const refreshPolicyAcceptance = useCallback(async () => {
-    setPolicyLoading(true);
+  const refreshPolicyAcceptance = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    // Silent refresh is used during the background reconcile after a cached
+    // first paint: it must not toggle `policyLoading`, which would re-block the
+    // UI on the loading spinner we just cleared.
+    if (!silent) {
+      setPolicyLoading(true);
+    }
 
     try {
       const status = await getCustomerPolicyAcceptance();
       setPolicyAccepted(status.accepted);
+      void storePolicyAccepted(status.accepted);
       return status.accepted;
     } catch (policyError) {
       console.warn('Unable to load customer policy acceptance:', policyError);
-      setPolicyAccepted(false);
+      // On a transient failure during a silent background refresh, keep the
+      // cached value rather than downgrading a returning user into the policy
+      // gate; only the blocking (interactive) path resets to false.
+      if (!silent) {
+        setPolicyAccepted(false);
+      }
       return false;
     } finally {
-      setPolicyLoading(false);
+      if (!silent) {
+        setPolicyLoading(false);
+      }
     }
   }, []);
 
@@ -242,14 +258,61 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return true;
   }, [clearLocalUserState]);
 
+  // First paint must not wait on the sequential auth RPCs (getUserDocument,
+  // role claim, single-device sync, policy acceptance) that follow
+  // onAuthStateChange. Resolve the first frame from local storage only: paint
+  // the cached customer profile and cached policy flag if present, or show the
+  // login screen immediately when there is no session. onAuthStateChange then
+  // reconciles the real state in the background.
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      const [cachedUser, cachedPolicyAccepted] = await Promise.all([
+        getStoredUserProfile<UserDocument>(),
+        getStoredPolicyAccepted(),
+      ]);
+
+      if (!active) {
+        return;
+      }
+
+      if (cachedUser && cachedUser.role === DEFAULT_APP_ROLE) {
+        setUser(cachedUser);
+        setPolicyAccepted(cachedPolicyAccepted);
+        setLoading(false);
+        return;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (active && !session) {
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   /**
    * Listen for authentication state changes and sync user profile
    */
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
-      setLoading(true);
+    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
+      // re-block the UI once the first paint has resolved. Only an explicit
+      // sign-in returns to the full-screen spinner.
+      const isInteractiveSignIn = event === 'SIGNED_IN';
+
+      if (isInteractiveSignIn) {
+        setLoading(true);
+      }
       try {
         const authUser = session?.user ?? null;
 
@@ -263,7 +326,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             return;
           }
 
-          await refreshPolicyAcceptance();
+          await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
           setUser(nextUser);
           await storeUserProfile(nextUser);
         } else {
@@ -367,6 +430,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
       await recordCustomerPolicyAcceptance(policyAcceptance.source || 'customer_signup');
       setPolicyAccepted(true);
+      void storePolicyAccepted(true);
       await startSingleDeviceSession(authUser.id);
       identifyAnalyticsUser(authUser.id);
 
@@ -644,6 +708,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       await recordCustomerPolicyAcceptance(source);
       setPolicyAccepted(true);
+      void storePolicyAccepted(true);
       trackAnalyticsEvent('customer_policy_accepted', {
         source,
       });

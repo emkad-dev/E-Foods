@@ -230,11 +230,50 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     [clearLocalUserState]
   );
 
+  // First paint must not wait on the sequential auth RPCs (role claim,
+  // getUserDocument, single-device sync) that follow onAuthStateChange. Resolve
+  // the first frame from local storage only: paint the cached rider profile if
+  // present, or show the login screen immediately when there is no session. The
+  // onAuthStateChange listener reconciles the real state in the background.
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      const cachedUser = await getStoredUserProfile<UserDocument>();
+
+      if (!active) {
+        return;
+      }
+
+      if (cachedUser && cachedUser.role === 'dispatch') {
+        setUser(cachedUser);
+        setLoading(false);
+        return;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (active && !session) {
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
-      setLoading(true);
+    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // Background reconciliation must not re-block the UI once the first paint
+      // has resolved. Only an explicit sign-in returns to the full-screen spinner.
+      if (event === 'SIGNED_IN') {
+        setLoading(true);
+      }
 
       try {
         const authUser = session?.user ?? null;

@@ -34,6 +34,9 @@ jobs:
       - name: Typecheck admin web
         run: npm --prefix apps/admin-web run typecheck
 
+      - name: Typecheck partner
+        run: npm run typecheck:partner
+
       - name: Lint customer
         run: npm run lint:customer
 
@@ -42,6 +45,9 @@ jobs:
 
       - name: Lint dispatch
         run: npm run lint:dispatch
+
+      - name: Build partner web (expo export)
+        run: npm run build:partner
 
       - name: Prisma generate
         run: npm run db:generate

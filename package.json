@@ -14,6 +14,8 @@
     "dev:partner": "npm --prefix apps/partner run start",
     "dev:dispatch": "npm --prefix apps/dispatch run start",
     "build:admin": "npm --prefix apps/admin-web run build",
+    "build:partner": "npm --prefix apps/partner run build:web",
+    "typecheck:partner": "npm --prefix apps/partner run typecheck",
     "android:customer": "npm --prefix apps/customer run android",
     "android:partner": "npm --prefix apps/partner run android",
     "android:dispatch": "npm --prefix apps/dispatch run android",

@@ -221,11 +221,57 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     [clearLocalUserState]
   );
 
+  // First paint must not wait on the sequential auth RPCs (role claim,
+  // getUserDocument, single-device sync) that follow onAuthStateChange — on a
+  // slow network those round-trips can hold the app on a spinner for seconds.
+  // Instead we resolve the first frame from local storage only: paint the
+  // cached partner profile if we have one, or show the login screen straight
+  // away when there is no Supabase session. The onAuthStateChange listener then
+  // reconciles the real state in the background.
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      const cachedUser = await getStoredUserProfile<UserDocument>();
+
+      if (!active) {
+        return;
+      }
+
+      if (cachedUser && cachedUser.role === 'restaurant') {
+        setUser(cachedUser);
+        setLoading(false);
+        return;
+      }
+
+      // No cached profile: getSession() is a local read (no network), so we can
+      // cheaply decide whether to unblock straight to the login screen. When a
+      // session does exist we leave `loading` true and let the reconcile below
+      // finish, since there is nothing cached to paint yet.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (active && !session) {
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
-      setLoading(true);
+    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
+      // re-block the UI once the first paint has resolved. Only an explicit
+      // sign-in returns to the full-screen spinner.
+      if (event === 'SIGNED_IN') {
+        setLoading(true);
+      }
 
       try {
         const authUser = session?.user ?? null;
