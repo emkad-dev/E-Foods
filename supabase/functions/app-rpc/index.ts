@@ -15,6 +15,7 @@ import {
   broadcastRestaurantsChanged,
   broadcastRidersChanged,
 } from '../_shared/realtime.ts';
+import { toCdnImageUrl } from '../_shared/media.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -757,8 +758,8 @@ const buildRestaurantResponse = (
   closingTime: sanitizeOptionalText(restaurant.closingTime),
   description: sanitizeOptionalText(restaurant.description),
   id: restaurant.id,
-  image: sanitizeOptionalText(restaurant.image),
-  logoImage: sanitizeOptionalText(restaurant.logoImage),
+  image: toCdnImageUrl(sanitizeOptionalText(restaurant.image)),
+  logoImage: toCdnImageUrl(sanitizeOptionalText(restaurant.logoImage)),
   isOpen: restaurant.isOpen !== false,
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,

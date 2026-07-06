@@ -2,6 +2,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import { toCdnImageUrl } from '../_shared/media.ts';
 import {
   createEdgeObservation,
   finishEdgeObservation,
@@ -62,8 +63,8 @@ const toRestaurantResponse = (
   description: sanitizeOptionalText(restaurant.description),
   closingTime: sanitizeOptionalText(restaurant.closingTime),
   id: restaurant.id,
-  image: sanitizeOptionalText(restaurant.image),
-  logoImage: sanitizeOptionalText(restaurant.logoImage),
+  image: toCdnImageUrl(sanitizeOptionalText(restaurant.image)),
+  logoImage: toCdnImageUrl(sanitizeOptionalText(restaurant.logoImage)),
   isOpen: restaurant.isOpen !== false,
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,

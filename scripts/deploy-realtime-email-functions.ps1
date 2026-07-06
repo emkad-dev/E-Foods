@@ -122,7 +122,8 @@ Sync-SupabaseSecrets -ProjectRef $resolvedProjectRef -EnvPath $functionsEnv -Map
   @{ Key = 'PAYSTACK_PUBLIC_KEY'; Aliases = @('PAYSTACK_PUBLIC_KEY') },
   @{ Key = 'PAYSTACK_CALLBACK_URL'; Aliases = @('PAYSTACK_CALLBACK_URL') },
   @{ Key = 'RESEND_API_KEY'; Aliases = @('RESEND_API_KEY') },
-  @{ Key = 'TRANSACTIONAL_EMAIL_FROM'; Aliases = @('TRANSACTIONAL_EMAIL_FROM') }
+  @{ Key = 'TRANSACTIONAL_EMAIL_FROM'; Aliases = @('TRANSACTIONAL_EMAIL_FROM') },
+  @{ Key = 'CDN_BASE_URL'; Aliases = @('CDN_BASE_URL') }
 )
 
 foreach ($functionName in $Functions) {
