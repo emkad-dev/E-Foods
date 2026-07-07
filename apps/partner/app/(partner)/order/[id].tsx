@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
@@ -18,7 +18,9 @@ export default function PartnerOrderDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { error, loading, order } = usePartnerOrder(id as string);
+  const isCompactRail = width < 480;
 
   const handleAccept = async () => {
     if (!order) return;
@@ -135,41 +137,63 @@ export default function PartnerOrderDetailScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Actions</Text>
-        <TouchableOpacity
-          style={[styles.actionButton, normalizedStatus !== 'placed' ? styles.actionButtonDisabled : null]}
-          disabled={normalizedStatus !== 'placed'}
-          onPress={handleAccept}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.actionRail, isCompactRail ? styles.actionRailCompact : null]}
         >
-          <Text style={styles.actionButtonText}>Accept order</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}
-          disabled={!['accepted', 'placed'].includes(normalizedStatus)}
-          onPress={handlePreparing}
-        >
-          <Text style={styles.actionButtonText}>Start preparing</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}
-          disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
-          onPress={handleReady}
-        >
-          <Text style={styles.actionButtonText}>{isPickup ? 'Mark ready for pickup' : 'Mark ready'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, !canComplete ? styles.actionButtonDisabled : null]}
-          disabled={!canComplete}
-          onPress={handleDelivered}
-        >
-          <Text style={styles.actionButtonText}>{isPickup ? 'Mark collected' : 'Mark delivered'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.rejectButton, !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null]}
-          disabled={!['placed', 'accepted'].includes(normalizedStatus)}
-          onPress={handleReject}
-        >
-          <Text style={styles.rejectButtonText}>Reject order</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              isCompactRail ? styles.actionButtonCompact : null,
+              normalizedStatus !== 'placed' ? styles.actionButtonDisabled : null,
+            ]}
+            disabled={normalizedStatus !== 'placed'}
+            onPress={handleAccept}
+          >
+            <Text style={styles.actionButtonText}>Accept order</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              isCompactRail ? styles.actionButtonCompact : null,
+              !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+            ]}
+            disabled={!['accepted', 'placed'].includes(normalizedStatus)}
+            onPress={handlePreparing}
+          >
+            <Text style={styles.actionButtonText}>Start preparing</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              isCompactRail ? styles.actionButtonCompact : null,
+              !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+            ]}
+            disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
+            onPress={handleReady}
+          >
+            <Text style={styles.actionButtonText}>{isPickup ? 'Mark ready for pickup' : 'Mark ready'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, isCompactRail ? styles.actionButtonCompact : null, !canComplete ? styles.actionButtonDisabled : null]}
+            disabled={!canComplete}
+            onPress={handleDelivered}
+          >
+            <Text style={styles.actionButtonText}>{isPickup ? 'Mark collected' : 'Mark delivered'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.rejectButton,
+              isCompactRail ? styles.actionButtonCompact : null,
+              !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+            ]}
+            disabled={!['placed', 'accepted'].includes(normalizedStatus)}
+            onPress={handleReject}
+          >
+            <Text style={styles.rejectButtonText}>Reject order</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
     </ScrollView>
   );
@@ -259,6 +283,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 8,
   },
+  actionRail: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    paddingTop: 4,
+  },
+  actionRailCompact: {
+    gap: 8,
+    paddingLeft: 2,
+    paddingRight: 2,
+  },
   itemRow: {
     alignItems: 'center',
     borderTopColor: partnerTheme.border,
@@ -292,8 +327,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
     borderRadius: 16,
+    justifyContent: 'center',
     marginTop: 10,
+    minWidth: 158,
+    paddingHorizontal: 18,
     paddingVertical: 14,
+  },
+  actionButtonCompact: {
+    minWidth: 138,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   actionButtonDisabled: {
     backgroundColor: '#d7d2c7',
@@ -307,7 +350,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.danger,
     borderRadius: 16,
+    justifyContent: 'center',
     marginTop: 10,
+    minWidth: 158,
+    paddingHorizontal: 18,
     paddingVertical: 14,
   },
   rejectButtonText: {

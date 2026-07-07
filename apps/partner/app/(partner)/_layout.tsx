@@ -200,8 +200,6 @@ const styles = StyleSheet.create({
   },
   navLink: {
     alignItems: 'center',
-    borderLeftColor: 'transparent',
-    borderLeftWidth: 3,
     borderRadius: 12,
     flexDirection: 'row',
     gap: 12,
@@ -211,7 +209,6 @@ const styles = StyleSheet.create({
   },
   navLinkActive: {
     backgroundColor: partnerTheme.accentSoft,
-    borderLeftColor: partnerTheme.accent,
   },
   navDot: {
     backgroundColor: partnerTheme.border,
