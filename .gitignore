@@ -92,3 +92,9 @@ amplifytools.xcconfig
 .secret-*
 **.sample
 #amplify-do-not-edit-end
+
+# local script env files (contain keys/tokens)
+scripts/.*.env
+
+# supabase CLI local branch state
+supabase/.branches/

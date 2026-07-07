@@ -111,6 +111,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pendingApplicantUidRef = useRef<string | null>(null);
+  const partnerSignupInProgressRef = useRef(false);
   // Tracks whether a partner is already signed in, without re-subscribing the
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
@@ -195,6 +196,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const buildNextUser = useCallback(
     async (authUser: SupabaseAuthUser) => {
+      if (partnerSignupInProgressRef.current) {
+        return null;
+      }
+
       const claimRole = await getUserRoleClaim(authUser);
       const userDocument = await getUserDocument(authUser.id);
 
@@ -349,6 +354,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let applicantUid: string | null = null;
 
     try {
+      partnerSignupInProgressRef.current = true;
       const authUser = await createUserWithEmail(supabase, email, password);
       applicantUid = authUser.id;
       pendingApplicantUidRef.current = authUser.id;
@@ -415,6 +421,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       throw new Error(resolvedMessage);
     } finally {
       pendingApplicantUidRef.current = null;
+      partnerSignupInProgressRef.current = false;
       setLoading(false);
     }
   };
