@@ -13,6 +13,7 @@ enum AppRole {
   restaurant
   dispatch
   admin
+  support
 }
 
 enum RestaurantApprovalStatus {

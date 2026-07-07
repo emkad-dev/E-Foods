@@ -2,11 +2,13 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import AppLayout from './components/AppLayout';
 import LoadingBlock from './components/LoadingBlock';
+import RequireRole from './components/RequireRole';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SnapshotProvider } from './contexts/SnapshotContext';
 import AccessPage from './pages/AccessPage';
 import ApprovalsPage from './pages/ApprovalsPage';
 import DispatchPage from './pages/DispatchPage';
+import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
 import OrdersPage from './pages/OrdersPage';
 import OverviewPage from './pages/OverviewPage';
@@ -47,6 +49,18 @@ export default function App() {
           <Route path="/access" element={<AccessPage />} />
           <Route path="/dispatch" element={<DispatchPage />} />
           <Route path="/statistics" element={<StatisticsPage />} />
+        </Route>
+        <Route
+          path="/inbox"
+          element={
+            <RequireRole roles={['admin', 'support']}>
+              <SnapshotProvider>
+                <AppLayout />
+              </SnapshotProvider>
+            </RequireRole>
+          }
+        >
+          <Route index element={<InboxPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
