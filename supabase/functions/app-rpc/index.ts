@@ -18,6 +18,7 @@ import {
   broadcastSupportThreadChanged,
 } from '../_shared/realtime.ts';
 import { toCdnImageUrl } from '../_shared/media.ts';
+import { resolveBroadcastAudience, type BroadcastSegment } from '../_shared/broadcast.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -6662,6 +6663,127 @@ const handleNativeAction = async (
     return json(200, { data: { conversation } });
   }
 
+  if (action === 'broadcastList') {
+    ensureRole(context.role, ['admin']);
+    const { data: broadcasts, error } = await serviceClient
+      .from('Broadcast')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .returns<BroadcastRow[]>();
+    if (error) {
+      throw new Error(error.message);
+    }
+    return json(200, { data: { broadcasts: broadcasts ?? [] } });
+  }
+
+  if (action === 'broadcastGet') {
+    ensureRole(context.role, ['admin']);
+    const broadcastId = sanitizeText(data.id);
+    if (!broadcastId) {
+      fail(400, 'A broadcast id is required.');
+    }
+    const { data: broadcast, error } = await serviceClient
+      .from('Broadcast')
+      .select('*')
+      .eq('id', broadcastId)
+      .maybeSingle<BroadcastRow>();
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!broadcast) {
+      fail(404, 'Broadcast not found.');
+    }
+    return json(200, { data: { broadcast } });
+  }
+
+  if (action === 'broadcastPreviewAudience') {
+    ensureRole(context.role, ['admin']);
+    const category = sanitizeText(data.category) || 'transactional';
+    const segment = (data.segment && typeof data.segment === 'object' ? data.segment : {}) as BroadcastSegment;
+    const recipients = await resolveBroadcastAudience(segment, category);
+    return json(200, { data: { recipientCount: recipients.length } });
+  }
+
+  if (action === 'broadcastCreate') {
+    ensureRole(context.role, ['admin']);
+    const title = sanitizeText(data.title);
+    if (!title) {
+      fail(400, 'A title is required.');
+    }
+    const { channels, segment } = validateBroadcastComposition({
+      category: data.category,
+      channels: data.channels,
+      segment: data.segment,
+      emailSubject: data.emailSubject,
+      emailBody: data.emailBody,
+      pushTitle: data.pushTitle,
+      pushBody: data.pushBody,
+    });
+    const { data: broadcast, error } = await serviceClient
+      .from('Broadcast')
+      .insert({
+        title,
+        category: data.category,
+        channels,
+        segment,
+        emailSubject: sanitizeText(data.emailSubject) || null,
+        emailBody: typeof data.emailBody === 'string' && data.emailBody.trim() ? data.emailBody : null,
+        pushTitle: sanitizeText(data.pushTitle) || null,
+        pushBody: sanitizeText(data.pushBody) || null,
+        status: 'draft',
+        createdByUid: context.uid,
+      })
+      .select('*')
+      .single<BroadcastRow>();
+    if (error || !broadcast) {
+      throw new Error(error?.message ?? 'Failed to create the broadcast.');
+    }
+    return json(200, { data: { broadcast } });
+  }
+
+  if (action === 'broadcastSchedule') {
+    ensureRole(context.role, ['admin']);
+    const broadcastId = sanitizeText(data.id);
+    if (!broadcastId) {
+      fail(400, 'A broadcast id is required.');
+    }
+    const scheduledAtRaw = sanitizeText(data.scheduledAt);
+    if (scheduledAtRaw && Number.isNaN(new Date(scheduledAtRaw).getTime())) {
+      fail(400, 'A valid scheduledAt timestamp is required.');
+    }
+    const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw).toISOString() : new Date().toISOString();
+    const { data: broadcast, error } = await serviceClient
+      .from('Broadcast')
+      .update({ status: 'scheduled', scheduledAt, updatedAt: new Date().toISOString() })
+      .eq('id', broadcastId)
+      .in('status', ['draft', 'scheduled', 'canceled', 'failed'])
+      .select('*')
+      .single<BroadcastRow>();
+    if (error || !broadcast) {
+      throw new Error(error?.message ?? 'Failed to schedule the broadcast.');
+    }
+    return json(200, { data: { broadcast } });
+  }
+
+  if (action === 'broadcastCancel') {
+    ensureRole(context.role, ['admin']);
+    const broadcastId = sanitizeText(data.id);
+    if (!broadcastId) {
+      fail(400, 'A broadcast id is required.');
+    }
+    const { data: broadcast, error } = await serviceClient
+      .from('Broadcast')
+      .update({ status: 'canceled', updatedAt: new Date().toISOString() })
+      .eq('id', broadcastId)
+      .eq('status', 'scheduled')
+      .select('*')
+      .single<BroadcastRow>();
+    if (error || !broadcast) {
+      throw new Error(error?.message ?? 'Only a scheduled broadcast can be canceled.');
+    }
+    return json(200, { data: { broadcast } });
+  }
+
   return null;
 };
 
@@ -6686,6 +6808,69 @@ type SupportMessageRow = {
   emailSent: boolean;
   pushSent: boolean;
   createdAt: string;
+};
+
+type BroadcastRow = {
+  id: string;
+  title: string;
+  category: string;
+  channels: string[];
+  segment: BroadcastSegment;
+  emailSubject: string | null;
+  emailBody: string | null;
+  pushTitle: string | null;
+  pushBody: string | null;
+  status: string;
+  scheduledAt: string | null;
+  recipientCount: number;
+  sentEmail: number;
+  failedEmail: number;
+  sentPush: number;
+  failedPush: number;
+  createdByUid: string;
+  createdAt: string;
+  updatedAt: string;
+  sentAt: string | null;
+};
+
+const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;
+const isBroadcastCategory = (value: unknown): value is (typeof BROADCAST_CATEGORIES)[number] =>
+  typeof value === 'string' && (BROADCAST_CATEGORIES as readonly string[]).includes(value);
+
+const validateBroadcastComposition = (input: {
+  category: unknown;
+  channels: unknown;
+  segment: unknown;
+  emailSubject: unknown;
+  emailBody: unknown;
+  pushTitle: unknown;
+  pushBody: unknown;
+}) => {
+  if (!isBroadcastCategory(input.category)) {
+    fail(400, 'A valid category is required.');
+  }
+  const channels = Array.isArray(input.channels)
+    ? input.channels.filter((channel) => channel === 'email' || channel === 'push')
+    : [];
+  if (channels.length === 0) {
+    fail(400, 'At least one channel (email or push) is required.');
+  }
+  if (channels.includes('email') && (!sanitizeText(input.emailSubject) || !sanitizeText(input.emailBody))) {
+    fail(400, 'Email subject and body are required for the email channel.');
+  }
+  if (channels.includes('push') && (!sanitizeText(input.pushTitle) || !sanitizeText(input.pushBody))) {
+    fail(400, 'Push title and body are required for the push channel.');
+  }
+  const segment = (input.segment && typeof input.segment === 'object' ? input.segment : {}) as BroadcastSegment;
+  if (
+    input.category === 'marketing' &&
+    !(segment.roles ?? []).includes('customer') &&
+    !segment.activity &&
+    !segment.restaurantId
+  ) {
+    fail(400, 'Marketing broadcasts must target customers.');
+  }
+  return { channels, segment };
 };
 
 const SUPPORT_STATUSES = ['open', 'pending', 'closed'] as const;
