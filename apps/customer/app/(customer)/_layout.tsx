@@ -128,6 +128,7 @@ export default function CustomerLayout() {
             headerShown: true,
             title: 'Help & Support',
             headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
+            tabBarStyle: { display: 'none' },
           }}
         />
       </Tabs>
