@@ -1,6 +1,6 @@
 -- Support inbox: conversations + messages (Phase 1)
 create table if not exists public."SupportConversation" (
-  "id"            text primary key,
+  "id"            text primary key default (gen_random_uuid())::text,
   "customerId"    text not null unique,
   "subject"       text,
   "status"        text not null default 'open',
@@ -12,7 +12,7 @@ create table if not exists public."SupportConversation" (
 );
 
 create table if not exists public."SupportMessage" (
-  "id"             text primary key,
+  "id"             text primary key default (gen_random_uuid())::text,
   "conversationId" text not null references public."SupportConversation"("id") on delete cascade,
   "senderType"     text not null,
   "senderId"       text,
