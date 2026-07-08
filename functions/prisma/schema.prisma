@@ -475,3 +475,39 @@ model SupportMessage {
   @@index([conversationId])
   @@index([createdAt])
 }
+
+model Broadcast {
+  id             String    @id @default(cuid())
+  title          String
+  category       String // marketing | transactional
+  channels       Json // ["email","push"]
+  segment        Json
+  emailSubject   String?
+  emailBody      String?
+  pushTitle      String?
+  pushBody       String?
+  status         String    @default("draft") // draft|scheduled|sending|sent|failed|canceled
+  scheduledAt    DateTime?
+  recipientCount Int       @default(0)
+  sentEmail      Int       @default(0)
+  failedEmail    Int       @default(0)
+  sentPush       Int       @default(0)
+  failedPush     Int       @default(0)
+  createdByUid   String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  sentAt         DateTime?
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([createdAt])
+}
+
+model EmailSuppression {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  reason    String // unsubscribe | bounce | complaint
+  createdAt DateTime @default(now())
+
+  @@index([reason])
+}
