@@ -14,11 +14,14 @@ import {
   broadcastOrderChanged,
   broadcastRestaurantsChanged,
   broadcastRidersChanged,
+  broadcastSupportInboxChanged,
+  broadcastSupportThreadChanged,
 } from '../_shared/realtime.ts';
 import { toCdnImageUrl } from '../_shared/media.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
+  loadUserEmailRecipient,
   sendTransactionalEmail,
   shortOrderCode,
 } from '../_shared/email.ts';
@@ -6380,7 +6383,346 @@ const handleNativeAction = async (
     });
   }
 
+  if (action === 'customerSendSupportMessage') {
+    const body = sanitizeText(data.body);
+    if (!body) {
+      fail(400, 'A message body is required.');
+    }
+
+    // One thread per customer: find, create, or reopen if previously closed.
+    const { data: existing, error: findError } = await serviceClient
+      .from('SupportConversation')
+      .select('*')
+      .eq('customerId', context.uid)
+      .maybeSingle<SupportConversationRow>();
+    if (findError) {
+      throw new Error(findError.message);
+    }
+
+    let conversation: SupportConversationRow;
+    if (!existing) {
+      const { data: created, error: createError } = await serviceClient
+        .from('SupportConversation')
+        .insert({ customerId: context.uid, status: 'open', subject: body.slice(0, 80) })
+        .select('*')
+        .single<SupportConversationRow>();
+      if (createError || !created) {
+        throw new Error(createError?.message ?? 'Failed to create the conversation.');
+      }
+      conversation = created;
+    } else if (existing.status === 'closed') {
+      const { data: reopened, error: reopenError } = await serviceClient
+        .from('SupportConversation')
+        .update({ status: 'open', updatedAt: new Date().toISOString() })
+        .eq('id', existing.id)
+        .select('*')
+        .single<SupportConversationRow>();
+      if (reopenError || !reopened) {
+        throw new Error(reopenError?.message ?? 'Failed to reopen the conversation.');
+      }
+      conversation = reopened;
+    } else {
+      conversation = existing;
+    }
+
+    const message = await appendSupportMessage({
+      conversationId: conversation.id,
+      senderType: 'customer',
+      senderId: context.uid,
+      body,
+    });
+
+    await broadcastSupportInboxChanged({ conversationId: conversation.id });
+    await broadcastSupportThreadChanged(conversation.id, { messageId: message.id });
+
+    return json(200, { data: { conversation, message } });
+  }
+
+  if (action === 'customerGetSupportThread') {
+    const { data: conversation, error: convError } = await serviceClient
+      .from('SupportConversation')
+      .select('*')
+      .eq('customerId', context.uid)
+      .maybeSingle<SupportConversationRow>();
+    if (convError) {
+      throw new Error(convError.message);
+    }
+    if (!conversation) {
+      return json(200, { data: { conversation: null, messages: [] } });
+    }
+
+    const { data: messages, error: msgError } = await serviceClient
+      .from('SupportMessage')
+      .select('*')
+      .eq('conversationId', conversation.id)
+      .order('createdAt', { ascending: true })
+      .returns<SupportMessageRow[]>();
+    if (msgError) {
+      throw new Error(msgError.message);
+    }
+    return json(200, { data: { conversation, messages: messages ?? [] } });
+  }
+
+  if (action === 'supportGetInbox') {
+    ensureRole(context.role, ['admin', 'support']);
+    const status = sanitizeText(data.status);
+    const scope = sanitizeText(data.scope) || 'all';
+
+    let query = serviceClient
+      .from('SupportConversation')
+      .select('*')
+      .order('lastMessageAt', { ascending: false });
+    if (status && isSupportStatus(status)) {
+      query = query.eq('status', status);
+    }
+    if (scope === 'mine') {
+      query = query.eq('assignedTo', context.uid);
+    } else if (scope === 'unassigned') {
+      query = query.is('assignedTo', null);
+    }
+
+    const { data: conversations, error } = await query.returns<SupportConversationRow[]>();
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const customerIds = Array.from(new Set((conversations ?? []).map((row) => row.customerId)));
+    const accountsById = new Map<string, { displayName: string | null; email: string }>();
+    if (customerIds.length > 0) {
+      const { data: accounts, error: accountsError } = await serviceClient
+        .from('UserAccount')
+        .select('uid,displayName,email')
+        .in('uid', customerIds)
+        .returns<Array<{ uid: string; displayName: string | null; email: string }>>();
+      if (accountsError) {
+        throw new Error(accountsError.message);
+      }
+      for (const account of accounts ?? []) {
+        accountsById.set(account.uid, { displayName: account.displayName, email: account.email });
+      }
+    }
+
+    const rows = (conversations ?? []).map((row) => ({
+      ...row,
+      customerName:
+        accountsById.get(row.customerId)?.displayName ??
+        accountsById.get(row.customerId)?.email ??
+        row.customerId,
+    }));
+    return json(200, { data: { conversations: rows } });
+  }
+
+  if (action === 'supportGetConversation') {
+    ensureRole(context.role, ['admin', 'support']);
+    const conversationId = sanitizeText(data.conversationId);
+    if (!conversationId) {
+      fail(400, 'A conversationId is required.');
+    }
+
+    const { data: conversation, error: convError } = await serviceClient
+      .from('SupportConversation')
+      .select('*')
+      .eq('id', conversationId)
+      .maybeSingle<SupportConversationRow>();
+    if (convError) {
+      throw new Error(convError.message);
+    }
+    if (!conversation) {
+      fail(404, 'Conversation not found.');
+    }
+
+    const { data: messages, error: msgError } = await serviceClient
+      .from('SupportMessage')
+      .select('*')
+      .eq('conversationId', conversationId)
+      .order('createdAt', { ascending: true })
+      .returns<SupportMessageRow[]>();
+    if (msgError) {
+      throw new Error(msgError.message);
+    }
+    return json(200, { data: { conversation, messages: messages ?? [] } });
+  }
+
+  if (action === 'supportSendAgentReply') {
+    ensureRole(context.role, ['admin', 'support']);
+    const conversationId = sanitizeText(data.conversationId);
+    const body = sanitizeText(data.body);
+    if (!conversationId) {
+      fail(400, 'A conversationId is required.');
+    }
+    if (!body) {
+      fail(400, 'A reply body is required.');
+    }
+
+    const { data: conversation, error: convError } = await serviceClient
+      .from('SupportConversation')
+      .select('*')
+      .eq('id', conversationId)
+      .maybeSingle<SupportConversationRow>();
+    if (convError) {
+      throw new Error(convError.message);
+    }
+    if (!conversation) {
+      fail(404, 'Conversation not found.');
+    }
+
+    // Persist first so the reply is never lost, even if delivery fails.
+    const message = await appendSupportMessage({
+      conversationId: conversation.id,
+      senderType: 'agent',
+      senderId: context.uid,
+      body,
+    });
+
+    // In-app: broadcast to the customer's thread and the inbox.
+    await broadcastSupportThreadChanged(conversation.id, { messageId: message.id });
+    await broadcastSupportInboxChanged({ conversationId: conversation.id });
+
+    // Email (best-effort).
+    let emailSent = false;
+    const recipient = await loadUserEmailRecipient(conversation.customerId);
+    if (recipient) {
+      const html = buildTransactionalEmailHtml({
+        heading: 'FEASTy Support replied',
+        recipientName: recipient.displayName,
+        lines: [body, 'Reply to this message inside the FEASTy app to continue the conversation.'],
+      });
+      const emailResult = await sendTransactionalEmail({
+        to: recipient.email,
+        subject: 'FEASTy Support',
+        html,
+      });
+      emailSent = emailResult.sent;
+    }
+
+    // Push (best-effort).
+    let pushSent = false;
+    try {
+      const pushResult = await sendPushNotificationsToUsers([conversation.customerId], {
+        title: 'FEASTy Support',
+        body: body.length > 120 ? `${body.slice(0, 117)}…` : body,
+        data: { type: 'support_reply', path: '/support', routeKey: 'customer_profile', app: 'customer' },
+      });
+      pushSent = pushResult.sent > 0;
+    } catch (error) {
+      console.error('Support push delivery failed.', error);
+    }
+
+    await serviceClient
+      .from('SupportMessage')
+      .update({ emailSent, pushSent })
+      .eq('id', message.id);
+
+    return json(200, { data: { message: { ...message, emailSent, pushSent } } });
+  }
+
+  if (action === 'supportSetConversationStatus') {
+    ensureRole(context.role, ['admin', 'support']);
+    const conversationId = sanitizeText(data.conversationId);
+    const status = sanitizeText(data.status);
+    if (!conversationId) {
+      fail(400, 'A conversationId is required.');
+    }
+    if (!status || !isSupportStatus(status)) {
+      fail(400, 'A valid status is required.');
+    }
+
+    const { data: conversation, error } = await serviceClient
+      .from('SupportConversation')
+      .update({ status, updatedAt: new Date().toISOString() })
+      .eq('id', conversationId)
+      .select('*')
+      .single<SupportConversationRow>();
+    if (error || !conversation) {
+      throw new Error(error?.message ?? 'Failed to update the conversation status.');
+    }
+    await broadcastSupportInboxChanged({ conversationId: conversation.id });
+    return json(200, { data: { conversation } });
+  }
+
+  if (action === 'supportAssignConversation') {
+    ensureRole(context.role, ['admin', 'support']);
+    const conversationId = sanitizeText(data.conversationId);
+    if (!conversationId) {
+      fail(400, 'A conversationId is required.');
+    }
+    const assignToRaw = sanitizeText(data.assignTo);
+    const assignTo = assignToRaw === 'me' ? context.uid : assignToRaw || null;
+
+    const { data: conversation, error } = await serviceClient
+      .from('SupportConversation')
+      .update({ assignedTo: assignTo, updatedAt: new Date().toISOString() })
+      .eq('id', conversationId)
+      .select('*')
+      .single<SupportConversationRow>();
+    if (error || !conversation) {
+      throw new Error(error?.message ?? 'Failed to assign the conversation.');
+    }
+    await broadcastSupportInboxChanged({ conversationId: conversation.id });
+    return json(200, { data: { conversation } });
+  }
+
   return null;
+};
+
+type SupportConversationRow = {
+  id: string;
+  customerId: string;
+  subject: string | null;
+  status: string;
+  assignedTo: string | null;
+  channel: string;
+  lastMessageAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SupportMessageRow = {
+  id: string;
+  conversationId: string;
+  senderType: string;
+  senderId: string | null;
+  body: string;
+  emailSent: boolean;
+  pushSent: boolean;
+  createdAt: string;
+};
+
+const SUPPORT_STATUSES = ['open', 'pending', 'closed'] as const;
+const isSupportStatus = (value: unknown): value is (typeof SUPPORT_STATUSES)[number] =>
+  typeof value === 'string' && (SUPPORT_STATUSES as readonly string[]).includes(value);
+
+const appendSupportMessage = async (input: {
+  conversationId: string;
+  senderType: 'customer' | 'agent' | 'system';
+  senderId: string | null;
+  body: string;
+  emailSent?: boolean;
+  pushSent?: boolean;
+}): Promise<SupportMessageRow> => {
+  const { data, error } = await serviceClient
+    .from('SupportMessage')
+    .insert({
+      conversationId: input.conversationId,
+      senderType: input.senderType,
+      senderId: input.senderId,
+      body: input.body,
+      emailSent: input.emailSent ?? false,
+      pushSent: input.pushSent ?? false,
+    })
+    .select('*')
+    .single<SupportMessageRow>();
+  if (error || !data) {
+    throw new Error(error?.message ?? 'Failed to persist the support message.');
+  }
+
+  const timestamp = nowIso();
+  await serviceClient
+    .from('SupportConversation')
+    .update({ lastMessageAt: timestamp, updatedAt: timestamp })
+    .eq('id', input.conversationId);
+
+  return data;
 };
 
 Deno.serve(async (request) => {

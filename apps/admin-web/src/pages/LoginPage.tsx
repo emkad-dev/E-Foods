@@ -11,8 +11,11 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!initializing && session && role === 'admin') {
-    const from = (location.state as { from?: string } | null)?.from ?? '/';
+  const allowedRole = role === 'admin' || role === 'support';
+
+  if (!initializing && session && allowedRole) {
+    const fallback = role === 'support' ? '/inbox' : '/';
+    const from = (location.state as { from?: string } | null)?.from ?? fallback;
     return <Navigate to={from} replace />;
   }
 
@@ -30,7 +33,7 @@ export default function LoginPage() {
     }
   };
 
-  const signedInWithoutAdminRole = !initializing && session && role !== 'admin';
+  const signedInWithoutAccess = !initializing && session && !allowedRole;
 
   return (
     <div className="login-wrap">
@@ -44,8 +47,8 @@ export default function LoginPage() {
           Sign in with your admin provissioned account given by the super user to access the platform.
         </p>
         {error ? <ErrorBanner message={error} /> : null}
-        {signedInWithoutAdminRole ? (
-          <ErrorBanner message="This account does not have admin access." />
+        {signedInWithoutAccess ? (
+          <ErrorBanner message="This account does not have panel access." />
         ) : null}
         <div className="field">
           <label htmlFor="email">Email</label>
@@ -72,7 +75,7 @@ export default function LoginPage() {
         <button type="submit" className="btn btn-primary" disabled={submitting || initializing}>
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>
-        {signedInWithoutAdminRole ? (
+        {signedInWithoutAccess ? (
           <button type="button" className="btn btn-ghost" onClick={() => void signOut()}>
             Sign out of current account
           </button>

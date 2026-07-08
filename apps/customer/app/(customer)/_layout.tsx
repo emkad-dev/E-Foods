@@ -121,6 +121,15 @@ export default function CustomerLayout() {
             headerShown: false,
           }}
         />
+        <Tabs.Screen
+          name="support"
+          options={{
+            href: null,
+            headerShown: true,
+            title: 'Help & Support',
+            headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
+          }}
+        />
       </Tabs>
     </FavoritesProvider>
   );

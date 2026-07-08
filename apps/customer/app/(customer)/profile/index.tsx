@@ -152,6 +152,7 @@ export default function ProfileScreen() {
         <Text style={styles.groupTitle}>Orders and delivery</Text>
         <ProfileRow icon="shopping-bag" label="Order history" onPress={() => router.push('/orders')} />
         <ProfileRow icon="map-marker" label="Delivery location" onPress={() => router.push('/delivery-location')} />
+        <ProfileRow icon="life-ring" label="Help & Support" onPress={() => router.push('/support')} />
       </View>
 
       <View style={styles.group}>

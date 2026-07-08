@@ -58,3 +58,18 @@ export const broadcastRidersChanged = (payload: Record<string, unknown> = {}) =>
 
 export const broadcastRestaurantsChanged = (payload: Record<string, unknown> = {}) =>
   broadcastRealtimeMessages([{ payload, topic: RESTAURANTS_REALTIME_TOPIC }]);
+
+export const SUPPORT_INBOX_TOPIC = 'support-inbox';
+export const supportThreadTopic = (conversationId: string) => `support-${conversationId}`;
+
+export const broadcastSupportInboxChanged = (payload: Record<string, unknown> = {}) =>
+  broadcastRealtimeMessages([{ payload, topic: SUPPORT_INBOX_TOPIC }]);
+
+export const broadcastSupportThreadChanged = (
+  conversationId: string,
+  payload: Record<string, unknown> = {}
+) =>
+  broadcastRealtimeMessages([
+    { payload: { conversationId, ...payload }, topic: supportThreadTopic(conversationId) },
+    { payload: { conversationId, ...payload }, topic: SUPPORT_INBOX_TOPIC },
+  ]);

@@ -2,18 +2,23 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
 
-const NAV_ITEMS = [
+const ADMIN_NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/orders', label: 'Orders' },
   { to: '/approvals', label: 'Approvals' },
   { to: '/access', label: 'Access' },
   { to: '/dispatch', label: 'Dispatch' },
   { to: '/statistics', label: 'Statistics' },
+  { to: '/inbox', label: 'Inbox' },
 ];
 
+const SUPPORT_NAV = [{ to: '/inbox', label: 'Inbox', end: true }];
+
 export default function AppLayout() {
-  const { session, signOut } = useAuth();
+  const { session, role, signOut } = useAuth();
   const { lastUpdated } = useSnapshot();
+
+  const navItems = role === 'support' ? SUPPORT_NAV : ADMIN_NAV;
 
   const rawName = session?.user.user_metadata?.display_name || session?.user.email?.split('@')[0] || 'Admin';
   const greetingName = String(rawName).slice(0, 24);
@@ -27,7 +32,7 @@ export default function AppLayout() {
         </div>
         
         <nav>
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
               {item.label}
             </NavLink>
