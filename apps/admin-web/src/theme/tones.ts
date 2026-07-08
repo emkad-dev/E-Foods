@@ -51,13 +51,13 @@ export const getRoleTone = (role?: string | null): AdminTone => {
 };
 
 const STATUS_CHART_COLORS: Record<string, string> = {
-  confirmed: '#03b833',
-  placed: '#ff951f',
+  confirmed: '#2e7d32',
+  placed: '#f57c00',
   cancelled: '#c54a43',
-  delivered: '#028a26',
+  delivered: '#1b5e20',
 };
 
-const FALLBACK_CHART_COLORS = ['#7fd99a', '#ffc175', '#117c6a', '#5b6978', '#e07c00', '#b5e48c'];
+const FALLBACK_CHART_COLORS = ['#66bb6a', '#ffb74d', '#117c6a', '#5b6978', '#ef6c00', '#a5d6a7'];
 
 export const getStatusChartColor = (status: string, index: number) =>
   STATUS_CHART_COLORS[status.toLowerCase()] ?? FALLBACK_CHART_COLORS[index % FALLBACK_CHART_COLORS.length];

@@ -10,6 +10,7 @@ const ADMIN_NAV = [
   { to: '/dispatch', label: 'Dispatch' },
   { to: '/statistics', label: 'Statistics' },
   { to: '/inbox', label: 'Inbox' },
+  { to: '/broadcasts', label: 'Broadcasts' },
 ];
 
 const SUPPORT_NAV = [{ to: '/inbox', label: 'Inbox', end: true }];

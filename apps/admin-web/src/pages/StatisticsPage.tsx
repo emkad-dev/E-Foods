@@ -74,7 +74,7 @@ export default function StatisticsPage() {
               <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 12 }} width={80} />
               <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0), currency)} />
-              <Line type="monotone" dataKey="revenue" stroke="#03b833" strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="revenue" stroke="#2e7d32" strokeWidth={2.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -114,7 +114,7 @@ export default function StatisticsPage() {
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
                 <Tooltip formatter={(value) => [formatNumber(Number(value ?? 0)), 'Orders']} />
-                <Bar dataKey="orders" fill="#ff951f" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="orders" fill="#f57c00" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
