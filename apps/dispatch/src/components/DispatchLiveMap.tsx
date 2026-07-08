@@ -47,8 +47,8 @@ const buildHtml = (riders: DispatchMapRider[], region: DispatchLiveMapProps['reg
         border: 3px solid rgba(255, 255, 255, 0.95);
         box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
       }
-      .marker.live { background: #0f7f4c; }
-      .marker.lga { background: #c87d22; }
+      .marker.live { background: #1b5e20; }
+      .marker.lga { background: #ef6c00; }
       .maplibregl-popup-content {
         border-radius: 14px;
         padding: 10px 12px;

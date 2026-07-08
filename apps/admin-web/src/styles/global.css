@@ -67,12 +67,20 @@ button {
 }
 
 .sidebar-logo {
+  align-items: center;
+  display: flex;
   font-size: 40px;
   font-style: italic;
   font-weight: 900;
+  gap: 8px;
   letter-spacing: -2px;
   padding: 0 12px 24px;
   text-transform: uppercase;
+}
+
+.wordmark-icon {
+  height: 0.9em;
+  width: auto;
 }
 
 .wordmark-green {
@@ -525,9 +533,13 @@ button {
 }
 
 .login-logo {
+  align-items: center;
+  display: flex;
   font-size: 26px;
   font-style: italic;
   font-weight: 900;
+  gap: 8px;
+  justify-content: center;
   letter-spacing: -1px;
   text-transform: uppercase;
   text-align: center;

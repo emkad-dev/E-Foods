@@ -2272,6 +2272,31 @@ const isOrderOperationallyVisible = (order: CustomerOrderRow) => {
   return TERMINAL_ORDER_STATUSES.has(currentStatus);
 };
 
+const FAILED_ORDER_STATUSES = new Set<string>([
+  ORDER_STATUS.CANCELLED,
+  ORDER_STATUS.REJECTED,
+  ORDER_STATUS.FAILED_DELIVERY,
+]);
+
+// Admin and partner order lists/counts stay clean: unpaid prepaid checkouts and
+// failed outcomes (cancelled/rejected/failed delivery) are excluded. Customers
+// always see their full order history via the customer read paths.
+const isOrderCleanForReporting = (order: CustomerOrderRow) => {
+  const paymentMethod = sanitizeText(order.payment?.method, 'cash');
+  const paymentStatus = sanitizeText(order.payment?.status, PAYMENT_STATUS.PENDING);
+  const currentStatus = normalizeOrderStatus(order.status);
+
+  if (FAILED_ORDER_STATUSES.has(currentStatus)) {
+    return false;
+  }
+
+  if (PREPAID_PAYMENT_METHODS.has(paymentMethod) && paymentStatus !== PAYMENT_STATUS.PAID) {
+    return false;
+  }
+
+  return true;
+};
+
 const assertOrderPaymentReadyForOperations = (order: CustomerOrderRow) => {
   if (!isOrderOperationallyVisible(order)) {
     fail(412, 'This order is still waiting for online payment confirmation and cannot move into kitchen or dispatch yet.');
@@ -5437,7 +5462,7 @@ const handleNativeAction = async (
 
     const orderList = sortPartnerKitchenQueue(
       (await Promise.all(((orders ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order))))
-        .filter(isOrderOperationallyVisible)
+        .filter(isOrderCleanForReporting)
     );
     const { assignmentsByOrderId, itemsByOrderId } = await loadOrderRelations(orderList.map((order) => order.id));
     const customerPhoneByUid = await loadUserPhoneNumbers(orderList.map((order) => order.customerId));
@@ -6338,7 +6363,11 @@ const handleNativeAction = async (
     const users = (usersResult.data ?? []) as UserAccountRow[];
     const rolesByUserId = await loadUserRoles(users.map((user) => user.uid));
     const restaurants = (restaurantsResult.data ?? []) as RestaurantRecordRow[];
-    const orders = (ordersResult.data ?? []) as CustomerOrderRow[];
+    const orders = (
+      await Promise.all(
+        ((ordersResult.data ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order))
+      )
+    ).filter(isOrderCleanForReporting);
     const riders = (ridersResult.data ?? []) as DispatchRiderRow[];
     const orderRelations = await loadOrderRelations(orders.map((order) => order.id));
     const restaurantApprovals = await Promise.all(restaurants.map((restaurant) => loadRestaurantById(restaurant.id)));

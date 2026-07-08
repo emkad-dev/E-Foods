@@ -28,8 +28,11 @@ export default function AppLayout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <span className="wordmark-green">FEAST</span>
-          <span className="wordmark-orange">Y</span>
+          <img className="wordmark-icon" src="/feasty-pizza.png" alt="" />
+          <span>
+            <span className="wordmark-green">FEAST</span>
+            <span className="wordmark-orange">Y</span>
+          </span>
         </div>
         
         <nav>

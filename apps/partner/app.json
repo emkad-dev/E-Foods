@@ -29,7 +29,7 @@
         "expo-notifications",
         {
           "icon": "../customer/assets/images/icon.png",
-          "color": "#C87D22"
+          "color": "#F57C00"
         }
       ],
       [

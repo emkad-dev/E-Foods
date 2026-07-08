@@ -39,9 +39,12 @@ export default function LoginPage() {
     <div className="login-wrap">
       <form className="card login-card" onSubmit={handleSubmit}>
         <div className="login-logo">
-          <span className="wordmark-green">FEAST</span>
-          <span className="wordmark-orange">Y</span>
-          <span className="login-logo-suffix"> Admin</span>
+          <img className="wordmark-icon" src="/feasty-pizza.png" alt="" />
+          <span>
+            <span className="wordmark-green">FEAST</span>
+            <span className="wordmark-orange">Y</span>
+            <span className="login-logo-suffix"> Admin</span>
+          </span>
         </div>
         <p className="muted" style={{ textAlign: 'center', margin: 0 }}>
           Sign in with your admin provissioned account given by the super user to access the platform.

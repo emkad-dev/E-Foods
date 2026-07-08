@@ -71,7 +71,7 @@ export const usePushNotifications = () => {
           await Notifications.setNotificationChannelAsync('default', {
             name: 'default',
             importance: Notifications.AndroidImportance.MAX,
-            lightColor: '#C87D22',
+            lightColor: '#F57C00',
             vibrationPattern: [0, 250, 250, 250],
           });
         }

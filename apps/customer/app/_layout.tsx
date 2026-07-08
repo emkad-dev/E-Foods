@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Linking from 'expo-linking';
-import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
@@ -20,7 +20,7 @@ function FeastyLaunchScreen() {
         toValue: 1,
         useNativeDriver: true,
       }),
-      Animated.delay(650),
+      Animated.delay(4320),
       Animated.timing(opacity, {
         duration: 360,
         toValue: 0,
@@ -32,6 +32,7 @@ function FeastyLaunchScreen() {
   return (
     <View style={styles.launchScreen}>
       <Animated.View style={[styles.launchBrand, { opacity }]}>
+        <Image source={require('../assets/images/feasty-pizza.png')} style={styles.launchMark} resizeMode="contain" />
         <Text style={styles.launchWordmark}>
           <Text style={styles.launchWordmarkGreen}>FEAST</Text>
           <Text style={styles.launchWordmarkOrange}>Y</Text>
@@ -159,7 +160,7 @@ function RootLayoutNav() {
 
     launchShownForUserRef.current = user.uid;
     setShowLaunch(true);
-    const timer = setTimeout(() => setShowLaunch(false), 2000);
+    const timer = setTimeout(() => setShowLaunch(false), 5000);
 
     return () => clearTimeout(timer);
   }, [loading, policyAccepted, policyLoading, user?.emailVerified, user?.role, user?.uid]);
@@ -244,6 +245,10 @@ const styles = StyleSheet.create({
   },
   launchBrand: {
     alignItems: 'center',
+  },
+  launchMark: {
+    height: 108,
+    width: 120,
   },
   launchWordmark: {
     fontSize: 54,
