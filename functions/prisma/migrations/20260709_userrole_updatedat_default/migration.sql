@@ -1,0 +1,6 @@
+ALTER TABLE "UserRole"
+  ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE "UserRole"
+SET "updatedAt" = COALESCE("updatedAt", "createdAt", CURRENT_TIMESTAMP)
+WHERE "updatedAt" IS NULL;

@@ -72,6 +72,7 @@ export const createUserDocument = async (
     {
       userId,
       role: userData.role ?? 'customer',
+      updatedAt: new Date().toISOString(),
     },
     {
       onConflict: 'userId,role',
