@@ -3263,14 +3263,24 @@ const deleteUserRoleLinks = async (userId: string) => {
 };
 
 const updateUserAccount = async (uid: string, updates: JsonObject) => {
-  const { error } = await serviceClient.from('UserAccount').update(updates).eq('uid', uid);
+  const nextUpdates = {
+    ...updates,
+    updatedAt: nowIso(),
+  };
+
+  const { error } = await serviceClient.from('UserAccount').update(nextUpdates).eq('uid', uid);
   if (error) {
     throw new Error(error.message);
   }
 };
 
 const upsertUserAccount = async (record: JsonObject) => {
-  const { error } = await serviceClient.from('UserAccount').upsert(record, { onConflict: 'uid' });
+  const nextRecord = {
+    ...record,
+    updatedAt: nowIso(),
+  };
+
+  const { error } = await serviceClient.from('UserAccount').upsert(nextRecord, { onConflict: 'uid' });
   if (error) {
     throw new Error(error.message);
   }
