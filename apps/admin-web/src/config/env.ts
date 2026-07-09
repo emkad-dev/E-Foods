@@ -12,12 +12,24 @@ const resolveEnv = (...values: Array<string | undefined>) => values.find((value)
 
 export const appEnv = {
   supabaseUrl: readEnv(
-    resolveEnv(import.meta.env.VITE_SUPABASE_URL, import.meta.env.EXPO_PUBLIC_SUPABASE_URL),
-    'VITE_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_URL'
+    resolveEnv(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.EXPO_PUBLIC_SUPABASE_URL,
+      import.meta.env.SUPABASE_URL
+    ),
+    'VITE_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_URL, or SUPABASE_URL'
   ),
   supabaseAnonKey: readEnv(
-    resolveEnv(import.meta.env.VITE_SUPABASE_ANON_KEY, import.meta.env.EXPO_PUBLIC_SUPABASE_ANON_KEY),
-    'VITE_SUPABASE_ANON_KEY or EXPO_PUBLIC_SUPABASE_ANON_KEY'
+    resolveEnv(
+      import.meta.env.VITE_SUPABASE_ANON_KEY,
+      import.meta.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      import.meta.env.SUPABASE_ANON_KEY
+    ),
+    'VITE_SUPABASE_ANON_KEY, EXPO_PUBLIC_SUPABASE_ANON_KEY, or SUPABASE_ANON_KEY'
   ),
-  backendRpcUrl: resolveEnv(import.meta.env.VITE_BACKEND_RPC_URL, import.meta.env.EXPO_PUBLIC_BACKEND_RPC_URL),
+  backendRpcUrl: resolveEnv(
+    import.meta.env.VITE_BACKEND_RPC_URL,
+    import.meta.env.EXPO_PUBLIC_BACKEND_RPC_URL,
+    import.meta.env.BACKEND_RPC_URL
+  ),
 };
