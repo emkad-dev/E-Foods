@@ -298,6 +298,8 @@ export const markPaymentVerificationFailed = async (
   paymentReference: string,
   message: string
 ) => {
+  const nowIso = new Date().toISOString();
+
   const { error } = await serviceClient
     .from('CustomerOrder')
     .update({
@@ -305,8 +307,9 @@ export const markPaymentVerificationFailed = async (
         status: 'failed',
         reference: paymentReference,
         error: message,
-        failedAt: new Date().toISOString(),
+        failedAt: nowIso,
       },
+      updatedAt: nowIso,
     })
     .eq('id', orderId);
 
