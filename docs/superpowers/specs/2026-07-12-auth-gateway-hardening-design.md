@@ -30,7 +30,7 @@ untouched and migrate to the SDK incrementally.
 
 | Original ask | Reality on Supabase | What we build |
 |---|---|---|
-| bcrypt password hashing | GoTrue already bcrypts | Never bypass it; enforce a strong password **policy** |
+| bcrypt password hashing | GoTrue already bcrypts | Never bypass it; enforce a password **policy** (≥6 + upper/lower/digit) |
 | refresh token rotation | GoTrue supports it (config) | `/refresh` forwards so GoTrue rotates + reuse-detects; we verify the setting is on |
 | rate limiting | Built-in global limits only | Our own per-IP + per-email limiting with lockout at the route |
 | parameterized queries | PostgREST/RLS parameterize | All new SQL parameterized; audit `app-rpc` for raw SQL |
@@ -80,9 +80,10 @@ SDK is a drop-in.
 
 Shared `supabase/functions/_shared/validation.ts`:
 - Email: RFC-lite structural check, length bounds, normalized to lowercase.
-- Password policy: **≥ 10 characters, at least one upper, one lower, one digit.**
-  Enforced server-side regardless of client. The matching Supabase
-  minimum-password-length setting is documented so the two cannot diverge.
+- Password policy: **≥ 6 characters, at least one upper, one lower, one digit.**
+  Enforced server-side regardless of client. This matches the existing Supabase
+  minimum-password-length setting (6), so the two do not diverge; the complexity
+  requirement (upper/lower/digit) is the added hardening on top of it.
 
 ## RBAC
 
