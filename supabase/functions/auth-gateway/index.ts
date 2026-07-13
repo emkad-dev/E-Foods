@@ -46,15 +46,23 @@ Deno.serve(async (request) => {
       await enforceRateLimit(`signup:${ip}`, POLICIES.signupPerIp);
       const r = await gotrue.signUp(email, password);
       await writeAudit({ event: 'signup', email, ip, success: r.ok, reason: r.ok ? undefined : `gotrue_${r.status}` });
-      if (!r.ok) throw new ClientSafeError(r.status >= 500 ? 502 : 400, safeAuthMessage('signup', r.status));
-      response = respond(200, r.body);         // preserves email-confirmation flow (may have null session)
+      // Only surface genuine server faults. For a new address (2xx) OR an
+      // already-registered one (4xx), return an IDENTICAL 200 body so signup
+      // cannot be used to enumerate registered emails. GoTrue sends the
+      // confirmation email only on a real new signup; the client always shows
+      // "check your inbox" and completes via email confirmation + login.
+      if (r.status >= 500) throw new ClientSafeError(502, safeAuthMessage('signup', r.status));
+      response = respond(200, {
+        message: 'If that email can be registered, check your inbox to confirm your account.',
+      });
     } else if (route === 'login') {
       const email = validateEmail(payload.email);
       const password = validatePassword(payload.password);
       const r = await gotrue.passwordGrant(email, password);
       if (!r.ok) {
-        // Count only failures toward the per-email lockout.
-        await enforceRateLimit(`login-fail:${email}`, POLICIES.loginFailure);
+        // Count only failures toward the per-email lockout. Fail CLOSED: a
+        // brute-force lockout must not silently disappear if the RPC is down.
+        await enforceRateLimit(`login-fail:${email}`, POLICIES.loginFailure, { failClosed: true });
         await writeAudit({ event: 'login', email, ip, success: false, reason: `gotrue_${r.status}` });
         throw new ClientSafeError(401, safeAuthMessage('login', r.status));
       }

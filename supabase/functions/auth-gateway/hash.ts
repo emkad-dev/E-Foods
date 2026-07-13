@@ -1,6 +1,14 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
-const salt = () => Deno.env.get('AUTH_HASH_SALT') ?? '';
+const salt = () => {
+  const s = Deno.env.get('AUTH_HASH_SALT') ?? '';
+  // Fail loudly on a mis-provisioned deploy: an empty/short salt would make the
+  // audit HMAC deterministic and dictionary-attackable if the table ever leaks.
+  if (s.length < 16) {
+    throw new Error('AUTH_HASH_SALT must be set to at least 16 characters.');
+  }
+  return s;
+};
 
 export const hashValue = async (value: string): Promise<string> => {
   const key = await crypto.subtle.importKey(

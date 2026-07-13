@@ -50,6 +50,11 @@ If rotation is off, refresh tokens are not rotated and the "refresh token
 rotation" requirement is not actually met — the gateway relies on this
 setting.
 
+Also enable **email-enumeration protection** (Dashboard → Authentication →
+Security). The gateway already returns a uniform `200` for `/signup` whether or
+not the address is registered, but enabling GoTrue's own protection is
+defense-in-depth for any other auth surface.
+
 ## 4. Password-policy alignment
 
 The gateway enforces **≥ 6 chars + one uppercase + one lowercase + one digit**

@@ -15,7 +15,13 @@ export const POLICIES = {
   refreshPerIp: { limit: 60, windowSecs: 600, lockoutSecs: 300 } as RlPolicy,
 };
 
-export const enforceRateLimit = async (rawKey: string, policy: RlPolicy): Promise<void> => {
+const TOO_MANY = 'Too many attempts. Please try again later.';
+
+export const enforceRateLimit = async (
+  rawKey: string,
+  policy: RlPolicy,
+  opts: { failClosed?: boolean } = {}
+): Promise<void> => {
   const key = await hashValue(rawKey);
   const { data, error } = await serviceClient.rpc('auth_rl_hit', {
     p_key: key,
@@ -24,12 +30,17 @@ export const enforceRateLimit = async (rawKey: string, policy: RlPolicy): Promis
     p_lockout_secs: policy.lockoutSecs,
   });
   if (error) {
-    // Fail open on infra error, but log it — do not block legitimate users if the RPC is down.
     logEdgeEvent('error', 'rate limit RPC failed', { reason: error.message });
+    // Fail OPEN for the abuse brakes (availability), but fail CLOSED for the
+    // credential-guessing lockout so an RPC outage can't disable brute-force
+    // protection at the exact moment an attacker is generating load.
+    if (opts.failClosed) {
+      throw new ClientSafeError(429, TOO_MANY);
+    }
     return;
   }
   const row = Array.isArray(data) ? data[0] : data;
   if (row && row.allowed === false) {
-    throw new ClientSafeError(429, 'Too many attempts. Please try again later.');
+    throw new ClientSafeError(429, TOO_MANY);
   }
 };
