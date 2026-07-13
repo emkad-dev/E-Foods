@@ -22,6 +22,7 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
+import { buildPartnerPolicyAcceptance } from '../services/policyAcceptance';
 import { submitPartnerApplication, type PartnerApplicationInput } from '../services/partnerApplications';
 import { uploadRestaurantAsset } from '../services/restaurantAssetUpload';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
@@ -383,6 +384,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         logoImage,
         longitude: userData.longitude ?? null,
         phoneNumber: userData.phoneNumber.trim(),
+        policyAcceptance: userData.policyAcceptance ?? buildPartnerPolicyAcceptance('partner_signup'),
         restaurantName: userData.restaurantName.trim(),
       });
 
