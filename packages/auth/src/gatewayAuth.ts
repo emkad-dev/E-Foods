@@ -35,6 +35,20 @@ const post = async (env: GatewayAuthEnv, route: string, body: unknown, bearer?: 
   return json;
 };
 
+export type PhoneOtpChannel = 'sms' | 'whatsapp';
+
+export interface RequestPhoneOtpResult {
+  success: boolean;
+  expiresInSeconds: number;
+  resendInSeconds: number;
+}
+
+export interface VerifyPhoneOtpResult {
+  success: boolean;
+  phoneNumber: string;
+  phoneVerifiedAt: string;
+}
+
 export const createGatewayAuth = (env: GatewayAuthEnv) => ({
   signUp: (email: string, password: string) => post(env, 'signup', { email, password }),
   signIn: (email: string, password: string) => post(env, 'login', { email, password }),
@@ -42,4 +56,8 @@ export const createGatewayAuth = (env: GatewayAuthEnv) => ({
   signOut: async (accessToken: string) => {
     await post(env, 'logout', {}, accessToken);
   },
+  requestPhoneOtp: (accessToken: string, phone: string, channel: PhoneOtpChannel = 'sms') =>
+    post(env, 'otp-request', { phone, channel }, accessToken) as Promise<RequestPhoneOtpResult>,
+  verifyPhoneOtp: (accessToken: string, phone: string, code: string) =>
+    post(env, 'otp-verify', { phone, code }, accessToken) as Promise<VerifyPhoneOtpResult>,
 });

@@ -3,12 +3,13 @@ import { logEdgeEvent } from '../_shared/observability.ts';
 import { hashValue } from './hash.ts';
 
 export const writeAudit = async (input: {
-  event: string; email?: string; ip: string; success: boolean; reason?: string;
+  event: string; email?: string; subject?: string; ip: string; success: boolean; reason?: string;
 }): Promise<void> => {
+  const subject = input.subject ?? input.email;
   try {
     await serviceClient.from('auth_audit_log').insert({
       event: input.event,
-      subject_hash: input.email ? await hashValue(input.email) : null,
+      subject_hash: subject ? await hashValue(subject) : null,
       ip_hash: await hashValue(input.ip),
       success: input.success,
       reason: input.reason ?? null,

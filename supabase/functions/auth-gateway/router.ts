@@ -1,8 +1,12 @@
-export type AuthRoute = 'signup' | 'login' | 'logout' | 'refresh';
+export type AuthRoute = 'signup' | 'login' | 'logout' | 'refresh' | 'otp-request' | 'otp-verify';
+
+const ROUTES: ReadonlySet<string> = new Set([
+  'signup', 'login', 'logout', 'refresh', 'otp-request', 'otp-verify',
+]);
 
 export const parseRoute = (url: string): AuthRoute | null => {
-  const seg = new URL(url).pathname.split('/').filter(Boolean).pop();
-  return seg === 'signup' || seg === 'login' || seg === 'logout' || seg === 'refresh' ? seg : null;
+  const seg = new URL(url).pathname.split('/').filter(Boolean).pop() ?? '';
+  return ROUTES.has(seg) ? (seg as AuthRoute) : null;
 };
 
 export const clientIp = (request: Request): string => {

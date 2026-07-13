@@ -27,6 +27,7 @@ model UserAccount {
   email                  String
   displayName            String?
   phoneNumber            String?
+  phoneVerifiedAt        DateTime?
   photoURL               String?
   emailVerified          Boolean              @default(false)
   roleDisplay            AppRole?
