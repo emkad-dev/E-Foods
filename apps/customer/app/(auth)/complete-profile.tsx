@@ -1,29 +1,22 @@
-import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PhoneVerification } from '../../../../packages/auth/src/components/PhoneVerification';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { requestPhoneCode, verifyPhoneCode } from '../../src/services/phoneVerification';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function CompleteProfileScreen() {
-  const { error, loading, policyAccepted, updatePhoneNumber, user } = useAuth();
-  const [phoneNumber, setPhoneNumber] = useState(String(user?.phoneNumber ?? '').trim());
+  const { error, policyAccepted, updatePhoneNumber, user } = useAuth();
 
-  useEffect(() => {
-    setPhoneNumber(String(user?.phoneNumber ?? '').trim());
-  }, [user?.phoneNumber]);
-
-  const handleContinue = async () => {
-    if (!phoneNumber.trim()) {
-      Alert.alert('Phone number required', 'Add a phone number to continue.');
-      return;
-    }
-
+  const handleVerified = async (e164: string) => {
     try {
-      await updatePhoneNumber(phoneNumber.trim());
-      router.replace((policyAccepted ? '/home' : '/accept-policy') as never);
-    } catch (nextError: any) {
-      Alert.alert('Save failed', nextError.message ?? 'Unable to save your phone number right now.');
+      // The gateway already saved the verified number; this syncs local
+      // auth state (same value, so the verification timestamp is kept).
+      await updatePhoneNumber(e164);
+    } catch {
+      // Profile is already correct server-side; navigation may proceed.
     }
+    router.replace((policyAccepted ? '/home' : '/accept-policy') as never);
   };
 
   return (
@@ -31,28 +24,31 @@ export default function CompleteProfileScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.eyebrow}>FEASTY Customer</Text>
-          <Text style={styles.title}>Add your phone number</Text>
-          <Text style={styles.copy}>We use this for order updates and rider contact.</Text>
+          <Text style={styles.title}>Verify your phone number</Text>
+          <Text style={styles.copy}>
+            We use this for order updates and rider contact. We&apos;ll text you a 6-digit code by
+            SMS or WhatsApp.
+          </Text>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            placeholderTextColor={customerTheme.textMuted}
-            keyboardType="phone-pad"
-            value={phoneNumber}
-            onChangeText={setPhoneNumber}
-            editable={!loading}
-          />
-
-          <TouchableOpacity
-            style={[styles.button, !phoneNumber.trim() ? styles.buttonDisabled : null]}
-            onPress={handleContinue}
-            disabled={loading || !phoneNumber.trim()}
-          >
-            <Text style={styles.buttonText}>{loading ? 'Saving...' : 'Continue'}</Text>
-          </TouchableOpacity>
+          <View style={styles.verifyBlock}>
+            <PhoneVerification
+              theme={customerTheme}
+              initialPhone={typeof user?.phoneNumber === 'string' ? user.phoneNumber : undefined}
+              requestCode={async (e164, channel) => {
+                const result = await requestPhoneCode(e164, channel);
+                return { resendInSeconds: result.resendInSeconds };
+              }}
+              verifyCode={async (e164, code) => {
+                await verifyPhoneCode(e164, code);
+              }}
+              onVerified={(e164) => {
+                Alert.alert('Phone verified', 'Your number is confirmed.');
+                void handleVerified(e164);
+              }}
+            />
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -100,30 +96,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 12,
   },
-  input: {
-    backgroundColor: customerTheme.surfaceMuted,
-    borderColor: customerTheme.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    color: customerTheme.text,
-    fontSize: 15,
+  verifyBlock: {
     marginTop: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  button: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 14,
-    marginTop: 16,
-    paddingVertical: 14,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '800',
   },
 });

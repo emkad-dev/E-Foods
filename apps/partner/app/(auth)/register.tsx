@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
@@ -29,7 +30,7 @@ export default function PartnerRegisterScreen() {
   const [contactName, setContactName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [restaurantName, setRestaurantName] = useState('');
   const [cuisine, setCuisine] = useState<(typeof cuisineOptions)[number]>('Nigerian');
   const [address, setAddress] = useState('');
@@ -41,8 +42,8 @@ export default function PartnerRegisterScreen() {
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
   const hasRequiredDetails = useMemo(
-    () => Boolean(contactName.trim() && email.trim() && password.trim() && phoneNumber.trim() && restaurantName.trim() && address.trim()),
-    [address, contactName, email, password, phoneNumber, restaurantName]
+    () => Boolean(contactName.trim() && email.trim() && password.trim() && phoneE164 && restaurantName.trim() && address.trim()),
+    [address, contactName, email, password, phoneE164, restaurantName]
   );
   const canSubmit = hasRequiredDetails && acceptedPolicies;
 
@@ -90,7 +91,7 @@ export default function PartnerRegisterScreen() {
         latitude: hasLatitude ? parsedLatitude : null,
         logoImage,
         longitude: hasLongitude ? parsedLongitude : null,
-        phoneNumber: phoneNumber.trim(),
+        phoneNumber: phoneE164 ?? '',
         policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
         restaurantName: restaurantName.trim(),
       });
@@ -169,15 +170,18 @@ export default function PartnerRegisterScreen() {
             editable={!loading}
             showHint
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            placeholderTextColor="#8e8e8e"
-            keyboardType="phone-pad"
-            value={phoneNumber}
-            onChangeText={handleFieldChange(setPhoneNumber)}
-            editable={!loading}
-          />
+          <View style={styles.phoneField}>
+            <PhoneInput
+              theme={partnerTheme}
+              editable={!loading}
+              onChange={({ e164 }) => {
+                if (error) {
+                  clearError();
+                }
+                setPhoneE164(e164);
+              }}
+            />
+          </View>
           <TextInput
             style={styles.input}
             placeholder="Restaurant name"
@@ -372,6 +376,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
     minHeight: 54,
     paddingHorizontal: 16,
+  },
+  phoneField: {
+    marginTop: 14,
   },
   textArea: {
     minHeight: 96,

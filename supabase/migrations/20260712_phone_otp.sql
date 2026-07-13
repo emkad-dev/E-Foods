@@ -59,3 +59,26 @@ SELECT
 FROM "public"."UserAccount" ua;
 
 GRANT SELECT ON "public"."user_profiles" TO authenticated;
+
+-- A phone number change outside the OTP flow invalidates the verification.
+-- The gateway's verify path updates phoneNumber AND phoneVerifiedAt in one
+-- statement, so its write keeps the timestamp; any other phoneNumber change
+-- (profile edit, admin tooling) leaves phoneVerifiedAt untouched in the same
+-- statement and gets it cleared here.
+create or replace function public.clear_phone_verification()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new."phoneNumber" is distinct from old."phoneNumber"
+     and new."phoneVerifiedAt" is not distinct from old."phoneVerifiedAt" then
+    new."phoneVerifiedAt" := null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists useraccount_clear_phone_verification on public."UserAccount";
+create trigger useraccount_clear_phone_verification
+  before update on public."UserAccount"
+  for each row execute function public.clear_phone_verification();

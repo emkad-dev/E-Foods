@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -28,7 +29,7 @@ export default function DispatchRegisterScreen() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [region, setRegion] = useState<(typeof nigeriaStateOptions)[number]>('Lagos');
   const lgaOptions = useMemo(() => getLgaOptionsForState(region), [region]);
   const [lga, setLga] = useState('');
@@ -43,11 +44,11 @@ export default function DispatchRegisterScreen() {
         displayName.trim() &&
           email.trim() &&
           password.trim() &&
-          phoneNumber.trim() &&
+          phoneE164 &&
           lga.trim() &&
           acceptedPolicies
       ),
-    [acceptedPolicies, displayName, email, password, phoneNumber, lga]
+    [acceptedPolicies, displayName, email, password, phoneE164, lga]
   );
 
   useEffect(() => {
@@ -83,7 +84,7 @@ export default function DispatchRegisterScreen() {
         currentAddress: currentAddress.trim() || undefined,
         displayName: displayName.trim(),
         lga,
-        phoneNumber: phoneNumber.trim(),
+        phoneNumber: phoneE164 ?? '',
         policyAcceptance: buildDispatchPolicyAcceptance('dispatch_signup'),
         region,
         vehicleType,
@@ -143,15 +144,18 @@ export default function DispatchRegisterScreen() {
             editable={!loading}
             showHint
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            placeholderTextColor="#8e8e8e"
-            keyboardType="phone-pad"
-            value={phoneNumber}
-            onChangeText={handleFieldChange(setPhoneNumber)}
-            editable={!loading}
-          />
+          <View style={styles.phoneField}>
+            <PhoneInput
+              theme={dispatchTheme}
+              editable={!loading}
+              onChange={({ e164 }) => {
+                if (error) {
+                  clearError();
+                }
+                setPhoneE164(e164);
+              }}
+            />
+          </View>
 
           <Text style={styles.sectionLabel}>Dispatch state</Text>
           <CompactOptionPicker
@@ -301,6 +305,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
     minHeight: 54,
     paddingHorizontal: 16,
+  },
+  phoneField: {
+    marginTop: 14,
   },
   sectionLabel: {
     color: dispatchTheme.textSoft,
