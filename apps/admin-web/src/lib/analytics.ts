@@ -161,6 +161,110 @@ export const buildStatusBreakdown = (orders: OrderDocument[]): BreakdownSlice[] 
     });
 };
 
+// Payment lens: paid first, then the two problem states admins act on.
+const PAYMENT_DISPLAY_PRIORITY: Record<string, number> = {
+  paid: 0,
+  pending: 1,
+  failed: 2,
+};
+
+export const buildPaymentBreakdown = (orders: OrderDocument[]): BreakdownSlice[] => {
+  const counts = new Map<string, number>();
+
+  for (const order of orders) {
+    const status = (order.payment?.status ?? 'unknown').toString().toLowerCase();
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .sort((left, right) => {
+      const leftPriority = PAYMENT_DISPLAY_PRIORITY[left.name] ?? 100;
+      const rightPriority = PAYMENT_DISPLAY_PRIORITY[right.name] ?? 100;
+
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+
+      return right.value - left.value;
+    });
+};
+
+export interface ProblemCounts {
+  failedPayments: number;
+  pendingPayments: number;
+  cancelledOrders: number;
+}
+
+// "Problem" transactions an admin should chase: payments that failed, payments
+// still pending (abandoned checkout), and orders that were cancelled. The three
+// counts are independent lenses — a cancelled order with a pending payment
+// counts in both — so they must not be summed into a single total.
+export const computeProblemCounts = (orders: OrderDocument[]): ProblemCounts => {
+  let failedPayments = 0;
+  let pendingPayments = 0;
+  let cancelledOrders = 0;
+
+  for (const order of orders) {
+    const paymentStatus = (order.payment?.status ?? '').toString().toLowerCase();
+    if (paymentStatus === 'failed') failedPayments += 1;
+    if (paymentStatus === 'pending') pendingPayments += 1;
+    if ((order.status ?? '').toLowerCase() === 'cancelled') cancelledOrders += 1;
+  }
+
+  return { failedPayments, pendingPayments, cancelledOrders };
+};
+
+export interface ProblemDailyPoint {
+  key: string;
+  label: string;
+  failed: number;
+  pending: number;
+  cancelled: number;
+}
+
+export const buildProblemDailySeries = (
+  orders: OrderDocument[],
+  rangeDays: RangeDays,
+  now = new Date()
+): ProblemDailyPoint[] => {
+  const points = new Map<string, ProblemDailyPoint>();
+
+  for (let dayOffset = rangeDays - 1; dayOffset >= 0; dayOffset -= 1) {
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOffset);
+    const key = day.toISOString().slice(0, 10);
+    points.set(key, {
+      key,
+      label: day.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
+      failed: 0,
+      pending: 0,
+      cancelled: 0,
+    });
+  }
+
+  for (const order of orders) {
+    const created = getOrderDate(order);
+
+    if (!created) {
+      continue;
+    }
+
+    const key = new Date(created.getFullYear(), created.getMonth(), created.getDate()).toISOString().slice(0, 10);
+    const point = points.get(key);
+
+    if (!point) {
+      continue;
+    }
+
+    const paymentStatus = (order.payment?.status ?? '').toString().toLowerCase();
+    if (paymentStatus === 'failed') point.failed += 1;
+    if (paymentStatus === 'pending') point.pending += 1;
+    if ((order.status ?? '').toLowerCase() === 'cancelled') point.cancelled += 1;
+  }
+
+  return [...points.values()];
+};
+
 export const buildTopRestaurants = (orders: OrderDocument[], limit = 6): { name: string; orders: number; revenue: number }[] => {
   const byRestaurant = new Map<string, { name: string; orders: number; revenue: number }>();
 
