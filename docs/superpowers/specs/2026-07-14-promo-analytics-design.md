@@ -19,7 +19,8 @@ Answer two questions per promo, in the admin panel:
 
 1. **"Which promos work?"** — impressions, clicks, and click-through rate (CTR). Aggregate, anonymous.
 2. **"Did they drive orders?"** — attributed order **count** and **revenue**, using a 24-hour,
-   last-click-wins attribution window.
+   last-click-wins attribution window, counting **paid orders only** (unpaid/abandoned orders never
+   earn a promo credit).
 
 **Explicitly out of scope (deferred to later cycles):**
 - Unique-user reach / de-duplication across sessions (the "B" option). Impressions are deduped
@@ -76,8 +77,15 @@ Answer two questions per promo, in the admin panel:
   `attributedPromoId` to the **existing order-placement payload**.
 - **`order-placement` edge handler** stamps `attributedPromoId` onto the `Order` row when present
   (additive, best-effort; ignored/omitted otherwise).
-- **After a successful order**, the client clears `promoLastClick`, so one click credits at most one
-  order (last-click-wins, single-use).
+- **Credit is realized on payment, not placement.** The id is *carried* on the order at placement,
+  but reporting counts it only once the order reaches a **paid** state. The payment/webhook path is
+  **not** modified — the paid-only rule is purely a filter in the reporting query, keyed on the
+  `Order`'s existing payment/status field (exact column + "paid" value to be confirmed against the
+  schema during planning).
+- **After the order is placed**, the client clears `promoLastClick`, so one click credits at most one
+  order (last-click-wins, single-use). Trade-off: if that order is abandoned at payment and the
+  customer places a *fresh* order, the second order carries no attribution — a deliberate slight
+  **under**-credit, preferred over over-crediting ROI.
 
 ## Admin reporting (A + C)
 
@@ -85,7 +93,7 @@ Answer two questions per promo, in the admin panel:
   `impressions`, `clicks`, `ctr` (clicks / impressions, guarded for divide-by-zero),
   `attributedOrders`, `attributedRevenue`.
   - Computed with subqueries / group-by over `promo_events` (counts by type) and `Order`
-    (count + sum of totals grouped by `attributedPromoId`).
+    (count + sum of totals grouped by `attributedPromoId`, **filtered to paid orders only**).
 - **`PromosPage`** renders a small stat cluster on each promo row next to the existing Live/Off
   badge: Impr · Clicks · CTR · Orders · Revenue.
 
@@ -106,14 +114,18 @@ Answer two questions per promo, in the admin panel:
 - **Unit:**
   - `promoTrack` validation: rejects missing `promoId` and invalid `type`; accepts the two valid types.
   - Attribution window: order at 23h59m attributes; at 24h01m does not.
+  - Paid-only: an attributed but unpaid order contributes 0 to attributed count/revenue; the same
+    order counts once it reaches paid.
   - CTR computation: divide-by-zero guard (0 impressions → CTR 0, not NaN).
 - **Manual E2E:**
   1. Create a promo (admin).
   2. Load the customer app → exactly one impression logged for that session; reloading within the
      session logs no additional impression.
   3. Click "View deal" → one click logged; `promoLastClick` set in localStorage.
-  4. Place an order within 24h → order carries `attributedPromoId`.
-  5. Admin Promos row shows impressions / clicks / CTR / attributed orders / revenue.
+  4. Place an order within 24h → order carries `attributedPromoId`; while unpaid it is **not**
+     counted in the admin's attributed orders/revenue.
+  5. Complete payment → the order now counts toward attributed orders + revenue.
+  6. Admin Promos row shows impressions / clicks / CTR / attributed (paid) orders / revenue.
 
 ## Files touched (anticipated)
 
@@ -123,6 +135,9 @@ Answer two questions per promo, in the admin panel:
 - `apps/customer/src/components/PromoBanner.tsx` — impression/click tracking + `promoLastClick`.
 - customer checkout / order-placement call site — attach `attributedPromoId`.
 - `apps/admin-web/src/pages/PromosPage.tsx` + `services/promos.ts` — render stats.
+
+**Not touched:** the payment-verification / paystack-webhook path. Paid-only attribution is enforced
+by filtering on the `Order`'s existing payment status inside the `promoList` reporting query.
 
 ## Isolation / delivery
 
