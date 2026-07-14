@@ -219,6 +219,7 @@ model CustomerOrder {
   deliveryAddress  String?
   deliveryLocation Json?
   cancellation     Json?
+  attributedPromoId String?
   timeline         Json?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
@@ -231,6 +232,7 @@ model CustomerOrder {
   @@index([customerId])
   @@index([restaurantId])
   @@index([status])
+  @@index([attributedPromoId])
 }
 
 model PaymentTransaction {
