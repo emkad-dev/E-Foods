@@ -75,8 +75,10 @@ Answer two questions per promo, in the admin panel:
   device, which is required because ordering needs auth but browsing does not.
 - **At checkout**, the client reads `promoLastClick`; if `now − clickedAt ≤ 24h`, it adds
   `attributedPromoId` to the **existing order-placement payload**.
-- **`order-placement` edge handler** stamps `attributedPromoId` onto the `Order` row when present
-  (additive, best-effort; ignored/omitted otherwise).
+- The **`initializeCustomerPayment` app-rpc action** stamps `attributedPromoId` onto the
+  `CustomerOrder` row at creation time via `createOrderWithItems` (that action is where the order is
+  actually created — the `order-placement` queue/handler path is not used by the live Paystack
+  checkout). Additive, best-effort; ignored/omitted otherwise.
 - **Credit is realized on payment, not placement.** The id is *carried* on the order at placement,
   but reporting counts it only once the order reaches a **paid** state. The payment/webhook path is
   **not** modified — the paid-only rule is purely a filter in the reporting query, keyed on the
@@ -131,9 +133,10 @@ Answer two questions per promo, in the admin panel:
 
 - `supabase/migrations/<date>_promo_analytics.sql` — `promo_events` table + `Order.attributedPromoId`.
 - `supabase/functions/app-rpc/index.ts` — `promoTrack` action (pre-auth branch) + `promoList` stats.
-- `supabase/functions/order-placement/handler.ts` — stamp `attributedPromoId` when present.
+- `supabase/functions/app-rpc/index.ts` `initializeCustomerPayment` + `createOrderWithItems` — stamp
+  `attributedPromoId` on the order at creation.
 - `apps/customer/src/components/PromoBanner.tsx` — impression/click tracking + `promoLastClick`.
-- customer checkout / order-placement call site — attach `attributedPromoId`.
+- `apps/customer/src/services/customerOrderActions.ts` — attach `attributedPromoId` to the checkout payload.
 - `apps/admin-web/src/pages/PromosPage.tsx` + `services/promos.ts` — render stats.
 
 **Not touched:** the payment-verification / paystack-webhook path. Paid-only attribution is enforced
