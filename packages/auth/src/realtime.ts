@@ -3,6 +3,7 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 export const ORDERS_REALTIME_TOPIC = 'orders';
 export const RIDERS_REALTIME_TOPIC = 'dispatch-riders';
 export const RESTAURANTS_REALTIME_TOPIC = 'restaurants';
+export const PROMOS_REALTIME_TOPIC = 'promos';
 export const REALTIME_CHANGED_EVENT = 'changed';
 
 export const orderRealtimeTopic = (orderId: string) => `order-${orderId}`;

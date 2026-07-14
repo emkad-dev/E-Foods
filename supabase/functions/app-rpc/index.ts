@@ -12,6 +12,7 @@ import {
 import { getAuthenticatedRequestContext } from '../_shared/request-context.ts';
 import {
   broadcastOrderChanged,
+  broadcastPromosChanged,
   broadcastRestaurantsChanged,
   broadcastRidersChanged,
   broadcastSupportInboxChanged,
@@ -6823,6 +6824,78 @@ const handleNativeAction = async (
     return json(200, { data: { broadcast } });
   }
 
+  if (action === 'promoList') {
+    ensureRole(context.role, ['admin']);
+    const { data: promos, error } = await serviceClient
+      .from('Promo')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .returns<PromoRow[]>();
+    if (error) {
+      throw new Error(error.message);
+    }
+    return json(200, { data: { promos: promos ?? [] } });
+  }
+
+  if (action === 'promoCreate') {
+    ensureRole(context.role, ['admin']);
+    const title = sanitizeText(data.title);
+    const body = sanitizeText(data.body);
+    if (!title) {
+      fail(400, 'A title is required.');
+    }
+    if (!body) {
+      fail(400, 'A body is required.');
+    }
+    const { actionUrl, startsAt, endsAt } = validatePromoComposition({
+      actionUrl: data.actionUrl,
+      startsAt: data.startsAt,
+      endsAt: data.endsAt,
+    });
+    const { data: promo, error } = await serviceClient
+      .from('Promo')
+      .insert({
+        title,
+        body,
+        actionUrl,
+        startsAt,
+        endsAt,
+        active: true,
+        createdByUid: context.uid,
+      })
+      .select('*')
+      .single<PromoRow>();
+    if (error || !promo) {
+      throw new Error(error?.message ?? 'Failed to create the promo.');
+    }
+    // Live push to every connected app; clients refetch the active set. A failed
+    // broadcast must never fail the insert, so this is best-effort inside the helper.
+    await broadcastPromosChanged({ id: promo.id });
+    return json(200, { data: { promo } });
+  }
+
+  if (action === 'promoSetActive') {
+    ensureRole(context.role, ['admin']);
+    const promoId = sanitizeText(data.id);
+    if (!promoId) {
+      fail(400, 'A promo id is required.');
+    }
+    if (typeof data.active !== 'boolean') {
+      fail(400, 'An active flag is required.');
+    }
+    const { data: promo, error } = await serviceClient
+      .from('Promo')
+      .update({ active: data.active, updatedAt: new Date().toISOString() })
+      .eq('id', promoId)
+      .select('*')
+      .single<PromoRow>();
+    if (error || !promo) {
+      throw new Error(error?.message ?? 'Failed to update the promo.');
+    }
+    await broadcastPromosChanged({ id: promo.id });
+    return json(200, { data: { promo } });
+  }
+
   return null;
 };
 
@@ -6870,6 +6943,52 @@ type BroadcastRow = {
   createdAt: string;
   updatedAt: string;
   sentAt: string | null;
+};
+
+type PromoRow = {
+  id: string;
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  active: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdByUid: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const validatePromoComposition = (input: {
+  actionUrl: unknown;
+  startsAt: unknown;
+  endsAt: unknown;
+}) => {
+  const actionUrlRaw = sanitizeText(input.actionUrl);
+  // Only in-app deep links are allowed — an absolute/external URL in a banner
+  // that every user sees is an open-redirect footgun.
+  if (actionUrlRaw && !actionUrlRaw.startsWith('/')) {
+    fail(400, 'actionUrl must be an in-app path starting with "/".');
+  }
+  const actionUrl = actionUrlRaw || null;
+
+  const parseWindow = (value: unknown, label: string): string | null => {
+    const raw = sanitizeText(value);
+    if (!raw) {
+      return null;
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      fail(400, `A valid ${label} timestamp is required.`);
+    }
+    return parsed.toISOString();
+  };
+
+  const startsAt = parseWindow(input.startsAt, 'startsAt');
+  const endsAt = parseWindow(input.endsAt, 'endsAt');
+  if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
+    fail(400, 'endsAt must be after startsAt.');
+  }
+  return { actionUrl, startsAt, endsAt };
 };
 
 const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;

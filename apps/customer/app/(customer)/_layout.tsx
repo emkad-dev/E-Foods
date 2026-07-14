@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
+import PromoBanner from '../../src/components/PromoBanner';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
@@ -32,6 +33,7 @@ export default function CustomerLayout() {
 
   return (
     <FavoritesProvider>
+      <PromoBanner />
       <Tabs
         screenOptions={{
           tabBarActiveTintColor: customerTheme.accentStrong,

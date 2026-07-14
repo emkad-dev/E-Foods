@@ -6,6 +6,7 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 export const ORDERS_REALTIME_TOPIC = 'orders';
 export const RIDERS_REALTIME_TOPIC = 'dispatch-riders';
 export const RESTAURANTS_REALTIME_TOPIC = 'restaurants';
+export const PROMOS_REALTIME_TOPIC = 'promos';
 export const REALTIME_CHANGED_EVENT = 'changed';
 
 export const orderRealtimeTopic = (orderId: string) => `order-${orderId}`;
@@ -58,6 +59,9 @@ export const broadcastRidersChanged = (payload: Record<string, unknown> = {}) =>
 
 export const broadcastRestaurantsChanged = (payload: Record<string, unknown> = {}) =>
   broadcastRealtimeMessages([{ payload, topic: RESTAURANTS_REALTIME_TOPIC }]);
+
+export const broadcastPromosChanged = (payload: Record<string, unknown> = {}) =>
+  broadcastRealtimeMessages([{ payload, topic: PROMOS_REALTIME_TOPIC }]);
 
 export const SUPPORT_INBOX_TOPIC = 'support-inbox';
 export const supportThreadTopic = (conversationId: string) => `support-${conversationId}`;

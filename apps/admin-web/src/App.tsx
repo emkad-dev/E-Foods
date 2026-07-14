@@ -18,6 +18,7 @@ const DispatchPage = lazy(() => import('./pages/DispatchPage'));
 const StatisticsPage = lazy(() => import('./pages/StatisticsPage'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
 const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage'));
+const PromosPage = lazy(() => import('./pages/PromosPage'));
 
 function RequireAdmin({ children }: { children: ReactNode }) {
   const { session, role, initializing } = useAuth();
@@ -101,6 +102,14 @@ export default function App() {
             element={
               <Suspense fallback={<LoadingBlock label="Loading…" />}>
                 <BroadcastsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/promos"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+                <PromosPage />
               </Suspense>
             }
           />
