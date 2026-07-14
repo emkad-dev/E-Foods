@@ -7,18 +7,33 @@ import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { getOrderDate, type RangeDays } from '../lib/analytics';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
-import { getOrderTone } from '../theme/tones';
+import { getOrderTone, getPaymentTone } from '../theme/tones';
 
 export default function OrdersPage() {
   const { snapshot, loading, error, refresh } = useSnapshot();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [paymentFilter, setPaymentFilter] = useState<string>('all');
 
   const statusOptions = useMemo(() => {
     const statuses = new Set<string>();
 
     for (const order of snapshot.orders) {
       const status = (order.status ?? '').toLowerCase();
+
+      if (status) {
+        statuses.add(status);
+      }
+    }
+
+    return [...statuses].sort();
+  }, [snapshot.orders]);
+
+  const paymentOptions = useMemo(() => {
+    const statuses = new Set<string>();
+
+    for (const order of snapshot.orders) {
+      const status = (order.payment?.status ?? '').toString().toLowerCase();
 
       if (status) {
         statuses.add(status);
@@ -43,10 +58,17 @@ export default function OrdersPage() {
           return false;
         }
 
+        if (
+          paymentFilter !== 'all' &&
+          (order.payment?.status ?? '').toString().toLowerCase() !== paymentFilter
+        ) {
+          return false;
+        }
+
         return true;
       })
       .sort((left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0));
-  }, [snapshot.orders, rangeDays, statusFilter]);
+  }, [snapshot.orders, rangeDays, statusFilter, paymentFilter]);
 
   const totalValue = useMemo(
     () => filteredOrders.reduce((total, order) => total + (order.pricing?.total ?? 0), 0),
@@ -68,6 +90,19 @@ export default function OrdersPage() {
           >
             <option value="all">All statuses</option>
             {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {humanizeStatus(status)}
+              </option>
+            ))}
+          </select>
+          <select
+            className="select-pill"
+            value={paymentFilter}
+            onChange={(event) => setPaymentFilter(event.target.value)}
+            aria-label="Payment filter"
+          >
+            <option value="all">All payments</option>
+            {paymentOptions.map((status) => (
               <option key={status} value={status}>
                 {humanizeStatus(status)}
               </option>
@@ -108,7 +143,12 @@ export default function OrdersPage() {
                     <td>
                       <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
                     </td>
-                    <td className="muted">{humanizeStatus(order.payment?.status ?? 'unknown')}</td>
+                    <td>
+                      <StatusBadge
+                        label={order.payment?.status ?? 'unknown'}
+                        tone={getPaymentTone(order.payment?.status?.toString())}
+                      />
+                    </td>
                     <td className="muted">{formatDateTime(order.createdAt)}</td>
                     <td className="cell-amount">
                       {formatCurrency(order.pricing?.total ?? 0, order.pricing?.currency ?? currency)}

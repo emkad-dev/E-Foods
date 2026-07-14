@@ -50,6 +50,23 @@ export const getRoleTone = (role?: string | null): AdminTone => {
   }
 };
 
+export const getPaymentTone = (status?: string | null): AdminTone => {
+  switch ((status ?? '').toLowerCase()) {
+    case 'paid':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    case 'pending':
+      return 'warning';
+    case 'authorized':
+      return 'primary';
+    case 'refunded':
+      return 'info';
+    default:
+      return 'neutral';
+  }
+};
+
 const STATUS_CHART_COLORS: Record<string, string> = {
   confirmed: '#2e7d32',
   placed: '#f57c00',
@@ -57,10 +74,21 @@ const STATUS_CHART_COLORS: Record<string, string> = {
   delivered: '#1b5e20',
 };
 
+const PAYMENT_CHART_COLORS: Record<string, string> = {
+  paid: '#2e7d32',
+  pending: '#f57c00',
+  failed: '#c54a43',
+  authorized: '#117c6a',
+  refunded: '#5b6978',
+};
+
 const FALLBACK_CHART_COLORS = ['#66bb6a', '#ffb74d', '#117c6a', '#5b6978', '#ef6c00', '#a5d6a7'];
 
 export const getStatusChartColor = (status: string, index: number) =>
   STATUS_CHART_COLORS[status.toLowerCase()] ?? FALLBACK_CHART_COLORS[index % FALLBACK_CHART_COLORS.length];
+
+export const getPaymentChartColor = (status: string, index: number) =>
+  PAYMENT_CHART_COLORS[status.toLowerCase()] ?? FALLBACK_CHART_COLORS[index % FALLBACK_CHART_COLORS.length];
 
 export const getApplicationTone = (status?: string | null): AdminTone => {
   switch ((status ?? '').toLowerCase()) {
