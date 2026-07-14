@@ -8,7 +8,7 @@
 
 Phase 1 shipped in-app promo banners (a `Promo` table, a `promos` Realtime broadcast topic,
 an admin Promos page, and a customer `PromoBanner`). It tells us nothing about whether promos
-work. This sub-project adds measurement.
+work. This sub-project adds measurement — via a `"PromoEvent"` table for impressions/clicks and order attribution.
 
 Phase 2 overall is a four-part roadmap, each its own spec/build cycle:
 **① Measurable → ② Richer → ③ Targeted → ④ Reach-when-closed.** This document covers **①** only.
@@ -30,7 +30,7 @@ Answer two questions per promo, in the admin panel:
 
 ## Data model (one migration)
 
-### `promo_events` (new)
+### `"PromoEvent"` (new)
 | column | type | notes |
 |---|---|---|
 | `id` | text PK, `gen_random_uuid()` | |
@@ -43,7 +43,7 @@ Answer two questions per promo, in the admin panel:
   service-side via the `promoTrack` edge action (below). Follows the existing `Broadcast` table
   convention.
 
-### `Order` (additive change)
+### `CustomerOrder` (additive change)
 - Add nullable column **`attributedPromoId text`** + index on it.
 - Purely additive: existing order-placement logic is untouched; the column is written only when an
   attribution is present. Revenue attribution is derived by summing the totals of orders carrying
@@ -60,7 +60,7 @@ Answer two questions per promo, in the admin panel:
 **Backend — new app-rpc action `promoTrack`:**
 - Payload: `{ promoId: string, type: 'impression' | 'click' }`.
 - Validates `promoId` is non-empty and `type` is one of the two allowed values; inserts one
-  `promo_events` row via the service client.
+  `"PromoEvent"` row via the service client.
 - **Architectural note:** browsing customers are frequently **not logged in**, so `promoTrack` must
   work for anonymous callers. It is therefore handled in the **pre-auth branch** of
   `handleNativeAction` (the same region as `bootstrapFirstAdmin`), *before*
@@ -94,7 +94,7 @@ Answer two questions per promo, in the admin panel:
 - Extend the existing `promoList` app-rpc action to return, per promo, aggregate stats:
   `impressions`, `clicks`, `ctr` (clicks / impressions, guarded for divide-by-zero),
   `attributedOrders`, `attributedRevenue`.
-  - Computed with subqueries / group-by over `promo_events` (counts by type) and `Order`
+  - Computed with subqueries / group-by over `"PromoEvent"` (counts by type) and `CustomerOrder`
     (count + sum of totals grouped by `attributedPromoId`, **filtered to paid orders only**).
 - **`PromosPage`** renders a small stat cluster on each promo row next to the existing Live/Off
   badge: Impr · Clicks · CTR · Orders · Revenue.
@@ -105,7 +105,7 @@ Answer two questions per promo, in the admin panel:
   the order placement.
 - **Impression dedup is per session.** A new session recounts an impression — accepted as fine for
   CTR sanity without persistent identity.
-- **Deleted promos:** events and attributions are retained historically (no FK); the reporting join
+- **Deleted promos:** `"PromoEvent"` rows and attributions are retained historically (no FK); the reporting join
   tolerates promos that no longer exist.
 - **Attribution races / multiple clicks:** last click wins by construction (localStorage holds only
   the most recent click); single-use via clear-on-order.
@@ -131,16 +131,14 @@ Answer two questions per promo, in the admin panel:
 
 ## Files touched (anticipated)
 
-- `supabase/migrations/<date>_promo_analytics.sql` — `promo_events` table + `Order.attributedPromoId`.
-- `supabase/functions/app-rpc/index.ts` — `promoTrack` action (pre-auth branch) + `promoList` stats.
-- `supabase/functions/app-rpc/index.ts` `initializeCustomerPayment` + `createOrderWithItems` — stamp
-  `attributedPromoId` on the order at creation.
+- `supabase/migrations/<date>_promo_analytics.sql` — `"PromoEvent"` table + `CustomerOrder.attributedPromoId`.
+- `supabase/functions/app-rpc/index.ts` — `promoTrack` action (pre-auth branch) + `promoList` stats; `initializeCustomerPayment` + `createOrderWithItems` — stamp `attributedPromoId` on the order at creation.
 - `apps/customer/src/components/PromoBanner.tsx` — impression/click tracking + `promoLastClick`.
 - `apps/customer/src/services/customerOrderActions.ts` — attach `attributedPromoId` to the checkout payload.
 - `apps/admin-web/src/pages/PromosPage.tsx` + `services/promos.ts` — render stats.
 
 **Not touched:** the payment-verification / paystack-webhook path. Paid-only attribution is enforced
-by filtering on the `Order`'s existing payment status inside the `promoList` reporting query.
+by filtering on the `CustomerOrder`'s existing payment status inside the `promoList` reporting query.
 
 ## Isolation / delivery
 

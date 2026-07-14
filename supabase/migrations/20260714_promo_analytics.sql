@@ -1,15 +1,15 @@
 -- Promo analytics (Phase 2 ①): impression/click events + paid-order attribution.
 
 -- Impression/click events. Written service-side only (via app-rpc promoTrack).
-create table if not exists public."promo_events" (
+create table if not exists public."PromoEvent" (
   "id"        text primary key default (gen_random_uuid())::text,
   "promoId"   text not null,
   "type"      text not null, -- 'impression' | 'click'
   "createdAt" timestamptz not null default now()
 );
-create index if not exists "promo_events_promoId_type_idx"
-  on public."promo_events" ("promoId", "type");
-alter table public."promo_events" enable row level security;
+create index if not exists "PromoEvent_promoId_type_idx"
+  on public."PromoEvent" ("promoId", "type");
+alter table public."PromoEvent" enable row level security;
 -- No policies: anon/authenticated get zero access; writes are service-role only.
 
 -- Attribution: stamped at checkout-init; only counted once the order is paid.
@@ -35,7 +35,7 @@ as $$
     select "promoId",
            count(*) filter (where "type" = 'impression') as impressions,
            count(*) filter (where "type" = 'click')      as clicks
-    from public."promo_events"
+    from public."PromoEvent"
     group by "promoId"
   ),
   attr as (
@@ -59,3 +59,4 @@ as $$
 $$;
 
 grant execute on function public.ebuy_promo_stats() to service_role;
+revoke execute on function public.ebuy_promo_stats() from public, anon, authenticated;

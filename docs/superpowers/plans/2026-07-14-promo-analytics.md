@@ -4,7 +4,7 @@
 
 **Goal:** Measure whether promos work — per-promo impressions, clicks, CTR, and paid-order attribution (count + revenue) — surfaced in the admin Promos page.
 
-**Architecture:** A `promo_events` table captures impressions/clicks written by a new anon-allowed `promoTrack` app-rpc action. Attribution is stamped as an `attributedPromoId` column on `CustomerOrder` at checkout-init time (where the order is actually created), carried from the device via localStorage; it only *counts* once the order has a paid `PaymentTransaction`. A `ebuy_promo_stats()` SQL function aggregates everything for the admin.
+**Architecture:** A `"PromoEvent"` table captures impressions/clicks written by a new anon-allowed `promoTrack` app-rpc action. Attribution is stamped as an `attributedPromoId` column on `CustomerOrder` at checkout-init time (where the order is actually created), carried from the device via localStorage; it only *counts* once the order has a paid `PaymentTransaction`. A `ebuy_promo_stats()` SQL function aggregates everything for the admin.
 
 **Tech Stack:** Supabase (Postgres + Deno edge functions, `supabase-js` service client), Prisma schema (source of truth for `CustomerOrder`), Expo/React Native (customer), React + Vite (admin), `deno test` for edge/domain unit tests.
 
@@ -23,7 +23,7 @@
 ## File Structure
 
 **Database**
-- `supabase/migrations/20260714_promo_analytics.sql` (create) — `promo_events` table, `CustomerOrder.attributedPromoId` column + index, `ebuy_promo_stats()` function.
+- `supabase/migrations/20260714_promo_analytics.sql` (create) — `"PromoEvent"` table, `CustomerOrder.attributedPromoId` column + index, `ebuy_promo_stats()` function.
 - `functions/prisma/schema.prisma` (modify) — add `attributedPromoId String?` + index to `CustomerOrder` so the Prisma model matches the applied DDL (no separate Prisma migration; the supabase migration is the applied source, same way `Promo`/`Broadcast` are supabase-managed).
 
 **Edge (Deno)**
@@ -52,7 +52,7 @@
 - Modify: `functions/prisma/schema.prisma` (`CustomerOrder` model, ~line 210-234)
 
 **Interfaces:**
-- Produces: table `public."promo_events"("id","promoId","type","createdAt")`; column `CustomerOrder."attributedPromoId" text`; function `public.ebuy_promo_stats()` returning rows `("promoId" text, "impressions" bigint, "clicks" bigint, "attributedOrders" bigint, "attributedRevenue" double precision)`.
+- Produces: table `public."PromoEvent"("id","promoId","type","createdAt")`; column `CustomerOrder."attributedPromoId" text`; function `public.ebuy_promo_stats()` returning rows `("promoId" text, "impressions" bigint, "clicks" bigint, "attributedOrders" bigint, "attributedRevenue" double precision)`.
 
 - [ ] **Step 1: Write the migration**
 
@@ -60,15 +60,15 @@
 -- Promo analytics (Phase 2 ①): impression/click events + paid-order attribution.
 
 -- Impression/click events. Written service-side only (via app-rpc promoTrack).
-create table if not exists public."promo_events" (
+create table if not exists public."PromoEvent" (
   "id"        text primary key default (gen_random_uuid())::text,
   "promoId"   text not null,
   "type"      text not null, -- 'impression' | 'click'
   "createdAt" timestamptz not null default now()
 );
-create index if not exists "promo_events_promoId_type_idx"
-  on public."promo_events" ("promoId", "type");
-alter table public."promo_events" enable row level security;
+create index if not exists "PromoEvent_promoId_type_idx"
+  on public."PromoEvent" ("promoId", "type");
+alter table public."PromoEvent" enable row level security;
 -- No policies: anon/authenticated get zero access; writes are service-role only.
 
 -- Attribution: stamped at checkout-init; only counted once the order is paid.
@@ -94,7 +94,7 @@ as $$
     select "promoId",
            count(*) filter (where "type" = 'impression') as impressions,
            count(*) filter (where "type" = 'click')      as clicks
-    from public."promo_events"
+    from public."PromoEvent"
     group by "promoId"
   ),
   attr as (
@@ -143,7 +143,7 @@ Expected: no syntax errors.
 
 ```bash
 git add supabase/migrations/20260714_promo_analytics.sql functions/prisma/schema.prisma
-git commit -m "feat(promos): promo_events table, attribution column, ebuy_promo_stats()"
+git commit -m "feat(promos): PromoEvent table, attribution column, ebuy_promo_stats()"
 ```
 
 ---
@@ -253,7 +253,7 @@ Immediately BEFORE `const context = await getAuthenticatedRequestContext(request
     if (!parsed.ok) {
       fail(400, parsed.message);
     }
-    const { error } = await serviceClient.from('promo_events').insert({
+    const { error } = await serviceClient.from('PromoEvent').insert({
       promoId: parsed.value.promoId,
       type: parsed.value.type,
     });
@@ -273,7 +273,7 @@ Expected: no NEW errors referencing `promoTrack` / the new lines (pre-existing b
 
 ```bash
 git add supabase/functions/app-rpc/index.ts
-git commit -m "feat(promos): anon-allowed promoTrack action writing promo_events"
+git commit -m "feat(promos): anon-allowed promoTrack action writing PromoEvent"
 ```
 
 ---
@@ -647,7 +647,7 @@ git commit -m "feat(promos): admin per-promo stats (impressions/clicks/CTR/order
   - Apply `supabase/migrations/20260714_promo_analytics.sql` to the remote DB.
   - Deploy `app-rpc` (`--no-verify-jwt`, per the existing operator flow).
 
-- [ ] **Step 2: Impression dedup** — load the customer web app with an active promo; confirm exactly one `impression` row in `promo_events` for that promo; reload in the same session → no new row.
+- [ ] **Step 2: Impression dedup** — load the customer web app with an active promo; confirm exactly one `impression` row in `"PromoEvent"` for that promo; reload in the same session → no new row.
 
 - [ ] **Step 3: Click + attribution** — click "View deal"; confirm one `click` row and `feasty.promoLastClick` set in localStorage. Place an order within 24h; confirm the `CustomerOrder` row has `attributedPromoId` set.
 
