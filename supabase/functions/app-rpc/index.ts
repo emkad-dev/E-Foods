@@ -34,6 +34,7 @@ import {
   isEdgeBackpressureError,
   runWithBackpressure,
 } from '../_shared/observability.ts';
+import { validatePromoTrack } from './promoTrack.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -2000,6 +2001,7 @@ const prepareCustomerOrderDraft = async (
 };
 
 const createOrderWithItems = async ({
+  attributedPromoId,
   customerId,
   deliveryLocation,
   fulfillmentType,
@@ -2010,6 +2012,7 @@ const createOrderWithItems = async ({
   restaurantId,
   restaurantName,
 }: {
+  attributedPromoId?: string | null;
   customerId: string;
   deliveryLocation: JsonObject | null;
   fulfillmentType: string;
@@ -2043,6 +2046,7 @@ const createOrderWithItems = async ({
     payment,
     deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
     deliveryLocation,
+    attributedPromoId: attributedPromoId ?? null,
     cancellation: null,
     timeline,
     createdAt,
@@ -3581,6 +3585,24 @@ const handleNativeAction = async (
         tokenRefreshRequired: true,
       },
     });
+  }
+
+  if (action === 'promoTrack') {
+    // Anon-allowed: browsing customers are frequently not signed in. Fire-and-forget
+    // from the client, so failures here are still returned but never block the UI.
+    const parsed = validatePromoTrack(data);
+    if (!parsed.ok) {
+      fail(400, parsed.message);
+      return;
+    }
+    const { error } = await serviceClient.from('PromoEvent').insert({
+      promoId: parsed.value.promoId,
+      type: parsed.value.type,
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
+    return json(200, { data: { ok: true } });
   }
 
   const context = await getAuthenticatedRequestContext(request);
@@ -5126,6 +5148,9 @@ const handleNativeAction = async (
     }
 
     const orderId = crypto.randomUUID();
+    const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
+    const attributedPromoId =
+      rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
     const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
     const initialPayment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
@@ -5134,6 +5159,7 @@ const handleNativeAction = async (
     });
 
     const orderCreation = await createOrderWithItems({
+      attributedPromoId,
       customerId: context.uid,
       deliveryLocation: orderDraft.deliveryLocation,
       fulfillmentType: orderDraft.fulfillmentType,
@@ -6834,7 +6860,30 @@ const handleNativeAction = async (
     if (error) {
       throw new Error(error.message);
     }
-    return json(200, { data: { promos: promos ?? [] } });
+    const { data: stats, error: statsError } = await serviceClient.rpc('ebuy_promo_stats');
+    if (statsError) {
+      console.error('Promo stats lookup failed.', statsError);
+    }
+    const statById = new Map<string, {
+      promoId: string; impressions: number; clicks: number;
+      attributedOrders: number; attributedRevenue: number;
+    }>(
+      (stats ?? []).map((s: {
+        promoId: string; impressions: number; clicks: number;
+        attributedOrders: number; attributedRevenue: number;
+      }) => [s.promoId, s]),
+    );
+    const withStats = (promos ?? []).map((p) => {
+      const s = statById.get(p.id);
+      return {
+        ...p,
+        impressions: s?.impressions ?? 0,
+        clicks: s?.clicks ?? 0,
+        attributedOrders: s?.attributedOrders ?? 0,
+        attributedRevenue: s?.attributedRevenue ?? 0,
+      };
+    });
+    return json(200, { data: { promos: withStats } });
   }
 
   if (action === 'promoCreate') {

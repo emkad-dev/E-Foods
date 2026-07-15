@@ -3,6 +3,7 @@ import type { CheckoutPaymentMethod, FulfillmentType } from '../domain/orders';
 import { callCustomerBackendRpc } from './backendRpc';
 import { clearCustomerReadCache } from './customerReadModel';
 import { buildCustomerPaymentCallbackUrl } from './paymentRouting';
+import { takeAttributedPromoId } from './promoTracking';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 
 export const PREPAID_CHECKOUT_DISABLED_MESSAGE =
@@ -41,6 +42,8 @@ export const initializeCustomerPayment = async ({
     throw new Error(PREPAID_CHECKOUT_DISABLED_MESSAGE);
   }
 
+  const attributedPromoId = takeAttributedPromoId();
+
   return callCustomerBackendRpc<InitializeCustomerPaymentResult>('initializeCustomerPayment', {
     deliveryLocation,
     fulfillmentType,
@@ -53,6 +56,7 @@ export const initializeCustomerPayment = async ({
     paymentMethod,
     restaurantId,
     tipAmount,
+    ...(attributedPromoId ? { attributedPromoId } : {}),
   }).then((result) => {
     clearCustomerReadCache();
     trackAnalyticsEvent('customer_payment_initialized', {
