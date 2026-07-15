@@ -3,6 +3,7 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
+import { formatCurrency } from '../lib/format';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 
 const isLive = (promo: Promo): boolean => {
@@ -166,6 +167,11 @@ export default function PromosPage() {
                   </div>
                   <span className="muted">{promo.body}</span>
                   {promo.actionUrl ? <span className="promo-item-url">{promo.actionUrl}</span> : null}
+                  <span className="promo-item-stats">
+                    {promo.impressions} impr · {promo.clicks} clicks ·{' '}
+                    {promo.impressions > 0 ? Math.round((promo.clicks / promo.impressions) * 100) : 0}% CTR ·{' '}
+                    {promo.attributedOrders} orders · {formatCurrency(promo.attributedRevenue)}
+                  </span>
                 </div>
                 <button
                   type="button"

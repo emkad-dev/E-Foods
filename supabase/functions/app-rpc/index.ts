@@ -6859,7 +6859,30 @@ const handleNativeAction = async (
     if (error) {
       throw new Error(error.message);
     }
-    return json(200, { data: { promos: promos ?? [] } });
+    const { data: stats, error: statsError } = await serviceClient.rpc('ebuy_promo_stats');
+    if (statsError) {
+      console.error('Promo stats lookup failed.', statsError);
+    }
+    const statById = new Map<string, {
+      promoId: string; impressions: number; clicks: number;
+      attributedOrders: number; attributedRevenue: number;
+    }>(
+      (stats ?? []).map((s: {
+        promoId: string; impressions: number; clicks: number;
+        attributedOrders: number; attributedRevenue: number;
+      }) => [s.promoId, s]),
+    );
+    const withStats = (promos ?? []).map((p) => {
+      const s = statById.get(p.id);
+      return {
+        ...p,
+        impressions: s?.impressions ?? 0,
+        clicks: s?.clicks ?? 0,
+        attributedOrders: s?.attributedOrders ?? 0,
+        attributedRevenue: s?.attributedRevenue ?? 0,
+      };
+    });
+    return json(200, { data: { promos: withStats } });
   }
 
   if (action === 'promoCreate') {
