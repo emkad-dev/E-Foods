@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../services/supabase/config';
+import { trackPromoClick, trackPromoImpression } from '../services/promoTracking';
 import { customerTheme } from '../theme/palette';
 
 // Broadcast topic + event mirror the edge function (`PROMOS_REALTIME_TOPIC`,
@@ -52,6 +53,7 @@ export default function PromoBanner() {
   const show = useCallback(
     (next: Promo) => {
       setPromo(next);
+      trackPromoImpression(next.id);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: false }).start();
     },
     [fadeAnim]
@@ -105,6 +107,7 @@ export default function PromoBanner() {
   }, [promo, hide]);
 
   const openDeal = useCallback(() => {
+    if (promo) trackPromoClick(promo.id);
     if (promo?.actionUrl) {
       router.push(promo.actionUrl as never);
     }
