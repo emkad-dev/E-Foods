@@ -34,6 +34,7 @@ import {
   isEdgeBackpressureError,
   runWithBackpressure,
 } from '../_shared/observability.ts';
+import { validatePromoTrack } from './promoTrack.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -3581,6 +3582,24 @@ const handleNativeAction = async (
         tokenRefreshRequired: true,
       },
     });
+  }
+
+  if (action === 'promoTrack') {
+    // Anon-allowed: browsing customers are frequently not signed in. Fire-and-forget
+    // from the client, so failures here are still returned but never block the UI.
+    const parsed = validatePromoTrack(data);
+    if (!parsed.ok) {
+      fail(400, parsed.message);
+      return;
+    }
+    const { error } = await serviceClient.from('PromoEvent').insert({
+      promoId: parsed.value.promoId,
+      type: parsed.value.type,
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
+    return json(200, { data: { ok: true } });
   }
 
   const context = await getAuthenticatedRequestContext(request);
