@@ -5149,7 +5149,8 @@ const handleNativeAction = async (
 
     const orderId = crypto.randomUUID();
     const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
-    const attributedPromoId = rawAttributedPromoId ? rawAttributedPromoId : null;
+    const attributedPromoId =
+      rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
     const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
     const initialPayment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,

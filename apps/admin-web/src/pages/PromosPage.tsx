@@ -168,9 +168,19 @@ export default function PromosPage() {
                   <span className="muted">{promo.body}</span>
                   {promo.actionUrl ? <span className="promo-item-url">{promo.actionUrl}</span> : null}
                   <span className="promo-item-stats">
-                    {promo.impressions} impr · {promo.clicks} clicks ·{' '}
-                    {promo.impressions > 0 ? Math.round((promo.clicks / promo.impressions) * 100) : 0}% CTR ·{' '}
-                    {promo.attributedOrders} orders · {formatCurrency(promo.attributedRevenue)}
+                    {(() => {
+                      const impressions = promo.impressions ?? 0;
+                      const clicks = promo.clicks ?? 0;
+                      const attributedOrders = promo.attributedOrders ?? 0;
+                      const attributedRevenue = promo.attributedRevenue ?? 0;
+                      const ctr = impressions > 0 ? Math.round((clicks / impressions) * 100) : 0;
+                      return (
+                        <>
+                          {impressions} impr · {clicks} clicks · {ctr}% CTR ·{' '}
+                          {attributedOrders} orders · {formatCurrency(attributedRevenue)}
+                        </>
+                      );
+                    })()}
                   </span>
                 </div>
                 <button

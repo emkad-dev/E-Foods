@@ -11,10 +11,10 @@ export interface Promo {
   createdByUid: string;
   createdAt: string;
   updatedAt: string;
-  impressions: number;
-  clicks: number;
-  attributedOrders: number;
-  attributedRevenue: number;
+  impressions?: number;
+  clicks?: number;
+  attributedOrders?: number;
+  attributedRevenue?: number;
 }
 
 export const listPromos = () => callAdminRpc<{ promos: Promo[] }>('promoList');

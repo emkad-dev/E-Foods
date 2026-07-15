@@ -1,14 +1,41 @@
 // apps/customer/src/services/promoTracking.ts
 import { Platform } from 'react-native';
 import { resolveAttributedPromoId } from '../../../../packages/domain/src/promoAttribution';
-import { callCustomerBackendRpc } from './backendRpc';
+import { appEnv, supabaseEnv } from '../config/env';
+import { supabase } from './supabase/config';
 
 const LAST_CLICK_KEY = 'feasty.promoLastClick';
 const seenThisSession = new Set<string>();
 
+// Deliberately NOT using callCustomerBackendRpc: that helper throws
+// SESSION_EXPIRED_ERROR_MESSAGE before making any network call when there is
+// no session, which would silently drop every logged-out promo event even
+// though the server's promoTrack action is reachable pre-auth. This talks to
+// the backend RPC endpoint directly so it works with or without a session.
 const track = (promoId: string, type: 'impression' | 'click') => {
   // Fire-and-forget: a tracking failure must never surface to the customer.
-  void callCustomerBackendRpc('promoTrack', { promoId, type }).catch(() => undefined);
+  void (async () => {
+    try {
+      const backendRpcUrl = appEnv.backendRpcUrl;
+      const anonKey = supabaseEnv.anonKey;
+      if (!backendRpcUrl || !anonKey) return;
+
+      const { data } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+      const token = data?.session?.access_token || anonKey;
+
+      await fetch(backendRpcUrl, {
+        body: JSON.stringify({ action: 'promoTrack', data: { promoId, type } }),
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: anonKey,
+          Authorization: `Bearer ${token}`,
+        },
+        method: 'POST',
+      });
+    } catch {
+      // ignore — tracking must never surface to the customer
+    }
+  })();
 };
 
 export const trackPromoImpression = (promoId: string) => {
@@ -40,10 +67,13 @@ export const takeAttributedPromoId = (): string | null => {
   if (Platform.OS !== 'web') return null; // attribution is web-first (Phase 1)
   try {
     const raw = window.localStorage.getItem(LAST_CLICK_KEY);
-    const stored = raw ? (JSON.parse(raw) as { promoId: string; clickedAt: number }) : null;
-    const promoId = resolveAttributedPromoId(stored, Date.now());
-    window.localStorage.removeItem(LAST_CLICK_KEY);
-    return promoId;
+    try {
+      const stored = raw ? (JSON.parse(raw) as { promoId: string; clickedAt: number }) : null;
+      return resolveAttributedPromoId(stored, Date.now());
+    } finally {
+      // Always clear, even on corrupt JSON — a bad record must not persist forever.
+      window.localStorage.removeItem(LAST_CLICK_KEY);
+    }
   } catch {
     return null;
   }
