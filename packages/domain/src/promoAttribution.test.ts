@@ -7,6 +7,20 @@ Deno.test('attributes a click within 24h', () => {
   assertEquals(resolveAttributedPromoId({ promoId: 'p1', clickedAt: now - 1000 }, now), 'p1');
 });
 
+Deno.test('attributes at exactly the 24h inclusive edge', () => {
+  assertEquals(
+    resolveAttributedPromoId({ promoId: 'p1', clickedAt: now - PROMO_ATTRIBUTION_WINDOW_MS }, now),
+    'p1',
+  );
+});
+
+Deno.test('attributes at 23h59m', () => {
+  assertEquals(
+    resolveAttributedPromoId({ promoId: 'p1', clickedAt: now - PROMO_ATTRIBUTION_WINDOW_MS + 60_000 }, now),
+    'p1',
+  );
+});
+
 Deno.test('does not attribute a click at exactly 24h + 1ms', () => {
   assertEquals(
     resolveAttributedPromoId({ promoId: 'p1', clickedAt: now - PROMO_ATTRIBUTION_WINDOW_MS - 1 }, now),
