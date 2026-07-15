@@ -2001,6 +2001,7 @@ const prepareCustomerOrderDraft = async (
 };
 
 const createOrderWithItems = async ({
+  attributedPromoId,
   customerId,
   deliveryLocation,
   fulfillmentType,
@@ -2011,6 +2012,7 @@ const createOrderWithItems = async ({
   restaurantId,
   restaurantName,
 }: {
+  attributedPromoId?: string | null;
   customerId: string;
   deliveryLocation: JsonObject | null;
   fulfillmentType: string;
@@ -2044,6 +2046,7 @@ const createOrderWithItems = async ({
     payment,
     deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
     deliveryLocation,
+    attributedPromoId: attributedPromoId ?? null,
     cancellation: null,
     timeline,
     createdAt,
@@ -5145,6 +5148,8 @@ const handleNativeAction = async (
     }
 
     const orderId = crypto.randomUUID();
+    const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
+    const attributedPromoId = rawAttributedPromoId ? rawAttributedPromoId : null;
     const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
     const initialPayment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
@@ -5153,6 +5158,7 @@ const handleNativeAction = async (
     });
 
     const orderCreation = await createOrderWithItems({
+      attributedPromoId,
       customerId: context.uid,
       deliveryLocation: orderDraft.deliveryLocation,
       fulfillmentType: orderDraft.fulfillmentType,
