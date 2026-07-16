@@ -6896,17 +6896,26 @@ const handleNativeAction = async (
     if (!body) {
       fail(400, 'A body is required.');
     }
-    const { actionUrl, startsAt, endsAt } = validatePromoComposition({
-      actionUrl: data.actionUrl,
-      startsAt: data.startsAt,
-      endsAt: data.endsAt,
-    });
+    const { actionUrl, startsAt, endsAt, imageUrl, detailBody, terms, ctaLabel } =
+      validatePromoComposition({
+        actionUrl: data.actionUrl,
+        startsAt: data.startsAt,
+        endsAt: data.endsAt,
+        imageUrl: data.imageUrl,
+        detailBody: data.detailBody,
+        terms: data.terms,
+        ctaLabel: data.ctaLabel,
+      });
     const { data: promo, error } = await serviceClient
       .from('Promo')
       .insert({
         title,
         body,
         actionUrl,
+        imageUrl,
+        detailBody,
+        terms,
+        ctaLabel,
         startsAt,
         endsAt,
         active: true,
@@ -6999,6 +7008,10 @@ type PromoRow = {
   title: string;
   body: string;
   actionUrl: string | null;
+  imageUrl: string | null;
+  detailBody: string | null;
+  terms: string | null;
+  ctaLabel: string | null;
   active: boolean;
   startsAt: string | null;
   endsAt: string | null;
@@ -7011,6 +7024,10 @@ const validatePromoComposition = (input: {
   actionUrl: unknown;
   startsAt: unknown;
   endsAt: unknown;
+  imageUrl: unknown;
+  detailBody: unknown;
+  terms: unknown;
+  ctaLabel: unknown;
 }) => {
   const actionUrlRaw = sanitizeText(input.actionUrl);
   // Only in-app deep links are allowed — an absolute/external URL in a banner
@@ -7037,7 +7054,17 @@ const validatePromoComposition = (input: {
   if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
     fail(400, 'endsAt must be after startsAt.');
   }
-  return { actionUrl, startsAt, endsAt };
+  const imageUrlRaw = sanitizeText(input.imageUrl);
+  // Hero image, if present, must be a Supabase Storage public URL (same host we
+  // upload to) — never an arbitrary external URL shown to every customer.
+  if (imageUrlRaw && !imageUrlRaw.includes('/storage/v1/object/public/promo-assets/')) {
+    fail(400, 'imageUrl must be an uploaded promo asset.');
+  }
+  const imageUrl = imageUrlRaw || null;
+  const detailBody = sanitizeText(input.detailBody) || null;
+  const terms = sanitizeText(input.terms) || null;
+  const ctaLabel = sanitizeText(input.ctaLabel) || null;
+  return { actionUrl, startsAt, endsAt, imageUrl, detailBody, terms, ctaLabel };
 };
 
 const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;
