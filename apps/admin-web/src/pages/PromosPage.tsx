@@ -5,6 +5,7 @@ import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
 import { formatCurrency } from '../lib/format';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
+import { uploadPromoAsset } from '../services/promoAssetUpload';
 
 const isLive = (promo: Promo): boolean => {
   if (!promo.active) {
@@ -29,6 +30,7 @@ export default function PromosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -88,6 +90,24 @@ export default function PromosPage() {
     }
   };
 
+  const onPickImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await uploadPromoAsset(file);
+      setImageUrl(url);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+      event.target.value = '';
+    }
+  };
+
   const onToggle = async (promo: Promo) => {
     setBusy(true);
     try {
@@ -101,7 +121,7 @@ export default function PromosPage() {
     }
   };
 
-  const canSubmit = title.trim().length > 0 && body.trim().length > 0 && !busy;
+  const canSubmit = title.trim().length > 0 && body.trim().length > 0 && !busy && !uploading;
 
   return (
     <section className="page promos-page">
@@ -167,6 +187,14 @@ export default function PromosPage() {
             onChange={(event) => setCtaLabel(event.target.value)}
             placeholder="Order now"
           />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-image">Hero image (optional)</label>
+          <input id="promo-image" type="file" accept="image/*" onChange={(event) => void onPickImage(event)} />
+          {uploading ? <span className="muted">Uploading…</span> : null}
+          {imageUrl ? (
+            <img src={imageUrl} alt="Promo hero preview" style={{ marginTop: 8, maxWidth: 240, borderRadius: 8 }} />
+          ) : null}
         </div>
         <div className="field">
           <label htmlFor="promo-starts">Starts (optional)</label>
