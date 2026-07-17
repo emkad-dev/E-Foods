@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { promoHasRichContent, type PromoContent } from '../domain/promoContent';
 import { supabase } from '../services/supabase/config';
 import { trackPromoClick, trackPromoImpression } from '../services/promoTracking';
 import { customerTheme } from '../theme/palette';
@@ -11,13 +12,6 @@ import { customerTheme } from '../theme/palette';
 const PROMOS_TOPIC = 'promos';
 const CHANGED_EVENT = 'changed';
 const DISMISSED_KEY = 'feasty.dismissedPromos';
-
-type Promo = {
-  id: string;
-  title: string;
-  body: string;
-  actionUrl: string | null;
-};
 
 // Phase 1 dismissal: persisted in localStorage on web, in-memory on native.
 // (Native persistence via AsyncStorage is a follow-up.)
@@ -47,11 +41,11 @@ const persistDismissed = (ids: Set<string>) => {
 };
 
 export default function PromoBanner() {
-  const [promo, setPromo] = useState<Promo | null>(null);
+  const [promo, setPromo] = useState<PromoContent | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const show = useCallback(
-    (next: Promo) => {
+    (next: PromoContent) => {
       setPromo(next);
       trackPromoImpression(next.id);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: false }).start();
@@ -67,10 +61,10 @@ export default function PromoBanner() {
     // RLS returns only promos that are active and inside their live window.
     const { data, error } = await supabase
       .from('Promo')
-      .select('id, title, body, actionUrl')
+      .select('id, title, body, actionUrl, imageUrl, detailBody, terms, ctaLabel')
       .order('createdAt', { ascending: false })
       .limit(10)
-      .returns<Promo[]>();
+      .returns<PromoContent[]>();
     if (error || !data) {
       return;
     }
@@ -107,8 +101,13 @@ export default function PromoBanner() {
   }, [promo, hide]);
 
   const openDeal = useCallback(() => {
-    if (promo) trackPromoClick(promo.id);
-    if (promo?.actionUrl) {
+    if (!promo) {
+      return;
+    }
+    trackPromoClick(promo.id);
+    if (promoHasRichContent(promo)) {
+      router.push(`/promo/${promo.id}` as never);
+    } else if (promo.actionUrl) {
       router.push(promo.actionUrl as never);
     }
     dismiss();
@@ -122,8 +121,8 @@ export default function PromoBanner() {
     <Animated.View style={[styles.banner, { opacity: fadeAnim }]} pointerEvents="box-none">
       <Pressable
         style={styles.card}
-        onPress={promo.actionUrl ? openDeal : undefined}
-        accessibilityRole={promo.actionUrl ? 'button' : undefined}
+        onPress={promoHasRichContent(promo) || promo.actionUrl ? openDeal : undefined}
+        accessibilityRole={promoHasRichContent(promo) || promo.actionUrl ? 'button' : undefined}
       >
         <View style={styles.textWrap}>
           <Text style={styles.title} numberOfLines={1}>
@@ -132,7 +131,7 @@ export default function PromoBanner() {
           <Text style={styles.body} numberOfLines={2}>
             {promo.body}
           </Text>
-          {promo.actionUrl ? <Text style={styles.cta}>View deal →</Text> : null}
+          {promoHasRichContent(promo) || promo.actionUrl ? <Text style={styles.cta}>View deal →</Text> : null}
         </View>
         <TouchableOpacity
           style={styles.close}
