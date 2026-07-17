@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { PromoContent } from '../../src/domain/promoContent';
 import { trackPromoClick } from '../../src/services/promoTracking';
@@ -18,6 +18,7 @@ export default function DealsScreen() {
       .from('Promo')
       .select(PROMO_SELECT)
       .order('createdAt', { ascending: false })
+      .limit(50)
       .returns<PromoContent[]>();
     if (!error && data) {
       setPromos(data);
@@ -25,9 +26,7 @@ export default function DealsScreen() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const openPromo = (promo: PromoContent) => {
     trackPromoClick(promo.id);

@@ -7055,9 +7055,11 @@ const validatePromoComposition = (input: {
     fail(400, 'endsAt must be after startsAt.');
   }
   const imageUrlRaw = sanitizeText(input.imageUrl);
-  // Hero image, if present, must be a Supabase Storage public URL (same host we
-  // upload to) — never an arbitrary external URL shown to every customer.
-  if (imageUrlRaw && !imageUrlRaw.includes('/storage/v1/object/public/promo-assets/')) {
+  // Hero image, if present, must be a Supabase Storage public URL on this
+  // project's storage host (same host we upload to) — never an arbitrary
+  // external URL, or another project's storage host, shown to every customer.
+  const storagePrefix = `${(Deno.env.get('SUPABASE_URL') ?? '').replace(/\/+$/, '')}/storage/v1/object/public/promo-assets/`;
+  if (imageUrlRaw && !imageUrlRaw.startsWith(storagePrefix)) {
     fail(400, 'imageUrl must be an uploaded promo asset.');
   }
   const imageUrl = imageUrlRaw || null;

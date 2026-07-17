@@ -11,18 +11,25 @@ export default function PromoDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [promo, setPromo] = useState<PromoContent | null>(null);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
+    setLoading(true);
     if (!id) {
       setLoading(false);
       return;
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('Promo')
       .select(PROMO_SELECT)
       .eq('id', id)
       .maybeSingle<PromoContent>();
-    setPromo(data ?? null);
+    if (error && !data) {
+      setFailed(true);
+    } else {
+      setPromo(data ?? null);
+      setFailed(false);
+    }
     setLoading(false);
   }, [id]);
 
@@ -41,6 +48,18 @@ export default function PromoDetailScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={customerTheme.accent} />
+      </View>
+    );
+  }
+
+  if (failed) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.emptyTitle}>Couldn&apos;t load this deal</Text>
+        <Text style={styles.emptyBody}>Check your connection and try again.</Text>
+        <Pressable style={styles.retry} onPress={() => void load()} accessibilityRole="button">
+          <Text style={styles.ctaText}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -86,6 +105,10 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: customerTheme.background, gap: 6, padding: 24 },
   emptyTitle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
   emptyBody: { color: customerTheme.textMuted, fontSize: 14, textAlign: 'center' },
+  retry: {
+    marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center',
+  },
   hero: { width: '100%', height: 200, borderRadius: 16 },
   heroPlaceholder: { backgroundColor: customerTheme.accentSoft },
   title: { color: customerTheme.text, fontSize: 22, fontWeight: '800' },
