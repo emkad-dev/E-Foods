@@ -47,14 +47,36 @@ export interface PeriodComparison {
 
 export interface PartnerKpis {
   orders: PeriodComparison;
-  /** Net earnings: food subtotal minus discounts — what the kitchen keeps. */
+  /** Food earnings at the restaurant's own menu prices — exactly what the kitchen is paid. */
   earnings: PeriodComparison;
-  /** Total cost: delivery + service fees passed through to dispatch/platform. */
-  cost: PeriodComparison;
-  /** Current-window cost as a percentage of gross order value (0-100). */
-  costShareOfGross: number;
   avgOrder: PeriodComparison;
 }
+
+type PricingRecord = {
+  restaurantBasis?: number;
+  restaurantPayable?: number;
+  settlement?: { marketplaceMarkup?: number } | null;
+  subtotal?: number;
+};
+
+// Pricing-v2 orders are settled at the restaurant's full own-price basis
+// (restaurantPayable === restaurantBasis). Legacy orders fall back to their
+// stored commission-era payable — that is what was actually owed at the time —
+// and, failing that, subtotal minus the old flat marketplace markup.
+const earningsOf = (order: OrderDocument) => {
+  const pricing = (order.pricing ?? null) as PricingRecord | null;
+  if (typeof pricing?.restaurantPayable === 'number') {
+    return pricing.restaurantPayable;
+  }
+
+  if (typeof pricing?.restaurantBasis === 'number') {
+    return pricing.restaurantBasis;
+  }
+
+  const subtotal = pricing?.subtotal ?? orderTotal(order);
+  const legacyMarkup = typeof pricing?.settlement?.marketplaceMarkup === 'number' ? pricing.settlement.marketplaceMarkup : 0;
+  return Math.max(subtotal - legacyMarkup, 0);
+};
 
 export const computePartnerKpis = (orders: OrderDocument[], rangeDays: RangeDays, now = new Date()): PartnerKpis => {
   const currentStart = new Date(now.getTime() - rangeDays * 24 * 60 * 60 * 1000);
@@ -66,13 +88,8 @@ export const computePartnerKpis = (orders: OrderDocument[], rangeDays: RangeDays
   const sumOf = (windowOrders: OrderDocument[], pick: (order: OrderDocument) => number) =>
     windowOrders.reduce((total, order) => (isCountedTowardRevenue(order) ? total + pick(order) : total), 0);
 
-  const netOf = (order: OrderDocument) => (order.pricing?.subtotal ?? orderTotal(order)) - (order.pricing?.discount ?? 0);
-  const costOf = (order: OrderDocument) => (order.pricing?.deliveryFee ?? 0) + (order.pricing?.serviceFee ?? 0);
-
-  const currentEarnings = sumOf(currentOrders, netOf);
-  const previousEarnings = sumOf(previousOrders, netOf);
-  const currentCost = sumOf(currentOrders, costOf);
-  const currentGross = sumOf(currentOrders, orderTotal);
+  const currentEarnings = sumOf(currentOrders, earningsOf);
+  const previousEarnings = sumOf(previousOrders, earningsOf);
 
   // Averages are per completed order, so they line up with earnings above.
   const currentCompleted = currentOrders.filter(isCountedTowardRevenue).length;
@@ -81,8 +98,6 @@ export const computePartnerKpis = (orders: OrderDocument[], rangeDays: RangeDays
   return {
     orders: { current: currentOrders.length, previous: previousOrders.length },
     earnings: { current: currentEarnings, previous: previousEarnings },
-    cost: { current: currentCost, previous: sumOf(previousOrders, costOf) },
-    costShareOfGross: currentGross > 0 ? (currentCost / currentGross) * 100 : 0,
     avgOrder: {
       current: currentCompleted > 0 ? currentEarnings / currentCompleted : 0,
       previous: previousCompleted > 0 ? previousEarnings / previousCompleted : 0,

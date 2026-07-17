@@ -179,13 +179,6 @@ export default function PartnerHome() {
               wide={isWide}
             />
             <KpiCard
-              label={`Total costs (${rangeDays}d)`}
-              value={formatPartnerMoney(kpis.cost.current)}
-              note={`−${Math.round(kpis.costShareOfGross * 10) / 10}% of gross`}
-              noteColor={partnerTheme.danger}
-              wide={isWide}
-            />
-            <KpiCard
               label="Avg order value"
               value={formatPartnerMoney(kpis.avgOrder.current)}
               current={kpis.avgOrder.current}
