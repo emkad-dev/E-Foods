@@ -35,6 +35,10 @@ export default function PromosPage() {
   const [actionUrl, setActionUrl] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
+  const [detailBody, setDetailBody] = useState('');
+  const [terms, setTerms] = useState('');
+  const [ctaLabel, setCtaLabel] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -61,12 +65,20 @@ export default function PromosPage() {
         actionUrl: actionUrl.trim() || null,
         startsAt: toIso(startsAt),
         endsAt: toIso(endsAt),
+        detailBody: detailBody.trim() || null,
+        terms: terms.trim() || null,
+        ctaLabel: ctaLabel.trim() || null,
+        imageUrl: imageUrl.trim() || null,
       });
       setTitle('');
       setBody('');
       setActionUrl('');
       setStartsAt('');
       setEndsAt('');
+      setDetailBody('');
+      setTerms('');
+      setCtaLabel('');
+      setImageUrl('');
       setError(null);
       await load();
     } catch (nextError) {
@@ -125,6 +137,35 @@ export default function PromosPage() {
             value={actionUrl}
             onChange={(event) => setActionUrl(event.target.value)}
             placeholder="/deals"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-detail">Detail description (optional)</label>
+          <textarea
+            id="promo-detail"
+            rows={4}
+            value={detailBody}
+            onChange={(event) => setDetailBody(event.target.value)}
+            placeholder="Full explanation shown on the promo's landing page."
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-terms">Terms / fine print (optional)</label>
+          <textarea
+            id="promo-terms"
+            rows={2}
+            value={terms}
+            onChange={(event) => setTerms(event.target.value)}
+            placeholder="Valid 12–2pm · selected restaurants · min order ₦2000"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-cta">CTA label (optional)</label>
+          <input
+            id="promo-cta"
+            value={ctaLabel}
+            onChange={(event) => setCtaLabel(event.target.value)}
+            placeholder="Order now"
           />
         </div>
         <div className="field">

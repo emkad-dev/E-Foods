@@ -5,6 +5,10 @@ export interface Promo {
   title: string;
   body: string;
   actionUrl: string | null;
+  imageUrl: string | null;
+  detailBody: string | null;
+  terms: string | null;
+  ctaLabel: string | null;
   active: boolean;
   startsAt: string | null;
   endsAt: string | null;
@@ -25,6 +29,10 @@ export const createPromo = (input: {
   actionUrl?: string | null;
   startsAt?: string | null;
   endsAt?: string | null;
+  imageUrl?: string | null;
+  detailBody?: string | null;
+  terms?: string | null;
+  ctaLabel?: string | null;
 }) => callAdminRpc<{ promo: Promo }>('promoCreate', input);
 
 export const setPromoActive = (id: string, active: boolean) =>
