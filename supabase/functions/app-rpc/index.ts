@@ -35,6 +35,8 @@ import {
   runWithBackpressure,
 } from '../_shared/observability.ts';
 import { validatePromoTrack } from './promoTrack.ts';
+import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
+import { loadPricingConfig } from '../_shared/platformSettings.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -289,15 +291,6 @@ const DEFAULT_CURRENCY = 'NGN';
 const DEFAULT_DELIVERY_TIME = '25-35 min';
 const DEFAULT_DISPATCH_STATUS = 'Available';
 const DEFAULT_DISPATCH_VEHICLE = 'Bike';
-const PLATFORM_COMMISSION_RATES = {
-  delivery: 0.15,
-  pickup: 0.1,
-} as const;
-// Flat per-item marketplace markup charged to the customer on top of the
-// restaurant's own menu price. Kept entirely by the platform — the restaurant is
-// always settled on its own price (see calculateSettlementBreakdown).
-// Mirrored on the client via CUSTOMER_ITEM_MARKUP in packages/domain/src/orders.ts.
-const CUSTOMER_ITEM_MARKUP = 150;
 const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')?.trim() ?? '';
@@ -1717,7 +1710,12 @@ const flattenRestaurantMenu = (restaurant: RestaurantRecordRow) => {
   });
 };
 
-const buildOrderItems = (requestedItems: unknown, restaurantId: string, restaurant: RestaurantRecordRow) => {
+const buildOrderItems = (
+  requestedItems: unknown,
+  restaurantId: string,
+  restaurant: RestaurantRecordRow,
+  pricingConfig: PricingConfig
+) => {
   if (!Array.isArray(requestedItems) || requestedItems.length === 0) {
     fail(400, 'Add at least one item before placing an order.');
   }
@@ -1739,11 +1737,16 @@ const buildOrderItems = (requestedItems: unknown, restaurantId: string, restaura
       fail(412, 'One or more selected menu items are unavailable.');
     }
 
+    // Restaurant's own price — settlement and min-order run on this.
+    const basePrice = menuItem.price;
+
     return {
+      basePrice,
       id: menuItem.id,
       name: menuItem.name,
-      // Customer-facing price = restaurant's authoritative menu price + platform markup.
-      price: roundCurrency(menuItem.price + CUSTOMER_ITEM_MARKUP),
+      // Customer-facing price with the platform markup embedded, re-derived
+      // server-side from the authoritative menu price (never client input).
+      price: toDisplayPrice(basePrice, pricingConfig),
       quantity,
       restaurantId,
       restaurantName: sanitizeText(restaurant.name, 'Restaurant'),
@@ -1774,90 +1777,6 @@ const normalizeDeliveryLocation = (deliveryLocation: unknown) => {
     longitude: hasCoordinates ? longitude : null,
     note: sanitizeOptionalText(record.note),
     shortAddress: sanitizeOptionalText(record.shortAddress),
-  };
-};
-
-const calculateServiceFee = (subtotal: number) => {
-  if (subtotal <= 0) {
-    return 0;
-  }
-
-  return roundCurrency(Math.min(Math.max(subtotal * 0.05, 0.49), 12));
-};
-
-const calculateSettlementBreakdown = ({
-  deliveryFee,
-  fulfillmentType,
-  marketplaceMarkup = 0,
-  subtotal,
-}: {
-  deliveryFee: number;
-  fulfillmentType: 'delivery' | 'pickup';
-  marketplaceMarkup?: number;
-  subtotal: number;
-}) => {
-  const safeSubtotal = roundCurrency(subtotal);
-  const markup = roundCurrency(Math.max(marketplaceMarkup, 0));
-  // The restaurant is settled on its own menu prices only; the per-item marketplace
-  // markup is platform margin and is excluded from the restaurant's commission basis.
-  const restaurantBasis = roundCurrency(Math.max(safeSubtotal - markup, 0));
-  const dispatchFee = roundCurrency(deliveryFee);
-  const commissionRate = PLATFORM_COMMISSION_RATES[fulfillmentType];
-  const commission = roundCurrency(restaurantBasis * commissionRate);
-  const restaurantPayable = roundCurrency(Math.max(restaurantBasis - commission, 0));
-  const platformFee = roundCurrency(commission + markup);
-  const netSettlement = roundCurrency(restaurantPayable + dispatchFee);
-
-  return {
-    basis: 'menu_subtotal',
-    commissionRate,
-    fulfillmentType,
-    dispatchFee,
-    marketplaceMarkup: markup,
-    netSettlement,
-    platformFee,
-    restaurantPayable,
-  };
-};
-
-const calculatePricing = ({
-  deliveryFee,
-  fulfillmentType,
-  marketplaceMarkup = 0,
-  subtotal,
-  tip,
-}: {
-  deliveryFee: number;
-  fulfillmentType: 'delivery' | 'pickup';
-  marketplaceMarkup?: number;
-  subtotal: number;
-  tip: number;
-}) => {
-  const safeSubtotal = roundCurrency(subtotal);
-  const safeDeliveryFee = roundCurrency(deliveryFee);
-  const safeTip = roundCurrency(tip);
-  const serviceFee = calculateServiceFee(safeSubtotal);
-  const settlement = calculateSettlementBreakdown({
-    deliveryFee: safeDeliveryFee,
-    fulfillmentType,
-    marketplaceMarkup,
-    subtotal: safeSubtotal,
-  });
-  const total = roundCurrency(safeSubtotal + safeDeliveryFee + serviceFee + safeTip);
-
-  return {
-    currency: DEFAULT_CURRENCY,
-    deliveryFee: safeDeliveryFee,
-    discount: 0,
-    dispatchFee: settlement.dispatchFee,
-    netSettlement: settlement.netSettlement,
-    platformFee: settlement.platformFee,
-    restaurantPayable: settlement.restaurantPayable,
-    serviceFee,
-    settlement,
-    subtotal: safeSubtotal,
-    tip: safeTip,
-    total,
   };
 };
 
@@ -1962,15 +1881,15 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This restaurant does not support pickup.');
   }
 
-  const items = buildOrderItems(requestData.items, restaurantId, restaurant);
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  // Total platform markup baked into the subtotal above (CUSTOMER_ITEM_MARKUP per unit),
-  // so settlement can credit the restaurant on its own menu prices.
-  const marketplaceMarkup = items.reduce((sum, item) => sum + CUSTOMER_ITEM_MARKUP * item.quantity, 0);
+  const pricingConfig = await loadPricingConfig();
+  const items = buildOrderItems(requestData.items, restaurantId, restaurant, pricingConfig);
+  // Min-order and settlement both run on the restaurant's own menu prices,
+  // never on the marked-up customer prices.
+  const restaurantBasis = items.reduce((sum, item) => sum + item.basePrice * item.quantity, 0);
   const deliveryFee = fulfillmentType === 'delivery' ? parseNumber(restaurant.deliveryFee, 0) : 0;
   const minOrder = parseNumber(restaurant.minOrder, 0);
 
-  if (subtotal - marketplaceMarkup < minOrder) {
+  if (restaurantBasis < minOrder) {
     fail(412, `This restaurant requires a minimum order of ${minOrder.toFixed(2)}.`);
   }
 
@@ -1980,11 +1899,10 @@ const prepareCustomerOrderDraft = async (
     fail(400, 'A valid delivery location is required.');
   }
 
-  const pricing = calculatePricing({
+  const pricing = calculateOrderPricing({
+    config: pricingConfig,
     deliveryFee,
-    fulfillmentType,
-    marketplaceMarkup,
-    subtotal,
+    items,
     tip: tipAmount,
   });
 
@@ -2017,6 +1935,7 @@ const createOrderWithItems = async ({
   deliveryLocation: JsonObject | null;
   fulfillmentType: string;
   items: Array<{
+    basePrice: number;
     id: string;
     name: string;
     price: number;
@@ -2063,6 +1982,7 @@ const createOrderWithItems = async ({
       orderId,
       itemId: item.id,
       name: item.name,
+      basePrice: item.basePrice,
       price: item.price,
       quantity: item.quantity,
       restaurantId: item.restaurantId,
