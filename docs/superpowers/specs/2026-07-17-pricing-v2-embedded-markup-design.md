@@ -11,8 +11,10 @@ model, the way Chowdeck-style marketplaces price:
 
 - **Customer-facing menu price** = restaurant's own price × 1.20 + ₦100, per unit.
 - **No separate "Service fee" line** at checkout.
-- **Restaurant is settled on 97% of its own menu prices** (a 3% partner service
-  charge); the 15%/10% commission is removed.
+- **Restaurant is settled on 100% of its own menu prices** — the 15%/10%
+  commission is removed and there is no partner service charge. (The config
+  keeps a `partner_service_rate` field, currently `0`, so a charge could be
+  introduced later without code changes.)
 - **Pricing parameters live in one server-owned config**; clients only ever receive
   final display prices — no client-side fee math.
 
@@ -22,9 +24,9 @@ model, the way Chowdeck-style marketplaces price:
 |---|---|
 | Customer sees on menu | ₦6,100 (= 5,000 × 1.20 + 100) |
 | Checkout total | items ₦6,100 × qty + delivery fee + tip |
-| Partner dashboard, 2 units sold | gross ₦10,000 → service charge −₦300 (3%) → net ₦9,700 |
-| Partner payout | ₦9,700 + delivery fee (self-provisioned delivery passes through) |
-| Platform margin | ₦1,100/unit embedded markup + 3% of the restaurant basis |
+| Partner dashboard, 2 units sold | earnings ₦10,000 — exactly what the restaurant priced |
+| Partner payout | ₦10,000 + delivery fee (self-provisioned delivery passes through) |
+| Platform margin | ₦1,100/unit embedded markup — nothing is deducted from the restaurant |
 
 ## Current state being replaced
 
@@ -44,8 +46,12 @@ model, the way Chowdeck-style marketplaces price:
 A single `platform_settings` row (jsonb payload):
 
 ```json
-{ "markup_rate": 0.20, "markup_flat": 100, "partner_service_rate": 0.03 }
+{ "markup_rate": 0.20, "markup_flat": 100, "partner_service_rate": 0 }
 ```
+
+`partner_service_rate` is `0` by design decision (2026-07-17): the restaurant
+keeps 100% of its own prices. The field exists so a partner charge could be
+enabled later by editing the row — the settlement math below stays generic.
 
 Read by `app-rpc` and `public-catalog` (fetched per invocation; simple in-memory
 cache acceptable). Rates become editable from the admin app later without a
@@ -79,8 +85,8 @@ prices carried through order creation.
 
 ```
 restaurantBasis   = Σ basePrice × qty
-partnerServiceFee = roundCurrency(restaurantBasis × partner_service_rate)   // 3%
-restaurantPayable = roundCurrency(restaurantBasis − partnerServiceFee)      // 97%
+partnerServiceFee = roundCurrency(restaurantBasis × partner_service_rate)   // rate is 0 → fee 0
+restaurantPayable = roundCurrency(restaurantBasis − partnerServiceFee)      // = full basis today
 totalMarkup       = roundCurrency(markedUpSubtotal − restaurantBasis)
 platformFee       = roundCurrency(totalMarkup + partnerServiceFee)
 netSettlement     = restaurantPayable + dispatchFee
@@ -92,11 +98,11 @@ rewrite history.
 
 ### 5. Partner dashboard
 
-Earnings are presented at the restaurant's **own prices** with an explicit
-deduction, three lines: gross (own-price total), "FEASTY service charge (3%)",
-and net payout. `apps/partner` analytics (`partnerAnalytics.ts`) and the earnings
-views switch from commission-net figures to this gross/fee/net presentation.
-Rationale: gross-only next to a smaller bank credit generates support tickets.
+Earnings are presented at the restaurant's **own prices** — an order of two
+₦5,000 items shows ₦10,000, exactly what the partner will be paid for the food.
+`apps/partner` analytics (`partnerAnalytics.ts`) drops the commission-era
+"costs" framing. Legacy (pre-v2) orders keep showing their stored
+commission-net payable, since that is what was actually owed at the time.
 
 ### 6. Rollout
 
@@ -113,7 +119,8 @@ Rationale: gross-only next to a smaller bank credit generates support tickets.
 Unit tests on the pure pricing functions:
 
 - Display-price derivation (zero, cheap items, rounding at kobo precision).
-- Settlement breakdown, including 3% rounding on odd bases and platformFee
+- Settlement breakdown, including a nonzero partner_service_rate case (to keep
+  the generic math honest even though the live rate is 0) and platformFee
   reconciliation (`platformFee + restaurantPayable = markedUpSubtotal`).
 - Min-order enforcement against the base-price basis.
 - Consistency test: catalog display price for an item equals the price app-rpc
