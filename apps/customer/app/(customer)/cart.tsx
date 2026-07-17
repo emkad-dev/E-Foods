@@ -504,10 +504,6 @@ export default function CartScreen() {
                 </Text>
               </View>
               <View style={styles.summarySplit}>
-                <Text style={styles.summaryDetailLabel}>Service fee</Text>
-                <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.serviceFee)}</Text>
-              </View>
-              <View style={styles.summarySplit}>
                 <Text style={styles.summaryDetailLabel}>Tip</Text>
                 <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.tip)}</Text>
               </View>

@@ -235,7 +235,9 @@ export default function OrderTracking() {
         <Text style={styles.total}>Total: {formatMoney(total)}</Text>
         <Text style={styles.detailLine}>Subtotal: {formatMoney(order.pricing?.subtotal ?? total)}</Text>
         <Text style={styles.detailLine}>Delivery fee: {formatMoney(order.pricing?.deliveryFee ?? 0)}</Text>
-        <Text style={styles.detailLine}>Service fee: {formatMoney(order.pricing?.serviceFee ?? 0)}</Text>
+        {order.pricing?.serviceFee ? (
+          <Text style={styles.detailLine}>Service fee: {formatMoney(order.pricing.serviceFee)}</Text>
+        ) : null}
         <Text style={styles.detailLine}>Tip: {formatMoney(order.pricing?.tip ?? 0)}</Text>
         <Text style={styles.detailLine}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
