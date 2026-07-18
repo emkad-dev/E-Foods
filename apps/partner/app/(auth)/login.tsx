@@ -1,6 +1,6 @@
 import { Link } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -86,6 +86,9 @@ export default function PartnerLoginScreen() {
         <Link href="/(auth)/forgot-password" style={styles.linkSecondary}>
           Forgot password?
         </Link>
+        <Text style={styles.linkSecondary} onPress={() => Linking.openURL('https://feasty.com.ng')}>
+          Looking to order food? Visit feasty.com.ng
+        </Text>
       </View>
     </ScrollView>
   );
