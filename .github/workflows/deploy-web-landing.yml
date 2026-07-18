@@ -1,0 +1,26 @@
+name: Deploy web landing (feasty.com.ng)
+
+on:
+  push:
+    branches: [ 'main' ]
+    paths:
+      - 'apps/web-landing/**'
+      - '.github/workflows/deploy-web-landing.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy apps/web-landing to Cloudflare Pages (feasty-web)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          command: pages deploy apps/web-landing/public --project-name=feasty-web --branch=main

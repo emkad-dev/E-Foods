@@ -37,9 +37,11 @@ jobs:
           supabase login --token "$SUPABASE_ACCESS_TOKEN"
           supabase functions deploy app-rpc payment-verification paystack-webhook public-catalog --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
 
-      # Admin/partner web are hosted on Cloudflare Pages (feasty-admin /
-      # feasty-partner) and deployed manually via `npx wrangler pages deploy`
-      # — Metro's 6GB heap requirement doesn't fit Pages CI builds.
+      # Web apps are hosted on Cloudflare Pages and deployed by the
+      # path-filtered workflows deploy-web-landing.yml (feasty-web),
+      # deploy-admin.yml (feasty-admin), and deploy-partner.yml
+      # (feasty-partner). Pages' own git-integration CI is not used — its
+      # build environment can't fit Metro's heap requirement.
 
       - name: Notify
         run: echo "Deploy steps finished (check logs for details)."
