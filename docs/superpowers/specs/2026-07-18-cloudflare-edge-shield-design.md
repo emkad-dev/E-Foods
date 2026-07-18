@@ -1,7 +1,7 @@
 # Cloudflare Edge Shield — Images, Webhook Queue, and Full Cloudflare Consolidation
 
 **Date:** 2026-07-18
-**Status:** Draft — pending review
+**Status:** Code-complete 2026-07-18 (commits 7d8cf23..8a5d63b); rollout steps (push, worker deploys, secrets, dashboard toggles, Paystack cutover) pending operator — see plan Task 8 handoff
 **Scope:** Phases A1 (images + catalog edge cache), A2 (Paystack webhook
 buffering), and H1–H3 (migrate admin/partner web hosting from Vercel to
 Cloudflare Workers, put admin behind Cloudflare Access, decommission Vercel).
