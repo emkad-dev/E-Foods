@@ -98,3 +98,5 @@ scripts/.*.env
 
 # supabase CLI local branch state
 supabase/.branches/
+
+cloudflare/**/.wrangler/
