@@ -1,8 +1,10 @@
-# Cloudflare Edge Shield — Image Transformations + Paystack Webhook Queue (A1 + A2)
+# Cloudflare Edge Shield — Images, Webhook Queue, and Full Cloudflare Consolidation
 
 **Date:** 2026-07-18
 **Status:** Draft — pending review
-**Scope:** Phases A1 (images + catalog edge cache) and A2 (Paystack webhook buffering).
+**Scope:** Phases A1 (images + catalog edge cache), A2 (Paystack webhook
+buffering), and H1–H3 (migrate admin/partner web hosting from Vercel to
+Cloudflare Workers, put admin behind Cloudflare Access, decommission Vercel).
 Phase A3 (order-intent capture during outages) is explicitly out of scope and gets
 its own spec after A1/A2 are proven in production.
 
@@ -41,6 +43,8 @@ Existing resilience this builds on (not replaces):
 - Replacing the Postgres queue system.
 - Cloudflare-hosted images (Images product) — we only transform Supabase-hosted
   originals.
+- Hosting for the customer app: production customers use the mobile apps; no
+  root-domain web hosting is added or changed by this design.
 
 ## 3. Architecture overview
 
@@ -51,13 +55,16 @@ Clients ──rpc────► <project>.supabase.co/functions/v1/app-rpc   (u
 Paystack ─────────► hooks.feasty.com.ng/paystack (Worker producer)
                         └─► CF Queue paystack-webhook-events ─► consumer ─► paystack-webhook fn
                                                   └─(max retries exceeded)─► paystack-webhook-dlq
+Browsers ─admin──► Cloudflare Access ─► admin.feasty.com.ng (Worker static assets)
+Browsers ─partner─► partner.feasty.com.ng (Worker static assets)
 ```
 
-Three small, independent pieces. Each can ship, fail, and be rolled back alone.
+Small, independent pieces. Each can ship, fail, and be rolled back alone.
 
 New repo directory: `cloudflare/` with one folder per Worker
-(`cloudflare/hooks/`, `cloudflare/edge-cache/`), each with its own
-`wrangler.jsonc` and deployed via `npx wrangler deploy`.
+(`cloudflare/hooks/`, `cloudflare/edge-cache/`, `cloudflare/admin-site/`,
+`cloudflare/partner-site/`), each with its own `wrangler.jsonc` and deployed
+via `npx wrangler deploy`.
 
 ## 4. Phase A1a — Image transformations
 
@@ -172,6 +179,58 @@ so duplicates and reordering are safe.
 Supabase URL keeps working as fallback. This also closes out the "live webhook
 URL unconfirmed" loose end from the Paystack config work.
 
+## 6b. Phase H1 — Migrate admin-web and partner web to Cloudflare Workers
+
+Both apps are self-contained SPA static builds today (admin-web: Vite → `dist/`;
+partner: Expo web export via `npm run build:web` → `dist/`, built from repo root
+because it imports workspace packages). They move to **Workers static assets**:
+
+- `cloudflare/admin-site/wrangler.jsonc`: `assets.directory` pointing at the
+  admin-web `dist`, `not_found_handling: "single-page-application"` (replaces
+  the Vercel SPA rewrite), custom domain `admin.feasty.com.ng`.
+- `cloudflare/partner-site/wrangler.jsonc`: same shape, custom domain
+  `partner.feasty.com.ng`.
+- Headers currently set in each app's `vercel.json` (X-Robots-Tag noindex,
+  security headers for admin) move to a `_headers` file in the build output
+  (supported by Workers static assets).
+- CI: the two `amondnet/vercel-action` steps in `.github/workflows/deploy.yml`
+  are replaced with `cloudflare/wrangler-action` steps (build, then
+  `wrangler deploy`). New repo secrets: `CLOUDFLARE_API_TOKEN` (scoped to
+  Workers), `CLOUDFLARE_ACCOUNT_ID`. Vercel secrets stay in place until H3.
+- Cleanup: drop the `@vercel/speed-insights` dependency from admin-web.
+- Workers custom domains create the proxied DNS records automatically — the
+  Vercel-pointing CNAMEs for `admin.`/`partner.` from the old runbook are NOT
+  entered; this supersedes that part of the DNS migration doc.
+- Cost: fits the Workers free tier (static asset requests are free/unmetered;
+  both are low-traffic internal-facing apps).
+
+Rollback: point the custom domain back at a Vercel CNAME (Vercel project stays
+alive until H3 exactly for this reason).
+
+## 6c. Phase H2 — Cloudflare Access in front of admin
+
+Zero Trust application for `admin.feasty.com.ng` (free plan, ≤50 users):
+
+- Policy: allow-list of admin emails (starting with feastyfooders@gmail.com);
+  login via email one-time PIN (no IdP setup needed).
+- Session duration 24 h. Everyone else gets Cloudflare's login page — the admin
+  app's assets are never served to unauthenticated visitors.
+- The app's own Supabase auth + RBAC remains the inner gate (Access is
+  defense-in-depth, not a replacement).
+- Since hosting is now on Cloudflare (H1), there is no `*.vercel.app` back door
+  to worry about.
+- `partner.feasty.com.ng` does NOT go behind Access — restaurant partners are
+  the public audience for that app.
+
+## 6d. Phase H3 — Decommission Vercel
+
+Only after H1 is verified live (both sites serving from Workers, CI green,
+admin behind Access):
+
+- Remove Vercel deploy steps + `VERCEL_*` secrets from the repo/workflow.
+- Delete the two Vercel projects, then the Vercel account (user action).
+- Update `docs/PARTNER_WEB_DEPLOY.md` to describe the Workers deploy instead.
+
 ## 7. Error handling summary
 
 | Failure | Behavior |
@@ -201,17 +260,29 @@ URL unconfirmed" loose end from the Paystack config work.
 - **End-to-end:** one small live payment (as done for pricing v2) with the
   Paystack webhook URL pointed at `hooks.feasty.com.ng`, confirming order
   reaches `paid` via the queue path.
+- **Hosting (H1/H2):** `wrangler deploy` each site, then verify: SPA deep-link
+  refresh works (single-page-application fallback), `_headers` present in
+  responses, admin login + a real admin action against Supabase, partner login
+  flow, and Access challenge on `admin.` (allowed email gets in, other email
+  refused a PIN).
 
 ## 9. Rollout order and operator actions
 
 1. **User:** complete Cloudflare DNS records + NS swap at DomainKing
-   (prerequisite for everything; runbook already exists).
-2. Ship A1a (zone toggle + `media.ts` env-gated change + `img` DNS record) —
+   (prerequisite for everything; runbook already exists — but skip the
+   Vercel-pointing `admin.`/`partner.` CNAMEs, which H1 supersedes with
+   Worker custom domains).
+2. Ship H1 (Workers static hosting for admin + partner, CI switch) — restores
+   `admin.`/`partner.` availability, which has been down since the Bunny zone
+   died, so it goes first.
+3. Ship H2 (Cloudflare Access on admin) — small, immediately valuable.
+4. Ship A1a (zone toggle + `media.ts` env-gated change + `img` DNS record) —
    verify live.
-3. Ship A2 (hooks Worker + secret + Paystack dashboard URL change) — verify
+5. Ship A2 (hooks Worker + secret + Paystack dashboard URL change) — verify
    with live E2E payment.
-4. Ship A1b (edge-cache Worker + client base-URL change riding the pending
+6. Ship A1b (edge-cache Worker + client base-URL change riding the pending
    mobile builds).
+7. H3: decommission Vercel (user deletes projects/account after H1 verified).
 
 A2 before A1b because it's the money path and needs no client builds.
 
@@ -231,3 +302,8 @@ upgrading to the $5/month plan is a user action (purchase) before step 3.
   independent rollback.
 - A3 (order intents during outage) deferred: pricing v2 markup, stock, and
   payment init all live in Postgres; doing this safely needs its own design.
+- Full consolidation on Cloudflare (user decision 2026-07-18): admin/partner
+  hosting moves from Vercel to Workers static assets and Vercel is deleted
+  afterwards — one platform, no `*.vercel.app` back doors, Access-compatible.
+  Vercel stays alive until the Workers cutover is verified, as the rollback
+  path.
