@@ -1,0 +1,21 @@
+{
+  "name": "feasty-hooks",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "routes": [{ "pattern": "hooks.feasty.com.ng", "custom_domain": true }],
+  "vars": {
+    "SUPABASE_WEBHOOK_URL": "https://rgfbheorvtolixdcpjhy.supabase.co/functions/v1/paystack-webhook"
+  },
+  "queues": {
+    "producers": [{ "queue": "paystack-webhook-events", "binding": "WEBHOOK_QUEUE" }],
+    "consumers": [
+      {
+        "queue": "paystack-webhook-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 25,
+        "dead_letter_queue": "paystack-webhook-dlq"
+      }
+    ]
+  }
+}
