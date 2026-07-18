@@ -98,15 +98,32 @@ fits in free with wide headroom, leaving room to add per-context widths later.
 ## 5. Phase A1b — Catalog edge cache (menus browsable during outage)
 
 A Worker at `api.feasty.com.ng` (Workers custom domain — DNS record is created
-automatically) proxying **only** `GET/OPTIONS` for `public-catalog`:
+automatically) proxying **only** the `public-catalog` function.
 
-- Forwards to `<project>.supabase.co/functions/v1/public-catalog/...`,
-  preserving query string and the anon `apikey`/`Authorization` headers.
-- **Cache strategy (Cache API):** serve cached copy if younger than 60 s;
-  otherwise revalidate from origin. On origin failure (5xx, timeout, network
-  error), serve the cached copy up to 24 h old (manual stale-if-error) with an
-  `x-feasty-stale: 1` header for observability. Cache key = full URL.
+`public-catalog` is a POST-RPC (anonymous; action name + params in the JSON
+body), so standard HTTP caching does not apply. The Worker caches manually:
+
+- **Cache key:** synthetic GET URL
+  `https://api.feasty.com.ng/__cache/public-catalog/<sha256(rawBody)>` stored
+  via the Workers Cache API. Only an allowlist of read actions is cacheable
+  (`customerGetPublishedRestaurants`, `customerGetPublishedRestaurantDetail`,
+  and future anonymous reads added explicitly); anything else is proxied
+  straight through uncached.
+- Forwards to `<project>.supabase.co/functions/v1/public-catalog`, preserving
+  the anon `apikey`/`Authorization` headers; only 200 responses are cached.
+- **Cache strategy:** serve cached copy if younger than 60 s; otherwise
+  revalidate from origin. On origin failure (5xx, timeout, network error),
+  serve the cached copy up to 24 h old (manual stale-if-error) with an
+  `x-feasty-stale: 1` header for observability.
 - Non-matching paths return 404 — this hostname is only the catalog.
+
+**What is deliberately NOT edge-cached:** all `app-rpc` traffic. It is
+authenticated and per-user (carts, orders, profiles) or mutating (order
+placement, payments). Per-user responses have near-zero edge hit rates, and a
+cache-key mistake there leaks one user's data to another — the risk/benefit is
+upside-down. Spike protection for that path is the existing Postgres queue;
+freshness comes from Realtime. Anonymous shared reads and images are the whole
+cacheable surface, and both are covered.
 
 **Client change:** the public-catalog base URL in app config moves to
 `https://api.feasty.com.ng`. This is the one client-side change in this design;
