@@ -1,0 +1,15 @@
+{
+  "name": "feasty-edge-cache",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  // img.feasty.com.ng exists only to give /cdn-cgi/image/* a proxied
+  // hostname — Cloudflare's transformation service intercepts those paths
+  // before the Worker, so this Worker only ever sees (and 404s) other paths.
+  "routes": [
+    { "pattern": "api.feasty.com.ng", "custom_domain": true },
+    { "pattern": "img.feasty.com.ng", "custom_domain": true }
+  ],
+  "vars": {
+    "ORIGIN_URL": "https://rgfbheorvtolixdcpjhy.supabase.co/functions/v1/public-catalog"
+  }
+}

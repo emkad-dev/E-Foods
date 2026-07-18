@@ -63,6 +63,10 @@ export const appEnv = {
     process.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_RPC_URL
   ),
+  catalogUrl: getEnvValue(
+    process.env.EXPO_PUBLIC_CATALOG_URL,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_CATALOG_URL
+  ),
   functionsRegion:
     getEnvValue(
       process.env.EXPO_PUBLIC_FUNCTIONS_REGION,

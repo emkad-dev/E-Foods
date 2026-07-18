@@ -5,6 +5,7 @@ import {
   FunctionsRelayError,
 } from '@supabase/supabase-js';
 import { supabase } from './supabase/config';
+import { appEnv, supabaseEnv } from '../config/env';
 
 type CacheEntry<T> = {
   expiresAt: number;
@@ -35,6 +36,41 @@ const writeCache = <T>(key: string, value: T, ttlMs = PUBLIC_CATALOG_CACHE_TTL_M
   });
 };
 
+// Routes catalog reads through the Cloudflare edge cache (api.feasty.com.ng)
+// when EXPO_PUBLIC_CATALOG_URL is set; response contract is identical to the
+// Supabase function, so the result feeds the same envelope handling below.
+const invokeViaEdgeCache = async <T>(
+  action: string,
+  data?: Record<string, unknown>
+): Promise<T> => {
+  const anonKey = supabaseEnv.anonKey ?? '';
+  const response = await fetch(`${appEnv.catalogUrl}/public-catalog`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: anonKey,
+      Authorization: `Bearer ${anonKey}`,
+    },
+    body: JSON.stringify({ action, data: data ?? {} }),
+  });
+
+  if (!response.ok) {
+    let message = `Public catalog request failed with HTTP ${response.status}.`;
+    try {
+      const body = (await response.json()) as { message?: unknown; error?: unknown };
+      const parsed = body?.message ?? body?.error;
+      if (typeof parsed === 'string' && parsed.trim()) {
+        message = parsed.trim();
+      }
+    } catch {
+      // Keep the default message.
+    }
+    throw new Error(message);
+  }
+
+  return (await response.json()) as T;
+};
+
 const callPublicCatalog = async <T>(action: string, data?: Record<string, unknown>) => {
   const cacheKey = `${action}:${JSON.stringify(data ?? {})}`;
   const cached = readCache<T>(cacheKey);
@@ -43,6 +79,19 @@ const callPublicCatalog = async <T>(action: string, data?: Record<string, unknow
   }
 
   try {
+    if (appEnv.catalogUrl) {
+      const responseData = await invokeViaEdgeCache<T>(action, data);
+
+      if (responseData && typeof responseData === 'object' && 'data' in responseData) {
+        const dataValue = (responseData as { data: T }).data;
+        writeCache(cacheKey, dataValue);
+        return dataValue;
+      }
+
+      writeCache(cacheKey, responseData);
+      return responseData;
+    }
+
     const { data: responseData, error } = await supabase.functions.invoke<T>('public-catalog', {
       body: {
         action,
