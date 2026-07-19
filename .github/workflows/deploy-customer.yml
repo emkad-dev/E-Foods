@@ -1,0 +1,57 @@
+name: Deploy customer web (app.feasty.com.ng)
+
+on:
+  push:
+    branches: [ 'main' ]
+    paths:
+      - 'apps/customer/**'
+      - 'packages/**'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-customer.yml'
+  workflow_dispatch:
+
+# These EXPO_PUBLIC_* values are client-side and ship inside the built JS
+# bundle, so they are not secrets; keeping them here keeps CI builds identical
+# to local builds that read the repo-root .env.apps.
+env:
+  NODE_OPTIONS: --max-old-space-size=6144
+  EXPO_PUBLIC_SUPABASE_URL: https://rgfbheorvtolixdcpjhy.supabase.co
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnZmJoZW9ydnRvbGl4ZGNwamh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODE4MTgsImV4cCI6MjA5MzA1NzgxOH0.gJVihwyRHJTuPKxTKpm3UNIqUs5OiG5xCJK1fqweDzk
+  EXPO_PUBLIC_SUPABASE_PROJECT_REF: rgfbheorvtolixdcpjhy
+  EXPO_PUBLIC_BACKEND_RPC_URL: https://rgfbheorvtolixdcpjhy.supabase.co/functions/v1/app-rpc
+  EXPO_PUBLIC_APP_DOMAIN: feasty.com
+  EXPO_PUBLIC_FUNCTIONS_REGION: us-central1
+  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: 671364074557-5v9jvuvctnoh97mt4o1451hgn47qee6d.apps.googleusercontent.com
+  EXPO_PUBLIC_SENTRY_DSN: https://4a5c3f8b1f0482ab71bec0788114e027@o4511625693102080.ingest.de.sentry.io/4511625718464592
+
+jobs:
+  deploy:
+    name: Build and deploy apps/customer to Cloudflare Pages (feasty-customer)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      - name: Build customer web (expo export, SPA)
+        run: npm --prefix apps/customer run build:web
+
+      - name: Add SPA routing fallback
+        run: printf '/*    /index.html   200\n' > apps/customer/dist/_redirects
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          command: pages deploy apps/customer/dist --project-name=feasty-customer --branch=main
