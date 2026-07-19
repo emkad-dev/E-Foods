@@ -107,6 +107,10 @@ export default {
         status: 200,
         headers: origin.headers,
       });
+      // Cloudflare's Cache API refuses to store any response carrying
+      // Set-Cookie (Supabase's edge sets a __cf_bm bot cookie). Strip it so
+      // cache.put() succeeds — the cookie is useless to our client anyway.
+      toStore.headers.delete('set-cookie');
       toStore.headers.set(CACHED_AT_HEADER, String(Date.now()));
       // Cache API eviction honors Cache-Control; the 24h window is our
       // stale-serve budget — freshness is enforced above via CACHED_AT_HEADER.
