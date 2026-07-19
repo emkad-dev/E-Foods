@@ -7,7 +7,7 @@
     "android": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../scripts/run-expo-with-root-env.cjs run:android --port 8084",
     "ios": "node ../../scripts/run-expo-with-root-env.cjs run:ios",
     "web": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../scripts/run-expo-with-root-env.cjs start --web",
-    "build:web": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& node ../../scripts/run-expo-with-root-env.cjs export --platform web",
+    "build:web": "node ../../scripts/run-expo-with-root-env.cjs export --platform web",
     "typecheck": "tsc --noEmit",
     "lint": "node ../../node_modules/expo/bin/cli lint"
   },

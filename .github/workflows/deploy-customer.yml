@@ -15,6 +15,7 @@ on:
 # to local builds that read the repo-root .env.apps.
 env:
   NODE_OPTIONS: --max-old-space-size=6144
+  EXPO_NO_DEPENDENCY_VALIDATION: '1'
   EXPO_PUBLIC_SUPABASE_URL: https://rgfbheorvtolixdcpjhy.supabase.co
   EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnZmJoZW9ydnRvbGl4ZGNwamh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODE4MTgsImV4cCI6MjA5MzA1NzgxOH0.gJVihwyRHJTuPKxTKpm3UNIqUs5OiG5xCJK1fqweDzk
   EXPO_PUBLIC_SUPABASE_PROJECT_REF: rgfbheorvtolixdcpjhy
