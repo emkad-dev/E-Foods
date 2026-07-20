@@ -149,7 +149,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           email: authUser.email ?? '',
           emailVerified: Boolean(authUser.email_confirmed_at),
           role: DEFAULT_APP_ROLE,
-          displayName: (authUser.user_metadata?.full_name as string | undefined) ?? undefined,
+          displayName:
+            (authUser.user_metadata?.display_name as string | undefined) ??
+            (authUser.user_metadata?.full_name as string | undefined) ??
+            undefined,
           photoURL: (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
         });
       }
@@ -160,9 +163,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
-      setError(CUSTOMER_ACCESS_ERROR);
-      return null;
-    }
+        setError(CUSTOMER_ACCESS_ERROR);
+        return null;
+      }
 
       identifyAnalyticsUser(authUser.id);
 
@@ -213,6 +216,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!silent) {
         setPolicyLoading(false);
       }
+    }
+  }, []);
+
+  const flushPendingCustomerPolicyAcceptance = useCallback(async () => {
+    const pendingPolicyAccepted = await getStoredPolicyAccepted();
+
+    if (!pendingPolicyAccepted) {
+      return;
+    }
+
+    try {
+      await recordCustomerPolicyAcceptance('customer_signup');
+    } catch (policyError) {
+      console.warn('Unable to flush pending customer policy acceptance:', policyError);
     }
   }, []);
 
@@ -326,6 +343,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             return;
           }
 
+          await flushPendingCustomerPolicyAcceptance();
           await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
           setUser(nextUser);
           await storeUserProfile(nextUser);
@@ -398,7 +416,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, [buildNextUser, clearLocalUserState, refreshPolicyAcceptance, syncSingleDeviceSession]);
+  }, [buildNextUser, clearLocalUserState, flushPendingCustomerPolicyAcceptance, refreshPolicyAcceptance, syncSingleDeviceSession]);
 
   const signUp = async (
     email: string,
@@ -417,22 +435,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         throw new Error('Accept the Terms and Privacy Policy before creating an account.');
       }
 
-      const authUser = await createUserWithEmail(supabase, email, password, {
-        displayName: userData?.displayName,
+      const { user: authUser } = await createUserWithEmail(supabase, email, password, {
+        display_name: userData?.displayName,
+        phone: userData?.phoneNumber,
+        role: DEFAULT_APP_ROLE,
       });
       const policyAcceptance = userData.policyAcceptance;
-      await createUserDocument(authUser.id, {
-        email: authUser.email ?? '',
-        role: DEFAULT_APP_ROLE,
-        emailVerified: Boolean(authUser.email_confirmed_at),
-        displayName: userData.displayName,
-        phoneNumber: userData.phoneNumber,
-      });
-      await recordCustomerPolicyAcceptance(policyAcceptance.source || 'customer_signup');
       setPolicyAccepted(true);
       void storePolicyAccepted(true);
-      await startSingleDeviceSession(authUser.id);
-      identifyAnalyticsUser(authUser.id);
 
       try {
         await sendVerificationEmailWithFallback(
@@ -482,6 +492,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!nextUser) {
         throw new Error(CUSTOMER_ACCESS_ERROR);
       }
+
+      await flushPendingCustomerPolicyAcceptance();
 
       // Explicit sign-in deliberately claims this device as the active session.
       // Takeover detection lives in the passive onAuthStateChange path; re-checking
@@ -543,6 +555,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
       setUser(nextUser);
       await storeUserProfile(nextUser);
+      await flushPendingCustomerPolicyAcceptance();
       await refreshPolicyAcceptance();
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to complete Google sign-in');

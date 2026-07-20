@@ -1,5 +1,5 @@
-import type { AuthError, SupabaseClient, User } from '@supabase/supabase-js';
-import { getSupabaseUserRole } from './claims';
+import type { AuthError, Session, SupabaseClient, User } from '@supabase/supabase-js';
+import { getSupabaseUserRole } from './claims.js';
 import type { AuthRole } from './types';
 
 const ACTION_CODE_CONFIGURATION_ERRORS = new Set(['redirect_to_not_allowed']);
@@ -10,11 +10,13 @@ export const isActionCodeConfigurationError = (error: AuthError | null | undefin
 export const createUserWithEmail = async (
   supabase: SupabaseClient,
   email: string,
-  password: string
-): Promise<User> => {
+  password: string,
+  metadata?: Record<string, unknown>
+): Promise<{ user: User; session: Session | null }> => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
+    options: metadata ? { data: metadata } : undefined,
   });
 
   if (error) {
@@ -25,14 +27,10 @@ export const createUserWithEmail = async (
     throw new Error('Supabase did not return a user for this sign-up attempt.');
   }
 
-  if (!data.session) {
-    const signInResult = await supabase.auth.signInWithPassword({ email, password });
-    if (signInResult.error) {
-      throw signInResult.error;
-    }
-  }
-
-  return data.user;
+  return {
+    user: data.user,
+    session: data.session ?? null,
+  };
 };
 
 export const signInWithEmail = async (

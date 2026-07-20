@@ -111,6 +111,7 @@ function SidebarShell() {
 export default function PartnerStackLayout() {
   const { loading, user } = useAuth();
   usePushNotifications();
+  const pathname = usePathname();
   const { width } = useWindowDimensions();
   const isWide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
 
@@ -126,6 +127,14 @@ export default function PartnerStackLayout() {
   // immediately instead of flashing the dashboard.
   if (!user) {
     return <Redirect href={'/(auth)/login' as never} />;
+  }
+
+  if (user.role !== 'restaurant') {
+    if (pathname !== '/complete-restaurant-details') {
+      return <Redirect href={'/(partner)/complete-restaurant-details' as never} />;
+    }
+
+    return <Slot />;
   }
 
   if (isWide) {

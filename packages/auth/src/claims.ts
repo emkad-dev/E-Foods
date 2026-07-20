@@ -1,5 +1,5 @@
 import type { Session, User } from '@supabase/supabase-js';
-import { APP_ROLES, type AppRole } from '../../domain/src/roles';
+import { APP_ROLES, type AppRole } from '../../domain/src/roles.js';
 
 const isAppRole = (value: unknown): value is AppRole =>
   typeof value === 'string' && APP_ROLES.includes(value as AppRole);

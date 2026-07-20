@@ -1,9 +1,20 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Slot, Tabs, usePathname } from 'expo-router';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchLayout() {
+  const pathname = usePathname();
+  const { user } = useAuth();
   usePushNotifications();
+
+  if (user && user.role !== 'dispatch') {
+    if (pathname !== '/complete-rider-details') {
+      return <Redirect href={'/(dispatch)/complete-rider-details' as never} />;
+    }
+
+    return <Slot />;
+  }
 
   return (
     <Tabs

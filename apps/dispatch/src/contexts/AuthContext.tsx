@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
@@ -14,8 +14,6 @@ import {
 } from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
 import { appEnv } from '../config/env';
-import { submitDispatchApplication, type DispatchApplicationInput } from '../services/dispatchApplications';
-import { buildDispatchPolicyAcceptance } from '../services/policyAcceptance';
 import { deleteOwnAccount as deleteOwnDispatchAccount } from '../services/accountManagement';
 import {
   clearStoredUserProfile,
@@ -27,16 +25,23 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
+import { MISSING_PROFILE_ERROR, resolveDispatchAccessState } from './dispatchAuthFlow';
+
+type DispatchSignUpInput = {
+  displayName: string;
+  phoneNumber: string;
+};
+
+type SignUpResult = {
+  verificationEmailSent: boolean;
+  sessionPresent: boolean;
+};
 
 type AuthContextType = {
   user: UserDocument | null;
   loading: boolean;
   error: string | null;
-  signUp: (
-    email: string,
-    password: string,
-    userData: DispatchApplicationInput
-  ) => Promise<{ verificationEmailSent: boolean }>;
+  signUp: (email: string, password: string, userData: DispatchSignUpInput) => Promise<SignUpResult>;
   signIn: (email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -46,19 +51,9 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const DISPATCH_ACCESS_ERROR = 'This account does not have dispatch access.';
-const MISSING_PROFILE_ERROR = 'No dispatch profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const DISPATCH_APPLICATION_READY_MESSAGE =
-  'Your rider account is live. Sign in again after you verify your email.';
-const DISPATCH_APPLICATION_PENDING_MESSAGE =
-  'Your rider account is being prepared. Sign in again shortly.';
-const DISPATCH_APPLICATION_REJECTED_FALLBACK =
-  'Your rider account is not active yet. Contact the operations team and update your details before trying again.';
-const DISPATCH_SIGNUP_ROLLBACK_ERROR =
-  'Your rider application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the operations team.';
 const getActionCodeSettings = (path: string) => ({
   url: `https://${appEnv.appDomain}${path.startsWith('/') ? path : `/${path}`}`,
 });
@@ -92,27 +87,10 @@ const getDispatchAuthErrorMessage = (error: unknown, fallbackMessage: string) =>
   return fallbackMessage;
 };
 
-const getDispatchAccessStateMessage = (userDocument: Partial<UserDocument> | null) => {
-  if (!userDocument) {
-    return MISSING_PROFILE_ERROR;
-  }
-
-  if (userDocument.dispatchApplicationStatus === 'pending') {
-    return DISPATCH_APPLICATION_PENDING_MESSAGE;
-  }
-
-  if (userDocument.dispatchApplicationStatus === 'rejected') {
-    return userDocument.dispatchApplicationRejectionReason ?? DISPATCH_APPLICATION_REJECTED_FALLBACK;
-  }
-
-  return DISPATCH_ACCESS_ERROR;
-};
-
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const pendingApplicantUidRef = useRef<string | null>(null);
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
@@ -123,23 +101,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await signOutUser(supabase).catch(() => undefined);
     setUser(null);
     setError(SESSION_EXPIRED_ERROR_MESSAGE);
-  }, [clearLocalUserState]);
-
-  const rollbackPendingApplicant = useCallback(async () => {
-    pendingApplicantUidRef.current = null;
-
-    try {
-      await deleteOwnDispatchAccount();
-      await signOutUser(supabase).catch(() => undefined);
-      await clearLocalUserState();
-      setUser(null);
-      return true;
-    } catch (rollbackError) {
-      console.error('Failed to rollback dispatch applicant signup:', rollbackError);
-      await clearLocalUserState();
-      setUser(null);
-      return false;
-    }
   }, [clearLocalUserState]);
 
   const startSingleDeviceSession = useCallback(async (userId: string) => {
@@ -197,18 +158,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const buildNextUser = useCallback(
     async (authUser: SupabaseAuthUser) => {
       const claimRole = await getUserRoleClaim(authUser);
-      const userDocument = await getUserDocument(authUser.id);
+      let userDocument = await getUserDocument(authUser.id);
 
-      if (claimRole !== 'dispatch') {
-        if (pendingApplicantUidRef.current === authUser.id) {
-          return null;
-        }
-
-        await clearLocalUserState();
-        await signOutUser(supabase);
-        setUser(null);
-        setError(getDispatchAccessStateMessage(userDocument));
-        return null;
+      if (!userDocument && claimRole !== 'dispatch') {
+        userDocument = await createUserDocument(authUser.id, {
+          displayName:
+            (authUser.user_metadata?.display_name as string | undefined) ??
+            (authUser.user_metadata?.full_name as string | undefined) ??
+            undefined,
+          email: authUser.email ?? '',
+          emailVerified: Boolean(authUser.email_confirmed_at),
+          phoneNumber: (authUser.user_metadata?.phone as string | undefined) ?? undefined,
+          role: 'customer',
+        });
       }
 
       if (!userDocument) {
@@ -216,7 +178,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await signOutUser(supabase);
         setUser(null);
         setError(MISSING_PROFILE_ERROR);
-        return null;
+        throw new Error(MISSING_PROFILE_ERROR);
+      }
+
+      const accessState = resolveDispatchAccessState({
+        claimRole: claimRole === 'dispatch' || claimRole === 'customer' ? claimRole : null,
+        userDocument: {
+          dispatchApplicationRejectionReason: userDocument.dispatchApplicationRejectionReason ?? null,
+          dispatchApplicationStatus:
+            userDocument.dispatchApplicationStatus === 'pending' ||
+            userDocument.dispatchApplicationStatus === 'approved' ||
+            userDocument.dispatchApplicationStatus === 'rejected'
+              ? userDocument.dispatchApplicationStatus
+              : null,
+        },
+      });
+
+      if (accessState.kind === 'blocked') {
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(accessState.message);
+        throw new Error(accessState.message);
       }
 
       return {
@@ -224,7 +207,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         uid: authUser.id,
         email: authUser.email ?? userDocument.email,
         emailVerified: Boolean(authUser.email_confirmed_at),
-        role: claimRole,
+        role: accessState.userRole,
       } satisfies UserDocument;
     },
     [clearLocalUserState]
@@ -245,7 +228,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      if (cachedUser && cachedUser.role === 'dispatch') {
+      if (cachedUser && (cachedUser.role === 'dispatch' || cachedUser.role === 'customer')) {
         setUser(cachedUser);
         setLoading(false);
         return;
@@ -308,13 +291,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (authUser && isProfileOfflineError(nextError)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
-          if (cachedUser?.uid === authUser.id && cachedUser.role === 'dispatch') {
+          if (
+            cachedUser?.uid === authUser.id &&
+            (cachedUser.role === 'dispatch' || cachedUser.role === 'customer')
+          ) {
             const fallbackUser: UserDocument = {
               ...cachedUser,
               uid: authUser.id,
               email: authUser.email ?? cachedUser.email,
               emailVerified: Boolean(authUser.email_confirmed_at),
-              role: 'dispatch',
+              role: cachedUser.role,
             };
 
             const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
@@ -340,69 +326,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => subscription.unsubscribe();
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  const signUp = async (email: string, password: string, userData: DispatchApplicationInput) => {
+  const signUp = async (email: string, password: string, userData: DispatchSignUpInput): Promise<SignUpResult> => {
     setLoading(true);
     setError(null);
-    let applicantUid: string | null = null;
 
     try {
-      const authUser = await createUserWithEmail(supabase, email, password);
-      applicantUid = authUser.id;
-      pendingApplicantUidRef.current = authUser.id;
-
-      await createUserDocument(authUser.id, {
-        displayName: userData.displayName.trim(),
-        email: authUser.email ?? email,
-        emailVerified: Boolean(authUser.email_confirmed_at),
-        phoneNumber: userData.phoneNumber.trim(),
+      const { user: authUser, session } = await createUserWithEmail(supabase, email, password, {
+        display_name: userData.displayName.trim(),
+        phone: userData.phoneNumber.trim(),
         role: 'customer',
       });
 
-      await submitDispatchApplication({
-        ...userData,
-        displayName: userData.displayName.trim(),
-        phoneNumber: userData.phoneNumber.trim(),
-        policyAcceptance: userData.policyAcceptance ?? buildDispatchPolicyAcceptance('dispatch_signup'),
-        region: userData.region.trim(),
-        vehicleType: userData.vehicleType.trim(),
-      });
+      if (!session) {
+        let verificationEmailSent = false;
 
-      let verificationEmailSent = false;
-
-      try {
-        await sendVerificationEmail(
-          supabase,
-          authUser.email ?? email,
-          getActionCodeSettings(appEnv.verifyEmailPath)
-        );
-        verificationEmailSent = true;
-      } catch (verificationError) {
-        console.warn('Dispatch account created, but verification email could not be sent:', verificationError);
-      }
-
-      await clearLocalUserState();
-      await signOutUser(supabase);
-      setUser(null);
-      setError(DISPATCH_APPLICATION_READY_MESSAGE);
-      return { verificationEmailSent };
-    } catch (nextError: any) {
-      let nextMessage =
-        nextError?.message === DISPATCH_APPLICATION_READY_MESSAGE
-          ? DISPATCH_APPLICATION_READY_MESSAGE
-          : getDispatchAuthErrorMessage(nextError, 'Unable to sign up');
-
-      if (applicantUid) {
-        const rollbackSucceeded = await rollbackPendingApplicant();
-
-        if (!rollbackSucceeded) {
-          nextMessage = DISPATCH_SIGNUP_ROLLBACK_ERROR;
+        try {
+          await sendVerificationEmail(
+            supabase,
+            authUser.email ?? email,
+            getActionCodeSettings(appEnv.verifyEmailPath)
+          );
+          verificationEmailSent = true;
+        } catch (verificationError) {
+          console.warn('Dispatch login created, but verification email could not be sent:', verificationError);
         }
+
+        setError('Verify your email, then sign in to finish setting up your rider account.');
+        return { verificationEmailSent, sessionPresent: false };
       }
 
+      return { verificationEmailSent: false, sessionPresent: true };
+    } catch (nextError: any) {
+      const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign up');
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
-      pendingApplicantUidRef.current = null;
       setLoading(false);
     }
   };
@@ -413,29 +371,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const authUser = await signInWithEmail(supabase, email, password);
-      const claimRole = await getUserRoleClaim(authUser);
-
-      if (claimRole !== 'dispatch') {
-        const userDocument = await getUserDocument(authUser.id);
-        await clearLocalUserState();
-        await signOutUser(supabase);
-        setUser(null);
-        const nextMessage = getDispatchAccessStateMessage(userDocument);
-        setError(nextMessage);
-        throw new Error(nextMessage);
-      }
-
-      const userDocument = await getUserDocument(authUser.id);
-
-      if (!userDocument) {
-        await clearLocalUserState();
-        await signOutUser(supabase);
-        setUser(null);
-        setError(MISSING_PROFILE_ERROR);
-        throw new Error(MISSING_PROFILE_ERROR);
-      }
+      const nextUser = await buildNextUser(authUser);
 
       await startSingleDeviceSession(authUser.id);
+      setUser(nextUser);
+      await storeUserProfile(nextUser);
     } catch (nextError: any) {
       if (isStaleSupabaseSessionError(nextError)) {
         await clearExpiredSession();
