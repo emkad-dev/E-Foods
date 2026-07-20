@@ -10,8 +10,12 @@ itself fails, the producer falls back to a direct synchronous forward.
 
 ## Deploy
 
-    npx wrangler deploy                           # from this directory
+    npx wrangler deploy                           # manual deploy from this directory
     npx wrangler secret put PAYSTACK_SECRET_KEY   # live Paystack secret key
+
+The Worker also auto-deploys from GitHub Actions on every push to `main`.
+Set `CLOUDFLARE_API_TOKEN` in GitHub secrets so the workflow can publish
+`feasty-hooks` through Wrangler.
 
 ## DLQ replay runbook
 

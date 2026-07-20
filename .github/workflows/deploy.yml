@@ -37,6 +37,20 @@ jobs:
           supabase login --token "$SUPABASE_ACCESS_TOKEN"
           supabase functions deploy app-rpc payment-verification paystack-webhook public-catalog --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
 
+      - name: Deploy Cloudflare Worker (feasty-hooks)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          command: deploy --cwd cloudflare/hooks --yes
+
+      - name: Report Cloudflare Worker deployment
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          command: deployments status --name feasty-hooks
+
       # Web apps are hosted on Cloudflare Pages and deployed by the
       # path-filtered workflows deploy-web-landing.yml (feasty-web),
       # deploy-admin.yml (feasty-admin), and deploy-partner.yml
