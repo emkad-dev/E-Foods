@@ -23,6 +23,8 @@ import {
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { type PartnerApplicationInput } from '../services/partnerApplications';
+import { submitPartnerApplication } from '../services/partnerApplications';
+import { uploadRestaurantAsset } from '../services/restaurantAssetUpload';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 
@@ -50,8 +52,12 @@ const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
+const PARTNER_APPLICATION_READY_MESSAGE =
+  'Your restaurant account is live. Sign in again after you verify your email.';
 const PARTNER_APPLICATION_REJECTED_FALLBACK =
   'Your restaurant account is not active yet. Update your details with the operations team before trying again.';
+const PARTNER_SIGNUP_ROLLBACK_ERROR =
+  'Your restaurant application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the onboarding team.';
 const getActionCodeSettings = (path: string) => ({
   url: `${appEnv.appScheme}://${path}`,
 });
@@ -120,6 +126,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
 
+  const rollbackPendingApplicant = useCallback(async (userId: string) => {
+    pendingApplicantUidRef.current = null;
+
+    try {
+      await deleteOwnPartnerAccount();
+      await signOutUser(supabase).catch(() => undefined);
+      await clearLocalUserState();
+      setUser(null);
+      return true;
+    } catch (rollbackError) {
+      console.error('Failed to rollback partner applicant signup:', rollbackError);
+      await clearLocalUserState();
+      setUser(null);
+      return false;
+    }
+  }, [clearLocalUserState]);
+
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
 
@@ -178,50 +201,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return null;
       }
 
-      let userDocument = await getUserDocument(authUser.id);
-
-      if (!userDocument) {
-        userDocument = await createUserDocument(authUser.id, {
-          email: authUser.email ?? '',
-          emailVerified: Boolean(authUser.email_confirmed_at),
-          role: 'customer',
-          displayName:
-            (authUser.user_metadata?.display_name as string | undefined) ??
-            (authUser.user_metadata?.full_name as string | undefined) ??
-            undefined,
-        });
-      }
-
       const claimRole = await getUserRoleClaim(authUser);
+      const userDocument = await getUserDocument(authUser.id);
 
       if (claimRole !== 'restaurant') {
         if (pendingApplicantUidRef.current === authUser.id) {
           return null;
         }
 
-        if (userDocument.partnerApplicationStatus === 'pending') {
-          await clearLocalUserState();
-          await signOutUser(supabase);
-          setUser(null);
-          setError(getPartnerAccessStateMessage(userDocument));
-          return null;
-        }
-
-        if (userDocument.partnerApplicationStatus === 'rejected') {
-          await clearLocalUserState();
-          await signOutUser(supabase);
-          setUser(null);
-          setError(getPartnerAccessStateMessage(userDocument));
-          return null;
-        }
-
-        return {
-          ...userDocument,
-          uid: authUser.id,
-          email: authUser.email ?? userDocument.email,
-          emailVerified: Boolean(authUser.email_confirmed_at),
-          role: 'customer',
-        } satisfies UserDocument;
+        await clearLocalUserState();
+        await signOutUser(supabase);
+        setUser(null);
+        setError(getPartnerAccessStateMessage(userDocument));
+        return null;
       }
 
       if (!userDocument) {
@@ -360,12 +352,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const signUp = async (email: string, password: string, userData: PartnerApplicationInput) => {
     setLoading(true);
     setError(null);
+    let applicantUid: string | null = null;
 
     try {
       partnerSignupInProgressRef.current = true;
-      const { user: authUser, session } = await createUserWithEmail(supabase, email, password, {
-        display_name: userData.contactName.trim(),
+      const { user: authUser, session } = await createUserWithEmail(supabase, email, password);
+      applicantUid = authUser.id;
+      pendingApplicantUidRef.current = authUser.id;
+
+      await createUserDocument(authUser.id, {
+        email: authUser.email ?? email,
+        emailVerified: Boolean(authUser.email_confirmed_at),
         role: 'customer',
+      });
+
+      const logoImage = userData.logoImage
+        ? await uploadRestaurantAsset({
+            kind: 'logos',
+            ownerId: authUser.id,
+            uri: userData.logoImage,
+          })
+        : null;
+
+      await submitPartnerApplication({
+        address: userData.address.trim(),
+        contactName: userData.contactName.trim(),
+        cuisine: userData.cuisine.trim(),
+        deliveryTime: userData.deliveryTime?.trim() || undefined,
+        description: userData.description?.trim() || undefined,
+        latitude: userData.latitude ?? null,
+        logoImage,
+        longitude: userData.longitude ?? null,
+        phoneNumber: userData.phoneNumber.trim(),
+        restaurantName: userData.restaurantName.trim(),
       });
 
       let verificationEmailSent = false;
@@ -381,12 +400,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         console.warn('Partner account created, but verification email could not be sent:', verificationError);
       }
 
+      await clearLocalUserState();
+      await signOutUser(supabase);
+      setUser(null);
+      setError(PARTNER_APPLICATION_READY_MESSAGE);
       return { verificationEmailSent, sessionPresent: Boolean(session) };
     } catch (nextError: any) {
-      const resolvedMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
+      let resolvedMessage =
+        nextError?.message === PARTNER_APPLICATION_READY_MESSAGE
+          ? PARTNER_APPLICATION_READY_MESSAGE
+          : getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
+
+      if (applicantUid) {
+        const rollbackSucceeded = await rollbackPendingApplicant(applicantUid);
+        if (!rollbackSucceeded) {
+          resolvedMessage = PARTNER_SIGNUP_ROLLBACK_ERROR;
+        }
+      }
+
       setError(resolvedMessage);
       throw new Error(resolvedMessage);
     } finally {
+      pendingApplicantUidRef.current = null;
       partnerSignupInProgressRef.current = false;
       setLoading(false);
     }

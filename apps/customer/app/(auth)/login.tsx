@@ -5,14 +5,12 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import AuthLegalFooter from '../../src/components/AuthLegalFooter';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
-import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { signIn, loading, error, clearError } = useAuth();
-  const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
 
   const handleEmailChange = (value: string) => {
     if (error) clearError();
@@ -65,17 +63,13 @@ export default function LoginScreen() {
         <Text style={styles.buttonText}>{loading ? 'Loading...' : 'Sign In'}</Text>
       </TouchableOpacity>
 
-      {googleSignInAvailable ? (
-        <>
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Or sign in with</Text>
-            <View style={styles.dividerLine} />
-          </View>
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>Or sign in with</Text>
+        <View style={styles.dividerLine} />
+      </View>
 
-          <GoogleSignInButton />
-        </>
-      ) : null}
+      <GoogleSignInButton />
 
       <Link href="/register" style={styles.link}>
         Create an account

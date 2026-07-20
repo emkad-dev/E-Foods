@@ -416,7 +416,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, [buildNextUser, clearLocalUserState, flushPendingCustomerPolicyAcceptance, refreshPolicyAcceptance, syncSingleDeviceSession]);
+  }, [
+    buildNextUser,
+    clearExpiredSession,
+    clearLocalUserState,
+    flushPendingCustomerPolicyAcceptance,
+    refreshPolicyAcceptance,
+    syncSingleDeviceSession,
+  ]);
 
   const signUp = async (
     email: string,

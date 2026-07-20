@@ -12,7 +12,6 @@ import { Link } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
-import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { customerTheme } from '../../src/theme/palette';
 
@@ -24,7 +23,6 @@ export default function RegisterScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const { loading, signUp, error, clearError } = useAuth();
-  const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
 
   const handleNicknameChange = (value: string) => {
     if (error) clearError();
@@ -173,17 +171,13 @@ export default function RegisterScreen() {
             <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create account'}</Text>
           </TouchableOpacity>
 
-          {googleSignInAvailable ? (
-            <>
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>Or sign up with</Text>
-                <View style={styles.dividerLine} />
-              </View>
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>Or sign up with</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
-              <GoogleSignInButton />
-            </>
-          ) : null}
+          <GoogleSignInButton />
 
           <Link href="/login" style={styles.link}>
             Already have an account? Sign in
