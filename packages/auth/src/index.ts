@@ -1,6 +1,7 @@
 export * from './backendRpc';
 export * from './claims';
 export * from './client';
+export * from './gatewayAuth';
 export * from './profileApi';
 export * from './realtime';
 export * from './session';

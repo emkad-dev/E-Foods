@@ -1,25 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useRouter } from 'expo-router';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
-import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
-import { buildDispatchPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { dispatchTheme } from '../../src/theme/palette';
-
-const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
 
 export default function DispatchRegisterScreen() {
   const insets = useSafeAreaInsets();
@@ -28,36 +14,10 @@ export default function DispatchRegisterScreen() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [region, setRegion] = useState<(typeof nigeriaStateOptions)[number]>('Lagos');
-  const lgaOptions = useMemo(() => getLgaOptionsForState(region), [region]);
-  const [lga, setLga] = useState('');
-  const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
-  const [vehicleType, setVehicleType] = useState<(typeof vehicleOptions)[number]>('Bike');
-  const [currentAddress, setCurrentAddress] = useState('');
+  const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
-  const canSubmit = useMemo(
-    () =>
-      Boolean(
-        displayName.trim() &&
-          email.trim() &&
-          password.trim() &&
-          phoneNumber.trim() &&
-          lga.trim() &&
-          acceptedPolicies
-      ),
-    [acceptedPolicies, displayName, email, password, phoneNumber, lga]
-  );
-
-  useEffect(() => {
-    if (lgaOptions.length === 0) {
-      setLga('');
-      return;
-    }
-
-    setLga((currentLga) => (lgaOptions.includes(currentLga) ? currentLga : lgaOptions[0]));
-  }, [lgaOptions]);
+  const canSubmit = Boolean(displayName.trim() && email.trim() && password.trim() && phoneE164 && acceptedPolicies);
 
   const handleFieldChange = (setter: (value: string) => void) => (value: string) => {
     if (error) {
@@ -68,36 +28,40 @@ export default function DispatchRegisterScreen() {
   };
 
   const handleRegister = async () => {
-    if (!canSubmit) {
-      Alert.alert(
-        'Missing details',
-        acceptedPolicies
-          ? 'Complete every rider detail before submitting your dispatch application.'
-          : 'Accept the Terms and Privacy Policy before submitting your dispatch application.'
-      );
+    if (!displayName.trim() || !email.trim() || !password.trim() || !phoneE164) {
+      Alert.alert('Missing details', 'Complete your name, email, password, and phone number before continuing.');
+      return;
+    }
+
+    if (!acceptedPolicies) {
+      Alert.alert('Terms required', 'Accept the Terms and Privacy Policy before creating your rider login.');
       return;
     }
 
     try {
       const result = await signUp(email.trim(), password, {
-        currentAddress: currentAddress.trim() || undefined,
         displayName: displayName.trim(),
-        lga,
-        phoneNumber: phoneNumber.trim(),
-        policyAcceptance: buildDispatchPolicyAcceptance('dispatch_signup'),
-        region,
-        vehicleType,
+        phoneNumber: phoneE164,
       });
 
+      if (result.sessionPresent) {
+        Alert.alert(
+          'Login created',
+          'Your rider login is active. Complete your rider details to finish dispatch setup.'
+        );
+        router.replace('/(dispatch)/complete-rider-details' as never);
+        return;
+      }
+
       Alert.alert(
-        'Application submitted',
+        'Check your inbox',
         result.verificationEmailSent
-          ? 'Your rider account is live. Check your inbox and confirm your email before trying to sign in.'
-          : 'Your rider account is live, but email verification could not be confirmed from the app. Check your inbox and sign in once it is verified.'
+          ? 'We sent a verification email. Confirm it, then sign in to finish your rider setup.'
+          : 'Your login was created, but the verification email could not be confirmed from the app. Sign in after you verify your email.'
       );
       router.replace('/(auth)/login');
     } catch (nextError: any) {
-      Alert.alert('Application failed', nextError.message ?? 'Unable to submit your rider application right now.');
+      Alert.alert('Sign up failed', nextError.message ?? 'Unable to create your rider login right now.');
     }
   };
 
@@ -109,9 +73,10 @@ export default function DispatchRegisterScreen() {
       >
         <View style={styles.hero}>
           <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
-          <Text style={styles.title}>Apply as a dispatch rider</Text>
+          <Text style={styles.title}>Create your rider login</Text>
           <Text style={styles.copy}>
-            Share the rider details ops needs: name, phone, state, LGA, vehicle, and your current base location. Riders become live as soon as the application is submitted and email is verified.
+            Phase 1 sets up your login only. After email verification, you&apos;ll complete your dispatch area and
+            vehicle details from the rider setup screen.
           </Text>
         </View>
 
@@ -143,73 +108,21 @@ export default function DispatchRegisterScreen() {
             editable={!loading}
             showHint
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            placeholderTextColor="#8e8e8e"
-            keyboardType="phone-pad"
-            value={phoneNumber}
-            onChangeText={handleFieldChange(setPhoneNumber)}
-            editable={!loading}
-          />
-
-          <Text style={styles.sectionLabel}>Dispatch state</Text>
-          <CompactOptionPicker
-            label="Dispatch state"
-            selectedValue={region}
-            options={nigeriaStateOptions}
-            isOpen={openPicker === 'state'}
-            onToggle={() => setOpenPicker((current) => (current === 'state' ? null : 'state'))}
-            onSelect={(value) => {
-              setRegion(value as (typeof nigeriaStateOptions)[number]);
-              setOpenPicker(null);
-            }}
-            disabled={loading}
-          />
-
-          <Text style={styles.sectionLabel}>Local government area</Text>
-          <CompactOptionPicker
-            label="Local government area"
-            selectedValue={lga}
-            options={lgaOptions}
-            isOpen={openPicker === 'lga'}
-            onToggle={() => setOpenPicker((current) => (current === 'lga' ? null : 'lga'))}
-            onSelect={(value) => {
-              setLga(value);
-              setOpenPicker(null);
-            }}
-            disabled={loading}
-          />
-
-          <Text style={styles.sectionLabel}>Vehicle type</Text>
-          <View style={styles.optionRow}>
-            {vehicleOptions.map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={[styles.chip, vehicleType === option ? styles.chipActive : null]}
-                onPress={() => setVehicleType(option)}
-                disabled={loading}
-              >
-                <Text style={[styles.chipText, vehicleType === option ? styles.chipTextActive : null]}>{option}</Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.phoneField}>
+            <PhoneInput
+              theme={dispatchTheme}
+              editable={!loading}
+              onChange={({ e164 }) => {
+                if (error) {
+                  clearError();
+                }
+                setPhoneE164(e164);
+              }}
+            />
           </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Current landmark or pickup base"
-            placeholderTextColor="#8e8e8e"
-            value={currentAddress}
-            onChangeText={handleFieldChange(setCurrentAddress)}
-            editable={!loading}
-          />
-
-          <Text style={styles.helperText}>
-            Your rider profile goes live after signup. The selected state and LGA become the rider base, and we use that base for location fallback until live tracking is added.
-          </Text>
-
           <TouchableOpacity
-            style={styles.policyRow}
+            style={[styles.policyRow, !acceptedPolicies ? styles.policyRowMuted : null]}
             onPress={() => setAcceptedPolicies((current) => !current)}
             activeOpacity={0.82}
             disabled={loading}
@@ -218,23 +131,28 @@ export default function DispatchRegisterScreen() {
               {acceptedPolicies ? <View style={styles.checkboxDot} /> : null}
             </View>
             <Text style={styles.policyText}>
-              I agree to the <Link href="./terms" style={styles.policyLink}>Terms</Link> and{' '}
-              <Link href="./privacy" style={styles.policyLink}>Privacy Policy</Link>.
+              I agree to the{' '}
+              <Link href="./terms" style={styles.policyLink}>
+                Terms
+              </Link>{' '}
+              and{' '}
+              <Link href="./privacy" style={styles.policyLink}>
+                Privacy Policy
+              </Link>
+              .
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryButton, !canSubmit ? styles.primaryButtonDisabled : null]}
+            style={[styles.button, !canSubmit ? styles.buttonDisabled : null]}
             onPress={handleRegister}
             disabled={loading || !canSubmit}
           >
-            <Text style={styles.primaryButtonText}>
-              {loading ? 'Submitting application...' : 'Submit rider application'}
-            </Text>
+            <Text style={styles.buttonText}>{loading ? 'Creating login...' : 'Create login'}</Text>
           </TouchableOpacity>
 
           <Link href="/(auth)/login" style={styles.link}>
-            Back to dispatch sign in
+            Already have a login? Sign in
           </Link>
         </View>
       </ScrollView>
@@ -244,12 +162,13 @@ export default function DispatchRegisterScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: dispatchTheme.background,
     flex: 1,
+    backgroundColor: dispatchTheme.background,
   },
   content: {
     flexGrow: 1,
     paddingHorizontal: 20,
+    justifyContent: 'center',
   },
   hero: {
     backgroundColor: dispatchTheme.hero,
@@ -289,7 +208,7 @@ const styles = StyleSheet.create({
     color: dispatchTheme.danger,
     fontSize: 14,
     lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   input: {
     backgroundColor: dispatchTheme.cream,
@@ -302,56 +221,21 @@ const styles = StyleSheet.create({
     minHeight: 54,
     paddingHorizontal: 16,
   },
-  sectionLabel: {
-    color: dispatchTheme.textSoft,
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-    marginTop: 18,
-    textTransform: 'uppercase',
-  },
-  optionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 12,
-  },
-  chip: {
-    backgroundColor: dispatchTheme.cream,
-    borderColor: dispatchTheme.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  chipActive: {
-    backgroundColor: dispatchTheme.accent,
-    borderColor: dispatchTheme.accent,
-  },
-  chipText: {
-    color: dispatchTheme.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  chipTextActive: {
-    color: '#ffffff',
-  },
-  helperText: {
-    color: dispatchTheme.textMuted,
-    fontSize: 13,
-    lineHeight: 20,
+  phoneField: {
     marginTop: 14,
   },
   policyRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    marginTop: 16,
+    marginTop: 18,
+  },
+  policyRowMuted: {
+    opacity: 0.94,
   },
   checkbox: {
     alignItems: 'center',
-    backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     height: 22,
     justifyContent: 'center',
@@ -363,39 +247,39 @@ const styles = StyleSheet.create({
     borderColor: dispatchTheme.accent,
   },
   checkboxDot: {
-    backgroundColor: '#ffffff',
-    borderRadius: 3,
-    height: 8,
-    width: 8,
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    height: 10,
+    width: 10,
   },
   policyText: {
     color: dispatchTheme.textMuted,
     flex: 1,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 20,
   },
   policyLink: {
     color: dispatchTheme.accentStrong,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  primaryButton: {
+  button: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
     borderRadius: 18,
     marginTop: 18,
     paddingVertical: 16,
   },
-  primaryButtonDisabled: {
-    opacity: 0.55,
+  buttonDisabled: {
+    opacity: 0.72,
   },
-  primaryButtonText: {
+  buttonText: {
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '800',
   },
   link: {
     color: dispatchTheme.accentStrong,
-    marginTop: 18,
+    marginTop: 16,
     textAlign: 'center',
   },
 });
