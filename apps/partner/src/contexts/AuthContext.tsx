@@ -27,6 +27,7 @@ import { submitPartnerApplication } from '../services/partnerApplications';
 import { uploadRestaurantAsset } from '../services/restaurantAssetUpload';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
+import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
 
 type AuthContextType = {
   user: UserDocument | null;
@@ -246,27 +247,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let active = true;
 
     void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!active) {
+        return;
+      }
+
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+
       const cachedUser = await getStoredUserProfile<UserDocument>();
 
       if (!active) {
         return;
       }
 
-      if (cachedUser && cachedUser.role === 'restaurant') {
+      if (
+        shouldHydrateCachedUserProfile({
+          sessionUserId: session.user.id,
+          cachedUser,
+          expectedRole: 'restaurant',
+        })
+      ) {
         setUser(cachedUser);
-        setLoading(false);
-        return;
-      }
-
-      // No cached profile: getSession() is a local read (no network), so we can
-      // cheaply decide whether to unblock straight to the login screen. When a
-      // session does exist we leave `loading` true and let the reconcile below
-      // finish, since there is nothing cached to paint yet.
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (active && !session) {
         setLoading(false);
       }
     })();

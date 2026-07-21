@@ -1,5 +1,7 @@
 import Constants from 'expo-constants';
+import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { appEnv } from '../config/env';
 
 const PLACEHOLDER_WEB_CLIENT_ID = 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com';
@@ -61,20 +63,16 @@ const getConfiguredWebClientId = (): string | null => {
 export const hasGoogleSignInConfig = () => Boolean(getConfiguredWebClientId());
 
 export const getGoogleSignInUnavailableMessage = (): string | null => {
-  if (Platform.OS === 'web') {
-    return 'This Google Sign-In setup only supports native Android and iOS builds.';
+  if (!getConfiguredWebClientId()) {
+    return 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and enable Google in Supabase Auth before using customer Google sign-in.';
   }
 
-  if (isExpoGo) {
+  if (Platform.OS !== 'web' && isExpoGo) {
     return 'Google Sign-In is not available in Expo Go. Use a development build or rebuild the native app with "npx expo run:android" or "npx expo run:ios".';
   }
 
-  if (!loadGoogleSigninModule()) {
+  if (Platform.OS !== 'web' && !loadGoogleSigninModule()) {
     return 'Google Sign-In is not available in this app build. If you are using Expo Go, switch to a development build. If you already added the package, rebuild the native app with "npx expo run:android" or "npx expo run:ios".';
-  }
-
-  if (!getConfiguredWebClientId()) {
-    return 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and enable Google in Supabase Auth before using customer Google sign-in.';
   }
 
   return null;
@@ -85,6 +83,10 @@ export const configureGoogleSignIn = (): { ok: true } | { ok: false; message: st
 
   if (unavailableMessage) {
     return { ok: false, message: unavailableMessage };
+  }
+
+  if (Platform.OS === 'web') {
+    return { ok: true };
   }
 
   const googleSignin = loadGoogleSigninModule();
@@ -103,6 +105,35 @@ export const configureGoogleSignIn = (): { ok: true } | { ok: false; message: st
   });
 
   return { ok: true };
+};
+
+export const signInWithGoogleOAuth = async (supabase: SupabaseClient) => {
+  const webClientId = getConfiguredWebClientId();
+
+  if (!webClientId) {
+    throw new Error('Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and enable Google in Supabase Auth before using customer Google sign-in.');
+  }
+
+  const redirectTo = Linking.createURL('/verify-email');
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const authUrl = data?.url;
+  if (authUrl && typeof window !== 'undefined') {
+    window.location.assign(authUrl);
+  }
 };
 
 export const signInWithGoogleIdToken = async (): Promise<string> => {
