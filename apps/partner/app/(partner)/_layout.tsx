@@ -1,6 +1,6 @@
 import { Redirect, Slot, Tabs, usePathname, useRouter } from 'expo-router';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import FEASTYWordmark from '../../src/components/FEASTYWordmark';
+import FEASTYWordmark from '../../src/components/PartnerWordmark';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { partnerTheme } from '../../src/theme/palette';
