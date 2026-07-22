@@ -1,6 +1,6 @@
-# FEASTy Platform
+# FEASTY Platform
 
-FEASTy is a multi-app food delivery workspace. Customer, partner, dispatch, and admin all live in one repo, run as separate Expo apps, and share a Supabase and Postgres backend.
+FEASTY is a multi-app food delivery workspace. Customer, partner, dispatch, and admin all live in one repo, run as separate Expo apps, and share a Supabase and Postgres backend.
 
 ## App Layout
 
@@ -226,7 +226,7 @@ Set the secrets on the project:
 
 ```bash
 supabase secrets set RESEND_API_KEY=re_xxx --project-ref YOUR_PROJECT_REF
-supabase secrets set "TRANSACTIONAL_EMAIL_FROM=FEASTy <orders@yourdomain.com>" --project-ref YOUR_PROJECT_REF
+supabase secrets set "TRANSACTIONAL_EMAIL_FROM=FEASTY <orders@yourdomain.com>" --project-ref YOUR_PROJECT_REF
 ```
 
 `TRANSACTIONAL_EMAIL_FROM` defaults to Resend's onboarding sender, which only delivers to the Resend account owner's inbox — verify a domain in Resend and set a real sender before launch.

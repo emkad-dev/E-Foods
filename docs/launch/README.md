@@ -1,6 +1,6 @@
 # Launch Docs
 
-This folder holds the launch-facing planning docs for FEASTy.
+This folder holds the launch-facing planning docs for FEASTY.
 
 ## Read First
 

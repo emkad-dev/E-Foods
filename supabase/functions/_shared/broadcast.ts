@@ -177,8 +177,8 @@ export const buildBroadcastEmailHtml = (input: {
 }): string => {
   const footer =
     input.includeUnsubscribe && input.unsubUrl
-      ? `<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTy • <a href="${input.unsubUrl}" style="color:#94a3b8;">Unsubscribe</a> from marketing emails.</p>`
-      : '<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTy</p>';
+      ? `<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTY • <a href="${input.unsubUrl}" style="color:#94a3b8;">Unsubscribe</a> from marketing emails.</p>`
+      : '<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTY</p>';
 
   return [
     '<div style="max-width:560px;margin:0 auto;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#334155;font-size:15px;line-height:1.6;">',

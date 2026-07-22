@@ -38,7 +38,6 @@
         <action android:name="android.intent.action.VIEW"/>
         <data android:scheme="https" android:host="feasty.com"/>
         <data android:scheme="feasty-customer"/>
-        <data android:scheme="exp+e-foods"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>

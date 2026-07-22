@@ -5,7 +5,7 @@ import { serviceClient } from './client.ts';
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
 const resendApiKey = Deno.env.get('RESEND_API_KEY') ?? '';
-const emailFrom = Deno.env.get('TRANSACTIONAL_EMAIL_FROM') ?? 'FEASTy <onboarding@resend.dev>';
+const emailFrom = Deno.env.get('TRANSACTIONAL_EMAIL_FROM') ?? 'FEASTY <onboarding@resend.dev>';
 
 const escapeHtml = (value: string) =>
   value
@@ -37,7 +37,7 @@ export const buildTransactionalEmailHtml = (input: {
     `<h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">${escapeHtml(input.heading)}</h2>`,
     `<p style="margin:0 0 12px;color:#334155;font-size:15px;line-height:1.6;">${greeting}</p>`,
     paragraphs,
-    '<p style="margin:24px 0 0;color:#94a3b8;font-size:13px;">FEASTy • This is an automated message, no reply is needed.</p>',
+    '<p style="margin:24px 0 0;color:#94a3b8;font-size:13px;">FEASTY • This is an automated message, no reply is needed.</p>',
     '</div>',
   ].join('');
 };

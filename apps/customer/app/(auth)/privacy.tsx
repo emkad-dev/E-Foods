@@ -5,7 +5,7 @@ import { customerTheme } from '../../src/theme/palette';
 const privacySections = [
   {
     title: 'Who We Are',
-    paragraphs: ['FEASTy is a food delivery service operated by Feasty.'],
+    paragraphs: ['FEASTY is a food delivery service operated by FEASTY.'],
   },
   {
     title: 'Scope',
@@ -59,7 +59,7 @@ const privacySections = [
   },
   {
     title: "Children's Privacy",
-    paragraphs: ['FEASTy is not intended for children under 13.'],
+    paragraphs: ['FEASTY is not intended for children under 13.'],
   },
   {
     title: 'Changes to This Policy',
@@ -80,7 +80,7 @@ export default function CustomerPrivacyScreen() {
         <Text style={styles.eyebrow}>Legal Notice</Text>
         <Text style={styles.title}>Privacy Policy</Text>
         <Text style={styles.note}>
-          This policy explains how FEASTy collects, uses, shares, and protects personal information for users in Nigeria.
+          This policy explains how FEASTY collects, uses, shares, and protects personal information for users in Nigeria.
         </Text>
         <View style={styles.metaRow}>
           <MetaPill label="Last updated" value="June 23, 2026" />

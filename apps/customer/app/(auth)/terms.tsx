@@ -5,7 +5,7 @@ import { customerTheme } from '../../src/theme/palette';
 const termsSections = [
   {
     title: 'Who We Are',
-    paragraphs: ['FEASTy is a food delivery service operated by Feasty.'],
+    paragraphs: ['FEASTY is a food delivery service operated by FEASTY.'],
   },
   {
     title: 'Scope',
@@ -13,7 +13,7 @@ const termsSections = [
   },
   {
     title: 'Acceptance of These Terms',
-    paragraphs: ['By using FEASTy, you agree to these terms. If you do not agree, do not use the service.'],
+    paragraphs: ['By using FEASTY, you agree to these terms. If you do not agree, do not use the service.'],
   },
   {
     title: 'Accounts',
@@ -42,7 +42,7 @@ const termsSections = [
   {
     title: 'Acceptable Use',
     paragraphs: [
-      'You agree not to misuse FEASTy, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.',
+      'You agree not to misuse FEASTY, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.',
     ],
   },
   {
@@ -55,13 +55,13 @@ const termsSections = [
   {
     title: 'Intellectual Property',
     paragraphs: [
-      'The FEASTy name, branding, app design, and related content belong to us or our licensors and may not be used without permission.',
+      'The FEASTY name, branding, app design, and related content belong to us or our licensors and may not be used without permission.',
     ],
   },
   {
     title: 'Limitation of Liability',
     paragraphs: [
-      'To the fullest extent allowed by law, FEASTy is not liable for indirect, incidental, or consequential damages arising from use of the service.',
+      'To the fullest extent allowed by law, FEASTY is not liable for indirect, incidental, or consequential damages arising from use of the service.',
     ],
   },
   {
@@ -81,7 +81,7 @@ export default function CustomerTermsScreen() {
         <Text style={styles.eyebrow}>Legal Notice</Text>
         <Text style={styles.title}>Terms of Service</Text>
         <Text style={styles.note}>
-          These terms govern use of FEASTy for users in Nigeria and explain how orders, payments, cancellations, and
+          These terms govern use of FEASTY for users in Nigeria and explain how orders, payments, cancellations, and
           account responsibility work.
         </Text>
         <View style={styles.metaRow}>

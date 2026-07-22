@@ -30,7 +30,7 @@ const sharedTerms: PolicySection[] = [
     bullets: [
       'Use accurate signup details and keep your account secure.',
       'Do not share accounts, impersonate others, or misuse platform tools.',
-      'FEASTy may restrict accounts that create safety, fraud, or abuse risks.',
+      'FEASTY may restrict accounts that create safety, fraud, or abuse risks.',
     ],
   },
   {
@@ -83,7 +83,7 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
     terms: [
       {
         title: 'Who We Are',
-        bullets: ['FEASTy is a food delivery service operated by Feasty.'],
+        bullets: ['FEASTY is a food delivery service operated by FEASTY.'],
       },
       {
         title: 'Scope',
@@ -91,7 +91,7 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
       },
       {
         title: 'Acceptance of These Terms',
-        bullets: ['By using FEASTy, you agree to these terms. If you do not agree, do not use the service.'],
+        bullets: ['By using FEASTY, you agree to these terms. If you do not agree, do not use the service.'],
       },
       {
         title: 'Accounts',
@@ -120,7 +120,7 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
       {
         title: 'Acceptable Use',
         bullets: [
-          'You agree not to misuse FEASTy, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.',
+          'You agree not to misuse FEASTY, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.',
         ],
       },
       {
@@ -133,13 +133,13 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
       {
         title: 'Intellectual Property',
         bullets: [
-          'The FEASTy name, branding, app design, and related content belong to us or our licensors and may not be used without permission.',
+          'The FEASTY name, branding, app design, and related content belong to us or our licensors and may not be used without permission.',
         ],
       },
       {
         title: 'Limitation of Liability',
         bullets: [
-          'To the fullest extent allowed by law, FEASTy is not liable for indirect, incidental, or consequential damages arising from use of the service.',
+          'To the fullest extent allowed by law, FEASTY is not liable for indirect, incidental, or consequential damages arising from use of the service.',
         ],
       },
       {
@@ -154,7 +154,7 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
     privacy: [
       {
         title: 'Who We Are',
-        bullets: ['FEASTy is a food delivery service operated by Feasty.'],
+        bullets: ['FEASTY is a food delivery service operated by FEASTY.'],
       },
       {
         title: 'Scope',
@@ -206,7 +206,7 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
       },
       {
         title: "Children's Privacy",
-        bullets: ['FEASTy is not intended for children under 18.'],
+        bullets: ['FEASTY is not intended for children under 18.'],
       },
       {
         title: 'Changes to This Policy',

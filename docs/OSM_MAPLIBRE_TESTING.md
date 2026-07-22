@@ -2,7 +2,7 @@
 
 ## Summary
 
-FEASTy no longer uses Google Maps for the location stack.
+FEASTY no longer uses Google Maps for the location stack.
 
 - Customer delivery address entry uses `expo-location` for current location and reverse geocoding.
 - The dispatch live rider map uses `MapLibre` in a `WebView` with OpenStreetMap raster tiles.

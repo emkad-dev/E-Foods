@@ -70,7 +70,7 @@ export default function AcceptPolicyScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.card}>
-        <Text style={styles.eyebrow}>FEASTy</Text>
+        <Text style={styles.eyebrow}>FEASTY</Text>
         <Text style={styles.title}>Accept Terms</Text>
         <Text style={styles.copy}>
           Review and accept the current Terms and Privacy Policy before using the customer app.

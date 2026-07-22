@@ -34,11 +34,11 @@ Prepare a minimal landing page, launch copy, and social assets for release.
 
 Suggested title:
 
-- Introducing FEASTy: Fast, Local Food Delivery
+- Introducing FEASTY: Fast, Local Food Delivery
 
 Suggested sections:
 
-- Why FEASTy exists
+- Why FEASTY exists
 - How it works
 - Paystack checkout and real-time tracking
 - Beta or launch call to action

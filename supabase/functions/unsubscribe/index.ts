@@ -36,6 +36,6 @@ Deno.serve(async (request) => {
 
   return page(
     'Unsubscribed',
-    `${email} has been removed from FEASTy marketing emails. You will still receive important account and order updates.`
+    `${email} has been removed from FEASTY marketing emails. You will still receive important account and order updates.`
   );
 });

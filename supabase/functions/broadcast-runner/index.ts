@@ -12,7 +12,7 @@ import { sendExpoPushMessages } from '../_shared/notifications.ts';
 
 const WORKER_TOKEN = Deno.env.get('QUEUE_WORKER_TOKEN')?.trim() ?? '';
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
-const EMAIL_FROM = Deno.env.get('TRANSACTIONAL_EMAIL_FROM') ?? 'FEASTy <onboarding@resend.dev>';
+const EMAIL_FROM = Deno.env.get('TRANSACTIONAL_EMAIL_FROM') ?? 'FEASTY <onboarding@resend.dev>';
 const RESEND_BATCH_ENDPOINT = 'https://api.resend.com/emails/batch';
 const BATCH_SIZE = 100;
 

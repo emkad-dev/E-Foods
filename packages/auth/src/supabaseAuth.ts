@@ -3,6 +3,27 @@ import { getSupabaseUserRole } from './claims.js';
 import type { AuthRole } from './types';
 
 const ACTION_CODE_CONFIGURATION_ERRORS = new Set(['redirect_to_not_allowed']);
+const NETWORK_ERROR_PATTERNS = [
+  'failed to fetch',
+  'fetch failed',
+  'network request failed',
+  'networkerror',
+  'load failed',
+  'request failed',
+];
+
+export const isNetworkRequestError = (error: unknown) => {
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as any).message ?? '').toLowerCase()
+      : '';
+
+  if (!message) {
+    return false;
+  }
+
+  return NETWORK_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+};
 
 export const isActionCodeConfigurationError = (error: AuthError | null | undefined) =>
   Boolean(error?.code && ACTION_CODE_CONFIGURATION_ERRORS.has(error.code));

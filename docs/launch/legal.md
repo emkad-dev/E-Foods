@@ -14,7 +14,7 @@ The current legal copy should stay consistent across:
 
 ### Privacy Policy
 
-- FEASTy is a food delivery service operated by Feasty.
+- FEASTY is a food delivery service operated by FEASTY.
 - Scope is Nigeria only for now.
 - Collect account, delivery, order, payment metadata, and device/session data.
 - Use the data for account management, fulfillment, fraud prevention, support, and service notices.
@@ -25,7 +25,7 @@ The current legal copy should stay consistent across:
 
 ### Terms of Service
 
-- FEASTy is a food delivery service operated by Feasty.
+- FEASTY is a food delivery service operated by FEASTY.
 - Scope is Nigeria only for now.
 - Users are responsible for account activity and secure credentials.
 - Orders may require payment verification before processing.

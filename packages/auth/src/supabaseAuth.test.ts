@@ -3,7 +3,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createUserWithEmail } from './supabaseAuth.ts';
+import { createUserWithEmail, isNetworkRequestError } from './supabaseAuth.ts';
 
 test('createUserWithEmail returns the Supabase session and does not fall back to password sign-in', async () => {
   let signInCalled = false;
@@ -38,4 +38,10 @@ test('createUserWithEmail returns the Supabase session and does not fall back to
     session: null,
   });
   assert.equal(signInCalled, false);
+});
+
+test('isNetworkRequestError detects common browser and React Native fetch failures', () => {
+  assert.equal(isNetworkRequestError(new TypeError('Failed to fetch')), true);
+  assert.equal(isNetworkRequestError(new Error('Network request failed')), true);
+  assert.equal(isNetworkRequestError(new Error('Something else broke')), false);
 });

@@ -3,6 +3,7 @@ export {
   formatAuthError,
   getUserRoleClaim,
   isStaleSupabaseSessionError,
+  isNetworkRequestError,
   SESSION_EXPIRED_ERROR_MESSAGE,
   sendPasswordResetEmailWithFallback as sendPasswordReset,
   sendVerificationEmailWithFallback as sendVerificationEmail,

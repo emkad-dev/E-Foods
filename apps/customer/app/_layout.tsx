@@ -10,7 +10,7 @@ import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/obse
 import { initializeSentry } from '../../../packages/observability/src/sentry';
 import { customerTheme } from '../src/theme/palette';
 
-function FeastyLaunchScreen() {
+function FEASTYLaunchScreen() {
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -190,7 +190,7 @@ function RootLayoutNav() {
       </Stack>
       {showLaunch ? (
         <View style={styles.launchOverlay}>
-          <FeastyLaunchScreen />
+          <FEASTYLaunchScreen />
         </View>
       ) : null}
     </View>
