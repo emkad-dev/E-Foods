@@ -6,6 +6,7 @@ import {
   createUserWithEmail,
   formatAuthError,
   getUserRoleClaim,
+  isNetworkRequestError,
   sendVerificationEmail,
   signInWithEmail,
   signOutUser,
@@ -69,8 +70,10 @@ const isProfileOfflineError = (error: unknown) => {
   );
 };
 
+const isTransientNetworkError = (error: unknown) => isProfileOfflineError(error) || isNetworkRequestError(error);
+
 const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isProfileOfflineError(error)) {
+  if (isTransientNetworkError(error)) {
     return NO_INTERNET_ERROR;
   }
 

@@ -2,11 +2,11 @@
 
 Last updated: June 23, 2026
 
-These Terms of Service govern your use of FEASTy for users in Nigeria.
+These Terms of Service govern your use of FEASTY for users in Nigeria.
 
 ## Who We Are
 
-FEASTy is a food delivery service operated by Feasty.
+FEASTY is a food delivery service operated by FEASTY.
 
 ## Scope
 
@@ -14,7 +14,7 @@ Our service is currently intended for users in Nigeria only.
 
 ## Acceptance of These Terms
 
-By using FEASTy, you agree to these terms. If you do not agree, do not use the service.
+By using FEASTY, you agree to these terms. If you do not agree, do not use the service.
 
 ## Accounts
 
@@ -36,7 +36,7 @@ By using FEASTy, you agree to these terms. If you do not agree, do not use the s
 
 ## Acceptable Use
 
-You agree not to misuse FEASTy, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.
+You agree not to misuse FEASTY, attempt fraud, abuse staff or couriers, submit false information, or interfere with the service.
 
 ## Service Availability
 
@@ -45,11 +45,11 @@ We may also change features, routes, or access rules as needed to keep the servi
 
 ## Intellectual Property
 
-The FEASTy name, branding, app design, and related content belong to us or our licensors and may not be used without permission.
+The FEASTY name, branding, app design, and related content belong to us or our licensors and may not be used without permission.
 
 ## Limitation of Liability
 
-To the fullest extent allowed by law, FEASTy is not liable for indirect, incidental, or consequential damages arising from use of the service.
+To the fullest extent allowed by law, FEASTY is not liable for indirect, incidental, or consequential damages arising from use of the service.
 
 ## Changes to These Terms
 

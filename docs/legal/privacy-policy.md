@@ -2,11 +2,11 @@
 
 Last updated: June 23, 2026
 
-This Privacy Policy explains how FEASTy collects, uses, shares, and protects personal information for users in Nigeria.
+This Privacy Policy explains how FEASTY collects, uses, shares, and protects personal information for users in Nigeria.
 
 ## Who We Are
 
-FEASTy is a food delivery service operated by Feasty.
+FEASTY is a food delivery service operated by FEASTY.
 
 ## Scope
 
@@ -51,7 +51,7 @@ If you request deletion, we will remove or deactivate your account subject to le
 
 ## Children's Privacy
 
-FEASTy is not intended for children under 13.
+FEASTY is not intended for children under 13.
 
 ## Changes to This Policy
 

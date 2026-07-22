@@ -9,6 +9,7 @@ import {
   sendPasswordResetEmailWithFallback,
   formatAuthError,
   createUserWithEmail,
+  isNetworkRequestError,
   getUserRoleClaim,
   isStaleSupabaseSessionError,
   SESSION_EXPIRED_ERROR_MESSAGE,
@@ -93,8 +94,10 @@ const isOfflineError = (error: unknown) => {
   );
 };
 
+const isTransientNetworkError = (error: unknown) => isOfflineError(error) || isNetworkRequestError(error);
+
 const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isOfflineError(error)) {
+  if (isTransientNetworkError(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -205,13 +208,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return status.accepted;
     } catch (policyError) {
       console.warn('Unable to load customer policy acceptance:', policyError);
-      // On a transient failure during a silent background refresh, keep the
-      // cached value rather than downgrading a returning user into the policy
-      // gate; only the blocking (interactive) path resets to false.
+      const cachedPolicyAccepted = await getStoredPolicyAccepted().catch(() => false);
+
+      // Preserve the locally accepted state when the refresh itself is
+      // unavailable. That keeps a freshly signed-up user from being forced
+      // back through the policy gate because a network call failed.
       if (!silent) {
-        setPolicyAccepted(false);
+        setPolicyAccepted(cachedPolicyAccepted);
       }
-      return false;
+
+      return cachedPolicyAccepted;
     } finally {
       if (!silent) {
         setPolicyLoading(false);
@@ -416,7 +422,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, [buildNextUser, clearLocalUserState, flushPendingCustomerPolicyAcceptance, refreshPolicyAcceptance, syncSingleDeviceSession]);
+  }, [
+    buildNextUser,
+    clearExpiredSession,
+    clearLocalUserState,
+    flushPendingCustomerPolicyAcceptance,
+    refreshPolicyAcceptance,
+    syncSingleDeviceSession,
+  ]);
 
   const signUp = async (
     email: string,

@@ -1,7 +1,7 @@
 import { normalizeOrderStatus } from '../domain/orders';
 import { partnerTheme } from './palette';
 
-// Feasty brand status colors, aligned with the admin hub conventions.
+// FEASTY brand status colors, aligned with the admin hub conventions.
 // The shared packages/domain getOrderStatusColor stays untouched because the
 // customer and dispatch apps still depend on its palette.
 export const getPartnerStatusColor = (status: string | null | undefined): string => {

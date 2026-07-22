@@ -315,8 +315,8 @@ export const buildBroadcastEmailHtml = (input: {
   unsubUrl?: string;
 }): string => {
   const footer = input.includeUnsubscribe && input.unsubUrl
-    ? `<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTy • <a href="${input.unsubUrl}" style="color:#94a3b8;">Unsubscribe</a> from marketing emails.</p>`
-    : '<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTy</p>';
+    ? `<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTY • <a href="${input.unsubUrl}" style="color:#94a3b8;">Unsubscribe</a> from marketing emails.</p>`
+    : '<p style="margin:24px 0 0;color:#94a3b8;font-size:12px;">FEASTY</p>';
   return [
     '<div style="max-width:560px;margin:0 auto;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#334155;font-size:15px;line-height:1.6;">',
     input.body, // admin-authored HTML; treated as trusted (admin-only feature)
@@ -511,7 +511,7 @@ import { sendExpoPushMessages } from '../_shared/notifications.ts';
 
 const WORKER_TOKEN = Deno.env.get('QUEUE_WORKER_TOKEN')?.trim() ?? '';
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
-const EMAIL_FROM = Deno.env.get('TRANSACTIONAL_EMAIL_FROM') ?? 'FEASTy <onboarding@resend.dev>';
+const EMAIL_FROM = Deno.env.get('TRANSACTIONAL_EMAIL_FROM') ?? 'FEASTY <onboarding@resend.dev>';
 const RESEND_BATCH = 'https://api.resend.com/emails/batch';
 const BATCH = 100;
 
@@ -715,7 +715,7 @@ Deno.serve(async (request) => {
     return page('Something went wrong', 'We could not process your request. Please try again later.');
   }
 
-  return page('Unsubscribed', `${email} has been removed from FEASTy marketing emails. You will still receive important account and order updates.`);
+  return page('Unsubscribed', `${email} has been removed from FEASTY marketing emails. You will still receive important account and order updates.`);
 });
 ```
 

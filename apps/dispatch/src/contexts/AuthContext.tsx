@@ -4,6 +4,7 @@ import type { UserDocument } from '../domain/entities';
 import {
   createUserWithEmail,
   getUserRoleClaim,
+  isNetworkRequestError,
   isStaleSupabaseSessionError,
   SESSION_EXPIRED_ERROR_MESSAGE,
   signInWithEmail,
@@ -71,8 +72,10 @@ const isProfileOfflineError = (error: unknown) => {
   );
 };
 
+const isTransientNetworkError = (error: unknown) => isProfileOfflineError(error) || isNetworkRequestError(error);
+
 const getDispatchAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isProfileOfflineError(error)) {
+  if (isTransientNetworkError(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -324,7 +327,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
+  }, [buildNextUser, clearExpiredSession, clearLocalUserState, syncSingleDeviceSession]);
 
   const signUp = async (email: string, password: string, userData: DispatchSignUpInput): Promise<SignUpResult> => {
     setLoading(true);

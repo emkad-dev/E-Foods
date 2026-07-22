@@ -582,11 +582,11 @@ if (action === 'supportSendAgentReply') {
   const recipient = await loadUserEmailRecipient(conversation!.customerId);
   if (recipient) {
     const html = buildTransactionalEmailHtml({
-      heading: 'FEASTy Support replied',
+      heading: 'FEASTY Support replied',
       recipientName: recipient.displayName,
-      lines: [body!, 'Reply to this message inside the FEASTy app to continue the conversation.'],
+      lines: [body!, 'Reply to this message inside the FEASTY app to continue the conversation.'],
     });
-    const res = await sendTransactionalEmail({ to: recipient.email, subject: 'FEASTy Support', html });
+    const res = await sendTransactionalEmail({ to: recipient.email, subject: 'FEASTY Support', html });
     emailSent = res.sent;
   }
 
@@ -594,7 +594,7 @@ if (action === 'supportSendAgentReply') {
   let pushSent = false;
   try {
     const pushRes = await sendPushNotificationsToUsers([conversation!.customerId], {
-      title: 'FEASTy Support',
+      title: 'FEASTY Support',
       body: body!.length > 120 ? `${body!.slice(0, 117)}…` : body!,
       data: { type: 'support_reply', path: '/support', routeKey: 'customer_profile', app: 'customer' },
     });

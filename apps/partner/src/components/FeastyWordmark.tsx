@@ -1,7 +1,7 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { partnerTheme } from '../theme/palette';
 
-export default function FeastyWordmark({ size = 28 }: { size?: number }) {
+export default function FEASTYWordmark({ size = 28 }: { size?: number }) {
   return (
     <View style={styles.row}>
       <Image

@@ -6623,13 +6623,13 @@ const handleNativeAction = async (
     const recipient = await loadUserEmailRecipient(conversation.customerId);
     if (recipient) {
       const html = buildTransactionalEmailHtml({
-        heading: 'FEASTy Support replied',
+        heading: 'FEASTY Support replied',
         recipientName: recipient.displayName,
-        lines: [body, 'Reply to this message inside the FEASTy app to continue the conversation.'],
+        lines: [body, 'Reply to this message inside the FEASTY app to continue the conversation.'],
       });
       const emailResult = await sendTransactionalEmail({
         to: recipient.email,
-        subject: 'FEASTy Support',
+        subject: 'FEASTY Support',
         html,
       });
       emailSent = emailResult.sent;
@@ -6639,7 +6639,7 @@ const handleNativeAction = async (
     let pushSent = false;
     try {
       const pushResult = await sendPushNotificationsToUsers([conversation.customerId], {
-        title: 'FEASTy Support',
+        title: 'FEASTY Support',
         body: body.length > 120 ? `${body.slice(0, 117)}…` : body,
         data: { type: 'support_reply', path: '/support', routeKey: 'customer_profile', app: 'customer' },
       });

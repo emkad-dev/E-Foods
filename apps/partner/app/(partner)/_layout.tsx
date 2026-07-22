@@ -1,6 +1,6 @@
 import { Redirect, Slot, Tabs, usePathname, useRouter } from 'expo-router';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import FeastyWordmark from '../../src/components/FeastyWordmark';
+import FEASTYWordmark from '../../src/components/FEASTYWordmark';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { partnerTheme } from '../../src/theme/palette';
@@ -43,7 +43,7 @@ function SidebarShell() {
     <View style={styles.shell}>
       <View style={styles.sidebar}>
         <View style={styles.logoBlock}>
-          <FeastyWordmark size={34} />
+          <FEASTYWordmark size={34} />
           <Text style={styles.logoSub}>Partner</Text>
         </View>
         <View style={styles.nav}>

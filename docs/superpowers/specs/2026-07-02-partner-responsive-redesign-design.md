@@ -5,13 +5,13 @@
 
 ## Summary
 
-Upgrade `apps/partner` (Expo) in place to the Smile Food dashboard format with the Feasty brand, serving mobile and web from one codebase: native/narrow keeps bottom tabs, wide web (≥1024px) gets a sidebar shell. All four screens (Dashboard, Orders, Menu, Store) adopt the brand; the Dashboard is rebuilt in the mockup format.
+Upgrade `apps/partner` (Expo) in place to the Smile Food dashboard format with the FEASTY brand, serving mobile and web from one codebase: native/narrow keeps bottom tabs, wide web (≥1024px) gets a sidebar shell. All four screens (Dashboard, Orders, Menu, Store) adopt the brand; the Dashboard is rebuilt in the mockup format.
 
 ## Decisions locked with the user
 
 - **Architecture:** one responsive Expo codebase (no separate web app).
 - **Scope:** all screens.
-- **Branding:** full Feasty brand — green `#03b833` primary, orange `#ff951f` secondary, FEAST-Y two-tone italic wordmark, admin-hub status conventions.
+- **Branding:** full FEASTY brand — green `#03b833` primary, orange `#ff951f` secondary, FEAST-Y two-tone italic wordmark, admin-hub status conventions.
 
 ## Design
 
