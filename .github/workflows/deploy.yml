@@ -42,7 +42,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
-          command: deploy --cwd cloudflare/hooks --yes
+          command: deploy --cwd cloudflare/hooks
 
       - name: Report Cloudflare Worker deployment
         uses: cloudflare/wrangler-action@v3
@@ -50,6 +50,20 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
           command: deployments status --name feasty-hooks
+
+      - name: Deploy Cloudflare Worker (feasty-edge-cache)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          command: deploy --cwd cloudflare/edge-cache
+
+      - name: Report Cloudflare Worker deployment (edge-cache)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          command: deployments status --name feasty-edge-cache
 
       # Web apps are hosted on Cloudflare Pages and deployed by the
       # path-filtered workflows deploy-web-landing.yml (feasty-web),
