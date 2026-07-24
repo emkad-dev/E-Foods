@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { submitPartnerApplication } from '../../src/services/partnerApplications';
+import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -99,10 +100,13 @@ export default function CompleteRestaurantDetailsScreen() {
         longitude: hasLongitude ? parsedLongitude : null,
         phoneNumber: phoneNumber.trim(),
         restaurantName: restaurantName.trim(),
+        policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
       });
 
-      Alert.alert('Restaurant details saved', 'Your partner account is ready.');
-      router.replace('/(partner)' as never);
+      await signOut();
+
+      Alert.alert('Restaurant details saved', 'Your restaurant profile is ready. Sign in again to continue.');
+      router.replace('/(auth)/login' as never);
     } catch (nextError: any) {
       Alert.alert('Unable to save details', nextError.message ?? 'Please try again.');
     }

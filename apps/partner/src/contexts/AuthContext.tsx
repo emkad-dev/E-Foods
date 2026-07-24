@@ -23,9 +23,6 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
-import { type PartnerApplicationInput } from '../services/partnerApplications';
-import { submitPartnerApplication } from '../services/partnerApplications';
-import { uploadRestaurantAsset } from '../services/restaurantAssetUpload';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
@@ -37,7 +34,10 @@ type AuthContextType = {
   signUp: (
     email: string,
     password: string,
-    userData: PartnerApplicationInput
+    userData: {
+      contactName: string;
+      phoneNumber: string;
+    }
   ) => Promise<{ verificationEmailSent: boolean; sessionPresent: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -49,17 +49,12 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PARTNER_ACCESS_ERROR = 'This account does not have partner access.';
 const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const PARTNER_APPLICATION_READY_MESSAGE =
-  'Your restaurant account is live. Sign in again after you verify your email.';
 const PARTNER_APPLICATION_REJECTED_FALLBACK =
   'Your restaurant account is not active yet. Update your details with the operations team before trying again.';
-const PARTNER_SIGNUP_ROLLBACK_ERROR =
-  'Your restaurant application could not be completed and the temporary account could not be fully removed. Try again with a stable connection or contact the onboarding team.';
 const getActionCodeSettings = (path: string) => ({
   url: `${appEnv.appScheme}://${path}`,
 });
@@ -95,28 +90,62 @@ const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => 
   return fallbackMessage;
 };
 
-const getPartnerAccessStateMessage = (userDocument: Partial<UserDocument> | null) => {
+type PartnerAccessState =
+  | {
+      kind: 'restaurant';
+      userRole: 'restaurant';
+    }
+  | {
+      kind: 'complete-profile';
+      userRole: 'customer';
+    }
+  | {
+      kind: 'blocked';
+      message: string;
+    };
+
+const resolvePartnerAccessState = (
+  claimRole: 'customer' | 'restaurant' | null,
+  userDocument: UserDocument | null
+): PartnerAccessState => {
   if (!userDocument) {
-    return MISSING_PROFILE_ERROR;
+    return {
+      kind: 'blocked',
+      message: MISSING_PROFILE_ERROR,
+    };
   }
 
   if (userDocument.partnerApplicationStatus === 'pending') {
-    return 'Your restaurant account is being prepared. Sign in again shortly.';
+    return {
+      kind: 'blocked',
+      message: 'Your restaurant account is being prepared. Sign in again shortly.',
+    };
   }
 
   if (userDocument.partnerApplicationStatus === 'rejected') {
-    return userDocument.partnerApplicationRejectionReason ?? PARTNER_APPLICATION_REJECTED_FALLBACK;
+    return {
+      kind: 'blocked',
+      message: userDocument.partnerApplicationRejectionReason ?? PARTNER_APPLICATION_REJECTED_FALLBACK,
+    };
   }
 
-  return PARTNER_ACCESS_ERROR;
+  if (claimRole === 'restaurant') {
+    return {
+      kind: 'restaurant',
+      userRole: 'restaurant',
+    };
+  }
+
+  return {
+    kind: 'complete-profile',
+    userRole: 'customer',
+  };
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const pendingApplicantUidRef = useRef<string | null>(null);
-  const partnerSignupInProgressRef = useRef(false);
   // Tracks whether a partner is already signed in, without re-subscribing the
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
@@ -129,23 +158,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
-
-  const rollbackPendingApplicant = useCallback(async (userId: string) => {
-    pendingApplicantUidRef.current = null;
-
-    try {
-      await deleteOwnPartnerAccount();
-      await signOutUser(supabase).catch(() => undefined);
-      await clearLocalUserState();
-      setUser(null);
-      return true;
-    } catch (rollbackError) {
-      console.error('Failed to rollback partner applicant signup:', rollbackError);
-      await clearLocalUserState();
-      setUser(null);
-      return false;
-    }
-  }, [clearLocalUserState]);
 
   const startSingleDeviceSession = useCallback(async (userId: string) => {
     const sessionId = createSessionId();
@@ -201,30 +213,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const buildNextUser = useCallback(
     async (authUser: SupabaseAuthUser) => {
-      if (partnerSignupInProgressRef.current) {
-        return null;
-      }
-
       const claimRole = await getUserRoleClaim(authUser);
-      const userDocument = await getUserDocument(authUser.id);
-
-      if (claimRole !== 'restaurant') {
-        if (pendingApplicantUidRef.current === authUser.id) {
-          return null;
-        }
-
-        await clearLocalUserState();
-        await signOutUser(supabase);
-        setUser(null);
-        setError(getPartnerAccessStateMessage(userDocument));
-        return null;
-      }
+      let userDocument = await getUserDocument(authUser.id);
 
       if (!userDocument) {
+        userDocument = await createUserDocument(authUser.id, {
+          displayName:
+            (authUser.user_metadata?.display_name as string | undefined) ??
+            (authUser.user_metadata?.full_name as string | undefined) ??
+            undefined,
+          email: authUser.email ?? '',
+          emailVerified: Boolean(authUser.email_confirmed_at),
+          phoneNumber: (authUser.user_metadata?.phone as string | undefined) ?? undefined,
+          role: 'customer',
+        });
+      }
+
+      const accessState = resolvePartnerAccessState(claimRole === 'restaurant' ? 'restaurant' : 'customer', userDocument);
+
+      if (accessState.kind === 'blocked') {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
-        setError(MISSING_PROFILE_ERROR);
+        setError(accessState.message);
         return null;
       }
 
@@ -233,7 +244,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         uid: authUser.id,
         email: authUser.email ?? userDocument.email,
         emailVerified: Boolean(authUser.email_confirmed_at),
-        role: claimRole,
+        role: accessState.userRole,
       } satisfies UserDocument;
     },
     [clearLocalUserState]
@@ -359,42 +370,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => subscription.unsubscribe();
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  const signUp = async (email: string, password: string, userData: PartnerApplicationInput) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    userData: {
+      contactName: string;
+      phoneNumber: string;
+    }
+  ) => {
     setLoading(true);
     setError(null);
-    let applicantUid: string | null = null;
 
     try {
-      partnerSignupInProgressRef.current = true;
-      const { user: authUser, session } = await createUserWithEmail(supabase, email, password);
-      applicantUid = authUser.id;
-      pendingApplicantUidRef.current = authUser.id;
-
-      await createUserDocument(authUser.id, {
-        email: authUser.email ?? email,
-        emailVerified: Boolean(authUser.email_confirmed_at),
+      const { user: authUser, session } = await createUserWithEmail(supabase, email, password, {
+        display_name: userData.contactName.trim(),
+        phone: userData.phoneNumber.trim(),
         role: 'customer',
-      });
-
-      const logoImage = userData.logoImage
-        ? await uploadRestaurantAsset({
-            kind: 'logos',
-            ownerId: authUser.id,
-            uri: userData.logoImage,
-          })
-        : null;
-
-      await submitPartnerApplication({
-        address: userData.address.trim(),
-        contactName: userData.contactName.trim(),
-        cuisine: userData.cuisine.trim(),
-        deliveryTime: userData.deliveryTime?.trim() || undefined,
-        description: userData.description?.trim() || undefined,
-        latitude: userData.latitude ?? null,
-        logoImage,
-        longitude: userData.longitude ?? null,
-        phoneNumber: userData.phoneNumber.trim(),
-        restaurantName: userData.restaurantName.trim(),
       });
 
       let verificationEmailSent = false;
@@ -407,32 +398,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         );
         verificationEmailSent = true;
       } catch (verificationError) {
-        console.warn('Partner account created, but verification email could not be sent:', verificationError);
+        console.warn('Partner login created, but verification email could not be sent:', verificationError);
       }
 
-      await clearLocalUserState();
-      await signOutUser(supabase);
-      setUser(null);
-      setError(PARTNER_APPLICATION_READY_MESSAGE);
       return { verificationEmailSent, sessionPresent: Boolean(session) };
     } catch (nextError: any) {
-      let resolvedMessage =
-        nextError?.message === PARTNER_APPLICATION_READY_MESSAGE
-          ? PARTNER_APPLICATION_READY_MESSAGE
-          : getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
-
-      if (applicantUid) {
-        const rollbackSucceeded = await rollbackPendingApplicant(applicantUid);
-        if (!rollbackSucceeded) {
-          resolvedMessage = PARTNER_SIGNUP_ROLLBACK_ERROR;
-        }
-      }
+      const resolvedMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
 
       setError(resolvedMessage);
       throw new Error(resolvedMessage);
     } finally {
-      pendingApplicantUidRef.current = null;
-      partnerSignupInProgressRef.current = false;
       setLoading(false);
     }
   };
