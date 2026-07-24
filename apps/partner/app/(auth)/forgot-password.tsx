@@ -28,7 +28,7 @@ export default function PartnerForgotPasswordScreen() {
 
     try {
       await resetPassword(email.trim());
-      Alert.alert('Check your inbox', 'We sent a password reset email if this partner account exists.');
+      Alert.alert('Reset link sent', 'If this partner account exists, you will receive a password reset link shortly.');
     } catch (nextError: any) {
       Alert.alert('Reset failed', nextError.message ?? 'Unable to send reset email right now.');
     }
@@ -40,8 +40,8 @@ export default function PartnerForgotPasswordScreen() {
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }]}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>Reset partner password</Text>
-      <Text style={styles.copy}>Enter your partner email and we will send you a password reset link.</Text>
+      <Text style={styles.title}>Reset your partner password</Text>
+      <Text style={styles.copy}>Enter your partner email and we will send a link to set a new password and return to your dashboard.</Text>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -57,7 +57,7 @@ export default function PartnerForgotPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Sending...' : 'Send reset email'}</Text>
+        <Text style={styles.buttonText}>{loading ? 'Sending...' : 'Send reset link'}</Text>
       </TouchableOpacity>
 
       <Link

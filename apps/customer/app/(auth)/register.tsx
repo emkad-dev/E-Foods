@@ -80,10 +80,10 @@ export default function RegisterScreen() {
       });
 
       Alert.alert(
-        verificationEmailSent ? 'Check your inbox' : 'Account created',
+        verificationEmailSent ? 'Confirm your email' : 'Account created',
         verificationEmailSent
-          ? 'We sent you a verification email to finish setting up your account.'
-          : 'Your account was created, but verification email could not be sent yet. Open the verify email screen and try resending from there.'
+          ? 'We sent a verification email. Confirm it, then sign in to continue.'
+          : 'Your account was created, but the verification email could not be sent yet. Open the verify email screen and resend it from there.'
       );
     } catch (error: any) {
       Alert.alert('Registration failed', error.message);
@@ -99,7 +99,7 @@ export default function RegisterScreen() {
       >
         <View style={styles.container}>
           <Text style={styles.title}>Create your account</Text>
-          <Text style={styles.copy}>Sign up to start ordering from nearby restaurants.</Text>
+          <Text style={styles.copy}>Create your account, then confirm your email to start ordering from nearby restaurants.</Text>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
 

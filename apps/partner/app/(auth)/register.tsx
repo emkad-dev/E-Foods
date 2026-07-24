@@ -48,10 +48,10 @@ export default function PartnerRegisterScreen() {
 
       Alert.alert(
         result.sessionPresent ? 'Account created' : 'Check your inbox',
-        result.verificationEmailSent
-          ? result.sessionPresent
-            ? 'Your login is ready. Sign in to complete your restaurant profile.'
-            : 'We sent a verification email. Confirm it, then sign in to finish setting up your restaurant.'
+          result.verificationEmailSent
+            ? result.sessionPresent
+            ? 'Your login is ready. Sign in to complete your restaurant details and open your dashboard.'
+            : 'We sent a verification email. Confirm it, then sign in to finish your restaurant setup and open your dashboard.'
           : 'Your account was created, but the verification email could not be confirmed from the app.'
       );
 
@@ -73,7 +73,7 @@ export default function PartnerRegisterScreen() {
           <Text style={styles.eyebrow}>FEASTY Partner</Text>
           <Text style={styles.title}>Create your partner login</Text>
           <Text style={styles.copy}>
-            We’ll set up your login first. After you verify your email, you can finish the restaurant profile from the dashboard.
+            We'll set up your login first. After you verify your email, sign in to complete your restaurant details and open the partner dashboard.
           </Text>
         </View>
 

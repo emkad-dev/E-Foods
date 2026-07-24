@@ -102,8 +102,8 @@ export default function VerifyEmailScreen() {
       Alert.alert(
         emailVerified ? 'Success' : 'Not verified yet',
         emailVerified
-          ? 'Your email has been verified!'
-          : 'Please complete the verification link sent to your email.'
+          ? 'Your email has been confirmed. You can continue to the customer app.'
+          : 'Please open the verification link we sent and come back here after confirming it.'
       );
     } catch (error: any) {
       Alert.alert('Unable to refresh status', error.message);
@@ -116,7 +116,7 @@ export default function VerifyEmailScreen() {
     setResending(true);
     try {
       await sendVerificationEmail();
-      Alert.alert('Verification email sent', 'Please check your inbox for the new link.');
+      Alert.alert('Verification link sent', 'Please check your inbox for the new link.');
     } catch (error: any) {
       Alert.alert('Unable to resend email', error.message);
     } finally {
@@ -137,7 +137,7 @@ export default function VerifyEmailScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Verify your email</Text>
+      <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
         {processingLink
           ? 'Confirming your email link now. Stay on this screen for a moment.'
@@ -152,7 +152,7 @@ export default function VerifyEmailScreen() {
         disabled={checking || processingLink}
       >
         <Text style={styles.primaryText}>
-          {processingLink ? 'Confirming...' : checking ? 'Checking...' : 'I have verified my email'}
+          {processingLink ? 'Confirming...' : checking ? 'Checking...' : "I've confirmed it"}
         </Text>
       </TouchableOpacity>
 
@@ -161,7 +161,7 @@ export default function VerifyEmailScreen() {
         onPress={handleResendEmail}
         disabled={resending || processingLink}
       >
-        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Resend verification email'}</Text>
+        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Resend verification link'}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity

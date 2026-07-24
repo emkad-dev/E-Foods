@@ -51,9 +51,10 @@ export default function PartnerLoginScreen() {
     >
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
-        <Text style={styles.title}>Restaurant sign in</Text>
+        <Text style={styles.title}>Sign in to your dashboard</Text>
         <Text style={styles.copy}>
-          Use your restaurant operations account to manage orders, menu updates, and store performance.
+          Use your restaurant operations account to manage orders, menu updates, and store performance. We'll take
+          you to the right place after sign in.
         </Text>
       </View>
 
@@ -79,14 +80,14 @@ export default function PartnerLoginScreen() {
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter partner app'}</Text>
+          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Open dashboard'}</Text>
         </TouchableOpacity>
 
         <Link
           href={redirectTo ? { pathname: '/(auth)/register', params: { redirectTo } } : '/(auth)/register'}
           style={styles.link}
         >
-          Need a partner account? Sign up
+          Need a partner login? Create one
         </Link>
         <Link
           href={redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'}

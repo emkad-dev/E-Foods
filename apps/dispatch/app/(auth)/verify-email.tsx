@@ -89,19 +89,19 @@ export default function DispatchVerifyEmailScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Confirm dispatch email</Text>
+      <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
         {processing
           ? 'Finishing your email confirmation now. Stay on this screen for a moment.'
           : confirmed
-            ? 'Your email is confirmed. Your rider account is now ready for sign-in.'
-            : 'Open the verification link from your email on this device to confirm this dispatch account.'}
+            ? 'Your email is confirmed. You can now sign in and continue to rider setup.'
+            : 'Open the verification link from your email on this device to confirm this account.'}
       </Text>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <Link href="/(auth)/login" style={styles.link}>
-        Back to dispatch sign in
+        Back to sign in
       </Link>
     </ScrollView>
   );

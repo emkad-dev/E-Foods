@@ -26,6 +26,11 @@ import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
+import { buildPartnerAuthActionUrl } from '../utils/authActionUrls';
+import {
+  resolvePartnerAccessState,
+  type PartnerUserDocumentState,
+} from './partnerAuthFlow';
 
 type AuthContextType = {
   user: UserDocument | null;
@@ -53,10 +58,8 @@ const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const PARTNER_APPLICATION_REJECTED_FALLBACK =
-  'Your restaurant account is not active yet. Update your details with the operations team before trying again.';
 const getActionCodeSettings = (path: string) => ({
-  url: `${appEnv.appScheme}://${path}`,
+  url: buildPartnerAuthActionUrl(path, { appScheme: appEnv.appScheme }),
 });
 
 const isProfileOfflineError = (error: unknown) => {
@@ -88,58 +91,6 @@ const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => 
   }
 
   return fallbackMessage;
-};
-
-type PartnerAccessState =
-  | {
-      kind: 'restaurant';
-      userRole: 'restaurant';
-    }
-  | {
-      kind: 'complete-profile';
-      userRole: 'customer';
-    }
-  | {
-      kind: 'blocked';
-      message: string;
-    };
-
-const resolvePartnerAccessState = (
-  claimRole: 'customer' | 'restaurant' | null,
-  userDocument: UserDocument | null
-): PartnerAccessState => {
-  if (!userDocument) {
-    return {
-      kind: 'blocked',
-      message: MISSING_PROFILE_ERROR,
-    };
-  }
-
-  if (userDocument.partnerApplicationStatus === 'pending') {
-    return {
-      kind: 'blocked',
-      message: 'Your restaurant account is being prepared. Sign in again shortly.',
-    };
-  }
-
-  if (userDocument.partnerApplicationStatus === 'rejected') {
-    return {
-      kind: 'blocked',
-      message: userDocument.partnerApplicationRejectionReason ?? PARTNER_APPLICATION_REJECTED_FALLBACK,
-    };
-  }
-
-  if (claimRole === 'restaurant') {
-    return {
-      kind: 'restaurant',
-      userRole: 'restaurant',
-    };
-  }
-
-  return {
-    kind: 'complete-profile',
-    userRole: 'customer',
-  };
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -229,7 +180,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         });
       }
 
-      const accessState = resolvePartnerAccessState(claimRole === 'restaurant' ? 'restaurant' : 'customer', userDocument);
+      const accessState = resolvePartnerAccessState({
+        claimRole: claimRole === 'restaurant' ? 'restaurant' : 'customer',
+        userDocument: userDocument as PartnerUserDocumentState,
+      });
 
       if (accessState.kind === 'blocked') {
         await clearLocalUserState();

@@ -46,18 +46,18 @@ export default function DispatchRegisterScreen() {
 
       if (result.sessionPresent) {
         Alert.alert(
-          'Login created',
-          'Your rider login is active. Complete your rider details to finish dispatch setup.'
+          'Login ready',
+          'Your rider login is ready. Complete your rider details to finish setup.'
         );
         router.replace('/(dispatch)/complete-rider-details' as never);
         return;
       }
 
       Alert.alert(
-        'Check your inbox',
+        'Confirm your email',
         result.verificationEmailSent
           ? 'We sent a verification email. Confirm it, then sign in to finish your rider setup.'
-          : 'Your login was created, but the verification email could not be confirmed from the app. Sign in after you verify your email.'
+          : 'Your login was created, but the verification email could not be sent from the app. Sign in after you verify your email.'
       );
       router.replace('/(auth)/login');
     } catch (nextError: any) {
@@ -75,8 +75,8 @@ export default function DispatchRegisterScreen() {
           <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
           <Text style={styles.title}>Create your rider login</Text>
           <Text style={styles.copy}>
-            Phase 1 sets up your login only. After email verification, you&apos;ll complete your dispatch area and
-            vehicle details from the rider setup screen.
+            We'll set up your login first. After you confirm your email, complete your dispatch area and vehicle
+            details from the rider setup screen.
           </Text>
         </View>
 

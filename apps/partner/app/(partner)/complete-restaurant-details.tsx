@@ -7,6 +7,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { submitPartnerApplication } from '../../src/services/partnerApplications';
 import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
+import { supabase } from '../../src/services/supabase/config';
 import { partnerTheme } from '../../src/theme/palette';
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
@@ -25,6 +26,7 @@ export default function CompleteRestaurantDetailsScreen() {
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const contactName = useMemo(
     () => user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'Partner',
@@ -60,6 +62,10 @@ export default function CompleteRestaurantDetailsScreen() {
   };
 
   const handleSubmit = async () => {
+    if (loading || submitting) {
+      return;
+    }
+
     const hasLatitude = latitude.trim().length > 0;
     const hasLongitude = longitude.trim().length > 0;
     const parsedLatitude = hasLatitude ? Number.parseFloat(latitude) : null;
@@ -79,6 +85,8 @@ export default function CompleteRestaurantDetailsScreen() {
       Alert.alert('Invalid location', 'Use valid numeric coordinates for the restaurant location.');
       return;
     }
+
+    setSubmitting(true);
 
     try {
       const logoUpload = logoImage
@@ -103,12 +111,12 @@ export default function CompleteRestaurantDetailsScreen() {
         policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
       });
 
-      await signOut();
-
-      Alert.alert('Restaurant details saved', 'Your restaurant profile is ready. Sign in again to continue.');
-      router.replace('/(auth)/login' as never);
+      await supabase.auth.refreshSession().catch(() => undefined);
+      router.replace('/(partner)' as never);
     } catch (nextError: any) {
       Alert.alert('Unable to save details', nextError.message ?? 'Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -122,7 +130,7 @@ export default function CompleteRestaurantDetailsScreen() {
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
         <Text style={styles.title}>Complete your restaurant details</Text>
         <Text style={styles.copy}>
-          Add the restaurant profile that appears in the partner dashboard. You can update these details later.
+          Add the restaurant profile that appears in the partner dashboard. Once you save, we’ll open your restaurant dashboard right away.
         </Text>
       </View>
 
@@ -145,7 +153,7 @@ export default function CompleteRestaurantDetailsScreen() {
           placeholderTextColor="#8e8e8e"
           value={restaurantName}
           onChangeText={handleFieldChange(setRestaurantName)}
-          editable={!loading}
+          editable={!loading && !submitting}
         />
         <TextInput
           style={styles.input}
@@ -154,7 +162,7 @@ export default function CompleteRestaurantDetailsScreen() {
           keyboardType="phone-pad"
           value={phoneNumber}
           onChangeText={handleFieldChange(setPhoneNumber)}
-          editable={!loading}
+          editable={!loading && !submitting}
         />
 
         <View style={styles.logoRow}>
@@ -162,11 +170,11 @@ export default function CompleteRestaurantDetailsScreen() {
             {logoImage ? <Image source={{ uri: logoImage }} style={styles.logoImage} /> : <Text style={styles.logoPreviewText}>Logo</Text>}
           </View>
           <View style={styles.logoActions}>
-            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading}>
+            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading || submitting}>
               <Text style={styles.logoButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
             </TouchableOpacity>
             {logoImage ? (
-              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading}>
+              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading || submitting}>
                 <Text style={styles.removeLogoText}>Remove</Text>
               </TouchableOpacity>
             ) : null}
@@ -180,7 +188,7 @@ export default function CompleteRestaurantDetailsScreen() {
               key={option}
               style={[styles.chip, cuisine === option ? styles.chipActive : null]}
               onPress={() => setCuisine(option)}
-              disabled={loading}
+              disabled={loading || submitting}
             >
               <Text style={[styles.chipText, cuisine === option ? styles.chipTextActive : null]}>{option}</Text>
             </TouchableOpacity>
@@ -194,7 +202,7 @@ export default function CompleteRestaurantDetailsScreen() {
           multiline
           value={address}
           onChangeText={handleFieldChange(setAddress)}
-          editable={!loading}
+          editable={!loading && !submitting}
         />
         <TextInput
           style={[styles.input, styles.textArea]}
@@ -203,7 +211,7 @@ export default function CompleteRestaurantDetailsScreen() {
           multiline
           value={description}
           onChangeText={handleFieldChange(setDescription)}
-          editable={!loading}
+          editable={!loading && !submitting}
         />
 
         <Text style={styles.sectionLabel}>Typical delivery time</Text>
@@ -213,7 +221,7 @@ export default function CompleteRestaurantDetailsScreen() {
               key={option}
               style={[styles.chip, deliveryTime === option ? styles.chipActive : null]}
               onPress={() => setDeliveryTime(option)}
-              disabled={loading}
+              disabled={loading || submitting}
             >
               <Text style={[styles.chipText, deliveryTime === option ? styles.chipTextActive : null]}>{option}</Text>
             </TouchableOpacity>
@@ -228,7 +236,7 @@ export default function CompleteRestaurantDetailsScreen() {
             keyboardType="decimal-pad"
             value={latitude}
             onChangeText={handleFieldChange(setLatitude)}
-            editable={!loading}
+            editable={!loading && !submitting}
           />
           <TextInput
             style={[styles.input, styles.coordinateInput]}
@@ -237,15 +245,19 @@ export default function CompleteRestaurantDetailsScreen() {
             keyboardType="decimal-pad"
             value={longitude}
             onChangeText={handleFieldChange(setLongitude)}
-            editable={!loading}
+            editable={!loading && !submitting}
           />
         </View>
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Saving details...' : 'Save restaurant details'}</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading || submitting}>
+          <Text style={styles.primaryButtonText}>
+            {loading || submitting ? 'Saving details...' : 'Save and open dashboard'}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading}>
+        <Text style={styles.handoffNote}>After saving, we’ll take you straight into the partner dashboard.</Text>
+
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading || submitting}>
           <Text style={styles.secondaryButtonText}>Sign out</Text>
         </TouchableOpacity>
       </View>
@@ -466,5 +478,12 @@ const styles = StyleSheet.create({
     color: partnerTheme.textMuted,
     fontSize: 14,
     fontWeight: '700',
+  },
+  handoffNote: {
+    color: partnerTheme.textSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+    textAlign: 'center',
   },
 });

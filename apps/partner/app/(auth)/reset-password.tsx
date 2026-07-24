@@ -83,9 +83,9 @@ export default function PartnerResetPasswordScreen() {
       }
 
       await supabase.auth.signOut().catch(() => undefined);
-      Alert.alert('Password updated', 'You can now sign in with your new password.', [
+      Alert.alert('Password updated', 'Your password has been updated. Sign in to open your dashboard.', [
         {
-          text: 'Continue to sign in',
+          text: 'Back to sign in',
           onPress: () =>
             router.replace(
               redirectTo ? ({ pathname: '/(auth)/login', params: { redirectTo } } as never) : ('/(auth)/login' as never)
@@ -104,7 +104,7 @@ export default function PartnerResetPasswordScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Choose a new partner password</Text>
-      <Text style={styles.copy}>Set a fresh password for your partner account, then sign back in.</Text>
+      <Text style={styles.copy}>Set a fresh password for your partner account, then sign in to open your dashboard.</Text>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -128,7 +128,7 @@ export default function PartnerResetPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
-        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
+        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Save new password'}</Text>
       </TouchableOpacity>
 
       <Link
