@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthLegalFooter from '../../src/components/AuthLegalFooter';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function ForgotPasswordScreen() {
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { resetPassword, error, clearError } = useAuth();
@@ -25,12 +27,15 @@ export default function ForgotPasswordScreen() {
     setSubmitting(true);
     try {
       await resetPassword(email.trim());
-      Alert.alert('Reset email sent', 'Open the link in your inbox to choose a new password.', [
-        {
-          text: 'Back to login',
-          onPress: () => router.replace('/login'),
-        },
-      ]);
+        Alert.alert('Reset email sent', 'Open the link in your inbox to choose a new password.', [
+          {
+            text: 'Back to login',
+            onPress: () =>
+              router.replace(
+                redirectTo ? ({ pathname: '/login', params: { redirectTo } } as never) : ('/login' as never)
+              ),
+          },
+        ]);
     } catch (error: any) {
       Alert.alert('Unable to send reset email', error.message);
     } finally {
@@ -63,7 +68,7 @@ export default function ForgotPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Sending...' : 'Send reset email'}</Text>
       </TouchableOpacity>
 
-      <Link href="/login" style={styles.link}>
+      <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
         Back to login
       </Link>
 

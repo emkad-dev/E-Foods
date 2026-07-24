@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { customerTheme } from '../theme/palette';
 
@@ -9,16 +9,24 @@ type AuthPromptCardProps = {
 
 export default function AuthPromptCard({ title, message }: AuthPromptCardProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
 
   return (
     <View style={styles.card}>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.message}>{message}</Text>
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => router.replace('/login')}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.replace({ pathname: '/login', params: { redirectTo } } as never)}
+        >
           <Text style={styles.secondaryText}>Sign in</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => router.replace('/register')}>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => router.replace({ pathname: '/register', params: { redirectTo } } as never)}
+        >
           <Text style={styles.primaryText}>Sign up</Text>
         </TouchableOpacity>
       </View>

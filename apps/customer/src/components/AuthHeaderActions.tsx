@@ -1,10 +1,12 @@
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function AuthHeaderActions() {
   const { user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
 
   if (user) {
     return null;
@@ -12,10 +14,16 @@ export default function AuthHeaderActions() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/login')}>
+      <TouchableOpacity
+        style={styles.secondaryButton}
+        onPress={() => router.push({ pathname: '/login', params: { redirectTo } } as never)}
+      >
         <Text style={styles.secondaryText}>Sign in</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/register')}>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={() => router.push({ pathname: '/register', params: { redirectTo } } as never)}
+      >
         <Text style={styles.primaryText}>Sign up</Text>
       </TouchableOpacity>
     </View>

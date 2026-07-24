@@ -9,9 +9,14 @@ export default function ResetPasswordScreen() {
   const params = useLocalSearchParams<{
     access_token?: string | string[];
     code?: string | string[];
+    redirectTo?: string | string[];
     refresh_token?: string | string[];
   }>();
   const router = useRouter();
+  const redirectTo = useMemo(() => {
+    if (Array.isArray(params.redirectTo)) return params.redirectTo[0];
+    return params.redirectTo;
+  }, [params.redirectTo]);
   const accessToken = useMemo(() => {
     if (Array.isArray(params.access_token)) return params.access_token[0];
     return params.access_token;
@@ -80,7 +85,10 @@ export default function ResetPasswordScreen() {
       Alert.alert('Password updated', 'You can now sign in with your new password.', [
         {
           text: 'Continue to login',
-          onPress: () => router.replace('/login'),
+          onPress: () =>
+            router.replace(
+              redirectTo ? ({ pathname: '/login', params: { redirectTo } } as never) : ('/login' as never)
+            ),
         },
       ]);
     } catch (err: any) {
@@ -124,7 +132,7 @@ export default function ResetPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
       </TouchableOpacity>
 
-      <Link href="/login" style={styles.link}>
+      <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
         Back to login
       </Link>
     </ScrollView>

@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,8 +7,10 @@ import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const { clearError, error, loading, resetPassword } = useAuth();
   const [email, setEmail] = useState('');
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
 
   const handleEmailChange = (value: string) => {
     if (error) {
@@ -58,7 +60,10 @@ export default function PartnerForgotPasswordScreen() {
         <Text style={styles.buttonText}>{loading ? 'Sending...' : 'Send reset email'}</Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/login" style={styles.link}>
+      <Link
+        href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
+        style={styles.link}
+      >
         Back to sign in
       </Link>
     </ScrollView>

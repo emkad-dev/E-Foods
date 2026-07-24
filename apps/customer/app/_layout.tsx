@@ -1,14 +1,60 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Linking from 'expo-linking';
-import { ActivityIndicator, Animated, Image, StyleSheet, Text, View } from 'react-native';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Animated, Image, StyleSheet, Text, View } from 'react-native';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import LoadingSkeleton from '../src/components/LoadingSkeleton';
 import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
 import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRouting';
 import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
 import { initializeSentry } from '../../../packages/observability/src/sentry';
 import { customerTheme } from '../src/theme/palette';
+
+const AUTH_PAGES = new Set([
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+]);
+type CustomerLoadingMode = NonNullable<Parameters<typeof LoadingSkeleton>[0]['mode']>;
+
+const getCustomerLoadingMode = (pathname: string | null | undefined): CustomerLoadingMode => {
+  const currentPath = pathname || '/home';
+
+  if (
+    currentPath.startsWith('/login') ||
+    currentPath.startsWith('/register') ||
+    currentPath.startsWith('/forgot-password') ||
+    currentPath.startsWith('/reset-password') ||
+    currentPath.startsWith('/verify-email')
+  ) {
+    if (currentPath.startsWith('/register')) {
+      return 'auth-register';
+    }
+
+    if (
+      currentPath.startsWith('/forgot-password') ||
+      currentPath.startsWith('/reset-password') ||
+      currentPath.startsWith('/verify-email')
+    ) {
+      return 'auth-recovery';
+    }
+
+    return 'auth-login';
+  }
+
+  if (currentPath.startsWith('/accept-policy') || currentPath.startsWith('/complete-profile')) {
+    return 'auth-onboarding';
+  }
+
+  if (currentPath.startsWith('/orders')) return 'orders';
+  if (currentPath.startsWith('/cart')) return 'cart';
+  if (currentPath.startsWith('/profile')) return 'profile';
+  if (currentPath.startsWith('/support')) return 'support';
+
+  return 'home';
+};
 
 function FEASTYLaunchScreen() {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -46,7 +92,7 @@ function FEASTYLaunchScreen() {
 function RootLayoutNav() {
   const { user, loading, policyAccepted, policyLoading } = useAuth();
   const router = useRouter();
-  const segments = useSegments();
+  const pathname = usePathname();
   const [showLaunch, setShowLaunch] = useState(false);
   const launchShownForUserRef = useRef<string | null>(null);
 
@@ -106,17 +152,10 @@ function RootLayoutNav() {
     // screen is up has no navigator to handle it.
     if (loading || policyLoading) return;
 
-    const currentPath = `/${segments.filter((segment) => !segment.startsWith('(')).join('/')}`;
-    const isAuthRoute =
-      currentPath === '/login' ||
-      currentPath === '/register' ||
-      currentPath === '/forgot-password' ||
-      currentPath === '/reset-password' ||
-      currentPath === '/verify-email' ||
-      currentPath === '/accept-policy' ||
-      currentPath === '/complete-profile';
+    const currentPath = pathname || '/';
+    const isAuthRoute = AUTH_PAGES.has(currentPath);
 
-    if (!user) {
+    if (!user || isAuthRoute) {
       return;
     }
 
@@ -141,11 +180,7 @@ function RootLayoutNav() {
       return;
     }
 
-    if (isAuthRoute) {
-      router.replace('/home' as never);
-    }
-
-  }, [loading, policyAccepted, policyLoading, router, segments, user]);
+  }, [loading, pathname, policyAccepted, policyLoading, router, user]);
 
   useEffect(() => {
     if (loading || policyLoading || user?.role !== 'customer' || !user.emailVerified || !policyAccepted) {
@@ -166,11 +201,7 @@ function RootLayoutNav() {
   }, [loading, policyAccepted, policyLoading, user?.emailVerified, user?.role, user?.uid]);
 
   if (loading || policyLoading) {
-    return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color={customerTheme.brandGreen} />
-      </View>
-    );
+    return <LoadingSkeleton mode={getCustomerLoadingMode(pathname)} />;
   }
 
   // Keep the Stack mounted while the launch wordmark shows, otherwise the
@@ -272,11 +303,5 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center',
     textTransform: 'uppercase',
-  },
-  loadingScreen: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.launchBackground,
-    flex: 1,
-    justifyContent: 'center',
   },
 });

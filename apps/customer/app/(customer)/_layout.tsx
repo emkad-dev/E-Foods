@@ -1,8 +1,9 @@
 import { FontAwesome } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { Redirect, Tabs, usePathname } from 'expo-router';
+import { StyleSheet, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
+import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import PromoBanner from '../../src/components/PromoBanner';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
@@ -19,16 +20,32 @@ const renderTabIcon = (iconName: React.ComponentProps<typeof FontAwesome>['name'
   </View>
 );
 
+type CustomerLoadingMode = NonNullable<Parameters<typeof LoadingSkeleton>[0]['mode']>;
+
+const getCustomerShellLoadingMode = (pathname: string | null | undefined): CustomerLoadingMode => {
+  const currentPath = pathname || '/home';
+
+  if (currentPath.startsWith('/orders')) return 'orders';
+  if (currentPath.startsWith('/cart')) return 'cart';
+  if (currentPath.startsWith('/profile')) return 'profile';
+  if (currentPath.startsWith('/support')) return 'support';
+
+  return 'home';
+};
+
 export default function CustomerLayout() {
-  const { loading } = useAuth();
+  const { loading, user } = useAuth();
+  const pathname = usePathname();
   usePushNotifications();
 
   if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: customerTheme.background }}>
-        <ActivityIndicator size="large" color={customerTheme.accent} />
-      </View>
-    );
+    return <LoadingSkeleton mode={getCustomerShellLoadingMode(pathname)} />;
+  }
+
+  if (!user) {
+    const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
+
+    return <Redirect href={{ pathname: '/login', params: { redirectTo } } as never} />;
   }
 
   return (

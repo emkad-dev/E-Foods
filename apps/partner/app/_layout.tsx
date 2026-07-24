@@ -1,12 +1,11 @@
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 
 function RootLayoutNav() {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
   const router = useRouter();
-  const segments = useSegments();
 
   useEffect(() => {
     const handleDeepLink = ({ url }: { url: string }) => {
@@ -47,24 +46,6 @@ function RootLayoutNav() {
     const subscription = Linking.addEventListener('url', handleDeepLink);
     return () => subscription.remove();
   }, [router]);
-
-  useEffect(() => {
-    if (loading) {
-      return;
-    }
-
-    const inAuthGroup = segments[0] === '(auth)';
-    const inPartnerGroup = segments[0] === '(partner)';
-
-    if (!user && !inAuthGroup) {
-      router.replace('/(auth)/login');
-      return;
-    }
-
-    if (user && !inPartnerGroup) {
-      router.replace('/(partner)');
-    }
-  }, [loading, router, segments, user]);
 
   // The navigator stays mounted across auth/loading changes. Previously this
   // returned a spinner in place of the navigator whenever `loading` toggled,

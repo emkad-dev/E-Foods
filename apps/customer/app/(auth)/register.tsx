@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
@@ -16,6 +16,8 @@ import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptan
 import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
   const [nickname, setNickname] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -179,7 +181,7 @@ export default function RegisterScreen() {
 
           <GoogleSignInButton />
 
-          <Link href="/login" style={styles.link}>
+          <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
             Already have an account? Sign in
           </Link>
         </View>

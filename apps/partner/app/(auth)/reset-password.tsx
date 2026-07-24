@@ -9,9 +9,14 @@ export default function PartnerResetPasswordScreen() {
   const params = useLocalSearchParams<{
     access_token?: string | string[];
     code?: string | string[];
+    redirectTo?: string | string[];
     refresh_token?: string | string[];
   }>();
   const router = useRouter();
+  const redirectTo = useMemo(() => {
+    if (Array.isArray(params.redirectTo)) return params.redirectTo[0];
+    return params.redirectTo;
+  }, [params.redirectTo]);
   const accessToken = useMemo(() => {
     if (Array.isArray(params.access_token)) return params.access_token[0];
     return params.access_token;
@@ -81,7 +86,10 @@ export default function PartnerResetPasswordScreen() {
       Alert.alert('Password updated', 'You can now sign in with your new password.', [
         {
           text: 'Continue to sign in',
-          onPress: () => router.replace('/(auth)/login'),
+          onPress: () =>
+            router.replace(
+              redirectTo ? ({ pathname: '/(auth)/login', params: { redirectTo } } as never) : ('/(auth)/login' as never)
+            ),
         },
       ]);
     } catch (nextError: any) {
@@ -123,7 +131,10 @@ export default function PartnerResetPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/login" style={styles.link}>
+      <Link
+        href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
+        style={styles.link}
+      >
         Back to sign in
       </Link>
     </ScrollView>

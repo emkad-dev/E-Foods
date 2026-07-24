@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,9 +8,11 @@ import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerLoginScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const { clearError, error, loading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
 
   const handleEmailChange = (value: string) => {
     if (error) {
@@ -80,10 +82,16 @@ export default function PartnerLoginScreen() {
           <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter partner app'}</Text>
         </TouchableOpacity>
 
-        <Link href="/(auth)/register" style={styles.link}>
+        <Link
+          href={redirectTo ? { pathname: '/(auth)/register', params: { redirectTo } } : '/(auth)/register'}
+          style={styles.link}
+        >
           Need a partner account? Sign up
         </Link>
-        <Link href="/(auth)/forgot-password" style={styles.linkSecondary}>
+        <Link
+          href={redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'}
+          style={styles.linkSecondary}
+        >
           Forgot password?
         </Link>
         <Text style={styles.linkSecondary} onPress={() => Linking.openURL('https://feasty.com.ng')}>

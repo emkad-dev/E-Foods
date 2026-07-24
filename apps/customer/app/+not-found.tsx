@@ -1,46 +1,43 @@
-import { Link } from 'expo-router';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useAuth } from '../src/contexts/AuthContext';
+import { customerTheme } from '../src/theme/palette';
 
 export default function NotFoundScreen() {
-  return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>This screen does not exist.</Text>
-      <Text style={styles.copy}>Use the link below to get back to the app.</Text>
-      <Link href="/home" style={styles.link}>
-        Go to home
-      </Link>
-    </ScrollView>
-  );
+  const { loading, policyAccepted, user } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={customerTheme.brandGreen} size="large" />
+      </View>
+    );
+  }
+
+  if (!user) {
+    return <Redirect href="/login" />;
+  }
+
+  if (!user.emailVerified) {
+    return <Redirect href="/verify-email" />;
+  }
+
+  if (user.role === 'customer' && !user.phoneNumber) {
+    return <Redirect href="/complete-profile" />;
+  }
+
+  if (!policyAccepted) {
+    return <Redirect href="/accept-policy" />;
+  }
+
+  return <Redirect href="/home" />;
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: '#fff',
-    flex: 1,
-  },
-  container: {
+  loading: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    flexGrow: 1,
+    backgroundColor: customerTheme.background,
+    flex: 1,
     justifyContent: 'center',
-    padding: 24,
-  },
-  title: {
-    color: '#222',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  copy: {
-    color: '#666',
-    fontSize: 16,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  link: {
-    color: '#5D3FD3',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

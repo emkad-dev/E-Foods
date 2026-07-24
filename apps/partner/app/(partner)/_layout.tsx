@@ -1,6 +1,8 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, Slot, Tabs, usePathname, useRouter } from 'expo-router';
-import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import FEASTYWordmark from '../../src/components/PartnerWordmark';
+import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { partnerTheme } from '../../src/theme/palette';
@@ -28,6 +30,44 @@ const isNavItemActive = (path: string, pathname: string) => {
 
 const getActiveNavItem = (pathname: string) =>
   NAV_ITEMS.find((item) => isNavItemActive(item.path, pathname)) ?? NAV_ITEMS[0];
+
+type PartnerLoadingMode = NonNullable<Parameters<typeof LoadingSkeleton>[0]['mode']>;
+
+const getPartnerShellLoadingMode = (pathname: string | null | undefined): PartnerLoadingMode => {
+  const currentPath = pathname || '/';
+
+  if (currentPath === '/' || currentPath === '') {
+    return 'dashboard';
+  }
+
+  if (currentPath.startsWith('/orders') || currentPath.startsWith('/order')) {
+    return 'orders';
+  }
+
+  if (currentPath.startsWith('/menu')) {
+    return 'menu';
+  }
+
+  if (currentPath.startsWith('/profile')) {
+    return 'profile';
+  }
+
+  if (currentPath.startsWith('/complete-restaurant-details')) {
+    return 'setup';
+  }
+
+  return 'dashboard';
+};
+
+const renderTabIcon = (
+  iconName: React.ComponentProps<typeof MaterialCommunityIcons>['name'],
+  color: string,
+  focused: boolean
+) => (
+  <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
+    <MaterialCommunityIcons name={iconName} size={focused ? 22 : 21} color={focused ? '#ffffff' : color} />
+  </View>
+);
 
 function SidebarShell() {
   const pathname = usePathname();
@@ -114,19 +154,17 @@ export default function PartnerStackLayout() {
   const pathname = usePathname();
   const { width } = useWindowDimensions();
   const isWide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
+  const isCompactMobile = Platform.OS !== 'web' && width < 390;
 
   if (loading) {
-    return (
-      <View style={{ alignItems: 'center', backgroundColor: partnerTheme.background, flex: 1, justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={partnerTheme.accent} />
-      </View>
-    );
+    return <LoadingSkeleton mode={getPartnerShellLoadingMode(pathname)} />;
   }
 
   // Signed-out users never render the partner shell — send them to login
   // immediately instead of flashing the dashboard.
   if (!user) {
-    return <Redirect href={'/(auth)/login' as never} />;
+    const redirectTo = pathname && pathname !== '/login' ? pathname : '/';
+    return <Redirect href={{ pathname: '/(auth)/login', params: { redirectTo } } as never} />;
   }
 
   if (user.role !== 'restaurant') {
@@ -147,23 +185,52 @@ export default function PartnerStackLayout() {
         headerShown: false,
         tabBarActiveTintColor: partnerTheme.accentStrong,
         tabBarInactiveTintColor: partnerTheme.textMuted,
+        tabBarItemStyle: {
+          paddingBottom: 4,
+          paddingTop: 5,
+        },
+        tabBarLabelStyle: {
+          fontSize: isCompactMobile ? 10 : 12,
+          fontWeight: '700',
+          paddingBottom: 1,
+        },
         tabBarStyle: {
           backgroundColor: partnerTheme.surface,
           borderTopColor: partnerTheme.border,
-          height: 70,
-          paddingBottom: 8,
+          height: isCompactMobile ? 72 : 74,
+          paddingBottom: isCompactMobile ? 8 : 10,
           paddingTop: 8,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '700',
         },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
-      <Tabs.Screen name="orders" options={{ title: 'Orders' }} />
-      <Tabs.Screen name="menu" options={{ title: 'Menu' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Store' }} />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Dashboard',
+          tabBarIcon: ({ color, focused }) => renderTabIcon('view-dashboard-outline', color, focused),
+        }}
+      />
+      <Tabs.Screen
+        name="orders"
+        options={{
+          title: 'Orders',
+          tabBarIcon: ({ color, focused }) => renderTabIcon('clipboard-text-outline', color, focused),
+        }}
+      />
+      <Tabs.Screen
+        name="menu"
+        options={{
+          title: 'Menu',
+          tabBarIcon: ({ color, focused }) => renderTabIcon('silverware-fork-knife', color, focused),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Store',
+          tabBarIcon: ({ color, focused }) => renderTabIcon('storefront-outline', color, focused),
+        }}
+      />
       <Tabs.Screen name="order/[id]" options={{ href: null }} />
     </Tabs>
   );
@@ -297,6 +364,18 @@ const styles = StyleSheet.create({
     color: partnerTheme.textMuted,
     fontSize: 13,
     fontWeight: '700',
+  },
+  tabIconWrap: {
+    alignItems: 'center',
+    borderRadius: 14,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  tabIconWrapActive: {
+    backgroundColor: partnerTheme.accentSoft,
+    borderColor: partnerTheme.accent,
+    borderWidth: 1,
   },
   mainArea: {
     flex: 1,
