@@ -1297,7 +1297,9 @@ git commit -m "feat(admin): replace page loading blocks with skeleton rows"
 
 - [ ] **Step 1: Confirm the gates were left alone**
 
-Run: `git diff main --stat`
+Run: `git diff 6174962 --stat`
+
+`6174962` is the commit this plan's work started from. Do **not** diff against `main` — the branch carries unrelated uncommitted work and earlier feature commits that would flood the output.
 
 Confirm **none** of these files appear in the diff:
 
@@ -1312,7 +1314,7 @@ Confirm **none** of these files appear in the diff:
 
 - [ ] **Step 2: Confirm the inline spinners survive**
 
-Run: `git diff main -- "apps/customer/app/payment" "apps/customer/app/(customer)/delivery-location.tsx" "apps/dispatch/app/(dispatch)/profile.tsx"`
+Run: `git diff 6174962 -- "apps/customer/app/payment" "apps/customer/app/(customer)/delivery-location.tsx" "apps/dispatch/app/(dispatch)/profile.tsx"`
 
 Expected: empty. These four inline spinners (`payment/index.tsx:133`, `payment/callback.tsx:162`, `delivery-location.tsx:209`, `dispatch/profile.tsx:329`) stay as spinners, and so does the customer home catalog-refresh indicator at `home/index.tsx:417`.
 
