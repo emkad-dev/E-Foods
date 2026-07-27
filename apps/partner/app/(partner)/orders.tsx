@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { formatOrderStatusLabel, formatPaymentStatusLabel } from '../../src/domain/orders';
 import { getPartnerStatusColor } from '../../src/theme/statusColors';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
@@ -54,10 +55,13 @@ export default function PartnerOrdersScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingState}>
-        <ActivityIndicator size="large" color={partnerTheme.accent} />
-        <Text style={styles.loadingCopy}>Loading restaurant orders...</Text>
-      </View>
+      <SkeletonScreen>
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+      </SkeletonScreen>
     );
   }
 
