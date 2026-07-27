@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
+import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
@@ -24,7 +25,15 @@ export default function CustomerFavoritesScreen() {
   const loadFavorites = useCallback(async () => {
     setLoadingCatalog(true);
     try {
-      const [{ restaurants: catalog }] = await Promise.all([getPublishedRestaurants(), refreshFavorites()]);
+      const favoriteRestaurantIds = await refreshFavorites();
+
+      if (favoriteRestaurantIds.length === 0) {
+        setRestaurants([]);
+        setError(null);
+        return;
+      }
+
+      const { restaurants: catalog } = await getPublishedRestaurants();
       setRestaurants(catalog as FavoriteRestaurant[]);
       setError(null);
     } catch (nextError) {
@@ -47,9 +56,10 @@ export default function CustomerFavoritesScreen() {
 
   if (loadingCatalog || favoritesLoading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={customerTheme.accentStrong} />
-      </View>
+      <SkeletonScreen>
+        <SkeletonCard />
+        <SkeletonCard />
+      </SkeletonScreen>
     );
   }
 

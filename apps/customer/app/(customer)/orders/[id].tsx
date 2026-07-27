@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
   canCustomerCancelOrder,
@@ -66,9 +67,9 @@ export default function OrderTracking() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={customerTheme.accentStrong} />
-      </View>
+      <SkeletonScreen>
+        <SkeletonDetail />
+      </SkeletonScreen>
     );
   }
 

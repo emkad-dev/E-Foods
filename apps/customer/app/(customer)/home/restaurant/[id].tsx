@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -16,6 +15,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
+import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { customerTheme } from '../../../../src/theme/palette';
 import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
@@ -210,9 +210,9 @@ export default function RestaurantDetail() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={customerTheme.accentStrong} />
-      </View>
+      <SkeletonScreen>
+        <SkeletonDetail />
+      </SkeletonScreen>
     );
   }
 

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
   formatOrderStatusLabel,
@@ -191,9 +192,13 @@ export default function OrdersList() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={customerTheme.accentStrong} />
-      </View>
+      <SkeletonScreen>
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+      </SkeletonScreen>
     );
   }
 

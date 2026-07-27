@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -11,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
+import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useSupportThreadRealtime } from '../../src/hooks/useSupportThreadRealtime';
 import { getSupportThread, sendSupportMessage, type SupportMessage } from '../../src/services/customerSupport';
@@ -84,9 +84,11 @@ export default function SupportScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={customerTheme.accent} size="large" />
-        </View>
+        <SkeletonScreen>
+          <SkeletonListRow />
+          <SkeletonListRow />
+          <SkeletonListRow />
+        </SkeletonScreen>
       ) : (
         <FlatList
           ref={listRef}
