@@ -32,7 +32,7 @@ const INPUT_PLACEHOLDER_COLOR = '#6a7d76';
 export default function PartnerProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, linkRestaurant, loading: authLoading, signOut, user } = useAuth();
-  const { claimableRestaurants, error, loading, restaurant, restaurants, requiresVerifiedLink } = usePartnerRestaurant();
+  const { error, loading, restaurant, restaurants, requiresVerifiedLink } = usePartnerRestaurant();
   const [savingProfile, setSavingProfile] = useState(false);
   const [name, setName] = useState('');
   const [cuisine, setCuisine] = useState('');
@@ -53,7 +53,8 @@ export default function PartnerProfileScreen() {
   const [isOpen, setIsOpen] = useState(true);
   const [isPublished, setIsPublished] = useState(true);
 
-  const sortedRestaurants = [...restaurants].sort((left, right) => left.name.localeCompare(right.name));
+  const linkedRestaurantId = user?.restaurantId ?? restaurant?.id ?? null;
+  const linkableRestaurants = [...restaurants].sort((left, right) => left.name.localeCompare(right.name));
 
   useEffect(() => {
     setName(restaurant?.name ?? user?.displayName ?? '');
@@ -467,26 +468,20 @@ export default function PartnerProfileScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Restaurant linking</Text>
         <Text style={styles.helperText}>
-          Claim an unowned restaurant doc, or create a fresh one above and it will link automatically.
+          This is the restaurant record tied to your partner account. Create or update your store above and the link is kept in sync.
         </Text>
-        {sortedRestaurants.length === 0 ? (
-          <Text style={styles.metaLine}>No restaurant documents are available yet.</Text>
-        ) : claimableRestaurants.length === 0 ? (
-          <Text style={styles.metaLine}>Every existing restaurant is already managed by another partner account.</Text>
+        {linkableRestaurants.length === 0 ? (
+          <Text style={styles.metaLine}>
+            No restaurant is attached to this account yet. Complete your restaurant application to have one created for you.
+          </Text>
         ) : null}
-        {sortedRestaurants.map((candidate) => {
-          const isLinked = (user?.restaurantId ?? restaurant?.id) === candidate.id;
-          const claimedByAnotherPartner = Boolean(candidate.ownerId && candidate.ownerId !== user?.uid);
-          const ownedByThisPartner = Boolean(candidate.ownerId && candidate.ownerId === user?.uid);
+        {linkableRestaurants.map((candidate) => {
+          const isLinked = linkedRestaurantId === candidate.id;
 
           return (
             <View
               key={candidate.id}
-              style={[
-                styles.restaurantRow,
-                isLinked ? styles.restaurantRowActive : null,
-                claimedByAnotherPartner ? styles.restaurantRowDisabled : null,
-              ]}
+              style={[styles.restaurantRow, isLinked ? styles.restaurantRowActive : null]}
             >
               <View style={styles.restaurantMeta}>
                 <Text style={styles.restaurantName}>{candidate.name}</Text>
@@ -494,17 +489,14 @@ export default function PartnerProfileScreen() {
                   {candidate.cuisine ?? 'Cuisine not set'} | {candidate.address ?? 'Address not set'}
                 </Text>
                 <Text style={styles.restaurantId}>ID: {candidate.id}</Text>
-                <Text style={styles.restaurantId}>
-                  Ownership: {claimedByAnotherPartner ? 'Managed by another partner' : ownedByThisPartner ? 'Owned by this account' : 'Available to claim'}
-                </Text>
               </View>
               <TouchableOpacity
                 style={[styles.linkButton, isLinked ? styles.linkButtonActive : null]}
                 onPress={() => handleLinkRestaurant(candidate.id, candidate.name)}
-                disabled={loading || isLinked || claimedByAnotherPartner}
+                disabled={loading || isLinked}
               >
                 <Text style={[styles.linkButtonText, isLinked ? styles.linkButtonTextActive : null]}>
-                  {isLinked ? 'Linked' : claimedByAnotherPartner ? 'Unavailable' : 'Claim'}
+                  {isLinked ? 'Linked' : 'Confirm link'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -754,9 +746,6 @@ const styles = StyleSheet.create({
   restaurantRowActive: {
     backgroundColor: partnerTheme.accentSoft,
     borderColor: partnerTheme.accent,
-  },
-  restaurantRowDisabled: {
-    opacity: 0.55,
   },
   restaurantMeta: {
     flex: 1,
