@@ -34,6 +34,7 @@ import {
   runWithBackpressure,
 } from '../_shared/observability.ts';
 import {
+  canClaimRestaurantLink,
   dedupeRestaurantRowsById,
   resolvePartnerRestaurantScope,
 } from './partnerRestaurantScope.ts';
@@ -5672,8 +5673,19 @@ const handleNativeAction = async (
     }
 
     const existingOwnerId = sanitizeText(existingRestaurant.restaurant.ownerId);
-    if (existingOwnerId && existingOwnerId !== context.uid && context.role !== 'admin') {
-      fail(403, 'This restaurant is already managed by another partner account.');
+    const claimantAccount = await loadUserAccount(context.uid);
+    const claimantLinkedRestaurantId = sanitizeText(claimantAccount?.restaurantId);
+
+    if (
+      !canClaimRestaurantLink({
+        role: context.role,
+        uid: context.uid,
+        linkedRestaurantId: claimantLinkedRestaurantId,
+        restaurantId,
+        restaurantOwnerId: existingOwnerId,
+      })
+    ) {
+      fail(403, 'This restaurant is not available to link to this partner account.');
     }
 
     const linkedAt = nowIso();
