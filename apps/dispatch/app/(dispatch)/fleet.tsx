@@ -1,5 +1,6 @@
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { dispatchTheme } from '../../src/theme/palette';
 
@@ -9,10 +10,12 @@ export default function FleetScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingState}>
-        <ActivityIndicator size="large" color={dispatchTheme.accent} />
-        <Text style={styles.loadingCopy}>Loading rider fleet...</Text>
-      </View>
+      <SkeletonScreen>
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+      </SkeletonScreen>
     );
   }
 

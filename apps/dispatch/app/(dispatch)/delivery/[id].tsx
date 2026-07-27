@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import {
   formatOrderStatusLabel,
   getOrderStatusColor,
@@ -217,10 +218,9 @@ export default function DispatchDeliveryDetailScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={dispatchTheme.accent} />
-        <Text style={styles.loadingText}>Loading dispatch order...</Text>
-      </View>
+      <SkeletonScreen>
+        <SkeletonDetail />
+      </SkeletonScreen>
     );
   }
 
