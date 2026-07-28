@@ -337,3 +337,60 @@ export const getRestaurantOperatingHoursLabel = (restaurant: DiscoveryRestaurant
 
   return `${openingTime} - ${closingTime}`;
 };
+
+export type PlatformCoverage = {
+  isCovered: boolean;
+  nearestDeliverableKm: number | null;
+};
+
+/**
+ * Platform-level coverage: is FEASTY live where this customer pinned their address?
+ *
+ * Derived from the published catalogue, never configured — onboarding a delivery-capable
+ * partner in a new area opens that area automatically. Distinct from
+ * getRestaurantAvailability, which answers the narrower "can this one restaurant serve
+ * this one order".
+ */
+export const getPlatformCoverage = (
+  restaurants: DiscoveryRestaurant[],
+  deliveryLocation: AddressRecord | null
+): PlatformCoverage => {
+  const customerCoordinates = deliveryLocation
+    ? extractCoordinatePoint({
+        latitude: deliveryLocation.latitude,
+        longitude: deliveryLocation.longitude,
+      })
+    : null;
+
+  // Unknown location is never gated. The customer cannot reach delivery checkout without
+  // pinning an address, and the server check is the real boundary.
+  if (!customerCoordinates) {
+    return { isCovered: true, nearestDeliverableKm: null };
+  }
+
+  let isCovered = false;
+  let nearestDeliverableKm: number | null = null;
+
+  restaurants.forEach((restaurant) => {
+    if (!isRestaurantVisibleToCustomers(restaurant) || restaurant.supportsDelivery === false) {
+      return;
+    }
+
+    const restaurantCoordinates = extractRestaurantCoordinates(restaurant);
+    if (!restaurantCoordinates) {
+      return;
+    }
+
+    const distanceKm = calculateDistanceKm(restaurantCoordinates, customerCoordinates);
+
+    if (nearestDeliverableKm === null || distanceKm < nearestDeliverableKm) {
+      nearestDeliverableKm = distanceKm;
+    }
+
+    if (distanceKm <= getRestaurantServiceRadiusKm(restaurant)) {
+      isCovered = true;
+    }
+  });
+
+  return { isCovered, nearestDeliverableKm };
+};
