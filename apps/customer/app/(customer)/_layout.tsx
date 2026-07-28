@@ -4,6 +4,7 @@ import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { CoverageProvider } from '../../src/contexts/CoverageContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { customerTheme } from '../../src/theme/palette';
@@ -40,107 +41,109 @@ export default function CustomerLayout() {
 
   return (
     <FavoritesProvider>
-      <Tabs
-        screenOptions={{
-          tabBarActiveTintColor: customerTheme.accentStrong,
-          tabBarInactiveTintColor: customerTheme.textMuted,
-          tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
-          tabBarItemStyle: { paddingVertical: 2 },
-          tabBarStyle: {
-            backgroundColor: customerTheme.surface,
-            borderTopColor: customerTheme.border,
-            borderTopWidth: 1,
-            borderRadius: 20,
-            bottom: 12,
-            elevation: 8,
-            height: 58,
-            left: tabBarLeft,
-            paddingBottom: 6,
-            paddingTop: 6,
-            position: 'absolute',
-            shadowColor: '#684612',
-            shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 0.14,
-            shadowRadius: 14,
-            width: tabBarWidth,
-          },
-          headerShown: false,
-        }}
-      >
-        <Tabs.Screen
-          name="home"
-          options={{
-            title: 'Home',
-            tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="favorites"
-          options={{
-            title: 'Favorites',
-            headerShown: true,
-            headerLeft: () => <CustomerHeaderBackButton href="/home" />,
-            headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('heart', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="cart"
-          options={{
-            title: 'Cart',
-            headerShown: true,
-            headerLeft: () => <CustomerHeaderBackButton href="/home" />,
-            headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
-            tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('shopping-cart', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="orders"
-          options={{
-            title: 'Order',
+      <CoverageProvider>
+        <Tabs
+          screenOptions={{
+            tabBarActiveTintColor: customerTheme.accentStrong,
+            tabBarInactiveTintColor: customerTheme.textMuted,
+            tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
+            tabBarItemStyle: { paddingVertical: 2 },
+            tabBarStyle: {
+              backgroundColor: customerTheme.surface,
+              borderTopColor: customerTheme.border,
+              borderTopWidth: 1,
+              borderRadius: 20,
+              bottom: 12,
+              elevation: 8,
+              height: 58,
+              left: tabBarLeft,
+              paddingBottom: 6,
+              paddingTop: 6,
+              position: 'absolute',
+              shadowColor: '#684612',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.14,
+              shadowRadius: 14,
+              width: tabBarWidth,
+            },
             headerShown: false,
-            tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('list', color, focused),
           }}
-        />
-        <Tabs.Screen
-          name="profile"
-          options={{
-            title: 'Profile',
-            headerShown: false,
-            tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('user', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="deals"
-          options={{
-            href: null,
-            headerShown: true,
-            title: 'Deals',
-            headerRight: () => <AuthHeaderActions />,
-          }}
-        />
-        <Tabs.Screen
-          name="delivery-location"
-          options={{
-            href: null,
-            headerShown: false,
-            tabBarStyle: { display: 'none' },
-          }}
-        />
-        <Tabs.Screen
-          name="support"
-          options={{
-            href: null,
-            headerShown: true,
-            title: 'Help & Support',
-            headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
-            tabBarStyle: { display: 'none' },
-          }}
-        />
-      </Tabs>
+        >
+          <Tabs.Screen
+            name="home"
+            options={{
+              title: 'Home',
+              tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="favorites"
+            options={{
+              title: 'Favorites',
+              headerShown: true,
+              headerLeft: () => <CustomerHeaderBackButton href="/home" />,
+              headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('heart', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="cart"
+            options={{
+              title: 'Cart',
+              headerShown: true,
+              headerLeft: () => <CustomerHeaderBackButton href="/home" />,
+              headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
+              tabBarStyle: { display: 'none' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('shopping-cart', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="orders"
+            options={{
+              title: 'Order',
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('list', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="profile"
+            options={{
+              title: 'Profile',
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('user', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="deals"
+            options={{
+              href: null,
+              headerShown: true,
+              title: 'Deals',
+              headerRight: () => <AuthHeaderActions />,
+            }}
+          />
+          <Tabs.Screen
+            name="delivery-location"
+            options={{
+              href: null,
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+            }}
+          />
+          <Tabs.Screen
+            name="support"
+            options={{
+              href: null,
+              headerShown: true,
+              title: 'Help & Support',
+              headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
+              tabBarStyle: { display: 'none' },
+            }}
+          />
+        </Tabs>
+      </CoverageProvider>
     </FavoritesProvider>
   );
 }
