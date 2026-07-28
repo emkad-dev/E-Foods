@@ -22,6 +22,7 @@ import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
+import { getRestaurantAvailability } from '../../src/utils/restaurantAvailability';
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
@@ -69,6 +70,14 @@ export default function CartScreen() {
   const isPickupSupported = restaurant?.supportsPickup !== false;
   const deliveryComingSoon = Boolean(restaurant) && !isDeliverySupported;
   const isRestaurantPublished = restaurant?.isPublished === true;
+  // Per-restaurant delivery-radius check (Finding 2): platform coverage only tells us FEASTY
+  // serves this area at all — a customer can still be inside platform coverage but outside
+  // THIS restaurant's own deliveryRadiusKm. Only a delivery order can be blocked by this; a
+  // pickup order never touches a delivery radius. Only the 'out_of_area' reason applies here —
+  // 'closed' / 'pickup_only' / 'delivery_disabled' are already handled by the branches above.
+  const restaurantDeliveryAvailability = restaurant ? getRestaurantAvailability(restaurant, deliveryLocation) : null;
+  const isOutOfRestaurantDeliveryRange =
+    fulfillmentType === 'delivery' && restaurantDeliveryAvailability?.reason === 'out_of_area';
   const restaurantUnavailableReason =
     !isCovered
       ? COVERAGE_COMING_SOON_COPY
@@ -78,7 +87,9 @@ export default function CartScreen() {
           ? 'This restaurant is currently closed.'
             : !isRestaurantPublished
             ? 'This restaurant is currently unavailable for new orders.'
-            : fulfillmentType === 'pickup' && !isPickupSupported
+            : isOutOfRestaurantDeliveryRange
+              ? 'This restaurant does not deliver to your pinned address. Try pickup or choose a closer restaurant.'
+              : fulfillmentType === 'pickup' && !isPickupSupported
               ? 'Pickup is no longer available for this restaurant.'
               : belowMinimum
                 ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`

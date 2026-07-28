@@ -54,8 +54,17 @@ export const CoverageProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const checkCoverage = useCallback(
-    (location: AddressRecord | null): PlatformCoverage => getPlatformCoverage(restaurants, location),
-    [restaurants]
+    (location: AddressRecord | null): PlatformCoverage => {
+      // Mirror the fail-open guard below: loading or an empty catalogue (including a
+      // permanent-for-the-session fetch failure) must never gate a customer, whether the
+      // rendered isCovered is read or checkCoverage is called directly.
+      if (isLoading || restaurants.length === 0) {
+        return { isCovered: true, nearestDeliverableKm: null };
+      }
+
+      return getPlatformCoverage(restaurants, location);
+    },
+    [isLoading, restaurants]
   );
 
   const value = useMemo<CoverageContextValue>(() => {

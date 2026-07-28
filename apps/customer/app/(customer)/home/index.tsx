@@ -595,9 +595,20 @@ export default function HomeScreen() {
                     </Text>
                   ) : null}
                   <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
-                    {' · '}
-                    {restaurant.deliveryTime ?? '25-35 min'}
+                    {[
+                      availability.distanceKm
+                        ? `${availability.distanceKm.toFixed(1)} km away`
+                        // "Within your zone" only makes sense when we actually have coverage
+                        // here — in browse-only (out-of-coverage) mode this card can sit right
+                        // under the "not delivering here" banner, so say nothing rather than
+                        // contradict it.
+                        : isCovered
+                          ? 'Within your zone'
+                          : null,
+                      restaurant.deliveryTime ?? '25-35 min',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </Text>
                   {getRestaurantOperatingHoursLabel(restaurant) ? (
                     <Text style={styles.nearbyMeta} numberOfLines={1}>

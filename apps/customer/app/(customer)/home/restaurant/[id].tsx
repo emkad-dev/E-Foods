@@ -356,6 +356,12 @@ export default function RestaurantDetail() {
                     restaurant.isOpen === false || !isCovered ? styles.addButtonDisabled : null,
                   ]}
                   onPress={() => handleAddToCart(menuItem)}
+                  // Intentionally NOT `restaurant.isOpen === false || !isCovered` here: a
+                  // disabled TouchableOpacity swallows the press entirely, so an out-of-coverage
+                  // customer must still be able to tap Add and receive handleAddToCart's
+                  // COVERAGE_COMING_SOON explanation, rather than hit a dead button with no
+                  // feedback. The disabled STYLE reflects both conditions; `disabled` itself
+                  // stays keyed only on isOpen.
                   disabled={restaurant.isOpen === false}
                 >
                   <Text style={styles.addButtonText}>Add</Text>
