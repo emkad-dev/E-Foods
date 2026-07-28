@@ -1,11 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { submitPartnerApplication } from '../../src/services/partnerApplications';
+import {
+  RESTAURANT_ACCESS_TIMEOUT_MESSAGE,
+  RESTAURANT_ACCESS_POLL_INTERVAL_MS,
+  RESTAURANT_ACCESS_WAITING_MESSAGE,
+  RESTAURANT_ACCESS_WAIT_TIMEOUT_MS,
+  waitForRestaurantAccess,
+  runRestaurantCompletionHandoff,
+} from '../../src/services/restaurantCompletionHandoff';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
+import { supabase } from '../../src/services/supabase/config';
 import { partnerTheme } from '../../src/theme/palette';
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
@@ -15,6 +24,7 @@ export default function CompleteRestaurantDetailsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { clearError, error, loading, signOut, user } = useAuth();
+  const userRef = useRef(user);
   const [restaurantName, setRestaurantName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [cuisine, setCuisine] = useState<(typeof cuisineOptions)[number]>('Nigerian');
@@ -24,6 +34,14 @@ export default function CompleteRestaurantDetailsScreen() {
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  const [handoffError, setHandoffError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isWaitingForRestaurantAccess, setIsWaitingForRestaurantAccess] = useState(false);
+  const [submittedRestaurantId, setSubmittedRestaurantId] = useState<string | null>(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const contactName = useMemo(
     () => user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'Partner',
@@ -35,7 +53,23 @@ export default function CompleteRestaurantDetailsScreen() {
       clearError();
     }
 
+    if (handoffError || submittedRestaurantId) {
+      setHandoffError(null);
+      setSubmittedRestaurantId(null);
+    }
+
     setter(value);
+  };
+
+  const refreshAuthSession = async () => {
+    await supabase.auth.refreshSession().catch(() => undefined);
+  };
+
+  const completeRestaurantAccessHandoff = () => {
+    setHandoffError(null);
+    setIsWaitingForRestaurantAccess(false);
+    setSubmittedRestaurantId(null);
+    router.replace('/(partner)' as never);
   };
 
   const handlePickLogo = async () => {
@@ -59,6 +93,10 @@ export default function CompleteRestaurantDetailsScreen() {
   };
 
   const handleSubmit = async () => {
+    if (loading || isSubmitting || isWaitingForRestaurantAccess) {
+      return;
+    }
+
     const hasLatitude = latitude.trim().length > 0;
     const hasLongitude = longitude.trim().length > 0;
     const parsedLatitude = hasLatitude ? Number.parseFloat(latitude) : null;
@@ -80,6 +118,10 @@ export default function CompleteRestaurantDetailsScreen() {
     }
 
     try {
+      setIsSubmitting(true);
+      setHandoffError(null);
+      setIsWaitingForRestaurantAccess(true);
+
       const logoUpload = logoImage
         ? await uploadRestaurantAsset({
             kind: 'logos',
@@ -88,25 +130,89 @@ export default function CompleteRestaurantDetailsScreen() {
           })
         : null;
 
-      await submitPartnerApplication({
-        address: address.trim(),
-        contactName,
-        cuisine,
-        deliveryTime: deliveryTime?.trim() || undefined,
-        description: description.trim() || undefined,
-        latitude: hasLatitude ? parsedLatitude : null,
-        logoImage: logoUpload,
-        longitude: hasLongitude ? parsedLongitude : null,
-        phoneNumber: phoneNumber.trim(),
-        restaurantName: restaurantName.trim(),
+      const completionResult = await runRestaurantCompletionHandoff({
+        getCurrentUser: () => userRef.current,
+        onReady: async () => {
+          completeRestaurantAccessHandoff();
+        },
+        pollIntervalMs: RESTAURANT_ACCESS_POLL_INTERVAL_MS,
+        refreshAuthSession,
+        submitApplication: async () =>
+          submitPartnerApplication({
+            address: address.trim(),
+            contactName,
+            cuisine,
+            deliveryTime: deliveryTime?.trim() || undefined,
+            description: description.trim() || undefined,
+            latitude: hasLatitude ? parsedLatitude : null,
+            logoImage: logoUpload,
+            longitude: hasLongitude ? parsedLongitude : null,
+            phoneNumber: phoneNumber.trim(),
+            restaurantName: restaurantName.trim(),
+          }),
+        timeoutMs: RESTAURANT_ACCESS_WAIT_TIMEOUT_MS,
       });
 
-      Alert.alert('Restaurant details saved', 'Your partner account is ready.');
-      router.replace('/(partner)' as never);
+      if (completionResult.kind === 'timeout') {
+        setSubmittedRestaurantId(completionResult.application.restaurantId);
+        setIsWaitingForRestaurantAccess(false);
+        setHandoffError(RESTAURANT_ACCESS_TIMEOUT_MESSAGE);
+        Alert.alert('Restaurant access still syncing', RESTAURANT_ACCESS_TIMEOUT_MESSAGE);
+      }
     } catch (nextError: any) {
+      setIsWaitingForRestaurantAccess(false);
       Alert.alert('Unable to save details', nextError.message ?? 'Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
+  const handleRetryAccessSync = async () => {
+    if (!submittedRestaurantId || loading || isSubmitting || isWaitingForRestaurantAccess) {
+      return;
+    }
+
+    setHandoffError(null);
+    setIsWaitingForRestaurantAccess(true);
+
+    const completionResult = await waitForRestaurantAccess({
+      getCurrentUser: () => userRef.current,
+      pollIntervalMs: RESTAURANT_ACCESS_POLL_INTERVAL_MS,
+      refreshAuthSession,
+      submittedRestaurantId,
+      timeoutMs: RESTAURANT_ACCESS_WAIT_TIMEOUT_MS,
+    });
+
+    if (completionResult.kind === 'ready') {
+      completeRestaurantAccessHandoff();
+      return;
+    }
+
+    if (completionResult.kind === 'timeout') {
+      setIsWaitingForRestaurantAccess(false);
+      setHandoffError(RESTAURANT_ACCESS_TIMEOUT_MESSAGE);
+      Alert.alert('Restaurant access still syncing', RESTAURANT_ACCESS_TIMEOUT_MESSAGE);
+    }
+  };
+
+  const primaryActionLabel = loading || isSubmitting
+    ? 'Saving details...'
+    : isWaitingForRestaurantAccess
+      ? RESTAURANT_ACCESS_WAITING_MESSAGE
+      : handoffError && submittedRestaurantId
+        ? 'Check access again'
+        : 'Save restaurant details';
+
+  const handlePrimaryAction = () => {
+    if (handoffError && submittedRestaurantId && !isSubmitting && !isWaitingForRestaurantAccess && !loading) {
+      void handleRetryAccessSync();
+      return;
+    }
+
+    void handleSubmit();
+  };
+
+  const isInteractionDisabled = loading || isSubmitting || isWaitingForRestaurantAccess;
 
   return (
     <ScrollView
@@ -124,6 +230,19 @@ export default function CompleteRestaurantDetailsScreen() {
 
       <View style={styles.card}>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {handoffError ? (
+          <View style={styles.statusCallout}>
+            <Text style={styles.statusCalloutTitle}>Restaurant access not ready yet</Text>
+            <Text style={styles.statusCalloutText}>{handoffError}</Text>
+          </View>
+        ) : isWaitingForRestaurantAccess ? (
+          <View style={styles.statusCallout}>
+            <Text style={styles.statusCalloutTitle}>Awaiting restaurant access</Text>
+            <Text style={styles.statusCalloutText}>
+              We saved your details and refreshed your session. Once the account flips to restaurant, we will open the partner dashboard.
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.identityRow}>
           <View style={styles.identityBubble}>
@@ -135,34 +254,34 @@ export default function CompleteRestaurantDetailsScreen() {
           </View>
         </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Restaurant name"
-          placeholderTextColor="#8e8e8e"
-          value={restaurantName}
-          onChangeText={handleFieldChange(setRestaurantName)}
-          editable={!loading}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Phone number"
-          placeholderTextColor="#8e8e8e"
-          keyboardType="phone-pad"
-          value={phoneNumber}
-          onChangeText={handleFieldChange(setPhoneNumber)}
-          editable={!loading}
-        />
+          <TextInput
+            style={styles.input}
+            placeholder="Restaurant name"
+            placeholderTextColor="#8e8e8e"
+            value={restaurantName}
+            onChangeText={handleFieldChange(setRestaurantName)}
+            editable={!isInteractionDisabled}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Phone number"
+            placeholderTextColor="#8e8e8e"
+            keyboardType="phone-pad"
+            value={phoneNumber}
+            onChangeText={handleFieldChange(setPhoneNumber)}
+            editable={!isInteractionDisabled}
+          />
 
         <View style={styles.logoRow}>
           <View style={styles.logoPreview}>
             {logoImage ? <Image source={{ uri: logoImage }} style={styles.logoImage} /> : <Text style={styles.logoPreviewText}>Logo</Text>}
           </View>
           <View style={styles.logoActions}>
-            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading}>
+            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={isInteractionDisabled}>
               <Text style={styles.logoButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
             </TouchableOpacity>
             {logoImage ? (
-              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading}>
+              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={isInteractionDisabled}>
                 <Text style={styles.removeLogoText}>Remove</Text>
               </TouchableOpacity>
             ) : null}
@@ -176,7 +295,7 @@ export default function CompleteRestaurantDetailsScreen() {
               key={option}
               style={[styles.chip, cuisine === option ? styles.chipActive : null]}
               onPress={() => setCuisine(option)}
-              disabled={loading}
+              disabled={isInteractionDisabled}
             >
               <Text style={[styles.chipText, cuisine === option ? styles.chipTextActive : null]}>{option}</Text>
             </TouchableOpacity>
@@ -190,7 +309,7 @@ export default function CompleteRestaurantDetailsScreen() {
           multiline
           value={address}
           onChangeText={handleFieldChange(setAddress)}
-          editable={!loading}
+          editable={!isInteractionDisabled}
         />
         <TextInput
           style={[styles.input, styles.textArea]}
@@ -199,7 +318,7 @@ export default function CompleteRestaurantDetailsScreen() {
           multiline
           value={description}
           onChangeText={handleFieldChange(setDescription)}
-          editable={!loading}
+          editable={!isInteractionDisabled}
         />
 
         <Text style={styles.sectionLabel}>Typical delivery time</Text>
@@ -209,7 +328,7 @@ export default function CompleteRestaurantDetailsScreen() {
               key={option}
               style={[styles.chip, deliveryTime === option ? styles.chipActive : null]}
               onPress={() => setDeliveryTime(option)}
-              disabled={loading}
+              disabled={isInteractionDisabled}
             >
               <Text style={[styles.chipText, deliveryTime === option ? styles.chipTextActive : null]}>{option}</Text>
             </TouchableOpacity>
@@ -224,7 +343,7 @@ export default function CompleteRestaurantDetailsScreen() {
             keyboardType="decimal-pad"
             value={latitude}
             onChangeText={handleFieldChange(setLatitude)}
-            editable={!loading}
+            editable={!isInteractionDisabled}
           />
           <TextInput
             style={[styles.input, styles.coordinateInput]}
@@ -233,15 +352,15 @@ export default function CompleteRestaurantDetailsScreen() {
             keyboardType="decimal-pad"
             value={longitude}
             onChangeText={handleFieldChange(setLongitude)}
-            editable={!loading}
+            editable={!isInteractionDisabled}
           />
         </View>
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Saving details...' : 'Save restaurant details'}</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={handlePrimaryAction} disabled={isInteractionDisabled}>
+          <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={isInteractionDisabled}>
           <Text style={styles.secondaryButtonText}>Sign out</Text>
         </TouchableOpacity>
       </View>
@@ -462,5 +581,24 @@ const styles = StyleSheet.create({
     color: partnerTheme.textMuted,
     fontSize: 14,
     fontWeight: '700',
+  },
+  statusCallout: {
+    backgroundColor: partnerTheme.cream,
+    borderColor: partnerTheme.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 14,
+  },
+  statusCalloutTitle: {
+    color: partnerTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  statusCalloutText: {
+    color: partnerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
   },
 });
