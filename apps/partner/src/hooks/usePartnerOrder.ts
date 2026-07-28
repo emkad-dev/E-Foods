@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
-import { usePartnerRestaurant } from './usePartnerRestaurant';
 import type { PartnerOrder } from './usePartnerOrders';
 import { getPartnerRestaurantOrder } from '../services/partnerReadModel';
 import { supabase } from '../services/supabase/config';
 
 export const usePartnerOrder = (orderId: string | null | undefined) => {
-  const { restaurant } = usePartnerRestaurant();
   const [order, setOrder] = useState<PartnerOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,6 +12,7 @@ export const usePartnerOrder = (orderId: string | null | undefined) => {
   useEffect(() => {
     if (!orderId) {
       setOrder(null);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -22,6 +21,7 @@ export const usePartnerOrder = (orderId: string | null | undefined) => {
 
     const loadOrder = async () => {
       try {
+        setLoading(true);
         const nextData = await getPartnerRestaurantOrder(orderId);
 
         if (cancelled) {
@@ -61,17 +61,9 @@ export const usePartnerOrder = (orderId: string | null | undefined) => {
     };
   }, [orderId]);
 
-  const hasAccess = useMemo(() => {
-    if (!order || !restaurant) {
-      return true;
-    }
-
-    return order.restaurantId === restaurant.id;
-  }, [order, restaurant]);
-
   return {
-    error: hasAccess ? error : 'This order does not belong to your restaurant profile.',
+    error,
     loading,
-    order: hasAccess ? order : null,
+    order,
   };
 };

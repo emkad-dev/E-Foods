@@ -6,7 +6,7 @@ type FavoritesContextType = {
   favoriteRestaurantIds: string[];
   isFavoriteRestaurant: (restaurantId: string) => boolean;
   loading: boolean;
-  refreshFavorites: () => Promise<void>;
+  refreshFavorites: () => Promise<string[]>;
   toggleFavorite: (restaurantId: string, isFavorite?: boolean) => Promise<boolean>;
 };
 
@@ -20,13 +20,14 @@ export const FavoritesProvider = ({ children }: { children: React.ReactNode }) =
   const refreshFavorites = useCallback(async () => {
     if (!user) {
       setFavoriteRestaurantIds([]);
-      return;
+      return [];
     }
 
     setLoading(true);
     try {
       const result = await listFavoriteRestaurants();
       setFavoriteRestaurantIds(result.restaurantIds);
+      return result.restaurantIds;
     } finally {
       setLoading(false);
     }

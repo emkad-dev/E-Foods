@@ -1,6 +1,6 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -12,15 +12,23 @@ export const unstable_settings = {
   initialRouteName: 'home',
 };
 
+const TAB_BAR_MAX_WIDTH = 380;
+const TAB_BAR_SIDE_INSET = 24;
+
 const renderTabIcon = (iconName: React.ComponentProps<typeof FontAwesome>['name'], color: string, focused: boolean) => (
   <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
-    <FontAwesome name={iconName} size={focused ? 21 : 20} color={focused ? '#ffffff' : color} />
+    <FontAwesome name={iconName} size={focused ? 19 : 18} color={focused ? '#ffffff' : color} />
   </View>
 );
 
 export default function CustomerLayout() {
   const { loading } = useAuth();
+  const { width } = useWindowDimensions();
   usePushNotifications();
+
+  // Keep the floating bar off the screen edges, and stop it stretching across wide web viewports.
+  const tabBarWidth = Math.min(width - TAB_BAR_SIDE_INSET * 2, TAB_BAR_MAX_WIDTH);
+  const tabBarLeft = Math.max((width - tabBarWidth) / 2, TAB_BAR_SIDE_INSET);
 
   if (loading) {
     return (
@@ -36,25 +44,25 @@ export default function CustomerLayout() {
         screenOptions={{
           tabBarActiveTintColor: customerTheme.accentStrong,
           tabBarInactiveTintColor: customerTheme.textMuted,
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '700', paddingBottom: 2 },
-          tabBarItemStyle: { paddingVertical: 6 },
+          tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
+          tabBarItemStyle: { paddingVertical: 2 },
           tabBarStyle: {
             backgroundColor: customerTheme.surface,
             borderTopColor: customerTheme.border,
             borderTopWidth: 1,
-            borderRadius: 22,
-            bottom: 10,
+            borderRadius: 20,
+            bottom: 12,
             elevation: 8,
-            height: 70,
-            left: 10,
-            paddingBottom: 10,
-            paddingTop: 8,
+            height: 58,
+            left: tabBarLeft,
+            paddingBottom: 6,
+            paddingTop: 6,
             position: 'absolute',
-            right: 10,
             shadowColor: '#684612',
             shadowOffset: { width: 0, height: 8 },
             shadowOpacity: 0.14,
             shadowRadius: 14,
+            width: tabBarWidth,
           },
           headerShown: false,
         }}
@@ -119,6 +127,7 @@ export default function CustomerLayout() {
           options={{
             href: null,
             headerShown: false,
+            tabBarStyle: { display: 'none' },
           }}
         />
         <Tabs.Screen
@@ -139,10 +148,10 @@ export default function CustomerLayout() {
 const styles = StyleSheet.create({
   tabIconWrap: {
     alignItems: 'center',
-    borderRadius: 14,
-    height: 34,
+    borderRadius: 12,
+    height: 30,
     justifyContent: 'center',
-    width: 34,
+    width: 30,
   },
   tabIconWrapActive: {
     backgroundColor: customerTheme.accentSoft,

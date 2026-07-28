@@ -10,12 +10,6 @@ import {
   logEdgeEvent,
 } from '../_shared/observability.ts';
 
-type RestaurantApprovalRow = {
-  approvedAt?: string | null;
-  restaurantId: string;
-  status: string;
-};
-
 type RestaurantRecordRow = {
   address?: string | null;
   closingTime?: string | null;
@@ -51,11 +45,10 @@ const sanitizeOptionalText = (value: unknown) => {
 
 const toRestaurantResponse = (
   restaurant: RestaurantRecordRow,
-  approval: RestaurantApprovalRow | null
 ) => ({
   address: sanitizeOptionalText(restaurant.address),
-  approvalStatus: approval?.status ?? (restaurant.isPublished ? 'approved' : 'pending'),
-  approvedAt: approval?.approvedAt ?? null,
+  approvalStatus: restaurant.isPublished ? 'approved' : 'pending',
+  approvedAt: null,
   cuisine: sanitizeOptionalText(restaurant.cuisine),
   deliveryFee: restaurant.deliveryFee ?? 0,
   deliveryRadiusKm: restaurant.deliveryRadiusKm ?? null,
@@ -79,36 +72,19 @@ const toRestaurantResponse = (
 });
 
 const loadPublishedRestaurantCatalog = async () => {
-  const [{ data: restaurants, error: restaurantError }, { data: approvals, error: approvalError }] =
-    await Promise.all([
-      serviceClient
-        .from('RestaurantRecord')
-        .select(
-          'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
-        )
-        .eq('isPublished', true)
-        .order('updatedAt', { ascending: false }),
-      serviceClient
-        .from('RestaurantApproval')
-        .select('restaurantId,status,approvedAt')
-        .eq('status', 'approved'),
-    ]);
+  const { data: restaurants, error: restaurantError } = await serviceClient
+    .from('RestaurantRecord')
+    .select(
+      'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt'
+    )
+    .eq('isPublished', true)
+    .order('updatedAt', { ascending: false });
 
   if (restaurantError) {
     throw new Error(restaurantError.message);
   }
 
-  if (approvalError) {
-    throw new Error(approvalError.message);
-  }
-
-  const approvalByRestaurantId = new Map(
-    (approvals ?? []).map((approval) => [approval.restaurantId, approval] as const)
-  );
-
-  return (restaurants ?? []).map((restaurant) =>
-    toRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)
-  );
+  return (restaurants ?? []).map((restaurant) => toRestaurantResponse(restaurant));
 };
 
 Deno.serve(async (request) => {
