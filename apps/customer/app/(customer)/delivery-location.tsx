@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
+import { useCoverage } from '../../src/contexts/CoverageContext';
 import {
   getCurrentCoordinates,
   reverseGeocode,
@@ -23,6 +24,11 @@ import {
 } from '../../src/services/deviceLocation';
 import { LOCATION_ERROR_MESSAGES, coordinatesLabel } from '../../src/services/locationResolution';
 import { fallbackAddressFromCoords } from '../../src/utils/deliveryLocation';
+import {
+  COVERAGE_COMING_SOON_COPY,
+  COVERAGE_COMING_SOON_TITLE,
+  describeNearestKitchen,
+} from '../../src/utils/coverageMessaging';
 
 type Status = {
   tone: 'error' | 'info';
@@ -34,6 +40,7 @@ const LIVE_GEOCODE_INTERVAL_MS = 15000;
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
   const { deliveryLocation, setDeliveryLocation } = useCart();
+  const { isCovered, nearestDeliverableKm } = useCoverage();
   const [address, setAddress] = useState(deliveryLocation?.address ?? '');
   const [label, setLabel] = useState(deliveryLocation?.label ?? deliveryLocation?.shortAddress ?? '');
   const [note, setNote] = useState(deliveryLocation?.note ?? '');
@@ -158,6 +165,13 @@ export default function DeliveryLocationScreen() {
     });
 
     stopLiveTracking();
+
+    // Coverage is recomputed from the address we just saved, so it is only accurate on the
+    // next render. Gate on the coordinates being saved and let the panel below react.
+    if (!isCovered) {
+      return;
+    }
+
     router.replace('/cart');
   };
 
@@ -177,6 +191,16 @@ export default function DeliveryLocationScreen() {
           <Text style={styles.subtitle}>{liveTracking ? 'Live location on' : 'Manual entry'}</Text>
         </View>
       </View>
+
+      {!isCovered ? (
+        <View style={styles.comingSoonPanel}>
+          <Text style={styles.comingSoonTitle}>{COVERAGE_COMING_SOON_TITLE}</Text>
+          <Text style={styles.comingSoonCopy}>{COVERAGE_COMING_SOON_COPY}</Text>
+          {describeNearestKitchen(nearestDeliverableKm) ? (
+            <Text style={styles.comingSoonMeta}>{describeNearestKitchen(nearestDeliverableKm)}</Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
@@ -414,5 +438,31 @@ const styles = StyleSheet.create({
   stopButton: {
     backgroundColor: '#dff4e7',
     marginTop: 12,
+  },
+  comingSoonPanel: {
+    backgroundColor: '#ffe0b2',
+    borderColor: '#ef6c00',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+  },
+  comingSoonTitle: {
+    color: '#7a3c00',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  comingSoonCopy: {
+    color: '#7a3c00',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  comingSoonMeta: {
+    color: '#7a3c00',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
   },
 });
