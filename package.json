@@ -33,7 +33,6 @@
   "dependencies": {
     "@sentry/browser": "^10.62.0",
     "@supabase/supabase-js": "^2.105.4",
-    "@vercel/speed-insights": "^2.0.0",
     "jose": "^6.2.3",
     "jwt-decode": "^4.0.0",
     "react-native-url-polyfill": "^3.0.0",

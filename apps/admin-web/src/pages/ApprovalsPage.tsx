@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import {
@@ -65,7 +65,7 @@ export default function ApprovalsPage() {
     <div className="page">
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
       {actionError ? <ErrorBanner message={actionError} /> : null}
-      {loading ? <LoadingBlock label="Loading approval queues…" /> : null}
+      {loading ? <SkeletonRows count={5} /> : null}
 
       <div className="card">
         <div className="card-title-row">

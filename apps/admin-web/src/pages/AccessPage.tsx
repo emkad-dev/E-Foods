@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
 import type { AppRole } from '../../../../packages/domain/src';
@@ -157,7 +157,7 @@ export default function AccessPage() {
           <h3 className="card-title">Platform users</h3>
           <span className="muted">{users.length} accounts</span>
         </div>
-        {loading ? <LoadingBlock label="Loading users…" /> : null}
+        {loading ? <SkeletonRows count={6} /> : null}
         {!loading && users.length === 0 ? (
           <EmptyState title="No users" body="Platform accounts will appear here." />
         ) : (

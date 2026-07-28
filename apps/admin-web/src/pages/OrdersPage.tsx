@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import RangePicker from '../components/RangePicker';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
@@ -115,7 +115,7 @@ export default function OrdersPage() {
       </div>
 
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-      {loading ? <LoadingBlock label="Loading orders…" /> : null}
+      {loading ? <SkeletonRows count={8} /> : null}
 
       <div className="card">
         {filteredOrders.length === 0 && !loading ? (

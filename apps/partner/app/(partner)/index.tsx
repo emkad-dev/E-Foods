@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
-  ActivityIndicator,
   Alert,
   Platform,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
@@ -106,10 +106,14 @@ export default function PartnerHome() {
 
   if (loading) {
     return (
-      <View style={styles.loadingState}>
-        <ActivityIndicator size="large" color={partnerTheme.accent} />
-        <Text style={styles.loadingCopy}>Loading partner dashboard...</Text>
-      </View>
+      <SkeletonScreen>
+        <Skeleton width="50%" height={22} />
+        <Skeleton width="70%" height={13} style={{ marginBottom: 26, marginTop: 10 }} />
+        <Skeleton height={92} radius={14} style={{ marginBottom: 20 }} />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+      </SkeletonScreen>
     );
   }
 

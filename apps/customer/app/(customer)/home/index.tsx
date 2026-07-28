@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
+import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
 import {
@@ -351,9 +352,13 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={customerTheme.accentStrong} />
-      </View>
+      <SkeletonScreen>
+        <Skeleton width="55%" height={22} />
+        <Skeleton width="35%" height={13} style={{ marginBottom: 24, marginTop: 10 }} />
+        <Skeleton height={44} radius={22} style={{ marginBottom: 24 }} />
+        <SkeletonCard />
+        <SkeletonCard />
+      </SkeletonScreen>
     );
   }
 
