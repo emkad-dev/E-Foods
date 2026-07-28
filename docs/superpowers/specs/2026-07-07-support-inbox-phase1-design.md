@@ -39,7 +39,7 @@ canned responses, CSAT ratings, SLA timers. All deferred to later phases.
 ## Architecture / data flow
 
 ```
-Customer app (Expo)                Admin panel (Vercel SPA)
+Customer app (Expo)                Admin panel (Cloudflare Pages SPA)
   Support screen                     Support Inbox (/inbox)
       | insert message                     ^  live list + thread
       v                                     |  (Realtime)

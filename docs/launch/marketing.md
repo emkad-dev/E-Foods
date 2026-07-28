@@ -21,7 +21,7 @@ Prepare a minimal landing page, launch copy, and social assets for release.
 ## Fastest Path
 
 - Use a landing page builder such as Webflow, Framer, Carrd, or a simple hosted template.
-- Or clone a Vercel template and customize it.
+- Or clone a Cloudflare Pages template and customize it.
 
 ## Social Assets
 
