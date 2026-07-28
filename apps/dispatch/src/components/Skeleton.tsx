@@ -52,7 +52,11 @@ export function Skeleton({ width = '100%', height = 14, radius = 8, style }: Ske
 }
 
 export function SkeletonScreen({ children }: { children: React.ReactNode }) {
-  return <View style={styles.screen}>{children}</View>;
+  return (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel="Loading" style={styles.screen}>
+      {children}
+    </View>
+  );
 }
 
 export function SkeletonListRow() {
