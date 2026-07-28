@@ -31,9 +31,10 @@ export const CoverageProvider = ({ children }: { children: ReactNode }) => {
           setRestaurants(catalog as DiscoveryRestaurant[]);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         // A catalogue failure must not gate anyone. Leave the list empty and stay
         // permissive via the isLoading guard below.
+        console.warn('Failed to load coverage catalog', error);
       })
       .finally(() => {
         if (!cancelled) {
