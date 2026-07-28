@@ -1,18 +1,24 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { AddressRecord } from '../domain/entities';
 import { getPublishedRestaurants } from '../services/publicRestaurantReadModel';
-import { getPlatformCoverage, type DiscoveryRestaurant } from '../utils/restaurantAvailability';
+import { getPlatformCoverage, type DiscoveryRestaurant, type PlatformCoverage } from '../utils/restaurantAvailability';
 import { useCart } from './CartContext';
 
 type CoverageContextValue = {
   isCovered: boolean;
   nearestDeliverableKm: number | null;
   isLoading: boolean;
+  checkCoverage: (location: AddressRecord | null) => PlatformCoverage;
 };
+
+// Fails open: a consumer that somehow renders outside CoverageProvider must never be gated.
+const failOpenCheckCoverage = (): PlatformCoverage => ({ isCovered: true, nearestDeliverableKm: null });
 
 const CoverageContext = createContext<CoverageContextValue>({
   isCovered: true,
   nearestDeliverableKm: null,
   isLoading: true,
+  checkCoverage: failOpenCheckCoverage,
 });
 
 export const CoverageProvider = ({ children }: { children: ReactNode }) => {
@@ -47,15 +53,20 @@ export const CoverageProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
+  const checkCoverage = useCallback(
+    (location: AddressRecord | null): PlatformCoverage => getPlatformCoverage(restaurants, location),
+    [restaurants]
+  );
+
   const value = useMemo<CoverageContextValue>(() => {
     // Never flash a coming-soon screen at someone who may well be in range.
     if (isLoading || restaurants.length === 0) {
-      return { isCovered: true, nearestDeliverableKm: null, isLoading };
+      return { isCovered: true, nearestDeliverableKm: null, isLoading, checkCoverage };
     }
 
     const coverage = getPlatformCoverage(restaurants, deliveryLocation);
-    return { ...coverage, isLoading };
-  }, [deliveryLocation, isLoading, restaurants]);
+    return { ...coverage, isLoading, checkCoverage };
+  }, [checkCoverage, deliveryLocation, isLoading, restaurants]);
 
   return <CoverageContext.Provider value={value}>{children}</CoverageContext.Provider>;
 };

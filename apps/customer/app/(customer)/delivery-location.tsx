@@ -40,7 +40,7 @@ const LIVE_GEOCODE_INTERVAL_MS = 15000;
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
   const { deliveryLocation, setDeliveryLocation } = useCart();
-  const { isCovered, nearestDeliverableKm } = useCoverage();
+  const { checkCoverage, isCovered, nearestDeliverableKm } = useCoverage();
   const [address, setAddress] = useState(deliveryLocation?.address ?? '');
   const [label, setLabel] = useState(deliveryLocation?.label ?? deliveryLocation?.shortAddress ?? '');
   const [note, setNote] = useState(deliveryLocation?.note ?? '');
@@ -154,7 +154,7 @@ export default function DeliveryLocationScreen() {
       return;
     }
 
-    setDeliveryLocation({
+    const nextLocation = {
       address: trimmedAddress,
       label: trimmedLabel || null,
       latitude,
@@ -162,13 +162,13 @@ export default function DeliveryLocationScreen() {
       note: note.trim() || null,
       shortAddress: trimmedLabel || trimmedAddress,
       coordinateSource,
-    });
+    };
 
+    setDeliveryLocation(nextLocation);
     stopLiveTracking();
 
-    // Coverage is recomputed from the address we just saved, so it is only accurate on the
-    // next render. Gate on the coordinates being saved and let the panel below react.
-    if (!isCovered) {
+    // Synchronous verdict for the address just saved — isCovered is a render behind.
+    if (!checkCoverage(nextLocation).isCovered) {
       return;
     }
 
@@ -176,6 +176,7 @@ export default function DeliveryLocationScreen() {
   };
 
   const hasCoordinates = latitude !== null && longitude !== null;
+  const nearestKitchenDescription = describeNearestKitchen(nearestDeliverableKm);
 
   return (
     <KeyboardAvoidingView
@@ -196,8 +197,8 @@ export default function DeliveryLocationScreen() {
         <View style={styles.comingSoonPanel}>
           <Text style={styles.comingSoonTitle}>{COVERAGE_COMING_SOON_TITLE}</Text>
           <Text style={styles.comingSoonCopy}>{COVERAGE_COMING_SOON_COPY}</Text>
-          {describeNearestKitchen(nearestDeliverableKm) ? (
-            <Text style={styles.comingSoonMeta}>{describeNearestKitchen(nearestDeliverableKm)}</Text>
+          {nearestKitchenDescription ? (
+            <Text style={styles.comingSoonMeta}>{nearestKitchenDescription}</Text>
           ) : null}
         </View>
       ) : null}
