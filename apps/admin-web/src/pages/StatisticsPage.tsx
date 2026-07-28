@@ -15,7 +15,7 @@ import {
 } from 'recharts';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import RangePicker from '../components/RangePicker';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import {
@@ -59,7 +59,7 @@ export default function StatisticsPage() {
       </div>
 
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-      {loading ? <LoadingBlock label="Loading statistics…" /> : null}
+      {loading ? <SkeletonRows count={4} /> : null}
 
       <div className="card">
         <div className="card-title-row">

@@ -4,7 +4,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import KpiCard from '../components/KpiCard';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import RangePicker from '../components/RangePicker';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
@@ -54,7 +54,7 @@ export default function OverviewPage() {
       </div>
 
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-      {loading ? <LoadingBlock label="Loading the admin overview…" /> : null}
+      {loading ? <SkeletonRows count={4} /> : null}
 
       <div className="kpi-grid">
         <KpiCard

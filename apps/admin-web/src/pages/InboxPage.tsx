@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useSupportRealtime } from '../lib/useSupportRealtime';
 import {
@@ -119,7 +119,7 @@ export default function InboxPage() {
             </button>
           ))}
         </div>
-        {loading ? <LoadingBlock label="Loading inbox…" /> : null}
+        {loading ? <SkeletonRows count={6} /> : null}
         {error ? <ErrorBanner message={error} /> : null}
         {!loading && conversations.length === 0 ? (
           <EmptyState title="No conversations" body="Customer messages will show up here." />

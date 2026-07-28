@@ -794,3 +794,34 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Skeleton loaders ---------- */
+
+.skeleton-block {
+  background: var(--surface-muted);
+  border-radius: 8px;
+  animation: skeleton-pulse 1.3s ease-in-out infinite;
+}
+
+.skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    background: var(--surface-muted);
+  }
+  50% {
+    background: var(--border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block {
+    animation: none;
+  }
+}
