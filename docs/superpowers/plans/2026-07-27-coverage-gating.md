@@ -504,7 +504,9 @@ git commit -m "feat(app-rpc): reject delivery orders outside the restaurant serv
 
 **Interfaces:**
 - Consumes: `getPlatformCoverage`, `PlatformCoverage` from Task 1; `useCart()` from `apps/customer/src/contexts/CartContext.tsx`; `getPublishedRestaurants` from `apps/customer/src/services/publicRestaurantReadModel.ts:115`.
-- Produces: `useCoverage(): { isCovered: boolean; nearestDeliverableKm: number | null; isLoading: boolean }`, plus `COVERAGE_COMING_SOON_TITLE`, `COVERAGE_COMING_SOON_COPY`, `COVERAGE_UNAVAILABLE_TAG`, and `describeNearestKitchen(nearestDeliverableKm)`.
+- Produces: `useCoverage(): { isCovered: boolean; nearestDeliverableKm: number | null; isLoading: boolean; checkCoverage: (location: AddressRecord | null) => PlatformCoverage }`, plus `COVERAGE_COMING_SOON_TITLE`, `COVERAGE_COMING_SOON_COPY`, `COVERAGE_UNAVAILABLE_TAG`, and `describeNearestKitchen(nearestDeliverableKm)`.
+
+`checkCoverage` evaluates an arbitrary location against the loaded catalogue **synchronously**. It exists because `isCovered` is React state: a screen that has just called `setDeliveryLocation` cannot read a coverage verdict for the address it just saved until the next render. Any caller deciding something in the same tick as a save must use `checkCoverage(theAddressBeingSaved)`, never `isCovered`. Rendering may use `isCovered` freely.
 
 - [ ] **Step 1: Write the copy module**
 
@@ -669,24 +671,38 @@ import {
 Add beside the existing `useCart()` call (`:36`):
 
 ```tsx
-  const { isCovered, nearestDeliverableKm } = useCoverage();
+  const { checkCoverage, isCovered, nearestDeliverableKm } = useCoverage();
 ```
 
 - [ ] **Step 3: Keep the customer on the screen when out of coverage**
 
-Replace the tail of `handleSave` (`:160-161`) so the save still happens but the redirect does not:
+Rework `handleSave` so the save still happens but the redirect does not. **Gate on `checkCoverage(nextLocation)`, never on `isCovered`.** `setDeliveryLocation` is plain `useState` — it only schedules a re-render, so `isCovered` on the following line still describes the *previous* address. Reading it there inverts the gate: a first-ever pin (previous location `null`, treated as covered by design) would redirect an out-of-coverage customer straight to the cart.
+
+Build the saved location once, reuse it for both the save and the check:
 
 ```tsx
+    const nextLocation = {
+      address: trimmedAddress,
+      label: trimmedLabel || null,
+      latitude,
+      longitude,
+      note: note.trim() || null,
+      shortAddress: trimmedLabel || trimmedAddress,
+      coordinateSource,
+    };
+
+    setDeliveryLocation(nextLocation);
     stopLiveTracking();
 
-    // Coverage is recomputed from the address we just saved, so it is only accurate on the
-    // next render. Gate on the coordinates being saved and let the panel below react.
-    if (!isCovered) {
+    // Synchronous verdict for the address just saved — isCovered is a render behind.
+    if (!checkCoverage(nextLocation).isCovered) {
       return;
     }
 
     router.replace('/cart');
 ```
+
+The rendered panel below still reads `isCovered`, which is correct: by the time it renders, the context has recomputed from the newly saved address.
 
 - [ ] **Step 4: Render the coming-soon panel**
 
@@ -1034,7 +1050,7 @@ git commit -m "feat(customer): block checkout when the pinned address is out of 
 
 - [ ] `node --test apps/customer/src/utils/restaurantAvailability.test.ts` — passes
 - [ ] `deno test supabase/functions/app-rpc/deliveryCoverage.test.ts` — passes
-- [ ] `deno check supabase/functions/app-rpc/index.ts` — clean
+- [ ] `deno check supabase/functions/app-rpc/index.ts` — NOT clean, and was not clean before this plan: the file carries 210 pre-existing strict-mode errors at the branch point. The check is only useful as a delta. Task 2 measured +3 errors, all of the class `'restaurant' is possibly null`, matching the idiom already used two lines above the insertion point.
 - [ ] `npm run lint:customer` — no new errors
 - [ ] End-to-end with an in-range pinned address: browse, add to cart, place an order — unchanged from before this plan
 - [ ] End-to-end with an out-of-coverage pinned address: banner on home, full catalogue browsable nearest-first, Add buttons explain and refuse, checkout disabled, delivery-location panel shown
