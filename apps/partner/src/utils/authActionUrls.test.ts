@@ -3,15 +3,18 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildPartnerAuthActionUrl } from './authActionUrls.js';
+import { buildPartnerActionCodeSettings, buildPartnerAuthActionUrl } from './authActionUrls.js';
 
-test('builds a web URL for reset password links', () => {
-  assert.equal(
-    buildPartnerAuthActionUrl('reset-password', {
+test('builds the canonical partner web reset-password URL', () => {
+  assert.deepEqual(
+    buildPartnerActionCodeSettings('reset-password', {
+      appScheme: 'feasty-partner',
       isWeb: true,
-      webOrigin: 'https://partner.feasty.com',
+      webOrigin: 'https://partner.feasty.com.ng',
     }),
-    'https://partner.feasty.com/reset-password'
+    {
+    url: 'https://partner.feasty.com.ng/reset-password',
+    }
   );
 });
 

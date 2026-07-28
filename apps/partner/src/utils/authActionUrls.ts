@@ -16,7 +16,7 @@ export const buildPartnerAuthActionUrl = (path: string, options: BuildPartnerAut
   const isWeb = options.isWeb ?? (typeof window !== 'undefined' && typeof window.location?.origin === 'string');
 
   if (isWeb) {
-    const origin = options.webOrigin ?? window.location.origin;
+    const origin = options.webOrigin?.trim() || window.location.origin;
 
     if (origin) {
       return new URL(`/${normalizedPath}`, origin).toString();
@@ -26,3 +26,14 @@ export const buildPartnerAuthActionUrl = (path: string, options: BuildPartnerAut
   const appScheme = (options.appScheme ?? 'feasty-partner').trim() || 'feasty-partner';
   return `${appScheme}://${normalizedPath}`;
 };
+
+export const buildPartnerActionCodeSettings = (
+  path: string,
+  options: BuildPartnerAuthActionUrlOptions = {}
+) => ({
+  url: buildPartnerAuthActionUrl(path, {
+    appScheme: options.appScheme,
+    isWeb: options.isWeb,
+    webOrigin: options.webOrigin,
+  }),
+});

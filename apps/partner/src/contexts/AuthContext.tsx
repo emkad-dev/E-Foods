@@ -26,7 +26,7 @@ import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
-import { buildPartnerAuthActionUrl } from '../utils/authActionUrls';
+import { buildPartnerActionCodeSettings } from '../utils/authActionUrls';
 import {
   resolvePartnerAccessState,
   type PartnerUserDocumentState,
@@ -58,9 +58,6 @@ const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const getActionCodeSettings = (path: string) => ({
-  url: buildPartnerAuthActionUrl(path, { appScheme: appEnv.appScheme }),
-});
 
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -348,7 +345,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await sendVerificationEmail(
           supabase,
           authUser.email ?? email,
-          getActionCodeSettings(appEnv.verifyEmailPath)
+          buildPartnerActionCodeSettings(appEnv.verifyEmailPath, {
+            appScheme: appEnv.appScheme,
+            webOrigin: appEnv.partnerWebOrigin,
+          })
         );
         verificationEmailSent = true;
       } catch (verificationError) {
@@ -397,7 +397,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      await sendPasswordReset(supabase, email, getActionCodeSettings(appEnv.resetPasswordPath));
+      await sendPasswordReset(supabase, email, buildPartnerActionCodeSettings(appEnv.resetPasswordPath, {
+        appScheme: appEnv.appScheme,
+        webOrigin: appEnv.partnerWebOrigin,
+      }));
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);
