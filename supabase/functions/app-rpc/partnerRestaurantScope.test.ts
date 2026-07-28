@@ -106,6 +106,34 @@ Deno.test('a partner cannot claim a restaurant owned by another partner', () => 
   );
 });
 
+Deno.test('a partner with no linked restaurant cannot self-assign an unowned restaurant via profile upsert', () => {
+  equals(
+    canClaimRestaurantLink({
+      role: 'restaurant',
+      uid: 'user-1',
+      linkedRestaurantId: '',
+      restaurantId: 'rest-unowned',
+      restaurantOwnerId: '',
+    }),
+    false,
+    'unowned self-assign via upsert'
+  );
+});
+
+Deno.test('an admin can claim an unowned restaurant via profile upsert', () => {
+  equals(
+    canClaimRestaurantLink({
+      role: 'admin',
+      uid: 'admin-1',
+      linkedRestaurantId: '',
+      restaurantId: 'rest-unowned',
+      restaurantOwnerId: '',
+    }),
+    true,
+    'admin unowned claim via upsert'
+  );
+});
+
 Deno.test('duplicate rows collapse to the first occurrence', () => {
   equals(
     dedupeRestaurantRowsById([{ id: 'a' }, { id: 'b' }, { id: 'a' }]),

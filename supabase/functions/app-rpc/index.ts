@@ -5589,8 +5589,16 @@ const handleNativeAction = async (
       }
 
       const existingOwnerId = sanitizeText(currentRestaurant.ownerId);
-      if (existingOwnerId && existingOwnerId !== context.uid && !isAdmin) {
-        fail(403, 'This restaurant is already managed by another partner account.');
+      if (
+        !canClaimRestaurantLink({
+          role: context.role,
+          uid: context.uid,
+          linkedRestaurantId,
+          restaurantId,
+          restaurantOwnerId: existingOwnerId,
+        })
+      ) {
+        fail(403, 'This restaurant is not available to link to this partner account.');
       }
     }
 
