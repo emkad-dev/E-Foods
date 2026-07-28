@@ -6,6 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
+import { useCoverage } from '../../src/contexts/CoverageContext';
 import type { RestaurantDocument } from '../../src/domain/entities';
 import {
   type CheckoutPaymentMethod,
@@ -20,6 +21,7 @@ import { getPublishedRestaurantDetail } from '../../src/services/publicRestauran
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
+import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
@@ -42,6 +44,7 @@ export default function CartScreen() {
     updateQuantity,
   } = useCart();
   const { user } = useAuth();
+  const { isCovered } = useCoverage();
   const [deliveryNote, setDeliveryNote] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
   const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
@@ -67,17 +70,19 @@ export default function CartScreen() {
   const deliveryComingSoon = Boolean(restaurant) && !isDeliverySupported;
   const isRestaurantPublished = restaurant?.isPublished === true;
   const restaurantUnavailableReason =
-    !restaurant
-      ? 'This restaurant is no longer available for checkout.'
-      : restaurant.isOpen === false
-        ? 'This restaurant is currently closed.'
-          : !isRestaurantPublished
-          ? 'This restaurant is currently unavailable for new orders.'
-          : fulfillmentType === 'pickup' && !isPickupSupported
-            ? 'Pickup is no longer available for this restaurant.'
-            : belowMinimum
-              ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
-              : null;
+    !isCovered
+      ? COVERAGE_COMING_SOON_COPY
+      : !restaurant
+        ? 'This restaurant is no longer available for checkout.'
+        : restaurant.isOpen === false
+          ? 'This restaurant is currently closed.'
+            : !isRestaurantPublished
+            ? 'This restaurant is currently unavailable for new orders.'
+            : fulfillmentType === 'pickup' && !isPickupSupported
+              ? 'Pickup is no longer available for this restaurant.'
+              : belowMinimum
+                ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
+                : null;
 
   useEffect(() => {
     setDeliveryNote(deliveryLocation?.note ?? '');
