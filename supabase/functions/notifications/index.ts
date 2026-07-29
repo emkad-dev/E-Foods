@@ -6,6 +6,7 @@ import { sendPushNotificationsToRoles, sendPushNotificationsToUsers } from '../_
 import {
   createEdgeObservation,
   finishEdgeObservation,
+  getErrorStatus,
   jsonResponse,
   runWithBackpressure,
 } from '../_shared/observability.ts';
@@ -116,7 +117,10 @@ Deno.serve(async (request) => {
     finishEdgeObservation(observation, { status: response.status });
     return response;
   } catch (error) {
-    const status = error instanceof NotificationError ? error.status : 500;
+    // getErrorStatus for parity with app-rpc/auth-gateway's error handling
+    // convention (NotificationError carries a numeric .status, so this is a
+    // behavior-preserving swap, not a status change).
+    const status = getErrorStatus(error);
     const response = jsonResponse(status, {
       error: {
         message: error instanceof Error ? error.message : 'Unexpected notification failure.',

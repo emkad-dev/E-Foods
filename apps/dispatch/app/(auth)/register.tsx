@@ -75,7 +75,7 @@ export default function DispatchRegisterScreen() {
           <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
           <Text style={styles.title}>Create your rider login</Text>
           <Text style={styles.copy}>
-            We'll set up your login first. After you confirm your email, complete your dispatch area and vehicle
+            We’ll set up your login first. After you confirm your email, complete your dispatch area and vehicle
             details from the rider setup screen.
           </Text>
         </View>

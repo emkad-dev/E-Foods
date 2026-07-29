@@ -37,6 +37,12 @@ jobs:
       - name: Typecheck partner
         run: npm run typecheck:partner
 
+      - name: Typecheck customer
+        run: npm run typecheck:customer
+
+      - name: Typecheck dispatch
+        run: npm run typecheck:dispatch
+
       - name: Lint customer
         run: npm run lint:customer
 
@@ -52,8 +58,18 @@ jobs:
       - name: Prisma generate
         run: npm run db:generate
 
-      - name: Unit tests placeholder
-        run: echo "No central test script configured; add tests and replace this step."
+      - name: Use Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Runs test:node then test:deno (see root package.json). Deno coverage
+      # is 11 of 12 supabase/functions/**/*.test.ts files -- auth-gateway/
+      # otp.test.ts is excluded because importing it triggers a module-level
+      # throw from _shared/client.ts (SUPABASE_URL/SERVICE_ROLE_KEY required)
+      # unrelated to the test assertions themselves; see fixwave report.
+      - name: Unit tests
+        run: npm test
 
   migrate:
     name: Deploy migrations (main only)

@@ -73,7 +73,7 @@ export default function PartnerRegisterScreen() {
           <Text style={styles.eyebrow}>FEASTY Partner</Text>
           <Text style={styles.title}>Create your partner login</Text>
           <Text style={styles.copy}>
-            We'll set up your login first. After you verify your email, sign in to complete your restaurant details and open the partner dashboard.
+            We’ll set up your login first. After you verify your email, sign in to complete your restaurant details and open the partner dashboard.
           </Text>
         </View>
 

@@ -1,6 +1,7 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { serviceClient } from '../_shared/client.ts';
+import { constantTimeEqual } from '../_shared/crypto.ts';
 import { ClientSafeError, logEdgeEvent } from '../_shared/observability.ts';
 import { normalizePhone, phoneRejectionMessage } from '../_shared/phone.ts';
 import { sendOtpMessage, type OtpChannel } from './termii.ts';
@@ -42,13 +43,6 @@ export const hashOtpCode = async (phoneE164: string, code: string): Promise<stri
   );
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${phoneE164}:${code}`));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
-};
-
-const constantTimeEqual = (a: string, b: string): boolean => {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 };
 
 export const parseOtpPhone = (value: unknown): { e164: string } => {

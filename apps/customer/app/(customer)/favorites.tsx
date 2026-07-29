@@ -22,25 +22,33 @@ export default function CustomerFavoritesScreen() {
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Tracks whether a catalog fetch has been attempted-and-settled (success
+  // OR failure) for the CURRENT favoriteRestaurantIds -- see catalogPending
+  // below. settledForIds is reset the moment favoriteRestaurantIds changes
+  // reference, synchronously during render rather than in an effect: an
+  // effect-based reset would still lag a paint behind (the same lag that
+  // caused the original "No favorites yet" flash this component used to
+  // have), so it has to happen in the same commit that receives the new ids.
+  const [settledForIds, setSettledForIds] = useState(favoriteRestaurantIds);
+  const [catalogSettled, setCatalogSettled] = useState(false);
+  if (favoriteRestaurantIds !== settledForIds) {
+    setSettledForIds(favoriteRestaurantIds);
+    setCatalogSettled(false);
+  }
+
+  // refreshFavorites() only updates FavoritesContext's own state and resolves to void --
+  // it does not hand back the refreshed ids. Reading the context's favoriteRestaurantIds
+  // here (instead of trusting a return value that doesn't exist) also avoids shadowing
+  // the context value of the same name, which previously crashed with a TypeError on
+  // every load. The catalog fetch itself is driven by the effect below, which reacts to
+  // favoriteRestaurantIds once the context has re-rendered with the fresh list.
   const loadFavorites = useCallback(async () => {
-    setLoadingCatalog(true);
     try {
-      const favoriteRestaurantIds = await refreshFavorites();
-
-      if (favoriteRestaurantIds.length === 0) {
-        setRestaurants([]);
-        setError(null);
-        return;
-      }
-
-      const { restaurants: catalog } = await getPublishedRestaurants();
-      setRestaurants(catalog as FavoriteRestaurant[]);
+      await refreshFavorites();
       setError(null);
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
       setError(message);
-    } finally {
-      setLoadingCatalog(false);
     }
   }, [refreshFavorites]);
 
@@ -48,13 +56,67 @@ export default function CustomerFavoritesScreen() {
     void loadFavorites();
   }, [loadFavorites]);
 
+  useEffect(() => {
+    if (favoriteRestaurantIds.length === 0) {
+      setRestaurants([]);
+      setError(null);
+      setLoadingCatalog(false);
+      setCatalogSettled(true);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingCatalog(true);
+
+    getPublishedRestaurants()
+      .then(({ restaurants: catalog }) => {
+        if (!cancelled) {
+          setRestaurants(catalog as FavoriteRestaurant[]);
+          setError(null);
+        }
+      })
+      .catch((nextError) => {
+        if (!cancelled) {
+          const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
+          setError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingCatalog(false);
+          // Marks this fetch attempt as settled (success OR failure) for
+          // the ids it was resolved for. catalogPending below reads this
+          // instead of restaurants.length === 0, otherwise a catalog that
+          // legitimately resolves empty (nothing published) would look
+          // indistinguishable from "still loading" and hang on the
+          // skeleton forever.
+          setCatalogSettled(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [favoriteRestaurantIds]);
+
   const favoriteIdSet = useMemo(() => new Set(favoriteRestaurantIds), [favoriteRestaurantIds]);
   const favoriteRestaurants = useMemo(
     () => restaurants.filter((restaurant) => favoriteIdSet.has(restaurant.id)),
     [favoriteIdSet, restaurants]
   );
 
-  if (loadingCatalog || favoritesLoading) {
+  // On cold start / post-login / deep link, this component can mount and
+  // paint once before the catalog-fetch effect (above) has had a chance to
+  // flip loadingCatalog back to true for a non-empty favorites list --
+  // React 18 flushes passive effects after paint, so relying on effect
+  // ordering alone lets that first paint render "No favorites yet" for a
+  // user who actually has favorites. catalogSettled is reset synchronously
+  // during render (see above) rather than in that effect, so it already
+  // reads false by the time this paints, closing the gap without touching
+  // the effect's own timing.
+  const catalogPending = favoriteRestaurantIds.length > 0 && !catalogSettled;
+
+  if (loadingCatalog || favoritesLoading || catalogPending) {
     return (
       <SkeletonScreen>
         <SkeletonCard />

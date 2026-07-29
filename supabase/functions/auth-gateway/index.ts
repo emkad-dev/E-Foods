@@ -1,7 +1,7 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { corsHeaders } from '../_shared/cors.ts';
-import { getBearerToken } from '../_shared/auth.ts';
+import { getBearerToken, verifySupabaseJwt } from '../_shared/auth.ts';
 import {
   ClientSafeError, clientErrorMessage, createEdgeObservation,
   finishEdgeObservation, getErrorStatus, jsonResponse, logEdgeEvent,
@@ -12,6 +12,7 @@ import { safeAuthMessage } from './errors.ts';
 import { enforceRateLimit, POLICIES } from './ratelimit.ts';
 import { writeAudit } from './audit.ts';
 import { gotrue } from './gotrue.ts';
+import { parseOtpChannel, parseOtpPhone, requestOtp, verifyOtp } from './otp.ts';
 
 const respond = (status: number, body: unknown) =>
   jsonResponse(status, body, corsHeaders);
@@ -76,6 +77,34 @@ Deno.serve(async (request) => {
       await writeAudit({ event: 'refresh', ip, success: r.ok, reason: r.ok ? undefined : `gotrue_${r.status}` });
       if (!r.ok) throw new ClientSafeError(401, safeAuthMessage('refresh', r.status));
       response = respond(200, r.body);
+    } else if (route === 'otp-request') {
+      const { claims } = await verifySupabaseJwt(request); // 401 if missing/invalid
+      const uid = String(claims.sub);
+      const { e164 } = parseOtpPhone(payload.phone);
+      const channel = parseOtpChannel(payload.channel);
+      // Resend cooldown per user, hourly cap per phone (on top of the IP ceiling).
+      await enforceRateLimit(`otp-send:${uid}`, POLICIES.otpSendPerUser);
+      await enforceRateLimit(`otp-send-phone:${e164}`, POLICIES.otpSendPerPhone);
+      const result = await requestOtp(uid, e164, channel);
+      await writeAudit({ event: 'otp_request', subject: e164, ip, success: true, reason: channel });
+      response = respond(200, result);
+    } else if (route === 'otp-verify') {
+      const { claims } = await verifySupabaseJwt(request);
+      const uid = String(claims.sub);
+      const { e164 } = parseOtpPhone(payload.phone);
+      // Fail CLOSED: code-guessing protection must survive an RPC outage.
+      await enforceRateLimit(`otp-verify:${uid}`, POLICIES.otpVerifyPerUser, { failClosed: true });
+      try {
+        const result = await verifyOtp(uid, e164, payload.code);
+        await writeAudit({ event: 'otp_verify', subject: e164, ip, success: true });
+        response = respond(200, result);
+      } catch (error) {
+        await writeAudit({
+          event: 'otp_verify', subject: e164, ip, success: false,
+          reason: error instanceof ClientSafeError ? 'rejected' : 'error',
+        });
+        throw error;
+      }
     } else { // logout
       const token = getBearerToken(request); // throws ClientSafeError(401) if missing
       const r = await gotrue.logout(token);

@@ -13,6 +13,9 @@ export const POLICIES = {
   loginFailure: { limit: 5,  windowSecs: 600, lockoutSecs: 900 } as RlPolicy,  // 5 fails/10m -> 15m lock
   signupPerIp:  { limit: 10, windowSecs: 3600, lockoutSecs: 900 } as RlPolicy,
   refreshPerIp: { limit: 60, windowSecs: 600, lockoutSecs: 300 } as RlPolicy,
+  otpSendPerUser:  { limit: 1,  windowSecs: 60,   lockoutSecs: 60 } as RlPolicy,   // resend cooldown
+  otpSendPerPhone: { limit: 5,  windowSecs: 3600, lockoutSecs: 1800 } as RlPolicy, // hourly cap per number
+  otpVerifyPerUser: { limit: 10, windowSecs: 600, lockoutSecs: 600 } as RlPolicy,  // brute-force brake
 };
 
 const TOO_MANY = 'Too many attempts. Please try again later.';
