@@ -126,7 +126,10 @@ Deno.serve(async (request) => {
   const observation = createEdgeObservation(request, 'public-catalog');
 
   if (request.method === 'OPTIONS') {
-    const response = new Response('ok', {
+    // A 204 response must not carry a body — Deno throws a TypeError otherwise,
+    // and this branch runs outside the try/catch below, so the throw escapes as a
+    // bodiless 500 with no CORS headers and every browser preflight fails.
+    const response = new Response(null, {
       headers: corsHeaders,
       status: 204,
     });
