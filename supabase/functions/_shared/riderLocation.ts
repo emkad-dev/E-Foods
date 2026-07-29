@@ -56,6 +56,44 @@ export const isRiderLocationLive = (
   return nowMs - parsed < ttlMs;
 };
 
+// One row from ebuy_nearest_riders, already ordered nearest-first by the geo
+// query. Mirrors the SQL return type, hence snake_case.
+export type RankedRiderRow = {
+  rider_id: string;
+  latitude: number;
+  longitude: number;
+  metres: number;
+};
+
+// Joins distance-ranked geo rows to their durable profile rows.
+//
+// Two things this exists to guarantee, both easy to break by inlining:
+//   1. The geo query's ordering is preserved. A lookup keyed by id (the `in`
+//      filter that fetches the profiles) returns rows in arbitrary order, so the
+//      ranked list — not the map — drives iteration.
+//   2. A ranked rider with no profile row is dropped, not emitted as a partial
+//      record. That happens when a profile is deleted while a live location row
+//      survives, or when a dispatch account pings before its application is
+//      approved.
+export const joinRankedRiders = <
+  T extends { id: string; latitude?: number | null; longitude?: number | null }
+>(
+  ranked: RankedRiderRow[],
+  ridersById: Map<string, T>
+): Array<{ rider: T; metres: number }> =>
+  ranked.flatMap((row) => {
+    const rider = ridersById.get(row.rider_id);
+    if (!rider) {
+      return [];
+    }
+    return [
+      {
+        rider: { ...rider, latitude: row.latitude, longitude: row.longitude },
+        metres: Math.round(row.metres),
+      },
+    ];
+  });
+
 // Overlays a live fix onto the durable rider row. Returns the input unchanged
 // when there is no live row or it has aged out, so every caller degrades to the
 // DispatchRiderRecord columns — at most DURABLE_SYNC_INTERVAL_SECONDS stale.

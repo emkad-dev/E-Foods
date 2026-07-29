@@ -2,7 +2,9 @@ import {
   RIDER_LIVE_TTL_MS,
   buildRiderLocationUpsert,
   isRiderLocationLive,
+  joinRankedRiders,
   mergeRiderLiveLocation,
+  type RankedRiderRow,
 } from './riderLocation.ts';
 
 const expectEqual = (actual: unknown, expected: unknown, label: string) => {
@@ -122,6 +124,61 @@ Deno.test('mergeRiderLiveLocation keeps durable columns when there is no live ro
   const merged = mergeRiderLiveLocation(rider, undefined, NOW_MS);
   expectEqual(merged.latitude, 1, 'latitude');
   expectEqual(merged.longitude, 2, 'longitude');
+});
+
+const rankedRow = (riderId: string, metres: number, latitude = 6.5, longitude = 3.3): RankedRiderRow => ({
+  rider_id: riderId,
+  latitude,
+  longitude,
+  metres,
+});
+
+Deno.test('joinRankedRiders preserves the geo query ordering, not map ordering', () => {
+  const ranked = [rankedRow('c', 100), rankedRow('a', 500), rankedRow('b', 900)];
+  // Deliberately inserted in a different order from `ranked`.
+  const ridersById = new Map([
+    ['a', { id: 'a' }],
+    ['b', { id: 'b' }],
+    ['c', { id: 'c' }],
+  ]);
+  const joined = joinRankedRiders(ranked, ridersById);
+  expectJsonEqual(
+    joined.map((entry) => entry.rider.id),
+    ['c', 'a', 'b'],
+    'ordering'
+  );
+});
+
+Deno.test('joinRankedRiders skips ranked riders with no profile row', () => {
+  const ranked = [rankedRow('ghost', 100), rankedRow('real', 200)];
+  const ridersById = new Map([['real', { id: 'real' }]]);
+  const joined = joinRankedRiders(ranked, ridersById);
+  expectEqual(joined.length, 1, 'orphan dropped');
+  expectEqual(joined[0].rider.id, 'real', 'survivor');
+});
+
+Deno.test('joinRankedRiders overlays the live coordinates onto the profile row', () => {
+  const ranked = [rankedRow('a', 100, 6.4550, 3.4210)];
+  const ridersById = new Map([['a', { id: 'a', latitude: 1, longitude: 2 }]]);
+  const joined = joinRankedRiders(ranked, ridersById);
+  expectEqual(joined[0].rider.latitude, 6.4550, 'latitude overlaid');
+  expectEqual(joined[0].rider.longitude, 3.4210, 'longitude overlaid');
+});
+
+Deno.test('joinRankedRiders rounds metres to whole numbers', () => {
+  const ranked = [rankedRow('a', 1234.567)];
+  const ridersById = new Map([['a', { id: 'a' }]]);
+  expectEqual(joinRankedRiders(ranked, ridersById)[0].metres, 1235, 'rounded');
+});
+
+Deno.test('joinRankedRiders returns an empty list for empty input', () => {
+  expectEqual(joinRankedRiders([], new Map()).length, 0, 'empty');
+});
+
+Deno.test('joinRankedRiders does not mutate the profile rows it is given', () => {
+  const rider = { id: 'a', latitude: 1, longitude: 2 };
+  joinRankedRiders([rankedRow('a', 100, 9.9, 8.8)], new Map([['a', rider]]));
+  expectEqual(rider.latitude, 1, 'original untouched');
 });
 
 Deno.test('mergeRiderLiveLocation does not mutate the input rider', () => {

@@ -38,7 +38,9 @@ import {
 import {
   DURABLE_SYNC_INTERVAL_SECONDS,
   buildRiderLocationUpsert,
+  joinRankedRiders,
   mergeRiderLiveLocation,
+  type RankedRiderRow,
   type RiderLiveLocationRow,
 } from '../_shared/riderLocation.ts';
 import { validatePromoTrack } from './promoTrack.ts';
@@ -804,13 +806,6 @@ const buildDispatchRiderResponse = (rider: DispatchRiderRow) => ({
   zone: sanitizeText(rider.zone),
 });
 
-type NearestRiderRow = {
-  rider_id: string;
-  latitude: number;
-  longitude: number;
-  metres: number;
-};
-
 // Ranks live riders by true great-circle distance from a point, nearest first.
 // Returns [] when the geo function is unavailable or nothing is in range, so
 // callers always have a well-formed list rather than an error to handle.
@@ -819,7 +814,7 @@ const findNearestRiders = async (
   longitude: number,
   radiusMetres: number,
   limit: number
-): Promise<NearestRiderRow[]> => {
+): Promise<RankedRiderRow[]> => {
   const { data, error } = await serviceClient.rpc('ebuy_nearest_riders', {
     p_latitude: latitude,
     p_longitude: longitude,
@@ -6254,27 +6249,12 @@ const handleNativeAction = async (
       ((riderRows ?? []) as DispatchRiderRow[]).map((rider) => [rider.id, rider])
     );
 
-    // Preserve the distance ordering from the geo query — the `in` filter above
-    // returns rows in arbitrary order. A rider present in rider_live_location
-    // but missing from DispatchRiderRecord is skipped rather than emitted as a
-    // partial record; that happens if a profile is deleted while a live row
-    // survives.
-    const ordered = nearest.flatMap((row) => {
-      const rider = ridersById.get(row.rider_id);
-      if (!rider) {
-        return [];
-      }
-      return [
-        {
-          ...buildDispatchRiderResponse({
-            ...rider,
-            latitude: row.latitude,
-            longitude: row.longitude,
-          }),
-          metres: Math.round(row.metres),
-        },
-      ];
-    });
+    // joinRankedRiders preserves the geo ordering and drops ranked ids with no
+    // profile row — see _shared/riderLocation.ts for why both matter.
+    const ordered = joinRankedRiders(nearest, ridersById).map(({ rider, metres }) => ({
+      ...buildDispatchRiderResponse(rider),
+      metres,
+    }));
 
     return json(200, { data: { riders: ordered } });
   }
