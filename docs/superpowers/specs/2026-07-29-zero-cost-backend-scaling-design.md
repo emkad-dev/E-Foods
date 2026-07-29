@@ -276,6 +276,7 @@ throughput becomes a problem, with or without `pgmq`.
 | `pg_net` call fails | Logged in `net._http_response`; pg_cron backstop drains on its normal tick |
 | Trigger fires during a cron drain | `runWithBackpressure` returns 429; the drain in progress covers the work |
 | Rider stops pinging | Excluded from live queries after 90 s by the `updated_at` filter |
+| Dispatch JWT with no `DispatchRiderRecord` row (e.g. application still pending) | **Behaviour change:** previously 404 from the existence check; now 200 with an orphan `rider_live_location` row. Harmless on the read side — `dispatchGetRiders` iterates `DispatchRiderRecord` so orphans are invisible, and `dispatchGetNearestRiders` skips ids missing from it rather than emitting a partial record. Orphans are bounded by the number of dispatch accounts and are overwritten in place, never appended. |
 
 Every row degrades to current behaviour. No new external dependency exists to
 fail.
