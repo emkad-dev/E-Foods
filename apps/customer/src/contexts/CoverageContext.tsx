@@ -6,17 +6,17 @@ import { useCart } from './CartContext';
 
 type CoverageContextValue = {
   isCovered: boolean;
-  nearestDeliverableKm: number | null;
+  nearestOrderableKm: number | null;
   isLoading: boolean;
   checkCoverage: (location: AddressRecord | null) => PlatformCoverage;
 };
 
 // Fails open: a consumer that somehow renders outside CoverageProvider must never be gated.
-const failOpenCheckCoverage = (): PlatformCoverage => ({ isCovered: true, nearestDeliverableKm: null });
+const failOpenCheckCoverage = (): PlatformCoverage => ({ isCovered: true, nearestOrderableKm: null });
 
 const CoverageContext = createContext<CoverageContextValue>({
   isCovered: true,
-  nearestDeliverableKm: null,
+  nearestOrderableKm: null,
   isLoading: true,
   checkCoverage: failOpenCheckCoverage,
 });
@@ -59,7 +59,7 @@ export const CoverageProvider = ({ children }: { children: ReactNode }) => {
       // permanent-for-the-session fetch failure) must never gate a customer, whether the
       // rendered isCovered is read or checkCoverage is called directly.
       if (isLoading || restaurants.length === 0) {
-        return { isCovered: true, nearestDeliverableKm: null };
+        return { isCovered: true, nearestOrderableKm: null };
       }
 
       return getPlatformCoverage(restaurants, location);
@@ -70,7 +70,7 @@ export const CoverageProvider = ({ children }: { children: ReactNode }) => {
   const value = useMemo<CoverageContextValue>(() => {
     // Never flash a coming-soon screen at someone who may well be in range.
     if (isLoading || restaurants.length === 0) {
-      return { isCovered: true, nearestDeliverableKm: null, isLoading, checkCoverage };
+      return { isCovered: true, nearestOrderableKm: null, isLoading, checkCoverage };
     }
 
     const coverage = getPlatformCoverage(restaurants, deliveryLocation);

@@ -145,7 +145,7 @@ export default function HomeScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const { user } = useAuth();
   const { deliveryLocation } = useCart();
-  const { isCovered, nearestDeliverableKm } = useCoverage();
+  const { isCovered, nearestOrderableKm } = useCoverage();
   const spotlightWidth = Math.max(screenWidth - 28, 280);
 
   const loadRestaurants = useCallback(
@@ -317,7 +317,7 @@ export default function HomeScreen() {
   }, [spotlightSlides.length]);
 
   const nearbyVisible = toShelfEntries(nearbyRestaurants, expandedShelf === 'nearby' ? undefined : 4);
-  const nearestKitchenDescription = describeNearestKitchen(nearestDeliverableKm);
+  const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
 
   const emptyState = getDiscoveryEmptyState({
     availableCount: availableRestaurants.length,

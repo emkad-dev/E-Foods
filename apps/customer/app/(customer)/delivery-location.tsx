@@ -40,7 +40,7 @@ const LIVE_GEOCODE_INTERVAL_MS = 15000;
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
   const { deliveryLocation, setDeliveryLocation } = useCart();
-  const { checkCoverage, isCovered, nearestDeliverableKm } = useCoverage();
+  const { checkCoverage, isCovered, nearestOrderableKm } = useCoverage();
   const [address, setAddress] = useState(deliveryLocation?.address ?? '');
   const [label, setLabel] = useState(deliveryLocation?.label ?? deliveryLocation?.shortAddress ?? '');
   const [note, setNote] = useState(deliveryLocation?.note ?? '');
@@ -176,7 +176,7 @@ export default function DeliveryLocationScreen() {
   };
 
   const hasCoordinates = latitude !== null && longitude !== null;
-  const nearestKitchenDescription = describeNearestKitchen(nearestDeliverableKm);
+  const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
 
   return (
     <KeyboardAvoidingView

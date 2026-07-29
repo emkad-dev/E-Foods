@@ -5,10 +5,10 @@ export const COVERAGE_COMING_SOON_COPY =
 
 export const COVERAGE_UNAVAILABLE_TAG = 'Not available yet';
 
-export const describeNearestKitchen = (nearestDeliverableKm: number | null) => {
-  if (nearestDeliverableKm === null || !Number.isFinite(nearestDeliverableKm)) {
+export const describeNearestKitchen = (nearestOrderableKm: number | null) => {
+  if (nearestOrderableKm === null || !Number.isFinite(nearestOrderableKm)) {
     return null;
   }
 
-  return `Our nearest kitchen is about ${Math.round(nearestDeliverableKm)}km away.`;
+  return `Our nearest kitchen is about ${Math.round(nearestOrderableKm)}km away.`;
 };
