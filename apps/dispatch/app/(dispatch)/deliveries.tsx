@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { formatOrderStatusLabel, formatPaymentStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { dispatchTheme } from '../../src/theme/palette';
@@ -51,10 +52,13 @@ export default function DeliveriesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingState}>
-        <ActivityIndicator size="large" color={dispatchTheme.accent} />
-        <Text style={styles.loadingCopy}>Loading live deliveries...</Text>
-      </View>
+      <SkeletonScreen>
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+      </SkeletonScreen>
     );
   }
 

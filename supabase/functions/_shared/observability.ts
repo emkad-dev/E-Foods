@@ -28,11 +28,65 @@ type BackpressureSlot = {
 class EdgeBackpressureError extends Error {
   readonly retryAfterSeconds: number;
   readonly status = 429;
+  // `expose` marks an error whose message is safe to return to the client.
+  readonly expose = true;
 
   constructor(message: string, retryAfterSeconds: number) {
     super(message);
     this.name = 'EdgeBackpressureError';
     this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * Generic, user-facing message returned to clients whenever an error is not
+ * explicitly marked as safe to expose. The real error is always logged
+ * server-side (see `finishEdgeObservation`) — never surfaced to the caller.
+ */
+export const GENERIC_ERROR_MESSAGE = 'Something went wrong. Please try again.';
+
+/**
+ * Resolve an HTTP status from an error. Errors that carry an explicit `status`
+ * (RpcError, NotificationError, ClientSafeError, backpressure) keep it; anything
+ * else is treated as an unexpected server fault (500).
+ */
+export const getErrorStatus = (error: unknown): number => {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status <= 599 ? status : 500;
+};
+
+/**
+ * An error is safe to surface to the client only when it opts in via `expose`
+ * AND represents a client-side condition (4xx). Server faults (5xx) are never
+ * exposed even when flagged, so a mislabeled internal message can't leak.
+ */
+export const isClientSafeError = (value: unknown): boolean =>
+  value instanceof Error &&
+  (value as { expose?: unknown }).expose === true &&
+  getErrorStatus(value) < 500;
+
+/**
+ * The message to return to the client: the error's own message when it is
+ * client-safe, otherwise a generic fallback. Actual details are logged, not
+ * returned.
+ */
+export const clientErrorMessage = (
+  error: unknown,
+  fallback: string = GENERIC_ERROR_MESSAGE
+): string => (isClientSafeError(error) ? (error as Error).message : fallback);
+
+/**
+ * Base class for deliberately user-facing errors raised in shared helpers.
+ * Its message is crafted for end users and is safe to return in a response.
+ */
+export class ClientSafeError extends Error {
+  readonly status: number;
+  readonly expose = true;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ClientSafeError';
+    this.status = status;
   }
 }
 
@@ -100,6 +154,7 @@ export const finishEdgeObservation = (
         ? {
             message: result.error.message,
             name: result.error.name,
+            stack: result.error.stack ?? null,
           }
         : {
             message: String(result.error),
@@ -160,7 +215,9 @@ export const runWithBackpressure = async <T>(
   const slot = acquireBackpressureSlot(key, options);
   if (!slot) {
     const retryAfterSeconds = options.retryAfterSeconds ?? Math.max(2, Math.ceil(options.maxConcurrent / 2));
-    throw new EdgeBackpressureError(`Too many in-flight requests for ${key}.`, retryAfterSeconds);
+    // Log the internal key server-side; return only a generic busy message.
+    logEdgeEvent('warn', 'request rejected by backpressure', { key, maxConcurrent: options.maxConcurrent });
+    throw new EdgeBackpressureError('The service is busy right now. Please try again in a moment.', retryAfterSeconds);
   }
 
   try {

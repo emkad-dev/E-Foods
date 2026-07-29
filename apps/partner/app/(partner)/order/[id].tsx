@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
 import { usePartnerOrder } from '../../../src/hooks/usePartnerOrder';
@@ -75,10 +76,9 @@ export default function PartnerOrderDetailScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingState}>
-        <ActivityIndicator size="large" color={partnerTheme.accent} />
-        <Text style={styles.loadingCopy}>Loading order details...</Text>
-      </View>
+      <SkeletonScreen>
+        <SkeletonDetail />
+      </SkeletonScreen>
     );
   }
 

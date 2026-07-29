@@ -4,13 +4,13 @@ Running capture of ideas, decisions, and research. Newest entries at top. Each e
 
 ---
 
-## 2026-07-07 — Vercel / site latency reduction
+## 2026-07-07 — Cloudflare Pages / site latency reduction
 
 **Goal:** Sites (admin panel + partner web) load slowly; cut the latency.
 
 **What we already have**
-- `apps/admin-web`: Vite + React 19 SPA, deployed on Vercel (`admin.feasty.com.ng`), served as static assets from Vercel's CDN.
-- `apps/partner`: Expo web export on Vercel (`partner.feasty.com.ng`).
+- `apps/admin-web`: Vite + React 19 SPA, deployed on Cloudflare Pages (`admin.feasty.com.ng`), served from Cloudflare's edge CDN.
+- `apps/partner`: Expo web export on Cloudflare Pages (`partner.feasty.com.ng`).
 - Backend = Supabase (project `ebuy-platform`). Admin data refreshes via **20s polling** (`usePolledRpc`, `POLL_INTERVAL_MS = 20000`).
 - Images already routed through Bunny CDN (`CDN_BASE_URL`).
 
@@ -19,15 +19,15 @@ Running capture of ideas, decisions, and research. Newest entries at top. Each e
 2. **Heavy first paint.** Recharts + the full SPA bundle load before anything renders. No route-level code splitting. **← now the leading lever.**
 3. **Redundant polling.** Every mounted page polls every 20s (`usePolledRpc`); adds constant backend load and jank.
 4. **Edge function cold starts** on hot paths (`app-rpc` is a single large function).
-5. **The Vercel ↔ Supabase hop + TLS + auth round-trips** on load (getSession, then RPCs) stack up serially.
+5. **The Cloudflare Pages ↔ Supabase hop + TLS + auth round-trips** on load (getSession, then RPCs) stack up serially.
 
 **What's needed (research / actions, aside from what we have)**
 - Add **route-based code splitting** (`React.lazy` + `Suspense`) so login/overview paint before Statistics/Recharts load. Biggest expected win now that region is excluded.
 - Replace blanket 20s polling with **Realtime subscriptions** (already have Supabase Broadcast) or on-demand refresh for heavy pages.
-- Enable Vercel build output caching / immutable asset headers (Vite hashes assets already — verify `Cache-Control`).
+- Enable Cloudflare Pages build output caching / immutable asset headers (Vite hashes assets already — verify `Cache-Control`).
 - Parallelize / defer non-critical RPCs on first load; cache stable reads.
 - Keep `app-rpc` warm or split hot read paths to cut cold starts.
-- Measure first with real numbers: Vercel Analytics / Lighthouse + Supabase query timings before/after, so we know which lever actually moved it.
+- Measure first with real numbers: Cloudflare Web Analytics / Lighthouse + Supabase query timings before/after, so we know which lever actually moved it.
 
 **Status:** Idea captured. Not yet scheduled. Needs a measurement pass first.
 
@@ -46,15 +46,15 @@ Running capture of ideas, decisions, and research. Newest entries at top. Each e
 - The **app URL and login page are still publicly reachable** — anyone can load the JS bundle and see the sign-in screen and attempt logins. "Private from the public" means putting a perimeter *in front of* the app, not just gating data.
 
 **Options (research, weakest → strongest)**
-1. **Vercel Password Protection / Vercel Authentication** (Pro feature) — puts a wall in front of the whole deployment; visitors must authenticate before the app even loads. Simplest.
-2. **IP allowlist** at the edge (Vercel Firewall / Cloudflare Access rule) — only office/VPN IPs reach it. Good if the team has stable IPs; awkward for remote/mobile admins.
+1. **Cloudflare Access** — puts a wall in front of the whole deployment; visitors must authenticate before the app even loads. Simplest.
+2. **IP allowlist** at the edge (Cloudflare Access rule) — only office/VPN IPs reach it. Good if the team has stable IPs; awkward for remote/mobile admins.
 3. **Cloudflare Access (Zero Trust)** in front of `admin.feasty.com.ng` — team logs in with Google/email OTP at the edge before reaching FEASTY's own login. Strong, flexible, free tier exists. **Recommended for "team-only" without fixed IPs.**
 4. **Enforce MFA** on the Supabase admin accounts regardless (defense in depth).
 5. Optionally move admin to a non-guessable subdomain + `noindex` + robots deny (obscurity only; do not rely on alone).
 
-**Recommendation:** Cloudflare Access (or Vercel Authentication) as the outer wall + keep the existing role gate + turn on MFA. Layered.
+**Recommendation:** Cloudflare Access as the outer wall + keep the existing role gate + turn on MFA. Layered.
 
-**Status:** Idea captured. Decision pending on which perimeter (depends on whether the team has stable IPs and the Vercel plan tier).
+**Status:** Idea captured. Decision pending on which perimeter (depends on whether the team has stable IPs and the Cloudflare access setup).
 
 ---
 
@@ -79,10 +79,10 @@ Running capture of ideas, decisions, and research. Newest entries at top. Each e
 - **Bulk marketing compliance:** opt-in/consent tracking + **unsubscribe link + suppression list**; NDPR (Nigeria Data Protection Regulation) applies to marketing sends. For large volume, use **Resend Broadcasts** or a queued sender (pg-cron + queue) to respect rate limits and deliverability.
 - **Segmentation layer:** query customers/partners/riders by attributes (city, restaurant, order history, active/inactive).
 
-**Decomposition (phased — see below). Status (2026-07-07):** Phase 1 **code complete** on branch `feature/support-inbox-phase1` (spec + plan in `docs/superpowers/`). Live so far: `AppRole` enum gained `support`, and `SupportConversation`/`SupportMessage` tables created with RLS on the Frankfurt project. **Pending deploys (owner action):** (a) `app-rpc` edge function redeploy — blocked from the agent by the auto-mode security classifier because it needs `--no-verify-jwt` to match current prod config; run manually; (b) admin-web → Vercel; (c) customer app → Expo build/OTA. E2E test + PR follow once (a)–(c) are live.
+**Decomposition (phased — see below). Status (2026-07-07):** Phase 1 **code complete** on branch `feature/support-inbox-phase1` (spec + plan in `docs/superpowers/`). Live so far: `AppRole` enum gained `support`, and `SupportConversation`/`SupportMessage` tables created with RLS on the Frankfurt project. **Pending deploys (owner action):** (a) `app-rpc` edge function redeploy — blocked from the agent by the auto-mode security classifier because it needs `--no-verify-jwt` to match current prod config; run manually; (b) admin-web → Cloudflare Pages; (c) customer app → Expo build/OTA. E2E test + PR follow once (a)–(c) are live.
 
 ### Proposed phases
-1. **Phase 1 — Core Support Inbox.** ✅ **LIVE 2026-07-08** — merged to main + deployed (admin on Vercel, app-rpc redeployed, tables on Frankfurt). Customer-app Support screen ships on next Expo build.
+1. **Phase 1 — Core Support Inbox.** ✅ **LIVE 2026-07-08** — merged to main + deployed (admin on Cloudflare Pages, app-rpc redeployed, tables on Frankfurt). Customer-app Support screen ships on next Expo build.
 2. **Phase 2 — Inbound email capture.** Customer email replies flow back into the same threads (new inbound-mail dependency).
-3. **Phase 3 — Broadcast / bulk messaging.** 🔨 **Phase 3a code-complete 2026-07-08** on branch `feature/broadcast-messaging-phase3a` (spec + plan in `docs/superpowers/`). Live already: `Broadcast`+`EmailSuppression` tables (RLS, uuid id defaults) and the `broadcast-runner-every-minute` pg_cron schedule. **Pending owner deploys:** set `BROADCAST_UNSUB_SECRET`, deploy `app-rpc`/`broadcast-runner`/`unsubscribe` (all `--no-verify-jwt`), merge to main for Vercel. v1 = email+push, segment by role/activity/restaurant, send-now(≤60s)+scheduled, marketing unsubscribe+suppression (customers only; partners/riders operational). **3b deferred:** in-app notice, city/region segmentation, recurring schedules, open/click tracking.
+3. **Phase 3 — Broadcast / bulk messaging.** 🔨 **Phase 3a code-complete 2026-07-08** on branch `feature/broadcast-messaging-phase3a` (spec + plan in `docs/superpowers/`). Live already: `Broadcast`+`EmailSuppression` tables (RLS, uuid id defaults) and the `broadcast-runner-every-minute` pg_cron schedule. **Pending owner deploys:** set `BROADCAST_UNSUB_SECRET`, deploy `app-rpc`/`broadcast-runner`/`unsubscribe` (all `--no-verify-jwt`), merge to main for Cloudflare Pages. v1 = email+push, segment by role/activity/restaurant, send-now(≤60s)+scheduled, marketing unsubscribe+suppression (customers only; partners/riders operational). **3b deferred:** in-app notice, city/region segmentation, recurring schedules, open/click tracking.
 4. **Phase 4 — WhatsApp / social channel.** Unify into the same inbox (Meta Cloud API; longest lead time / approvals).

@@ -2,6 +2,8 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import { constantTimeEqual } from '../_shared/crypto.ts';
+import { clientErrorMessage, logEdgeEvent } from '../_shared/observability.ts';
 import { handlePaymentVerification } from '../payment-verification/handler.ts';
 import { resolveWebhookOrderIdForReference } from './invariants.ts';
 
@@ -67,7 +69,7 @@ Deno.serve(async (req) => {
   const rawBody = await req.text();
 
   const expectedSignature = await computePaystackSignature(rawBody, paystackSecretKey);
-  if (!signature || signature.toLowerCase() !== expectedSignature.toLowerCase()) {
+  if (!signature || !constantTimeEqual(signature.toLowerCase(), expectedSignature.toLowerCase())) {
     return new Response(JSON.stringify({ error: 'Invalid Paystack signature' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -106,22 +108,30 @@ Deno.serve(async (req) => {
   }
 
   const metadataOrderId = normalizeText((eventData?.metadata as JsonObject | null)?.orderId);
-  const transactionOrderId = await getOrderIdForReference(reference);
-  const orderResolution = resolveWebhookOrderIdForReference({
-    metadataOrderId,
-    transactionOrderId,
-  });
 
-  if (orderResolution.ignored) {
-    return new Response(JSON.stringify({ received: true, ignored: true, reason: orderResolution.reason, reference }), {
-      status: 202,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const orderId = orderResolution.orderId;
+  // orderId defaults to '' so the catch block below always has a value to
+  // log/report even if getOrderIdForReference throws before it can be
+  // resolved (e.g. a raw Postgrest error) — that call now lives inside the
+  // try so it goes through the same sanitized-response path instead of
+  // escaping Deno.serve unhandled with the runtime's default status.
+  let orderId = '';
 
   try {
+    const transactionOrderId = await getOrderIdForReference(reference);
+    const orderResolution = resolveWebhookOrderIdForReference({
+      metadataOrderId,
+      transactionOrderId,
+    });
+
+    if (orderResolution.ignored) {
+      return new Response(JSON.stringify({ received: true, ignored: true, reason: orderResolution.reason, reference }), {
+        status: 202,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    orderId = orderResolution.orderId;
+
     const result = await handlePaymentVerification({
       orderId,
       paymentReference: reference,
@@ -141,15 +151,23 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
-  } catch (error: any) {
-    console.error('Paystack webhook processing failed:', error?.message ?? error);
+  } catch (error) {
+    // Log the real failure server-side only; the response body is sanitized
+    // per the ClientSafeError/clientErrorMessage convention (see Task 1). The
+    // status code and received/processed/orderId/reference fields are left
+    // exactly as they were — Paystack's retry behaviour keys off the status.
+    logEdgeEvent('error', 'Paystack webhook processing failed', {
+      orderId,
+      reference,
+      error: error instanceof Error ? { message: error.message, name: error.name } : String(error),
+    });
     return new Response(
       JSON.stringify({
         received: true,
         processed: false,
         orderId,
         reference,
-        error: error?.message ?? 'Webhook processing failed',
+        error: clientErrorMessage(error, 'Webhook processing failed'),
       }),
       {
         status: 500,

@@ -30,13 +30,18 @@ import {
 import {
   createEdgeObservation,
   finishEdgeObservation,
+  getErrorStatus,
   jsonResponse,
-  isEdgeBackpressureError,
   runWithBackpressure,
 } from '../_shared/observability.ts';
 import { validatePromoTrack } from './promoTrack.ts';
 import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
 import { loadPricingConfig } from '../_shared/platformSettings.ts';
+import {
+  canClaimRestaurantLink,
+  dedupeRestaurantRowsById,
+  resolvePartnerRestaurantScope,
+} from './partnerRestaurantScope.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -1640,9 +1645,9 @@ const loadRestaurantById = async (restaurantId: string) => {
   };
 };
 
-const loadManagedRestaurantForUser = async (uid: string, role: string) => {
-  const userAccount = await loadUserAccount(uid);
-  const linkedRestaurantId = sanitizeText(userAccount?.restaurantId);
+const loadManagedRestaurantForUser = async (uid: string, role: string, userAccount: UserAccountRow | null = null) => {
+  const account = userAccount ?? (await loadUserAccount(uid));
+  const linkedRestaurantId = sanitizeText(account?.restaurantId);
 
   if (linkedRestaurantId) {
     const linkedRestaurant = await loadRestaurantById(linkedRestaurantId);
@@ -5354,25 +5359,70 @@ const handleNativeAction = async (
     ensureRole(context.role, ['restaurant', 'admin']);
     const userAccount = await loadUserAccount(context.uid);
     const linkedRestaurantId = sanitizeText(userAccount?.restaurantId);
-    const [managedRestaurant, allRestaurants] = await Promise.all([
-      loadManagedRestaurantForUser(context.uid, context.role),
-      serviceClient
-        .from('RestaurantRecord')
-        .select(
-          'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt'
-        )
-        .order('updatedAt', { ascending: false }),
-    ]);
+    const scope = resolvePartnerRestaurantScope({
+      role: context.role,
+      uid: context.uid,
+      linkedRestaurantId,
+    });
+
+    const restaurantColumns =
+      'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt';
+
+    const scopedQuery = serviceClient
+      .from('RestaurantRecord')
+      .select(restaurantColumns)
+      .order('updatedAt', { ascending: false });
+
+    const allRestaurants = await (scope.ownerFilterUid
+      ? scopedQuery.eq('ownerId', scope.ownerFilterUid)
+      : scopedQuery);
 
     if (allRestaurants.error) {
       throw new Error(allRestaurants.error.message);
     }
 
-    const restaurantRows = (allRestaurants.data ?? []) as RestaurantRecordRow[];
-    const approvals = await Promise.all(restaurantRows.map((restaurant) => loadRestaurantById(restaurant.id)));
-    const allResponses = approvals
-      .map((entry) => (entry.restaurant ? buildRestaurantResponse(entry.restaurant, entry.approval) : null))
-      .filter(Boolean);
+    const ownedRows = (allRestaurants.data ?? []) as RestaurantRecordRow[];
+    let restaurantRows = ownedRows;
+
+    if (scope.extraRestaurantId && !ownedRows.some((row) => row.id === scope.extraRestaurantId)) {
+      const { data: linkedRow, error: linkedRowError } = await serviceClient
+        .from('RestaurantRecord')
+        .select(restaurantColumns)
+        .eq('id', scope.extraRestaurantId)
+        .maybeSingle<RestaurantRecordRow>();
+
+      if (linkedRowError) {
+        throw new Error(linkedRowError.message);
+      }
+
+      if (linkedRow) {
+        restaurantRows = dedupeRestaurantRowsById([...ownedRows, linkedRow]);
+      }
+    }
+    const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role, userAccount);
+    let approvalByRestaurantId = new Map<string, RestaurantApprovalRow>();
+
+    if (restaurantRows.length > 0) {
+      const { data: restaurantApprovals, error: restaurantApprovalError } = await serviceClient
+        .from('RestaurantApproval')
+        .select('restaurantId,status,approvedByUid,approvedAt')
+        .in(
+          'restaurantId',
+          restaurantRows.map((restaurant) => restaurant.id)
+        );
+
+      if (restaurantApprovalError) {
+        throw new Error(restaurantApprovalError.message);
+      }
+
+      approvalByRestaurantId = new Map(
+        ((restaurantApprovals ?? []) as RestaurantApprovalRow[]).map((approval) => [approval.restaurantId, approval])
+      );
+    }
+
+    const allResponses = restaurantRows.map((restaurant) =>
+      buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)
+    );
     const restaurantResponse = managedRestaurant.restaurant
       ? buildRestaurantResponse(managedRestaurant.restaurant, managedRestaurant.approval)
       : null;
@@ -5486,8 +5536,16 @@ const handleNativeAction = async (
       }
 
       const existingOwnerId = sanitizeText(currentRestaurant.ownerId);
-      if (existingOwnerId && existingOwnerId !== context.uid && !isAdmin) {
-        fail(403, 'This restaurant is already managed by another partner account.');
+      if (
+        !canClaimRestaurantLink({
+          role: context.role,
+          uid: context.uid,
+          linkedRestaurantId,
+          restaurantId,
+          restaurantOwnerId: existingOwnerId,
+        })
+      ) {
+        fail(403, 'This restaurant is not available to link to this partner account.');
       }
     }
 
@@ -5570,8 +5628,19 @@ const handleNativeAction = async (
     }
 
     const existingOwnerId = sanitizeText(existingRestaurant.restaurant.ownerId);
-    if (existingOwnerId && existingOwnerId !== context.uid && context.role !== 'admin') {
-      fail(403, 'This restaurant is already managed by another partner account.');
+    const claimantAccount = await loadUserAccount(context.uid);
+    const claimantLinkedRestaurantId = sanitizeText(claimantAccount?.restaurantId);
+
+    if (
+      !canClaimRestaurantLink({
+        role: context.role,
+        uid: context.uid,
+        linkedRestaurantId: claimantLinkedRestaurantId,
+        restaurantId,
+        restaurantOwnerId: existingOwnerId,
+      })
+    ) {
+      fail(403, 'This restaurant is not available to link to this partner account.');
     }
 
     const linkedAt = nowIso();
@@ -6327,7 +6396,21 @@ const handleNativeAction = async (
     ).filter(isOrderCleanForReporting);
     const riders = (ridersResult.data ?? []) as DispatchRiderRow[];
     const orderRelations = await loadOrderRelations(orders.map((order) => order.id));
-    const restaurantApprovals = await Promise.all(restaurants.map((restaurant) => loadRestaurantById(restaurant.id)));
+    const { data: restaurantApprovals, error: restaurantApprovalError } = await serviceClient
+      .from('RestaurantApproval')
+      .select('restaurantId,status,approvedByUid,approvedAt')
+      .in(
+        'restaurantId',
+        restaurants.map((restaurant) => restaurant.id)
+      );
+
+    if (restaurantApprovalError) {
+      throw new Error(restaurantApprovalError.message);
+    }
+
+    const approvalByRestaurantId = new Map(
+      ((restaurantApprovals ?? []) as RestaurantApprovalRow[]).map((approval) => [approval.restaurantId, approval])
+    );
 
     return json(200, {
       data: {
@@ -6339,9 +6422,9 @@ const handleNativeAction = async (
             orderRelations.assignmentsByOrderId.get(order.id) ?? null
           )
         ),
-        restaurants: restaurantApprovals
-          .map((entry) => (entry.restaurant ? buildRestaurantResponse(entry.restaurant, entry.approval) : null))
-          .filter(Boolean),
+        restaurants: restaurants.map((restaurant) =>
+          buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)
+        ),
         users: users.map((user) => buildUserAccountResponse(user, rolesByUserId.get(user.uid) ?? [])),
       },
     });
@@ -7105,16 +7188,15 @@ Deno.serve(async (request) => {
     return response;
   } catch (error) {
     capturedError = error;
+    // RpcError and EdgeBackpressureError both carry a numeric `.status` in the
+    // 400-599 range, so getErrorStatus() resolves them the same way the old
+    // per-type checks did. "This account is disabled." is thrown as a plain
+    // Error with no `.status` (see _shared/request-context.ts), so it still
+    // needs an explicit mapping or it would fall through to 500.
     const status =
-      isEdgeBackpressureError(error)
-        ? error.status
-        : error instanceof RpcError
-          ? error.status
-          : error instanceof Error && error.message === 'Missing authorization header'
-            ? 401
-            : error instanceof Error && error.message === 'This account is disabled.'
-              ? 403
-              : 500;
+      error instanceof Error && error.message === 'This account is disabled.'
+        ? 403
+        : getErrorStatus(error);
 
     response = json(
       status,

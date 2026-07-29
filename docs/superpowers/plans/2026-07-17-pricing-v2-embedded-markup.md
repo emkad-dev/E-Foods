@@ -923,7 +923,7 @@ Start the customer app against local/staging, open a restaurant, and confirm: me
 
 1. Apply `supabase/migrations/20260717_platform_settings_pricing.sql` to Frankfurt (`npx supabase db push` or MCP `apply_migration`).
 2. Deploy `app-rpc` (needs `--no-verify-jwt`) and `public-catalog` via the usual deploy script. ⚠️ The script syncs `functions/.env` → secrets on every run — confirm the Paystack live keys in `functions/.env` are still the real ones first.
-3. Ship new customer/partner builds (Expo) and redeploy partner web on Vercel. Old builds will preview slightly different totals until updated; the server charge is authoritative.
+3. Ship new customer/partner builds (Expo) and redeploy partner web on Cloudflare Pages. Old builds will preview slightly different totals until updated; the server charge is authoritative.
 
 - [ ] **Step 4: Merge/PR**
 

@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to staging/prod
+    name: Deploy backend updates
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,10 +65,13 @@ jobs:
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
           command: deployments status --name feasty-edge-cache
 
+      - name: Web deploys
+        run: echo "Cloudflare Pages handles admin, partner, customer, and public web deploys from GitHub."
+
       # Web apps are hosted on Cloudflare Pages and deployed by the
       # path-filtered workflows deploy-web-landing.yml (feasty-web),
       # deploy-admin.yml (feasty-admin), and deploy-partner.yml
-      # (feasty-partner). Pages' own git-integration CI is not used — its
+      # (feasty-partner). Pages' own git-integration CI is not used - its
       # build environment can't fit Metro's heap requirement.
 
       - name: Notify

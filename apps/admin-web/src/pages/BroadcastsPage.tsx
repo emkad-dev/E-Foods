@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
-import LoadingBlock from '../components/LoadingBlock';
+import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import {
   broadcastTone,
@@ -297,7 +297,7 @@ export default function BroadcastsPage() {
 
       <div className="broadcast-list card">
         <h3>Broadcasts</h3>
-        {loading ? <LoadingBlock label="Loading…" /> : null}
+        {loading ? <SkeletonRows count={5} /> : null}
         {!loading && broadcasts.length === 0 ? (
           <EmptyState title="No broadcasts yet" body="Compose one on the left." />
         ) : (

@@ -1,7 +1,8 @@
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
@@ -57,10 +58,14 @@ export default function DispatchDashboard() {
 
   if (loading || ridersLoading) {
     return (
-      <View style={styles.loadingState}>
-        <ActivityIndicator size="large" color={dispatchTheme.accent} />
-        <Text style={styles.loadingCopy}>Loading live dispatch board...</Text>
-      </View>
+      <SkeletonScreen>
+        <Skeleton width="50%" height={22} />
+        <Skeleton width="70%" height={13} style={{ marginBottom: 26, marginTop: 10 }} />
+        <Skeleton height={92} radius={14} style={{ marginBottom: 20 }} />
+        <SkeletonListRow />
+        <SkeletonListRow />
+        <SkeletonListRow />
+      </SkeletonScreen>
     );
   }
 

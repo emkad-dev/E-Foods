@@ -993,7 +993,7 @@ git commit -m "feat(broadcast): admin Broadcasts page, service, route, nav"
 
 Delivers: proven round-trip + updated docs.
 
-- [ ] **Step 1: USER deploys** (agent is blocked from `--no-verify-jwt`): set `BROADCAST_UNSUB_SECRET`, then deploy `app-rpc`, `broadcast-runner`, `unsubscribe` (all `--no-verify-jwt`). Merge the branch to `main` for the admin-web Vercel build.
+- [ ] **Step 1: USER deploys** (agent is blocked from `--no-verify-jwt`): set `BROADCAST_UNSUB_SECRET`, then deploy `app-rpc`, `broadcast-runner`, `unsubscribe` (all `--no-verify-jwt`). Merge the branch to `main` for the admin-web Cloudflare Pages build.
 
 - [ ] **Step 2: Seed check.** Via admin `/broadcasts`: create a small **transactional** email+push broadcast targeting `roles:['dispatch']` (small set), Preview shows a count, Send now. Within ≤60s the runner flips it to `sent` with counts. Verify an email arrived and (if a device token exists) a push.
 

@@ -142,7 +142,12 @@ export const buildNotificationData = (input: {
     routeKey: input.routeKey,
     ...(status ? { status } : null),
     type: input.type,
-    version: 1,
+    // String, not numeric: push data payloads (enqueueNotification's
+    // `Record<string, string>` contract, and FCM/APNs data payloads
+    // generally) require string values. No consumer reads this field today
+    // (grepped both apps' push-notification handlers) so widening its
+    // representation is safe.
+    version: '1',
   } satisfies JsonObject;
 };
 
