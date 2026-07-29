@@ -1,7 +1,11 @@
 # Zero-Cost Backend Scaling — Postgres-Native Equivalents to Redis
 
 **Date:** 2026-07-29
-**Status:** Design, supersedes the two Redis specs of the same date
+**Status:** Code complete on `feature/zero-cost-scaling` (2026-07-29), **not
+deployed and migrations not applied**. See §10.0 for the mandatory apply/deploy
+order — the edge-function changes and the migrations are a matched pair and
+deploying them out of order breaks rider pings. Supersedes the two Redis specs
+of the same date.
 **Supersedes:** `2026-07-29-redis-adoption-design.md`,
 `2026-07-29-phase6-queue-workers-design.md` (both retained for the analysis they
 contain; neither is scheduled)
@@ -296,19 +300,49 @@ fail.
 
 ## 10. Rollout order
 
-1. Migration: create `rider_live_location`, `cube` + `earthdistance`, the GiST
-   index.
-2. `syncDispatchRiderLocation` write path (§3) — must land before dispatch
-   launches.
-3. `dispatchGetRiders` read path with `DispatchRiderRecord` fallback.
-4. `dispatchAssignOrderCourier` distance ranking (§4).
-5. `pg_net` trigger (§5) — set `app.queue_drainer_url` and
-   `app.queue_worker_token` via Vault, mirroring the existing
-   `project_url`/`queue_worker_token` pattern already used by the cron jobs.
+### 10.0 MANDATORY ORDER — read before deploying anything
 
-Steps 2–4 are behind the same code paths that exist today and fall back to
-`DispatchRiderRecord`, so each is independently revertible. Step 5 is reverted by
-dropping the trigger.
+The edge-function changes and the migrations are a **matched pair**. `app-rpc`
+now reads and writes `public.rider_live_location` and calls
+`public.ebuy_touch_rider_durable_location`. Verified against production
+2026-07-29: **neither exists yet.**
+
+```
+Migrations FIRST  ─────►  then deploy app-rpc
+```
+
+Deploying `app-rpc` first makes **every rider location ping fail** —
+`syncDispatchRiderLocation` throws on the missing table — and turns
+`dispatchGetRiders` into a logged error per call. There is no env flag guarding
+this. Unlike the Redis design this replaced, the Postgres-native version has no
+"disabled" mode: the table either exists or it does not.
+
+Rollback is the mirror image: revert `app-rpc` **before** dropping anything.
+
+### 10.1 Ordered steps
+
+Steps 1–3 are additive DDL and touch no existing object. Step 5 is the only one
+that changes behaviour of an existing path.
+
+1. Apply `20260729_rider_live_location.sql` — table, `cube` + `earthdistance`,
+   GiST index. Verify `relpersistence = 'u'`; if it is `'p'` the `unlogged`
+   keyword did not take and the entire point of the change is lost.
+2. Apply `20260729_rider_durable_location_sync.sql` — verify the throttle by
+   calling it twice inside 60 s and confirming `true` then `false`.
+3. Apply `20260729_nearest_riders.sql` — verify ordering against known
+   coordinates.
+4. Deploy `app-rpc` (write path §3, read path, and the new
+   `dispatchGetNearestRiders` action §4). Confirm a real ping succeeds and that
+   `DispatchRiderRecord."updatedAt"` advances at most once a minute.
+5. Apply `20260729_queue_drainer_trigger.sql` **last and separately**. It installs
+   on `queue_order_placement` and `queue_payment_verification` — the money path —
+   and starts firing real drains immediately. It needs no new configuration: it
+   reads the same Vault secrets `project_url` and `queue_worker_token` that
+   `20260624_queue_drainer_schedule.sql` already uses. Reverted by dropping the
+   three triggers.
+
+Steps 1–4 fall back to `DispatchRiderRecord` at every read, so each is
+independently revertible without data loss.
 
 ## 11. Where this lands against the Chowdeck bar
 
@@ -343,3 +377,21 @@ the container.
   needs a measured reason, and free is not a reason.
 - **Existence `SELECT` deleted rather than cached:** the JWT already proves
   identity.
+- **`rider_id` is `text`, not `uuid` (verified against production 2026-07-29):**
+  `DispatchRiderRecord.id` is a text column (Prisma `id String @id`). The first
+  draft of these migrations used `uuid` and would have failed to apply.
+- **`DispatchRiderRecord."updatedAt"` is `timestamp WITHOUT time zone` (verified
+  2026-07-29):** comparing it against `now()` (timestamptz) coerces through the
+  session `TimeZone`. The throttle pins both sides to UTC via
+  `now() at time zone 'utc'`, matching the ISO-8601 UTC strings the edge function
+  writes. Do not "simplify" this back to a bare `now()`.
+- **`rider_live_location` deliberately NOT added to
+  `functions/prisma/schema.prisma`:** that schema is already divergent from the
+  database — it models `QueueJob` and `OrderPlacementJob`, neither of which
+  exists in production, while the live queues are the `queue_*` tables created by
+  raw SQL migrations. Prisma is not the source of truth here, so adding to it
+  would extend a stale artifact rather than document reality.
+- **Distance ranking exposed as a new `dispatchGetNearestRiders` action rather
+  than folded into assignment (§4):** `dispatchAssignOrderCourier` requires an
+  explicit `courierId` and fails 400 without one, so there was no auto-assign
+  path to improve, and orders carry no coordinates.
