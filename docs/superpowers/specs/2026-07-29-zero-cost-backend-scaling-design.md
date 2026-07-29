@@ -320,6 +320,34 @@ this. Unlike the Redis design this replaced, the Postgres-native version has no
 
 Rollback is the mirror image: revert `app-rpc` **before** dropping anything.
 
+### 10.0b Pre-apply dependency verification (read-only, done 2026-07-29)
+
+The migrations have **not been executed anywhere** — Docker is unavailable on the
+authoring machine and no local Postgres exists, so "will apply cleanly" is
+inference, not observation. What *was* verified against production, read-only:
+
+| Assumption | Result |
+| --- | --- |
+| `extensions` schema exists (target for `cube`/`earthdistance`) | present |
+| `net.http_post` callable as `net.http_post` | present, 1 overload — same named args the existing cron migration already uses successfully |
+| `vault.decrypted_secrets` view exists | present |
+| `ll_to_earth` not yet present anywhere | confirmed absent, consistent with `earthdistance` not yet installed |
+| `rider_live_location` not yet present | confirmed absent — this is the deploy-order hazard in §10.0 |
+| `DispatchRiderRecord.id` type | `text` |
+| `DispatchRiderRecord."updatedAt"` type | `timestamp without time zone` |
+
+Static review of the remaining SQL risks, for the record:
+
+- `earthdistance` requires `cube`; both target the `extensions` schema, and
+  `ebuy_nearest_riders` sets `search_path = public, extensions` so the `cube`
+  types and the `@>` operator resolve.
+- The GiST index expression (`extensions.ll_to_earth(latitude, longitude)`) is
+  written schema-qualified in **both** the index and the query, so they match and
+  the index is usable. Changing the qualification in one place silently disables
+  the index.
+- `earth_box(point, radius)` takes metres and `earth_distance` returns metres,
+  matching the `p_radius_metres` parameter name.
+
 ### 10.1 Ordered steps
 
 Steps 1–3 are additive DDL and touch no existing object. Step 5 is the only one
