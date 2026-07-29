@@ -83,7 +83,16 @@ export default function CustomerFavoritesScreen() {
     [favoriteIdSet, restaurants]
   );
 
-  if (loadingCatalog || favoritesLoading) {
+  // On cold start / post-login / deep link, this component can mount and
+  // paint once before the catalog-fetch effect (below) has had a chance to
+  // flip loadingCatalog back to true for a non-empty favorites list --
+  // React 18 flushes passive effects after paint, so relying on effect
+  // ordering alone lets that first paint render "No favorites yet" for a
+  // user who actually has favorites. Deriving the pending state during
+  // render closes that gap without touching the effect itself.
+  const catalogPending = favoriteRestaurantIds.length > 0 && restaurants.length === 0 && !error;
+
+  if (loadingCatalog || favoritesLoading || catalogPending) {
     return (
       <SkeletonScreen>
         <SkeletonCard />

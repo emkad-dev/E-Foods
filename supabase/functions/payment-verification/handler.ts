@@ -319,6 +319,16 @@ export const markPaymentVerificationFailed = async (
     existingPayment = (order?.payment ?? {}) as JsonObject;
   }
 
+  // Guard against a race where the webhook path already verified this
+  // payment (status: 'paid') while a stale queue retry for the same job was
+  // still in flight and only fails afterward. Reading the row above makes
+  // this check nearly free, so skip the write rather than stamping 'failed'
+  // next to a paidAt/paystackResponse that says otherwise.
+  if (normalizeStatus(existingPayment.status, '') === 'paid') {
+    console.log(`Skipping payment-failed write for ${orderId}: payment already marked paid.`);
+    return;
+  }
+
   const { error } = await serviceClient
     .from('CustomerOrder')
     .update({

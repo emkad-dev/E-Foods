@@ -58,6 +58,16 @@ jobs:
       - name: Prisma generate
         run: npm run db:generate
 
+      - name: Use Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Runs test:node then test:deno (see root package.json). Deno coverage
+      # is 11 of 12 supabase/functions/**/*.test.ts files -- auth-gateway/
+      # otp.test.ts is excluded because importing it triggers a module-level
+      # throw from _shared/client.ts (SUPABASE_URL/SERVICE_ROLE_KEY required)
+      # unrelated to the test assertions themselves; see fixwave report.
       - name: Unit tests
         run: npm test
 
