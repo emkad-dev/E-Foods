@@ -37,6 +37,12 @@ jobs:
       - name: Typecheck partner
         run: npm run typecheck:partner
 
+      - name: Typecheck customer
+        run: npm run typecheck:customer
+
+      - name: Typecheck dispatch
+        run: npm run typecheck:dispatch
+
       - name: Lint customer
         run: npm run lint:customer
 
@@ -52,8 +58,8 @@ jobs:
       - name: Prisma generate
         run: npm run db:generate
 
-      - name: Unit tests placeholder
-        run: echo "No central test script configured; add tests and replace this step."
+      - name: Unit tests
+        run: npm test
 
   migrate:
     name: Deploy migrations (main only)
