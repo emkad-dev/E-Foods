@@ -12,6 +12,7 @@ import {
 import { getAuthenticatedRequestContext } from '../_shared/request-context.ts';
 import {
   broadcastOrderChanged,
+  broadcastPromosChanged,
   broadcastRestaurantsChanged,
   broadcastRidersChanged,
   broadcastSupportInboxChanged,
@@ -29,10 +30,13 @@ import {
 import {
   createEdgeObservation,
   finishEdgeObservation,
+  getErrorStatus,
   jsonResponse,
-  isEdgeBackpressureError,
   runWithBackpressure,
 } from '../_shared/observability.ts';
+import { validatePromoTrack } from './promoTrack.ts';
+import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
+import { loadPricingConfig } from '../_shared/platformSettings.ts';
 import {
   canClaimRestaurantLink,
   dedupeRestaurantRowsById,
@@ -293,15 +297,6 @@ const DEFAULT_CURRENCY = 'NGN';
 const DEFAULT_DELIVERY_TIME = '25-35 min';
 const DEFAULT_DISPATCH_STATUS = 'Available';
 const DEFAULT_DISPATCH_VEHICLE = 'Bike';
-const PLATFORM_COMMISSION_RATES = {
-  delivery: 0.15,
-  pickup: 0.1,
-} as const;
-// Flat per-item marketplace markup charged to the customer on top of the
-// restaurant's own menu price. Kept entirely by the platform — the restaurant is
-// always settled on its own price (see calculateSettlementBreakdown).
-// Mirrored on the client via CUSTOMER_ITEM_MARKUP in packages/domain/src/orders.ts.
-const CUSTOMER_ITEM_MARKUP = 150;
 const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')?.trim() ?? '';
@@ -1704,7 +1699,12 @@ const flattenRestaurantMenu = (restaurant: RestaurantRecordRow) => {
   });
 };
 
-const buildOrderItems = (requestedItems: unknown, restaurantId: string, restaurant: RestaurantRecordRow) => {
+const buildOrderItems = (
+  requestedItems: unknown,
+  restaurantId: string,
+  restaurant: RestaurantRecordRow,
+  pricingConfig: PricingConfig
+) => {
   if (!Array.isArray(requestedItems) || requestedItems.length === 0) {
     fail(400, 'Add at least one item before placing an order.');
   }
@@ -1726,11 +1726,16 @@ const buildOrderItems = (requestedItems: unknown, restaurantId: string, restaura
       fail(412, 'One or more selected menu items are unavailable.');
     }
 
+    // Restaurant's own price — settlement and min-order run on this.
+    const basePrice = menuItem.price;
+
     return {
+      basePrice,
       id: menuItem.id,
       name: menuItem.name,
-      // Customer-facing price = restaurant's authoritative menu price + platform markup.
-      price: roundCurrency(menuItem.price + CUSTOMER_ITEM_MARKUP),
+      // Customer-facing price with the platform markup embedded, re-derived
+      // server-side from the authoritative menu price (never client input).
+      price: toDisplayPrice(basePrice, pricingConfig),
       quantity,
       restaurantId,
       restaurantName: sanitizeText(restaurant.name, 'Restaurant'),
@@ -1761,90 +1766,6 @@ const normalizeDeliveryLocation = (deliveryLocation: unknown) => {
     longitude: hasCoordinates ? longitude : null,
     note: sanitizeOptionalText(record.note),
     shortAddress: sanitizeOptionalText(record.shortAddress),
-  };
-};
-
-const calculateServiceFee = (subtotal: number) => {
-  if (subtotal <= 0) {
-    return 0;
-  }
-
-  return roundCurrency(Math.min(Math.max(subtotal * 0.05, 0.49), 12));
-};
-
-const calculateSettlementBreakdown = ({
-  deliveryFee,
-  fulfillmentType,
-  marketplaceMarkup = 0,
-  subtotal,
-}: {
-  deliveryFee: number;
-  fulfillmentType: 'delivery' | 'pickup';
-  marketplaceMarkup?: number;
-  subtotal: number;
-}) => {
-  const safeSubtotal = roundCurrency(subtotal);
-  const markup = roundCurrency(Math.max(marketplaceMarkup, 0));
-  // The restaurant is settled on its own menu prices only; the per-item marketplace
-  // markup is platform margin and is excluded from the restaurant's commission basis.
-  const restaurantBasis = roundCurrency(Math.max(safeSubtotal - markup, 0));
-  const dispatchFee = roundCurrency(deliveryFee);
-  const commissionRate = PLATFORM_COMMISSION_RATES[fulfillmentType];
-  const commission = roundCurrency(restaurantBasis * commissionRate);
-  const restaurantPayable = roundCurrency(Math.max(restaurantBasis - commission, 0));
-  const platformFee = roundCurrency(commission + markup);
-  const netSettlement = roundCurrency(restaurantPayable + dispatchFee);
-
-  return {
-    basis: 'menu_subtotal',
-    commissionRate,
-    fulfillmentType,
-    dispatchFee,
-    marketplaceMarkup: markup,
-    netSettlement,
-    platformFee,
-    restaurantPayable,
-  };
-};
-
-const calculatePricing = ({
-  deliveryFee,
-  fulfillmentType,
-  marketplaceMarkup = 0,
-  subtotal,
-  tip,
-}: {
-  deliveryFee: number;
-  fulfillmentType: 'delivery' | 'pickup';
-  marketplaceMarkup?: number;
-  subtotal: number;
-  tip: number;
-}) => {
-  const safeSubtotal = roundCurrency(subtotal);
-  const safeDeliveryFee = roundCurrency(deliveryFee);
-  const safeTip = roundCurrency(tip);
-  const serviceFee = calculateServiceFee(safeSubtotal);
-  const settlement = calculateSettlementBreakdown({
-    deliveryFee: safeDeliveryFee,
-    fulfillmentType,
-    marketplaceMarkup,
-    subtotal: safeSubtotal,
-  });
-  const total = roundCurrency(safeSubtotal + safeDeliveryFee + serviceFee + safeTip);
-
-  return {
-    currency: DEFAULT_CURRENCY,
-    deliveryFee: safeDeliveryFee,
-    discount: 0,
-    dispatchFee: settlement.dispatchFee,
-    netSettlement: settlement.netSettlement,
-    platformFee: settlement.platformFee,
-    restaurantPayable: settlement.restaurantPayable,
-    serviceFee,
-    settlement,
-    subtotal: safeSubtotal,
-    tip: safeTip,
-    total,
   };
 };
 
@@ -1949,15 +1870,15 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This restaurant does not support pickup.');
   }
 
-  const items = buildOrderItems(requestData.items, restaurantId, restaurant);
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  // Total platform markup baked into the subtotal above (CUSTOMER_ITEM_MARKUP per unit),
-  // so settlement can credit the restaurant on its own menu prices.
-  const marketplaceMarkup = items.reduce((sum, item) => sum + CUSTOMER_ITEM_MARKUP * item.quantity, 0);
+  const pricingConfig = await loadPricingConfig();
+  const items = buildOrderItems(requestData.items, restaurantId, restaurant, pricingConfig);
+  // Min-order and settlement both run on the restaurant's own menu prices,
+  // never on the marked-up customer prices.
+  const restaurantBasis = items.reduce((sum, item) => sum + item.basePrice * item.quantity, 0);
   const deliveryFee = fulfillmentType === 'delivery' ? parseNumber(restaurant.deliveryFee, 0) : 0;
   const minOrder = parseNumber(restaurant.minOrder, 0);
 
-  if (subtotal - marketplaceMarkup < minOrder) {
+  if (restaurantBasis < minOrder) {
     fail(412, `This restaurant requires a minimum order of ${minOrder.toFixed(2)}.`);
   }
 
@@ -1982,11 +1903,10 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This restaurant does not deliver to your selected location yet.');
   }
 
-  const pricing = calculatePricing({
+  const pricing = calculateOrderPricing({
+    config: pricingConfig,
     deliveryFee,
-    fulfillmentType,
-    marketplaceMarkup,
-    subtotal,
+    items,
     tip: tipAmount,
   });
 
@@ -2003,6 +1923,7 @@ const prepareCustomerOrderDraft = async (
 };
 
 const createOrderWithItems = async ({
+  attributedPromoId,
   customerId,
   deliveryLocation,
   fulfillmentType,
@@ -2013,10 +1934,12 @@ const createOrderWithItems = async ({
   restaurantId,
   restaurantName,
 }: {
+  attributedPromoId?: string | null;
   customerId: string;
   deliveryLocation: JsonObject | null;
   fulfillmentType: string;
   items: Array<{
+    basePrice: number;
     id: string;
     name: string;
     price: number;
@@ -2046,6 +1969,7 @@ const createOrderWithItems = async ({
     payment,
     deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
     deliveryLocation,
+    attributedPromoId: attributedPromoId ?? null,
     cancellation: null,
     timeline,
     createdAt,
@@ -2062,6 +1986,7 @@ const createOrderWithItems = async ({
       orderId,
       itemId: item.id,
       name: item.name,
+      basePrice: item.basePrice,
       price: item.price,
       quantity: item.quantity,
       restaurantId: item.restaurantId,
@@ -3584,6 +3509,24 @@ const handleNativeAction = async (
         tokenRefreshRequired: true,
       },
     });
+  }
+
+  if (action === 'promoTrack') {
+    // Anon-allowed: browsing customers are frequently not signed in. Fire-and-forget
+    // from the client, so failures here are still returned but never block the UI.
+    const parsed = validatePromoTrack(data);
+    if (!parsed.ok) {
+      fail(400, parsed.message);
+      return;
+    }
+    const { error } = await serviceClient.from('PromoEvent').insert({
+      promoId: parsed.value.promoId,
+      type: parsed.value.type,
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
+    return json(200, { data: { ok: true } });
   }
 
   const context = await getAuthenticatedRequestContext(request);
@@ -5129,6 +5072,9 @@ const handleNativeAction = async (
     }
 
     const orderId = crypto.randomUUID();
+    const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
+    const attributedPromoId =
+      rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
     const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
     const initialPayment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
@@ -5137,6 +5083,7 @@ const handleNativeAction = async (
     });
 
     const orderCreation = await createOrderWithItems({
+      attributedPromoId,
       customerId: context.uid,
       deliveryLocation: orderDraft.deliveryLocation,
       fulfillmentType: orderDraft.fulfillmentType,
@@ -6905,6 +6852,101 @@ const handleNativeAction = async (
     return json(200, { data: { broadcast } });
   }
 
+  if (action === 'promoList') {
+    ensureRole(context.role, ['admin']);
+    const { data: promos, error } = await serviceClient
+      .from('Promo')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .returns<PromoRow[]>();
+    if (error) {
+      throw new Error(error.message);
+    }
+    const { data: stats, error: statsError } = await serviceClient.rpc('ebuy_promo_stats');
+    if (statsError) {
+      console.error('Promo stats lookup failed.', statsError);
+    }
+    const statById = new Map<string, {
+      promoId: string; impressions: number; clicks: number;
+      attributedOrders: number; attributedRevenue: number;
+    }>(
+      (stats ?? []).map((s: {
+        promoId: string; impressions: number; clicks: number;
+        attributedOrders: number; attributedRevenue: number;
+      }) => [s.promoId, s]),
+    );
+    const withStats = (promos ?? []).map((p) => {
+      const s = statById.get(p.id);
+      return {
+        ...p,
+        impressions: s?.impressions ?? 0,
+        clicks: s?.clicks ?? 0,
+        attributedOrders: s?.attributedOrders ?? 0,
+        attributedRevenue: s?.attributedRevenue ?? 0,
+      };
+    });
+    return json(200, { data: { promos: withStats } });
+  }
+
+  if (action === 'promoCreate') {
+    ensureRole(context.role, ['admin']);
+    const title = sanitizeText(data.title);
+    const body = sanitizeText(data.body);
+    if (!title) {
+      fail(400, 'A title is required.');
+    }
+    if (!body) {
+      fail(400, 'A body is required.');
+    }
+    const { actionUrl, startsAt, endsAt } = validatePromoComposition({
+      actionUrl: data.actionUrl,
+      startsAt: data.startsAt,
+      endsAt: data.endsAt,
+    });
+    const { data: promo, error } = await serviceClient
+      .from('Promo')
+      .insert({
+        title,
+        body,
+        actionUrl,
+        startsAt,
+        endsAt,
+        active: true,
+        createdByUid: context.uid,
+      })
+      .select('*')
+      .single<PromoRow>();
+    if (error || !promo) {
+      throw new Error(error?.message ?? 'Failed to create the promo.');
+    }
+    // Live push to every connected app; clients refetch the active set. A failed
+    // broadcast must never fail the insert, so this is best-effort inside the helper.
+    await broadcastPromosChanged({ id: promo.id });
+    return json(200, { data: { promo } });
+  }
+
+  if (action === 'promoSetActive') {
+    ensureRole(context.role, ['admin']);
+    const promoId = sanitizeText(data.id);
+    if (!promoId) {
+      fail(400, 'A promo id is required.');
+    }
+    if (typeof data.active !== 'boolean') {
+      fail(400, 'An active flag is required.');
+    }
+    const { data: promo, error } = await serviceClient
+      .from('Promo')
+      .update({ active: data.active, updatedAt: new Date().toISOString() })
+      .eq('id', promoId)
+      .select('*')
+      .single<PromoRow>();
+    if (error || !promo) {
+      throw new Error(error?.message ?? 'Failed to update the promo.');
+    }
+    await broadcastPromosChanged({ id: promo.id });
+    return json(200, { data: { promo } });
+  }
+
   return null;
 };
 
@@ -6952,6 +6994,52 @@ type BroadcastRow = {
   createdAt: string;
   updatedAt: string;
   sentAt: string | null;
+};
+
+type PromoRow = {
+  id: string;
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  active: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdByUid: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const validatePromoComposition = (input: {
+  actionUrl: unknown;
+  startsAt: unknown;
+  endsAt: unknown;
+}) => {
+  const actionUrlRaw = sanitizeText(input.actionUrl);
+  // Only in-app deep links are allowed — an absolute/external URL in a banner
+  // that every user sees is an open-redirect footgun.
+  if (actionUrlRaw && !actionUrlRaw.startsWith('/')) {
+    fail(400, 'actionUrl must be an in-app path starting with "/".');
+  }
+  const actionUrl = actionUrlRaw || null;
+
+  const parseWindow = (value: unknown, label: string): string | null => {
+    const raw = sanitizeText(value);
+    if (!raw) {
+      return null;
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      fail(400, `A valid ${label} timestamp is required.`);
+    }
+    return parsed.toISOString();
+  };
+
+  const startsAt = parseWindow(input.startsAt, 'startsAt');
+  const endsAt = parseWindow(input.endsAt, 'endsAt');
+  if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
+    fail(400, 'endsAt must be after startsAt.');
+  }
+  return { actionUrl, startsAt, endsAt };
 };
 
 const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;
@@ -7099,16 +7187,15 @@ Deno.serve(async (request) => {
     return response;
   } catch (error) {
     capturedError = error;
+    // RpcError and EdgeBackpressureError both carry a numeric `.status` in the
+    // 400-599 range, so getErrorStatus() resolves them the same way the old
+    // per-type checks did. "This account is disabled." is thrown as a plain
+    // Error with no `.status` (see _shared/request-context.ts), so it still
+    // needs an explicit mapping or it would fall through to 500.
     const status =
-      isEdgeBackpressureError(error)
-        ? error.status
-        : error instanceof RpcError
-          ? error.status
-          : error instanceof Error && error.message === 'Missing authorization header'
-            ? 401
-            : error instanceof Error && error.message === 'This account is disabled.'
-              ? 403
-              : 500;
+      error instanceof Error && error.message === 'This account is disabled.'
+        ? 403
+        : getErrorStatus(error);
 
     response = json(
       status,

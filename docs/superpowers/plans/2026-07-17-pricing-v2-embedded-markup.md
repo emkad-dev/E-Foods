@@ -495,10 +495,16 @@ Change `toRestaurantResponse` to accept the config and use the transformer:
 ```ts
 const toRestaurantResponse = (
   restaurant: RestaurantRecordRow,
-  approval: RestaurantApprovalRow | null,
   pricingConfig: PricingConfig
 ) => ({
 ```
+
+> **Superseded detail:** this step originally threaded an
+> `approval: RestaurantApprovalRow | null` argument between `restaurant` and
+> `pricingConfig`. The `RestaurantApproval` join was removed from the catalog
+> read later (see `perf(public-catalog): drop the RestaurantApproval join from
+> the catalog read`), so the signature is now two arguments. The pricing change
+> this plan describes is unaffected.
 
 and replace the `menu:` line:
 
@@ -511,9 +517,7 @@ In `loadPublishedRestaurantCatalog`, load the config and pass it through — rep
 ```ts
   const pricingConfig = await loadPricingConfig();
 
-  return (restaurants ?? []).map((restaurant) =>
-    toRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null, pricingConfig)
-  );
+  return (restaurants ?? []).map((restaurant) => toRestaurantResponse(restaurant, pricingConfig));
 ```
 
 - [ ] **Step 3: Typecheck the function**

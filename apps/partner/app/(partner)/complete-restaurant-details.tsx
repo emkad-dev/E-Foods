@@ -1,12 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { submitPartnerApplication } from '../../src/services/partnerApplications';
+import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
+import { supabase } from '../../src/services/supabase/config';
 import { partnerTheme } from '../../src/theme/palette';
+import {
+  PARTNER_RESTAURANT_COMPLETION_TIMEOUT_MS,
+  resolvePartnerRestaurantCompletionState,
+} from '../../src/contexts/partnerAuthFlow';
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
 const deliveryTimeOptions = ['15-25 min', '25-35 min', '35-45 min', '45-60 min'] as const;
@@ -24,15 +30,82 @@ export default function CompleteRestaurantDetailsScreen() {
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [handoffStartedAt, setHandoffStartedAt] = useState<number | null>(null);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
+  const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const contactName = useMemo(
     () => user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'Partner',
     [user?.displayName, user?.email]
   );
+  const completionUserRole = user?.role === 'restaurant' ? 'restaurant' : 'customer';
+
+  useEffect(() => {
+    if (handoffTimerRef.current) {
+      clearTimeout(handoffTimerRef.current);
+      handoffTimerRef.current = null;
+    }
+
+    if (!handoffStartedAt) {
+      return;
+    }
+
+    const completionState = resolvePartnerRestaurantCompletionState({
+      startedAt: handoffStartedAt,
+      userRole: completionUserRole,
+    });
+
+    if (completionState.kind === 'ready') {
+      setHandoffStartedAt(null);
+      setHandoffError(null);
+      router.replace('/(partner)' as never);
+      return;
+    }
+
+    if (completionState.kind === 'timed-out') {
+      setHandoffStartedAt(null);
+      setHandoffError(completionState.message);
+      Alert.alert('Restaurant access still syncing', completionState.message);
+      return;
+    }
+
+    const elapsedMs = Date.now() - handoffStartedAt;
+    const remainingMs = Math.max(250, PARTNER_RESTAURANT_COMPLETION_TIMEOUT_MS - elapsedMs);
+
+    handoffTimerRef.current = setTimeout(() => {
+      const nextState = resolvePartnerRestaurantCompletionState({
+        startedAt: handoffStartedAt,
+        userRole: completionUserRole,
+        now: Date.now(),
+      });
+
+      if (nextState.kind === 'ready') {
+        setHandoffStartedAt(null);
+        setHandoffError(null);
+        router.replace('/(partner)' as never);
+        return;
+      }
+
+      if (nextState.kind === 'timed-out') {
+        setHandoffStartedAt(null);
+        setHandoffError(nextState.message);
+        Alert.alert('Restaurant access still syncing', nextState.message);
+      }
+    }, remainingMs);
+
+    return () => {
+      if (handoffTimerRef.current) {
+        clearTimeout(handoffTimerRef.current);
+        handoffTimerRef.current = null;
+      }
+    };
+  }, [completionUserRole, handoffStartedAt, router]);
 
   const handleFieldChange = (setter: (value: string) => void) => (value: string) => {
-    if (error) {
+    if (error || handoffError) {
       clearError();
+      setHandoffError(null);
     }
 
     setter(value);
@@ -59,6 +132,10 @@ export default function CompleteRestaurantDetailsScreen() {
   };
 
   const handleSubmit = async () => {
+    if (loading || submitting) {
+      return;
+    }
+
     const hasLatitude = latitude.trim().length > 0;
     const hasLongitude = longitude.trim().length > 0;
     const parsedLatitude = hasLatitude ? Number.parseFloat(latitude) : null;
@@ -78,6 +155,9 @@ export default function CompleteRestaurantDetailsScreen() {
       Alert.alert('Invalid location', 'Use valid numeric coordinates for the restaurant location.');
       return;
     }
+
+    setSubmitting(true);
+    setHandoffError(null);
 
     try {
       const logoUpload = logoImage
@@ -99,12 +179,15 @@ export default function CompleteRestaurantDetailsScreen() {
         longitude: hasLongitude ? parsedLongitude : null,
         phoneNumber: phoneNumber.trim(),
         restaurantName: restaurantName.trim(),
+        policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
       });
 
-      Alert.alert('Restaurant details saved', 'Your partner account is ready.');
-      router.replace('/(partner)' as never);
+      setHandoffStartedAt(Date.now());
+      await supabase.auth.refreshSession().catch(() => undefined);
     } catch (nextError: any) {
       Alert.alert('Unable to save details', nextError.message ?? 'Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -118,12 +201,12 @@ export default function CompleteRestaurantDetailsScreen() {
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
         <Text style={styles.title}>Complete your restaurant details</Text>
         <Text style={styles.copy}>
-          Add the restaurant profile that appears in the partner dashboard. You can update these details later.
+          Add the restaurant profile that appears in the partner dashboard. Once you save, we’ll open your restaurant dashboard right away.
         </Text>
       </View>
 
       <View style={styles.card}>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {handoffError || error ? <Text style={styles.errorText}>{handoffError ?? error}</Text> : null}
 
         <View style={styles.identityRow}>
           <View style={styles.identityBubble}>
@@ -141,7 +224,7 @@ export default function CompleteRestaurantDetailsScreen() {
           placeholderTextColor="#8e8e8e"
           value={restaurantName}
           onChangeText={handleFieldChange(setRestaurantName)}
-          editable={!loading}
+          editable={!loading && !submitting && !handoffStartedAt}
         />
         <TextInput
           style={styles.input}
@@ -150,7 +233,7 @@ export default function CompleteRestaurantDetailsScreen() {
           keyboardType="phone-pad"
           value={phoneNumber}
           onChangeText={handleFieldChange(setPhoneNumber)}
-          editable={!loading}
+          editable={!loading && !submitting && !handoffStartedAt}
         />
 
         <View style={styles.logoRow}>
@@ -158,11 +241,11 @@ export default function CompleteRestaurantDetailsScreen() {
             {logoImage ? <Image source={{ uri: logoImage }} style={styles.logoImage} /> : <Text style={styles.logoPreviewText}>Logo</Text>}
           </View>
           <View style={styles.logoActions}>
-            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading}>
+            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading || submitting || Boolean(handoffStartedAt)}>
               <Text style={styles.logoButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
             </TouchableOpacity>
             {logoImage ? (
-              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading}>
+              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading || submitting || Boolean(handoffStartedAt)}>
                 <Text style={styles.removeLogoText}>Remove</Text>
               </TouchableOpacity>
             ) : null}
@@ -176,7 +259,7 @@ export default function CompleteRestaurantDetailsScreen() {
               key={option}
               style={[styles.chip, cuisine === option ? styles.chipActive : null]}
               onPress={() => setCuisine(option)}
-              disabled={loading}
+              disabled={loading || submitting || Boolean(handoffStartedAt)}
             >
               <Text style={[styles.chipText, cuisine === option ? styles.chipTextActive : null]}>{option}</Text>
             </TouchableOpacity>
@@ -190,7 +273,7 @@ export default function CompleteRestaurantDetailsScreen() {
           multiline
           value={address}
           onChangeText={handleFieldChange(setAddress)}
-          editable={!loading}
+          editable={!loading && !submitting && !handoffStartedAt}
         />
         <TextInput
           style={[styles.input, styles.textArea]}
@@ -199,7 +282,7 @@ export default function CompleteRestaurantDetailsScreen() {
           multiline
           value={description}
           onChangeText={handleFieldChange(setDescription)}
-          editable={!loading}
+          editable={!loading && !submitting && !handoffStartedAt}
         />
 
         <Text style={styles.sectionLabel}>Typical delivery time</Text>
@@ -209,7 +292,7 @@ export default function CompleteRestaurantDetailsScreen() {
               key={option}
               style={[styles.chip, deliveryTime === option ? styles.chipActive : null]}
               onPress={() => setDeliveryTime(option)}
-              disabled={loading}
+              disabled={loading || submitting || Boolean(handoffStartedAt)}
             >
               <Text style={[styles.chipText, deliveryTime === option ? styles.chipTextActive : null]}>{option}</Text>
             </TouchableOpacity>
@@ -224,7 +307,7 @@ export default function CompleteRestaurantDetailsScreen() {
             keyboardType="decimal-pad"
             value={latitude}
             onChangeText={handleFieldChange(setLatitude)}
-            editable={!loading}
+            editable={!loading && !submitting && !handoffStartedAt}
           />
           <TextInput
             style={[styles.input, styles.coordinateInput]}
@@ -233,15 +316,21 @@ export default function CompleteRestaurantDetailsScreen() {
             keyboardType="decimal-pad"
             value={longitude}
             onChangeText={handleFieldChange(setLongitude)}
-            editable={!loading}
+            editable={!loading && !submitting && !handoffStartedAt}
           />
         </View>
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Saving details...' : 'Save restaurant details'}</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading || submitting || Boolean(handoffStartedAt)}>
+          <Text style={styles.primaryButtonText}>
+            {handoffStartedAt ? 'Opening dashboard...' : loading || submitting ? 'Saving details...' : 'Save and open dashboard'}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading}>
+        <Text style={styles.handoffNote}>
+          After saving, we’ll wait for your restaurant access to finish syncing before opening the dashboard.
+        </Text>
+
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading || submitting || Boolean(handoffStartedAt)}>
           <Text style={styles.secondaryButtonText}>Sign out</Text>
         </TouchableOpacity>
       </View>
@@ -462,5 +551,12 @@ const styles = StyleSheet.create({
     color: partnerTheme.textMuted,
     fontSize: 14,
     fontWeight: '700',
+  },
+  handoffNote: {
+    color: partnerTheme.textSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+    textAlign: 'center',
   },
 });

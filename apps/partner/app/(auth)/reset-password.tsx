@@ -9,9 +9,14 @@ export default function PartnerResetPasswordScreen() {
   const params = useLocalSearchParams<{
     access_token?: string | string[];
     code?: string | string[];
+    redirectTo?: string | string[];
     refresh_token?: string | string[];
   }>();
   const router = useRouter();
+  const redirectTo = useMemo(() => {
+    if (Array.isArray(params.redirectTo)) return params.redirectTo[0];
+    return params.redirectTo;
+  }, [params.redirectTo]);
   const accessToken = useMemo(() => {
     if (Array.isArray(params.access_token)) return params.access_token[0];
     return params.access_token;
@@ -78,10 +83,13 @@ export default function PartnerResetPasswordScreen() {
       }
 
       await supabase.auth.signOut().catch(() => undefined);
-      Alert.alert('Password updated', 'You can now sign in with your new password.', [
+      Alert.alert('Password updated', 'Your password has been updated. Sign in to open your dashboard.', [
         {
-          text: 'Continue to sign in',
-          onPress: () => router.replace('/(auth)/login'),
+          text: 'Back to sign in',
+          onPress: () =>
+            router.replace(
+              redirectTo ? ({ pathname: '/(auth)/login', params: { redirectTo } } as never) : ('/(auth)/login' as never)
+            ),
         },
       ]);
     } catch (nextError: any) {
@@ -96,7 +104,7 @@ export default function PartnerResetPasswordScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Choose a new partner password</Text>
-      <Text style={styles.copy}>Set a fresh password for your partner account, then sign back in.</Text>
+      <Text style={styles.copy}>Set a fresh password for your partner account, then sign in to open your dashboard.</Text>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -120,10 +128,13 @@ export default function PartnerResetPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
-        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
+        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Save new password'}</Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/login" style={styles.link}>
+      <Link
+        href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
+        style={styles.link}
+      >
         Back to sign in
       </Link>
     </ScrollView>

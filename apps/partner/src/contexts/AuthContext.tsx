@@ -23,9 +23,14 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
-import { type PartnerApplicationInput } from '../services/partnerApplications';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
+import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
+import { buildPartnerActionCodeSettings } from '../utils/authActionUrls';
+import {
+  resolvePartnerAccessState,
+  type PartnerUserDocumentState,
+} from './partnerAuthFlow';
 
 type AuthContextType = {
   user: UserDocument | null;
@@ -34,7 +39,10 @@ type AuthContextType = {
   signUp: (
     email: string,
     password: string,
-    userData: PartnerApplicationInput
+    userData: {
+      contactName: string;
+      phoneNumber: string;
+    }
   ) => Promise<{ verificationEmailSent: boolean; sessionPresent: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -46,16 +54,10 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PARTNER_ACCESS_ERROR = 'This account does not have partner access.';
 const MISSING_PROFILE_ERROR = 'No partner profile was found for this account.';
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const PARTNER_APPLICATION_REJECTED_FALLBACK =
-  'Your restaurant account is not active yet. Update your details with the operations team before trying again.';
-const getActionCodeSettings = (path: string) => ({
-  url: `${appEnv.appScheme}://${path}`,
-});
 
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -88,28 +90,10 @@ const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => 
   return fallbackMessage;
 };
 
-const getPartnerAccessStateMessage = (userDocument: Partial<UserDocument> | null) => {
-  if (!userDocument) {
-    return MISSING_PROFILE_ERROR;
-  }
-
-  if (userDocument.partnerApplicationStatus === 'pending') {
-    return 'Your restaurant account is being prepared. Sign in again shortly.';
-  }
-
-  if (userDocument.partnerApplicationStatus === 'rejected') {
-    return userDocument.partnerApplicationRejectionReason ?? PARTNER_APPLICATION_REJECTED_FALLBACK;
-  }
-
-  return PARTNER_ACCESS_ERROR;
-};
-
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const pendingApplicantUidRef = useRef<string | null>(null);
-  const partnerSignupInProgressRef = useRef(false);
   // Tracks whether a partner is already signed in, without re-subscribing the
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
@@ -177,61 +161,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const buildNextUser = useCallback(
     async (authUser: SupabaseAuthUser) => {
-      if (partnerSignupInProgressRef.current) {
-        return null;
-      }
-
+      const claimRole = await getUserRoleClaim(authUser);
       let userDocument = await getUserDocument(authUser.id);
 
       if (!userDocument) {
         userDocument = await createUserDocument(authUser.id, {
-          email: authUser.email ?? '',
-          emailVerified: Boolean(authUser.email_confirmed_at),
-          role: 'customer',
           displayName:
             (authUser.user_metadata?.display_name as string | undefined) ??
             (authUser.user_metadata?.full_name as string | undefined) ??
             undefined,
+          email: authUser.email ?? '',
+          emailVerified: Boolean(authUser.email_confirmed_at),
+          phoneNumber: (authUser.user_metadata?.phone as string | undefined) ?? undefined,
+          role: 'customer',
         });
       }
 
-      const claimRole = await getUserRoleClaim(authUser);
+      const accessState = resolvePartnerAccessState({
+        claimRole: claimRole === 'restaurant' ? 'restaurant' : 'customer',
+        userDocument: userDocument as PartnerUserDocumentState,
+      });
 
-      if (claimRole !== 'restaurant') {
-        if (pendingApplicantUidRef.current === authUser.id) {
-          return null;
-        }
-
-        if (userDocument.partnerApplicationStatus === 'pending') {
-          await clearLocalUserState();
-          await signOutUser(supabase);
-          setUser(null);
-          setError(getPartnerAccessStateMessage(userDocument));
-          return null;
-        }
-
-        if (userDocument.partnerApplicationStatus === 'rejected') {
-          await clearLocalUserState();
-          await signOutUser(supabase);
-          setUser(null);
-          setError(getPartnerAccessStateMessage(userDocument));
-          return null;
-        }
-
-        return {
-          ...userDocument,
-          uid: authUser.id,
-          email: authUser.email ?? userDocument.email,
-          emailVerified: Boolean(authUser.email_confirmed_at),
-          role: 'customer',
-        } satisfies UserDocument;
-      }
-
-      if (!userDocument) {
+      if (accessState.kind === 'blocked') {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
-        setError(MISSING_PROFILE_ERROR);
+        setError(accessState.message);
         return null;
       }
 
@@ -240,7 +195,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         uid: authUser.id,
         email: authUser.email ?? userDocument.email,
         emailVerified: Boolean(authUser.email_confirmed_at),
-        role: claimRole,
+        role: accessState.userRole,
       } satisfies UserDocument;
     },
     [clearLocalUserState]
@@ -257,27 +212,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let active = true;
 
     void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!active) {
+        return;
+      }
+
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+
       const cachedUser = await getStoredUserProfile<UserDocument>();
 
       if (!active) {
         return;
       }
 
-      if (cachedUser && cachedUser.role === 'restaurant') {
+      if (
+        shouldHydrateCachedUserProfile({
+          sessionUserId: session.user.id,
+          cachedUser,
+          expectedRole: 'restaurant',
+        })
+      ) {
         setUser(cachedUser);
-        setLoading(false);
-        return;
-      }
-
-      // No cached profile: getSession() is a local read (no network), so we can
-      // cheaply decide whether to unblock straight to the login screen. When a
-      // session does exist we leave `loading` true and let the reconcile below
-      // finish, since there is nothing cached to paint yet.
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (active && !session) {
         setLoading(false);
       }
     })();
@@ -360,14 +321,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => subscription.unsubscribe();
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
-  const signUp = async (email: string, password: string, userData: PartnerApplicationInput) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    userData: {
+      contactName: string;
+      phoneNumber: string;
+    }
+  ) => {
     setLoading(true);
     setError(null);
 
     try {
-      partnerSignupInProgressRef.current = true;
       const { user: authUser, session } = await createUserWithEmail(supabase, email, password, {
         display_name: userData.contactName.trim(),
+        phone: userData.phoneNumber.trim(),
         role: 'customer',
       });
 
@@ -377,20 +345,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await sendVerificationEmail(
           supabase,
           authUser.email ?? email,
-          getActionCodeSettings(appEnv.verifyEmailPath)
+          buildPartnerActionCodeSettings(appEnv.verifyEmailPath, {
+            appScheme: appEnv.appScheme,
+            webOrigin: appEnv.partnerWebOrigin,
+          })
         );
         verificationEmailSent = true;
       } catch (verificationError) {
-        console.warn('Partner account created, but verification email could not be sent:', verificationError);
+        console.warn('Partner login created, but verification email could not be sent:', verificationError);
       }
 
       return { verificationEmailSent, sessionPresent: Boolean(session) };
     } catch (nextError: any) {
       const resolvedMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
+
       setError(resolvedMessage);
       throw new Error(resolvedMessage);
     } finally {
-      partnerSignupInProgressRef.current = false;
       setLoading(false);
     }
   };
@@ -426,7 +397,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      await sendPasswordReset(supabase, email, getActionCodeSettings(appEnv.resetPasswordPath));
+      await sendPasswordReset(supabase, email, buildPartnerActionCodeSettings(appEnv.resetPasswordPath, {
+        appScheme: appEnv.appScheme,
+        webOrigin: appEnv.partnerWebOrigin,
+      }));
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);

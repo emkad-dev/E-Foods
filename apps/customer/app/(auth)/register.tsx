@@ -8,15 +8,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
-import { getGoogleSignInUnavailableMessage } from '../../src/services/googleSignIn';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
   const [nickname, setNickname] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,7 +25,6 @@ export default function RegisterScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const { loading, signUp, error, clearError } = useAuth();
-  const googleSignInAvailable = !getGoogleSignInUnavailableMessage();
 
   const handleNicknameChange = (value: string) => {
     if (error) clearError();
@@ -80,10 +80,10 @@ export default function RegisterScreen() {
       });
 
       Alert.alert(
-        verificationEmailSent ? 'Check your inbox' : 'Account created',
+        verificationEmailSent ? 'Confirm your email' : 'Account created',
         verificationEmailSent
-          ? 'We sent you a verification email to finish setting up your account.'
-          : 'Your account was created, but verification email could not be sent yet. Open the verify email screen and try resending from there.'
+          ? 'We sent a verification email. Confirm it, then sign in to continue.'
+          : 'Your account was created, but the verification email could not be sent yet. Open the verify email screen and resend it from there.'
       );
     } catch (error: any) {
       Alert.alert('Registration failed', error.message);
@@ -99,7 +99,7 @@ export default function RegisterScreen() {
       >
         <View style={styles.container}>
           <Text style={styles.title}>Create your account</Text>
-          <Text style={styles.copy}>Sign up to start ordering from nearby restaurants.</Text>
+          <Text style={styles.copy}>Create your account, then confirm your email to start ordering from nearby restaurants.</Text>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -173,19 +173,15 @@ export default function RegisterScreen() {
             <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create account'}</Text>
           </TouchableOpacity>
 
-          {googleSignInAvailable ? (
-            <>
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>Or sign up with</Text>
-                <View style={styles.dividerLine} />
-              </View>
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>Or sign up with</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
-              <GoogleSignInButton />
-            </>
-          ) : null}
+          <GoogleSignInButton />
 
-          <Link href="/login" style={styles.link}>
+          <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
             Already have an account? Sign in
           </Link>
         </View>

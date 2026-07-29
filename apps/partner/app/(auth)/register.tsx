@@ -1,22 +1,23 @@
 import { useState } from 'react';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerRegisterScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const { clearError, error, loading, signUp } = useAuth();
   const [contactName, setContactName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
 
   const canSubmit = Boolean(contactName.trim() && email.trim() && password.trim() && phoneE164 && acceptedPolicies);
 
@@ -42,24 +43,15 @@ export default function PartnerRegisterScreen() {
     try {
       const result = await signUp(email.trim(), password, {
         contactName: contactName.trim(),
-        address: '',
-        cuisine: 'Nigerian',
-        deliveryTime: undefined,
-        description: undefined,
-        latitude: null,
-        logoImage: null,
-        longitude: null,
         phoneNumber: phoneE164 ?? '',
-        policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
-        restaurantName: '',
       });
 
       Alert.alert(
         result.sessionPresent ? 'Account created' : 'Check your inbox',
-        result.verificationEmailSent
-          ? result.sessionPresent
-            ? 'Your login is ready. Sign in to complete your restaurant profile.'
-            : 'We sent a verification email. Confirm it, then sign in to finish setting up your restaurant.'
+          result.verificationEmailSent
+            ? result.sessionPresent
+            ? 'Your login is ready. Sign in to complete your restaurant details and open your dashboard.'
+            : 'We sent a verification email. Confirm it, then sign in to finish your restaurant setup and open your dashboard.'
           : 'Your account was created, but the verification email could not be confirmed from the app.'
       );
 
@@ -81,7 +73,7 @@ export default function PartnerRegisterScreen() {
           <Text style={styles.eyebrow}>FEASTY Partner</Text>
           <Text style={styles.title}>Create your partner login</Text>
           <Text style={styles.copy}>
-            We’ll set up your login first. After you verify your email, you can finish the restaurant profile from the dashboard.
+            We’ll set up your login first. After you verify your email, sign in to complete your restaurant details and open the partner dashboard.
           </Text>
         </View>
 
@@ -152,7 +144,7 @@ export default function PartnerRegisterScreen() {
             <Text style={styles.buttonText}>{loading ? 'Creating login...' : 'Create login'}</Text>
           </TouchableOpacity>
 
-          <Link href="/login" style={styles.link}>
+          <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
             Already have a login? Sign in
           </Link>
         </View>

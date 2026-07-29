@@ -12,7 +12,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ebuy.customer",
       "associatedDomains": [
-        "applinks:feasty.com"
+        "applinks:app.feasty.com.ng"
       ]
     },
     "android": {
@@ -29,7 +29,7 @@
           "data": [
             {
               "scheme": "https",
-              "host": "feasty.com"
+              "host": "app.feasty.com.ng"
             },
             {
               "scheme": "feasty-customer"
@@ -47,7 +47,7 @@
       ]
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -88,7 +88,7 @@
         "projectId": "dcd9458a-36cb-4f88-bd22-b53a99e1332b"
       },
       "EXPO_PUBLIC_PROJECT_ID": "G-VM017RKW5Q",
-      "EXPO_PUBLIC_APP_DOMAIN": "feasty.com",
+      "EXPO_PUBLIC_APP_DOMAIN": "app.feasty.com.ng",
       "EXPO_PUBLIC_APP_SCHEME": "feasty-customer",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password",

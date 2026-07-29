@@ -9,13 +9,15 @@ import RangePicker from '../components/RangePicker';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import {
+  buildPaymentBreakdown,
   buildStatusBreakdown,
   computeDashboardKpis,
+  computeProblemCounts,
   getOrderDate,
   type RangeDays,
 } from '../lib/analytics';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
-import { getApprovalTone, getOrderTone, getStatusChartColor } from '../theme/tones';
+import { getApprovalTone, getOrderTone, getPaymentChartColor, getStatusChartColor } from '../theme/tones';
 
 export default function OverviewPage() {
   const { snapshot, loading, error, refresh } = useSnapshot();
@@ -36,6 +38,17 @@ export default function OverviewPage() {
   );
 
   const statusBreakdown = useMemo(() => buildStatusBreakdown(snapshot.orders).slice(0, 8), [snapshot.orders]);
+
+  const windowedOrders = useMemo(() => {
+    const start = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    return snapshot.orders.filter((order) => {
+      const created = getOrderDate(order);
+      return created !== null && created >= start;
+    });
+  }, [snapshot.orders, rangeDays]);
+
+  const problemCounts = useMemo(() => computeProblemCounts(windowedOrders), [windowedOrders]);
+  const paymentBreakdown = useMemo(() => buildPaymentBreakdown(snapshot.orders).slice(0, 8), [snapshot.orders]);
 
   const approvalPulse = useMemo(
     () =>
@@ -78,6 +91,9 @@ export default function OverviewPage() {
         <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} />
         <KpiCard label="Dispatch online" value={formatNumber(kpis.dispatchOnline)} />
         <KpiCard label="Pending approvals" value={formatNumber(kpis.pendingApprovals)} />
+        <KpiCard label={`Failed payments (${rangeDays}d)`} value={formatNumber(problemCounts.failedPayments)} />
+        <KpiCard label={`Pending payments (${rangeDays}d)`} value={formatNumber(problemCounts.pendingPayments)} />
+        <KpiCard label={`Cancelled orders (${rangeDays}d)`} value={formatNumber(problemCounts.cancelledOrders)} />
       </div>
 
       <div className="grid-2">
@@ -120,6 +136,57 @@ export default function OverviewPage() {
                             height: 10,
                             borderRadius: 999,
                             background: getStatusChartColor(slice.name, index),
+                            display: 'inline-block',
+                          }}
+                        />
+                        {humanizeStatus(slice.name)}
+                      </span>
+                      <span className="cell-strong">{formatNumber(slice.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-title-row">
+              <h3 className="card-title">Payments by status</h3>
+              <Link to="/statistics" className="muted" style={{ fontSize: 13 }}>
+                more →
+              </Link>
+            </div>
+            {paymentBreakdown.length === 0 ? (
+              <EmptyState title="No payments yet" body="Payment status distribution will appear here." />
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={paymentBreakdown}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={60}
+                      outerRadius={95}
+                      paddingAngle={3}
+                    >
+                      {paymentBreakdown.map((slice, index) => (
+                        <Cell key={slice.name} fill={getPaymentChartColor(slice.name, index)} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div>
+                  {paymentBreakdown.map((slice, index) => (
+                    <div key={slice.name} className="list-row">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: 999,
+                            background: getPaymentChartColor(slice.name, index),
                             display: 'inline-block',
                           }}
                         />

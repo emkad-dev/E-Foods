@@ -11,6 +11,7 @@ const ADMIN_NAV = [
   { to: '/statistics', label: 'Statistics' },
   { to: '/inbox', label: 'Inbox' },
   { to: '/broadcasts', label: 'Broadcasts' },
+  { to: '/promos', label: 'Promos' },
 ];
 
 const SUPPORT_NAV = [{ to: '/inbox', label: 'Inbox', end: true }];

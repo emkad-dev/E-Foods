@@ -97,6 +97,12 @@ export interface OrderPriceBreakdown extends DocumentData {
   tip: number;
   discount: number;
   total: number;
+  /** Restaurant's own-price basis (Σ base price × qty). Absent on legacy orders. */
+  restaurantBasis?: number;
+  /** Platform service charge deducted from the basis (currently 0). Absent on legacy orders. */
+  partnerServiceFee?: number;
+  /** Food payout: basis − service charge. Legacy orders carry the commission-era value. */
+  restaurantPayable?: number;
 }
 
 export interface OrderPaymentSummary extends DocumentData {

@@ -35,7 +35,7 @@ export const appEnv = {
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_DOMAIN,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN
-    ) ?? 'feasty.com',
+    ) ?? 'app.feasty.com.ng',
   appScheme:
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_SCHEME,
@@ -62,6 +62,10 @@ export const appEnv = {
   backendRpcUrl: getEnvValue(
     process.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_RPC_URL
+  ),
+  catalogUrl: getEnvValue(
+    process.env.EXPO_PUBLIC_CATALOG_URL,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_CATALOG_URL
   ),
   functionsRegion:
     getEnvValue(

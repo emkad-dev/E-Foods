@@ -89,19 +89,19 @@ export default function PartnerVerifyEmailScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Confirm partner email</Text>
+      <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
         {processing
           ? 'Finishing your email confirmation now. Stay on this screen for a moment.'
           : confirmed
-            ? 'Your email is confirmed. Your restaurant account is now ready for sign-in.'
-            : 'Open the verification link from your email on this device to confirm this partner account.'}
+            ? 'Your email is confirmed. You can now sign in and open your dashboard.'
+            : 'Open the verification link from your email on this device to confirm this account.'}
       </Text>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <Link href="/(auth)/login" style={styles.link}>
-        Back to partner sign in
+        Back to sign in
       </Link>
     </ScrollView>
   );

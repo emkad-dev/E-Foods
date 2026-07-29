@@ -20,7 +20,6 @@ import { useCart } from '../../../../src/contexts/CartContext';
 import { useCoverage } from '../../../../src/contexts/CoverageContext';
 import { customerTheme } from '../../../../src/theme/palette';
 import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
-import { toCustomerFacingItemPrice } from '../../../../src/domain/orders';
 import {
   COVERAGE_COMING_SOON_COPY,
   COVERAGE_COMING_SOON_TITLE,
@@ -162,7 +161,7 @@ export default function RestaurantDetail() {
                 {
                   id: item.id,
                   name: item.name,
-                  price: toCustomerFacingItemPrice(item.price),
+                  price: item.price,
                   quantity: 1,
                   restaurantId: id as string,
                   restaurantName: restaurant?.name ?? 'Restaurant',
@@ -184,7 +183,7 @@ export default function RestaurantDetail() {
       {
         id: item.id,
         name: item.name,
-        price: toCustomerFacingItemPrice(item.price),
+        price: item.price,
         quantity: 1,
         restaurantId: id as string,
         restaurantName: restaurant?.name ?? 'Restaurant',
@@ -348,7 +347,7 @@ export default function RestaurantDetail() {
                 <View style={styles.menuItemInfo}>
                   <Text style={styles.itemName}>{menuItem.name}</Text>
                   {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
-                  <Text style={styles.itemPrice}>{formatMoney(toCustomerFacingItemPrice(menuItem.price))}</Text>
+                  <Text style={styles.itemPrice}>{formatMoney(menuItem.price)}</Text>
                 </View>
                 <TouchableOpacity
                   style={[

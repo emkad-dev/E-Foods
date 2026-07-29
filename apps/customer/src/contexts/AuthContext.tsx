@@ -31,6 +31,7 @@ import {
 } from '../services/session';
 import { getUserDocument, createUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { supabase } from '../services/supabase/config';
+import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
 import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
 import {
   getCustomerPolicyAcceptance,
@@ -291,6 +292,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let active = true;
 
     void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!active) {
+        return;
+      }
+
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+
       const [cachedUser, cachedPolicyAccepted] = await Promise.all([
         getStoredUserProfile<UserDocument>(),
         getStoredPolicyAccepted(),
@@ -300,18 +314,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      if (cachedUser && cachedUser.role === DEFAULT_APP_ROLE) {
+      if (
+        shouldHydrateCachedUserProfile({
+          sessionUserId: session.user.id,
+          cachedUser,
+          expectedRole: DEFAULT_APP_ROLE,
+        })
+      ) {
         setUser(cachedUser);
         setPolicyAccepted(cachedPolicyAccepted);
-        setLoading(false);
-        return;
-      }
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (active && !session) {
         setLoading(false);
       }
     })();

@@ -1,6 +1,6 @@
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -8,9 +8,11 @@ import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerLoginScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const { clearError, error, loading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
 
   const handleEmailChange = (value: string) => {
     if (error) {
@@ -49,9 +51,10 @@ export default function PartnerLoginScreen() {
     >
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
-        <Text style={styles.title}>Restaurant sign in</Text>
+        <Text style={styles.title}>Sign in to your dashboard</Text>
         <Text style={styles.copy}>
-          Use your restaurant operations account to manage orders, menu updates, and store performance.
+          Use your restaurant operations account to manage orders, menu updates, and store performance. We’ll take
+          you to the right place after sign in.
         </Text>
       </View>
 
@@ -77,15 +80,24 @@ export default function PartnerLoginScreen() {
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter partner app'}</Text>
+          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Open dashboard'}</Text>
         </TouchableOpacity>
 
-        <Link href="/(auth)/register" style={styles.link}>
-          Need a partner account? Sign up
+        <Link
+          href={redirectTo ? { pathname: '/(auth)/register', params: { redirectTo } } : '/(auth)/register'}
+          style={styles.link}
+        >
+          Need a partner login? Create one
         </Link>
-        <Link href="/(auth)/forgot-password" style={styles.linkSecondary}>
+        <Link
+          href={redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'}
+          style={styles.linkSecondary}
+        >
           Forgot password?
         </Link>
+        <Text style={styles.linkSecondary} onPress={() => Linking.openURL('https://feasty.com.ng')}>
+          Looking to order food? Visit feasty.com.ng
+        </Text>
       </View>
     </ScrollView>
   );

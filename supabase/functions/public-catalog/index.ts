@@ -3,6 +3,8 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
 import { toCdnImageUrl } from '../_shared/media.ts';
+import { toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
+import { loadPricingConfig } from '../_shared/platformSettings.ts';
 import {
   createEdgeObservation,
   finishEdgeObservation,
@@ -43,8 +45,39 @@ const sanitizeOptionalText = (value: unknown) => {
   return nextValue || null;
 };
 
+// Customers only ever see final prices; the restaurant's own price never
+// leaves the server. Malformed categories/items pass through untouched.
+const withDisplayMenuPrices = (menu: unknown[], config: PricingConfig) =>
+  menu.map((category) => {
+    if (!category || typeof category !== 'object') {
+      return category;
+    }
+
+    const categoryRecord = category as Record<string, unknown>;
+    if (!Array.isArray(categoryRecord.items)) {
+      return category;
+    }
+
+    return {
+      ...categoryRecord,
+      items: categoryRecord.items.map((item) => {
+        if (!item || typeof item !== 'object') {
+          return item;
+        }
+
+        const itemRecord = item as Record<string, unknown>;
+        if (typeof itemRecord.price !== 'number' || !Number.isFinite(itemRecord.price)) {
+          return item;
+        }
+
+        return { ...itemRecord, price: toDisplayPrice(itemRecord.price, config) };
+      }),
+    };
+  });
+
 const toRestaurantResponse = (
   restaurant: RestaurantRecordRow,
+  pricingConfig: PricingConfig
 ) => ({
   address: sanitizeOptionalText(restaurant.address),
   approvalStatus: restaurant.isPublished ? 'approved' : 'pending',
@@ -62,7 +95,7 @@ const toRestaurantResponse = (
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,
   longitude: restaurant.longitude ?? null,
-  menu: Array.isArray(restaurant.menu) ? restaurant.menu : [],
+  menu: Array.isArray(restaurant.menu) ? withDisplayMenuPrices(restaurant.menu, pricingConfig) : [],
   minOrder: restaurant.minOrder ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
@@ -84,7 +117,9 @@ const loadPublishedRestaurantCatalog = async () => {
     throw new Error(restaurantError.message);
   }
 
-  return (restaurants ?? []).map((restaurant) => toRestaurantResponse(restaurant));
+  const pricingConfig = await loadPricingConfig();
+
+  return (restaurants ?? []).map((restaurant) => toRestaurantResponse(restaurant, pricingConfig));
 };
 
 Deno.serve(async (request) => {

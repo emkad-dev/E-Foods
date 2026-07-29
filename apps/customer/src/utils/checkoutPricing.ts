@@ -1,13 +1,8 @@
 export const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
-export const calculateServiceFee = (subtotal: number) => {
-  if (subtotal <= 0) {
-    return 0;
-  }
-
-  return roundCurrency(Math.min(Math.max(subtotal * 0.05, 0.49), 12));
-};
-
+// Menu prices arrive from the catalog with the platform markup already
+// embedded, so checkout is a plain sum. The server re-derives every amount
+// authoritatively at order creation — this preview must add nothing.
 export const calculateCheckoutTotal = ({
   deliveryFee,
   subtotal,
@@ -20,14 +15,11 @@ export const calculateCheckoutTotal = ({
   const safeSubtotal = roundCurrency(subtotal);
   const safeDeliveryFee = roundCurrency(deliveryFee);
   const safeTip = roundCurrency(tip);
-  const serviceFee = calculateServiceFee(safeSubtotal);
-  const total = roundCurrency(safeSubtotal + safeDeliveryFee + serviceFee + safeTip);
 
   return {
     deliveryFee: safeDeliveryFee,
-    serviceFee,
     subtotal: safeSubtotal,
     tip: safeTip,
-    total,
+    total: roundCurrency(safeSubtotal + safeDeliveryFee + safeTip),
   };
 };

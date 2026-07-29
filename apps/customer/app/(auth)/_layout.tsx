@@ -1,24 +1,61 @@
-import { Redirect, Stack } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import { Redirect, Stack, useLocalSearchParams, usePathname } from 'expo-router';
+import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { customerTheme } from '../../src/theme/palette';
 
+const AUTH_ROUTES = new Set(['/login', '/register', '/forgot-password', '/reset-password']);
+const normalizeRedirectTo = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  if (normalized === '/' || AUTH_ROUTES.has(normalized) || normalized === '/payment' || normalized === '/payment/callback') {
+    return null;
+  }
+
+  return normalized;
+};
+
+type CustomerLoadingMode = NonNullable<Parameters<typeof LoadingSkeleton>[0]['mode']>;
+
+const getAuthLoadingMode = (pathname: string | null | undefined): CustomerLoadingMode => {
+  const currentPath = pathname || '/login';
+
+  if (currentPath.startsWith('/register')) {
+    return 'auth-register';
+  }
+
+  if (
+    currentPath.startsWith('/forgot-password') ||
+    currentPath.startsWith('/reset-password') ||
+    currentPath.startsWith('/verify-email') ||
+    currentPath.startsWith('/terms') ||
+    currentPath.startsWith('/privacy') ||
+    currentPath.startsWith('/accept-policy') ||
+    currentPath.startsWith('/complete-profile')
+  ) {
+    return currentPath.startsWith('/accept-policy') || currentPath.startsWith('/complete-profile')
+      ? 'auth-onboarding'
+      : 'auth-recovery';
+  }
+
+  return 'auth-login';
+};
+
 export default function AuthLayout() {
+  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const pathname = usePathname();
   const { loading, policyLoading, policyAccepted, user } = useAuth();
+  const redirectTo = normalizeRedirectTo(params.redirectTo);
 
   if (loading || policyLoading) {
-    return (
-      <View
-        style={{
-          alignItems: 'center',
-          backgroundColor: customerTheme.launchBackground,
-          flex: 1,
-          justifyContent: 'center',
-        }}
-      >
-        <ActivityIndicator color={customerTheme.brandGreen} size="large" />
-      </View>
-    );
+    return <LoadingSkeleton mode={getAuthLoadingMode(pathname)} />;
   }
 
   if (user) {
@@ -30,6 +67,8 @@ export default function AuthLayout() {
       target = '/complete-profile';
     } else if (!policyAccepted) {
       target = '/accept-policy';
+    } else if (redirectTo) {
+      target = redirectTo;
     }
 
     return <Redirect href={target as never} />;
