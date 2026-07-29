@@ -32,8 +32,15 @@ import {
   finishEdgeObservation,
   getErrorStatus,
   jsonResponse,
+  logEdgeEvent,
   runWithBackpressure,
 } from '../_shared/observability.ts';
+import {
+  DURABLE_SYNC_INTERVAL_SECONDS,
+  buildRiderLocationUpsert,
+  mergeRiderLiveLocation,
+  type RiderLiveLocationRow,
+} from '../_shared/riderLocation.ts';
 import { validatePromoTrack } from './promoTrack.ts';
 import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
 import { loadPricingConfig } from '../_shared/platformSettings.ts';
@@ -796,6 +803,37 @@ const buildDispatchRiderResponse = (rider: DispatchRiderRow) => ({
   vehicleType: sanitizeText(rider.vehicleType, DEFAULT_DISPATCH_VEHICLE),
   zone: sanitizeText(rider.zone),
 });
+
+type NearestRiderRow = {
+  rider_id: string;
+  latitude: number;
+  longitude: number;
+  metres: number;
+};
+
+// Ranks live riders by true great-circle distance from a point, nearest first.
+// Returns [] when the geo function is unavailable or nothing is in range, so
+// callers always have a well-formed list rather than an error to handle.
+const findNearestRiders = async (
+  latitude: number,
+  longitude: number,
+  radiusMetres: number,
+  limit: number
+): Promise<NearestRiderRow[]> => {
+  const { data, error } = await serviceClient.rpc('ebuy_nearest_riders', {
+    p_latitude: latitude,
+    p_longitude: longitude,
+    p_radius_metres: radiusMetres,
+    p_limit: limit,
+  });
+
+  if (error) {
+    logEdgeEvent('error', 'nearest rider lookup failed', { reason: error.message });
+    return [];
+  }
+
+  return (data ?? []) as NearestRiderRow[];
+};
 
 const getRolePriority = (role: string) => {
   switch (role) {
@@ -5882,9 +5920,29 @@ const handleNativeAction = async (
       throw new Error(error.message);
     }
 
+    // Live positions come from the unlogged table. A failure here is not fatal:
+    // the durable DispatchRiderRecord columns are the fallback, at most
+    // DURABLE_SYNC_INTERVAL_SECONDS stale.
+    const { data: liveRows, error: liveError } = await serviceClient
+      .from('rider_live_location')
+      .select('rider_id,latitude,longitude,accuracy,updated_at');
+
+    if (liveError) {
+      logEdgeEvent('error', 'live rider location read failed', {
+        reason: liveError.message,
+      });
+    }
+
+    const liveById = new Map<string, RiderLiveLocationRow>(
+      ((liveRows ?? []) as RiderLiveLocationRow[]).map((row) => [row.rider_id, row])
+    );
+    const nowMs = Date.now();
+
     return json(200, {
       data: {
-        riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) => buildDispatchRiderResponse(rider)),
+        riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) =>
+          buildDispatchRiderResponse(mergeRiderLiveLocation(rider, liveById.get(rider.id), nowMs))
+        ),
       },
     });
   }
@@ -6088,6 +6146,7 @@ const handleNativeAction = async (
     const riderId = context.role === 'admin' ? requestedRiderId || context.uid : context.uid;
     const latitude = parseNumber(data.latitude, Number.NaN);
     const longitude = parseNumber(data.longitude, Number.NaN);
+    const accuracy = parseNumber(data.accuracy, null);
     if (!riderId) {
       fail(400, 'A rider id is required.');
     }
@@ -6095,43 +6154,129 @@ const handleNativeAction = async (
       fail(400, 'A valid rider location is required.');
     }
 
-    const { data: existingRider, error: riderError } = await serviceClient
-      .from('DispatchRiderRecord')
-      .select('id')
-      .eq('id', riderId)
-      .maybeSingle<{ id: string }>();
+    // An admin may target an arbitrary rider id, so that case still needs
+    // validating. A dispatch caller can only ever be itself — riderId is forced
+    // to context.uid above — and the JWT already proves that identity, so the
+    // existence check is skipped on the hot path. At 5s ping intervals this is
+    // the difference between two round trips per ping and one.
+    if (context.role === 'admin' && requestedRiderId) {
+      const { data: existingRider, error: riderError } = await serviceClient
+        .from('DispatchRiderRecord')
+        .select('id')
+        .eq('id', riderId)
+        .maybeSingle<{ id: string }>();
 
-    if (riderError) {
-      throw new Error(riderError.message);
-    }
+      if (riderError) {
+        throw new Error(riderError.message);
+      }
 
-    if (!existingRider) {
-      fail(404, 'The selected rider could not be found.');
+      if (!existingRider) {
+        fail(404, 'The selected rider could not be found.');
+      }
     }
 
     const timestamp = nowIso();
-    const { error } = await serviceClient
-      .from('DispatchRiderRecord')
-      .update({
-        latitude,
-        longitude,
-        updatedAt: timestamp,
-      })
-      .eq('id', riderId);
 
-    if (error) {
-      throw new Error(error.message);
+    // Unlogged write: no WAL, no dead tuple on DispatchRiderRecord.
+    const { error: liveError } = await serviceClient
+      .from('rider_live_location')
+      .upsert(
+        buildRiderLocationUpsert(riderId, latitude, longitude, accuracy, timestamp),
+        { onConflict: 'rider_id' }
+      );
+
+    if (liveError) {
+      throw new Error(liveError.message);
+    }
+
+    // Durable fallback, throttled to once per DURABLE_SYNC_INTERVAL_SECONDS by
+    // the SQL function's WHERE clause. A failure here must not fail the ping:
+    // the live row is already written and is what every read path prefers.
+    const { error: durableError } = await serviceClient.rpc(
+      'ebuy_touch_rider_durable_location',
+      {
+        p_rider_id: riderId,
+        p_latitude: latitude,
+        p_longitude: longitude,
+        p_min_interval_seconds: DURABLE_SYNC_INTERVAL_SECONDS,
+      }
+    );
+
+    if (durableError) {
+      logEdgeEvent('error', 'durable rider location sync failed', {
+        reason: durableError.message,
+        riderId,
+      });
     }
 
     return json(200, {
       data: {
-        accuracy: parseNumber(data.accuracy, null),
+        accuracy,
         latitude,
         longitude,
         riderId,
         timestamp,
       },
     });
+  }
+
+  if (action === 'dispatchGetNearestRiders') {
+    ensureRole(context.role, ['dispatch', 'admin']);
+    const latitude = parseNumber(data.latitude, Number.NaN);
+    const longitude = parseNumber(data.longitude, Number.NaN);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      fail(400, 'A valid pickup location is required.');
+    }
+
+    const radiusMetres = Math.min(Math.max(parseNumber(data.radiusMetres, 5000) ?? 5000, 100), 50_000);
+    const limit = Math.min(Math.max(parseNumber(data.limit, 10) ?? 10, 1), 50);
+
+    const nearest = await findNearestRiders(latitude, longitude, radiusMetres, limit);
+    if (nearest.length === 0) {
+      return json(200, { data: { riders: [] } });
+    }
+
+    const { data: riderRows, error: ridersError } = await serviceClient
+      .from('DispatchRiderRecord')
+      .select(
+        'id,displayName,status,zone,vehicleType,acceptanceRate,activeLoad,completedTrips,latitude,longitude,createdAt,updatedAt'
+      )
+      .in(
+        'id',
+        nearest.map((row) => row.rider_id)
+      );
+
+    if (ridersError) {
+      throw new Error(ridersError.message);
+    }
+
+    const ridersById = new Map(
+      ((riderRows ?? []) as DispatchRiderRow[]).map((rider) => [rider.id, rider])
+    );
+
+    // Preserve the distance ordering from the geo query — the `in` filter above
+    // returns rows in arbitrary order. A rider present in rider_live_location
+    // but missing from DispatchRiderRecord is skipped rather than emitted as a
+    // partial record; that happens if a profile is deleted while a live row
+    // survives.
+    const ordered = nearest.flatMap((row) => {
+      const rider = ridersById.get(row.rider_id);
+      if (!rider) {
+        return [];
+      }
+      return [
+        {
+          ...buildDispatchRiderResponse({
+            ...rider,
+            latitude: row.latitude,
+            longitude: row.longitude,
+          }),
+          metres: Math.round(row.metres),
+        },
+      ];
+    });
+
+    return json(200, { data: { riders: ordered } });
   }
 
   if (action === 'dispatchAssignOrderCourier') {
