@@ -300,10 +300,30 @@ export const markPaymentVerificationFailed = async (
 ) => {
   const nowIso = new Date().toISOString();
 
+  // Load the order's existing payment blob so the failure update can merge
+  // into it (see markOrderPaymentState above) instead of replacing it — a
+  // wholesale replace drops `method`/`provider`/`currency`/etc. and makes a
+  // failed card order look non-prepaid downstream. Reading the order is
+  // best-effort: if it fails we still record the failure, just without prior
+  // fields to preserve, and we never throw past the caller (see doc comment).
+  let existingPayment: JsonObject = {};
+  const { data: order, error: orderError } = await serviceClient
+    .from('CustomerOrder')
+    .select('payment')
+    .eq('id', orderId)
+    .maybeSingle<{ payment: JsonObject | null }>();
+
+  if (orderError) {
+    console.error(`Failed to load order ${orderId} before marking payment failed: ${orderError.message}`);
+  } else {
+    existingPayment = (order?.payment ?? {}) as JsonObject;
+  }
+
   const { error } = await serviceClient
     .from('CustomerOrder')
     .update({
       payment: {
+        ...existingPayment,
         status: 'failed',
         reference: paymentReference,
         error: message,

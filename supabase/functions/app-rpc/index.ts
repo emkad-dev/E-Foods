@@ -30,8 +30,8 @@ import {
 import {
   createEdgeObservation,
   finishEdgeObservation,
+  getErrorStatus,
   jsonResponse,
-  isEdgeBackpressureError,
   runWithBackpressure,
 } from '../_shared/observability.ts';
 import { validatePromoTrack } from './promoTrack.ts';
@@ -7188,16 +7188,15 @@ Deno.serve(async (request) => {
     return response;
   } catch (error) {
     capturedError = error;
+    // RpcError and EdgeBackpressureError both carry a numeric `.status` in the
+    // 400-599 range, so getErrorStatus() resolves them the same way the old
+    // per-type checks did. "This account is disabled." is thrown as a plain
+    // Error with no `.status` (see _shared/request-context.ts), so it still
+    // needs an explicit mapping or it would fall through to 500.
     const status =
-      isEdgeBackpressureError(error)
-        ? error.status
-        : error instanceof RpcError
-          ? error.status
-          : error instanceof Error && error.message === 'Missing authorization header'
-            ? 401
-            : error instanceof Error && error.message === 'This account is disabled.'
-              ? 403
-              : 500;
+      error instanceof Error && error.message === 'This account is disabled.'
+        ? 403
+        : getErrorStatus(error);
 
     response = json(
       status,
