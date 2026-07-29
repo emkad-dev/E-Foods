@@ -53,7 +53,7 @@ export default function PartnerLoginScreen() {
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
         <Text style={styles.title}>Sign in to your dashboard</Text>
         <Text style={styles.copy}>
-          Use your restaurant operations account to manage orders, menu updates, and store performance. We'll take
+          Use your restaurant operations account to manage orders, menu updates, and store performance. We’ll take
           you to the right place after sign in.
         </Text>
       </View>

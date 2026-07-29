@@ -1,10 +1,9 @@
 import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
 import { Stack, useRouter } from 'expo-router';
-import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import { AuthProvider } from '../src/contexts/AuthContext';
 
 function RootLayoutNav() {
-  const { loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
