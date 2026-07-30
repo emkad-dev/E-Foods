@@ -21,7 +21,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
-import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
+import RestaurantCard from '../../../src/components/RestaurantCard';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
@@ -540,12 +540,22 @@ export default function HomeScreen() {
 
           {nearbyVisible.map(({ restaurant, availability }) => {
             const mealPreview = getMealPreview(restaurant, search);
+            const metaLine = availability.distanceKm
+              ? `${availability.distanceKm.toFixed(1)} km away`
+              : 'Within your zone';
 
             return (
-              <TouchableOpacity
+              <RestaurantCard
                 key={restaurant.id}
-                style={styles.nearbyCard}
-                activeOpacity={0.92}
+                id={restaurant.id}
+                name={restaurant.name}
+                image={restaurant.image}
+                cuisine={restaurant.cuisine}
+                rating={restaurant.rating}
+                deliveryTime={restaurant.deliveryTime}
+                metaLine={metaLine}
+                hoursLabel={getRestaurantOperatingHoursLabel(restaurant)}
+                mealPreview={mealPreview}
                 onPress={() => {
                   trackAnalyticsEvent('customer_restaurant_opened', {
                     restaurant_id: restaurant.id,
@@ -553,35 +563,7 @@ export default function HomeScreen() {
                   });
                   router.push(`/home/restaurant/${restaurant.id}`);
                 }}
-              >
-                <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
-                <View style={styles.nearbyInfo}>
-                  <View style={styles.nearbyHeader}>
-                    <Text style={styles.nearbyName} numberOfLines={1}>
-                      {restaurant.name}
-                    </Text>
-                    <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
-                  </View>
-                  <Text style={styles.nearbyCuisine} numberOfLines={1}>
-                    {restaurant.cuisine ?? 'Kitchen update pending'}
-                  </Text>
-                  {mealPreview.length > 0 ? (
-                    <Text style={styles.nearbyMealPreview} numberOfLines={2}>
-                      Meals: {mealPreview.join(' • ')}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
-                    {' · '}
-                    {restaurant.deliveryTime ?? '25-35 min'}
-                  </Text>
-                  {getRestaurantOperatingHoursLabel(restaurant) ? (
-                    <Text style={styles.nearbyMeta} numberOfLines={1}>
-                      {getRestaurantOperatingHoursLabel(restaurant)}
-                    </Text>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
+              />
             );
           })}
         </Animated.View>
@@ -603,48 +585,38 @@ export default function HomeScreen() {
           {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => {
             const mealPreview = getMealPreview(restaurant, search);
             const isClosed = availability.reason === 'closed';
+            const statusLabel =
+              availability.reason === 'delivery_disabled'
+                ? 'Pickup only'
+                : isClosed
+                  ? 'Closed'
+                  : 'Out of area';
+            const metaLine =
+              availability.distanceKm && availability.radiusKm
+                ? `${availability.distanceKm.toFixed(1)} km away, outside ${availability.radiusKm.toFixed(0)} km range`
+                : isClosed
+                  ? 'Published but currently closed'
+                  : 'Delivery not available here yet';
 
-              return (
-                <TouchableOpacity
-                  key={restaurant.id}
-                  style={[styles.unavailableCard, isClosed ? styles.unavailableCardClosed : null]}
-                  onPress={() => {
-                    trackAnalyticsEvent('customer_restaurant_opened', {
-                      restaurant_id: restaurant.id,
-                      source: 'unavailable',
-                    });
-                    router.push(`/home/restaurant/${restaurant.id}`);
-                  }}
-                >
-                  <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
-                  <View style={styles.unavailableInfo}>
-                  <View style={styles.unavailableHeader}>
-                    <Text style={styles.unavailableName}>{restaurant.name}</Text>
-                    <View style={[styles.unavailableBadge, isClosed ? styles.unavailableBadgeClosed : null]}>
-                      <Text style={[styles.unavailableBadgeText, isClosed ? styles.unavailableBadgeTextClosed : null]}>
-                        {availability.reason === 'delivery_disabled'
-                          ? 'Pickup only'
-                          : availability.reason === 'closed'
-                            ? 'Closed'
-                            : 'Out of area'}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.unavailableCuisine}>{restaurant.cuisine ?? 'Kitchen update pending'}</Text>
-                  {mealPreview.length > 0 ? (
-                    <Text style={styles.unavailableMealPreview} numberOfLines={2}>
-                      Meals: {mealPreview.join(' • ')}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.unavailableMeta}>
-                    {availability.distanceKm && availability.radiusKm
-                      ? `${availability.distanceKm.toFixed(1)} km away, outside ${availability.radiusKm.toFixed(0)} km range`
-                      : isClosed
-                        ? 'This restaurant is published but currently closed.'
-                        : 'Delivery is not available for this restaurant yet'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+            return (
+              <RestaurantCard
+                key={restaurant.id}
+                id={restaurant.id}
+                name={restaurant.name}
+                image={restaurant.image}
+                cuisine={restaurant.cuisine}
+                metaLine={metaLine}
+                mealPreview={mealPreview}
+                statusLabel={statusLabel}
+                statusTone={isClosed ? 'danger' : 'warning'}
+                onPress={() => {
+                  trackAnalyticsEvent('customer_restaurant_opened', {
+                    restaurant_id: restaurant.id,
+                    source: 'unavailable',
+                  });
+                  router.push(`/home/restaurant/${restaurant.id}`);
+                }}
+              />
             );
           })}
         </View>
@@ -1156,59 +1128,6 @@ const styles = StyleSheet.create({
     marginRight: 10,
     marginTop: 4,
   },
-  nearbyCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    flexDirection: 'row',
-    marginBottom: 12,
-    minHeight: 132,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  nearbyImage: {
-    height: 132,
-    width: 112,
-  },
-  nearbyInfo: {
-    flex: 1,
-    padding: 14,
-  },
-  nearbyHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  nearbyFavoriteButton: {
-    backgroundColor: customerTheme.surfaceMuted,
-    height: 30,
-    width: 30,
-  },
-  nearbyName: {
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-    marginRight: 8,
-  },
-  nearbyCuisine: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  nearbyMeta: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 6,
-  },
-  nearbyMealPreview: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    marginTop: 8,
-  },
   emptyState: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
@@ -1241,77 +1160,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 12,
-    marginTop: 6,
-  },
-  unavailableCard: {
-    backgroundColor: customerTheme.dangerSoft,
-    borderColor: '#ebc0b7',
-    borderRadius: 16,
-    borderWidth: 1,
-    flexDirection: 'row',
-    minHeight: 132,
-    marginBottom: 12,
-    width: '100%',
-    overflow: 'hidden',
-  },
-  unavailableCardClosed: {
-    backgroundColor: '#fdecec',
-    borderColor: '#ef4444',
-  },
-  unavailableImage: {
-    height: 132,
-    width: 112,
-  },
-  unavailableInfo: {
-    flex: 1,
-    padding: 14,
-  },
-  unavailableHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  unavailableName: {
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-    marginRight: 10,
-  },
-  unavailableBadge: {
-    backgroundColor: '#f7d1ca',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  unavailableBadgeClosed: {
-    backgroundColor: '#fee2e2',
-  },
-  unavailableBadgeText: {
-    color: '#9a312c',
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  unavailableBadgeTextClosed: {
-    color: '#b91c1c',
-  },
-  unavailableCuisine: {
-    color: customerTheme.textSoft,
-    fontSize: 12,
-    marginTop: 6,
-  },
-  unavailableMealPreview: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    marginTop: 8,
-  },
-  unavailableMeta: {
-    color: '#9a312c',
-    fontSize: 11,
-    lineHeight: 16,
     marginTop: 6,
   },
 });
