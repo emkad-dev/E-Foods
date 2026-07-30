@@ -3,6 +3,7 @@ import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } 
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import OrderStatusTracker from '../../../src/components/OrderStatusTracker';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
@@ -218,17 +219,7 @@ export default function OrderTracking() {
 
       <View style={styles.progressCard}>
         <Text style={styles.sectionTitle}>Tracking</Text>
-        {trackingSteps.map((step, index) => {
-          const active = index <= currentStep;
-          const current = index === currentStep;
-
-          return (
-            <Animated.View key={step} entering={FadeIn.delay(index * 120)} style={styles.stepRow}>
-              <View style={[styles.stepCircle, active ? styles.stepCircleActive : null, current ? styles.stepCircleCurrent : null]} />
-              <Text style={[styles.stepLabel, active ? styles.stepLabelActive : null]}>{formatOrderStatusLabel(step)}</Text>
-            </Animated.View>
-          );
-        })}
+        <OrderStatusTracker labels={trackingSteps.map(formatOrderStatusLabel)} currentStep={currentStep} />
       </View>
 
       <View style={styles.detailCard}>
@@ -433,33 +424,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.2,
     marginBottom: 8,
-  },
-  stepRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginTop: 10,
-  },
-  stepCircle: {
-    backgroundColor: customerTheme.border,
-    borderRadius: 8,
-    height: 16,
-    marginRight: 10,
-    width: 16,
-  },
-  stepCircleActive: {
-    backgroundColor: customerTheme.accentStrong,
-  },
-  stepCircleCurrent: {
-    borderColor: customerTheme.hero,
-    borderWidth: 2,
-  },
-  stepLabel: {
-    color: customerTheme.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  stepLabelActive: {
-    color: customerTheme.text,
   },
   detailCard: {
     backgroundColor: customerTheme.surface,
