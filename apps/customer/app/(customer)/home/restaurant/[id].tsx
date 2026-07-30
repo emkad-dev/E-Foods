@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -13,6 +13,8 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, withSpring } f
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useVisiblePolling } from '../../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../../packages/runtime/src/useAppStateVisibility';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
@@ -26,6 +28,8 @@ import {
   getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
 } from '../../../../src/utils/restaurantAvailability';
+
+const RESTAURANT_POLL_INTERVAL_MS = 30000;
 
 type MenuItem = {
   categoryId?: string;
@@ -65,56 +69,75 @@ export default function RestaurantDetail() {
     transform: [{ scale: withSpring(cartButtonScale) }],
   }));
 
-  useEffect(() => {
+  // Hoisted out of the effect so the refresh poll can call the same loader.
+  const activeRef = useRef(true);
+  const isVisible = useAppStateVisibility();
+
+  const loadRestaurant = useCallback(async () => {
     if (!id || typeof id !== 'string') {
-      setLoading(false);
       return;
     }
 
-    let active = true;
+    try {
+      const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(id);
 
-    const loadRestaurant = async () => {
-      try {
-        const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(id);
-
-        if (!active) {
-          return;
-        }
-
-        if (!nextRestaurant || !isRestaurantVisibleToCustomers(nextRestaurant as DiscoveryRestaurant)) {
-          setRestaurant(null);
-          setMenu([]);
-          return;
-        }
-
-        const nextMenu = (((nextRestaurant.menu as MenuCategory[] | undefined) ?? []).map((category) => ({
-          category: category.category,
-          items: (category.items ?? []).filter((item) => item.isAvailable !== false),
-        })));
-
-        const filteredMenu = nextMenu.filter((category) => category.items.length > 0);
-
-        setRestaurant(nextRestaurant as DiscoveryRestaurant);
-        setMenu(filteredMenu);
-        setSelectedCategory((current) => (current ? current : filteredMenu.length > 0 ? filteredMenu[0].category : null));
-      } catch (error) {
-        console.error('Error fetching restaurant:', error);
-        Alert.alert('Error', 'Could not load restaurant details');
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
+      if (!activeRef.current) {
+        return;
       }
-    };
+
+      if (!nextRestaurant || !isRestaurantVisibleToCustomers(nextRestaurant as DiscoveryRestaurant)) {
+        setRestaurant(null);
+        setMenu([]);
+        return;
+      }
+
+      const nextMenu = (((nextRestaurant.menu as MenuCategory[] | undefined) ?? []).map((category) => ({
+        category: category.category,
+        items: (category.items ?? []).filter((item) => item.isAvailable !== false),
+      })));
+
+      const filteredMenu = nextMenu.filter((category) => category.items.length > 0);
+
+      setRestaurant(nextRestaurant as DiscoveryRestaurant);
+      setMenu(filteredMenu);
+      setSelectedCategory((current) => (current ? current : filteredMenu.length > 0 ? filteredMenu[0].category : null));
+    } catch (error) {
+      console.error('Error fetching restaurant:', error);
+      Alert.alert('Error', 'Could not load restaurant details');
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [id]);
+
+  useEffect(() => {
+    activeRef.current = true;
+
+    if (!id || typeof id !== 'string') {
+      setLoading(false);
+
+      return () => {
+        activeRef.current = false;
+      };
+    }
 
     void loadRestaurant();
-    const interval = setInterval(loadRestaurant, 30000);
 
     return () => {
-      active = false;
-      clearInterval(interval);
+      activeRef.current = false;
     };
-  }, [id]);
+  }, [id, loadRestaurant]);
+
+  // Keeps menu availability and open/closed state current while the screen is
+  // being looked at; stops entirely once the app is backgrounded.
+  useVisiblePolling(
+    () => {
+      void loadRestaurant();
+    },
+    RESTAURANT_POLL_INTERVAL_MS,
+    isVisible
+  );
 
   useEffect(() => {
     return () => {

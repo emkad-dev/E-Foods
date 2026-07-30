@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { usePartnerRestaurant } from './usePartnerRestaurant';
 import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
@@ -9,8 +11,11 @@ import { sortKitchenHistoryOrders } from '../utils/partnerQueue';
 
 export type PartnerOrder = OrderDocument;
 
+const POLL_INTERVAL_MS = 30000;
+
 export const usePartnerOrders = () => {
   const { error: restaurantError, loading: restaurantLoading, restaurant } = usePartnerRestaurant();
+  const isVisible = useAppStateVisibility();
   const [orders, setOrders] = useState<PartnerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -71,17 +76,26 @@ export const usePartnerOrders = () => {
 
       void guardedLoad('background');
     });
-    // Slow fallback poll in case the realtime connection drops silently.
-    const interval = setInterval(() => {
-      void guardedLoad('background');
-    }, 30000);
-
     return () => {
       cancelled = true;
-      clearInterval(interval);
       unsubscribe();
     };
   }, [loadOrders, restaurant?.id, restaurantError, restaurantLoading]);
+
+  // Slow fallback poll in case the realtime connection drops silently. Paused
+  // while the app is backgrounded — a fallback for a screen nobody is looking at
+  // has nobody to serve, and resuming forces a catch-up read anyway.
+  useVisiblePolling(
+    () => {
+      if (!restaurant?.id) {
+        return;
+      }
+
+      void loadOrders('background');
+    },
+    POLL_INTERVAL_MS,
+    isVisible
+  );
 
   const restaurantOrders = useMemo(() => orders, [orders]);
 

@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
+import { useVisiblePolling } from '../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
@@ -15,6 +17,8 @@ import {
 import { getCustomerOrders } from '../../../src/services/customerReadModel';
 import { supabase } from '../../../src/services/supabase/config';
 import { customerTheme } from '../../../src/theme/palette';
+
+const ORDERS_POLL_INTERVAL_MS = 30000;
 
 type Order = {
   id: string;
@@ -109,38 +113,48 @@ export default function OrdersList() {
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<OrderFilter>('all');
   const router = useRouter();
+  // Hoisted out of the effect so the fallback poll can call the same loader.
+  const activeRef = useRef(true);
+  const isVisible = useAppStateVisibility();
 
-  useEffect(() => {
+  const loadOrders = useCallback(async () => {
     if (!user) {
-      setOrders([]);
-      setLoading(false);
       return;
     }
 
-    let cancelled = false;
+    try {
+      const nextData = await getCustomerOrders();
 
-    const loadOrders = async () => {
-      try {
-        const nextData = await getCustomerOrders();
-
-        if (cancelled) {
-          return;
-        }
-
-        setOrders(nextData.orders as Order[]);
-      } catch (nextError) {
-        if (cancelled) {
-          return;
-        }
-
-        console.error('Error fetching orders:', nextError);
-        setOrders([]);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      if (!activeRef.current) {
+        return;
       }
-    };
+
+      setOrders(nextData.orders as Order[]);
+    } catch (nextError) {
+      if (!activeRef.current) {
+        return;
+      }
+
+      console.error('Error fetching orders:', nextError);
+      setOrders([]);
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
+    activeRef.current = true;
+
+    if (!user) {
+      setOrders([]);
+      setLoading(false);
+
+      return () => {
+        activeRef.current = false;
+      };
+    }
 
     void loadOrders();
     const channel = supabase
@@ -163,16 +177,22 @@ export default function OrdersList() {
         }
       });
 
-    const interval = setInterval(() => {
-      void loadOrders();
-    }, 30000);
-
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      activeRef.current = false;
       void supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [loadOrders, user]);
+
+  // Safety net behind the postgres_changes subscription above, in case that
+  // socket drops silently. Paused while the app is backgrounded; resuming forces
+  // one catch-up read.
+  useVisiblePolling(
+    () => {
+      void loadOrders();
+    },
+    ORDERS_POLL_INTERVAL_MS,
+    isVisible
+  );
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => matchesOrderFilter(order, activeFilter)),

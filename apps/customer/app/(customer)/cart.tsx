@@ -16,10 +16,14 @@ import {
   initializeCustomerPayment,
 } from '../../src/services/customerOrderActions';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
+
+const CHECKOUT_RESTAURANT_POLL_INTERVAL_MS = 30000;
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
@@ -51,6 +55,7 @@ export default function CartScreen() {
   const router = useRouter();
   const isMountedRef = useRef(true);
   const isCheckoutScreenFocusedRef = useRef(false);
+  const isVisible = useAppStateVisibility();
   const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
   const safeTipAmount = tipOptions.includes(tipAmount as (typeof tipOptions)[number]) ? tipAmount : DEFAULT_TIP_AMOUNT;
   const pricingPreview = calculateCheckoutTotal({
@@ -115,40 +120,57 @@ export default function CartScreen() {
     }, [])
   );
 
-  useEffect(() => {
+  // Hoisted out of the effect so the refresh poll can call the same loader.
+  const restaurantLoadActiveRef = useRef(true);
+
+  const loadRestaurant = useCallback(async () => {
     if (!restaurantId) {
-      setRestaurant(null);
       return;
     }
 
-    let active = true;
-
-    const loadRestaurant = async () => {
-      try {
-        const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(restaurantId);
-        if (!active) {
-          return;
-        }
-
-        setRestaurant(nextRestaurant as RestaurantDocument | null);
-      } catch {
-        console.warn('Unable to load checkout restaurant.');
-        if (active) {
-          setRestaurant(null);
-        }
+    try {
+      const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(restaurantId);
+      if (!restaurantLoadActiveRef.current) {
+        return;
       }
-    };
+
+      setRestaurant(nextRestaurant as RestaurantDocument | null);
+    } catch {
+      console.warn('Unable to load checkout restaurant.');
+      if (restaurantLoadActiveRef.current) {
+        setRestaurant(null);
+      }
+    }
+  }, [restaurantId]);
+
+  useEffect(() => {
+    restaurantLoadActiveRef.current = true;
+
+    if (!restaurantId) {
+      setRestaurant(null);
+
+      return () => {
+        restaurantLoadActiveRef.current = false;
+      };
+    }
 
     void loadRestaurant();
-    const interval = setInterval(() => {
-      void loadRestaurant();
-    }, 30000);
 
     return () => {
-      active = false;
-      clearInterval(interval);
+      restaurantLoadActiveRef.current = false;
     };
-  }, [restaurantId]);
+  }, [loadRestaurant, restaurantId]);
+
+  // Keeps checkout pricing and availability current while the user is actually
+  // on this screen. Gated on app visibility as well as the existing focus guard,
+  // so a backgrounded checkout screen stops polling entirely.
+  useVisiblePolling(
+    () => {
+      void loadRestaurant();
+    },
+    CHECKOUT_RESTAURANT_POLL_INTERVAL_MS,
+    isVisible
+  );
 
   const handleFulfillmentChange = (nextType: FulfillmentType) => {
     if (nextType === 'delivery' && !isDeliverySupported) {

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getDispatchDeliveryQueue } from '../services/dispatchReadModel';
@@ -9,8 +11,11 @@ import { useAuth } from '../contexts/AuthContext';
 
 export type DispatchOrder = OrderDocument;
 
+const POLL_INTERVAL_MS = 30000;
+
 export const useDispatchOrders = () => {
   const { loading: authLoading, user } = useAuth();
+  const isVisible = useAppStateVisibility();
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -70,17 +75,25 @@ export const useDispatchOrders = () => {
     const unsubscribe = subscribeToRealtimeChanges(supabase, [ORDERS_REALTIME_TOPIC], () => {
       void guardedLoad('background');
     });
-    // Slow fallback poll in case the realtime connection drops silently.
-    const interval = setInterval(() => {
-      void guardedLoad('background');
-    }, 30000);
-
     return () => {
       cancelled = true;
-      clearInterval(interval);
       unsubscribe();
     };
   }, [authLoading, loadOrders, user]);
+
+  // Slow fallback poll in case the realtime connection drops silently. Paused
+  // while the app is backgrounded; resuming forces one catch-up read.
+  useVisiblePolling(
+    () => {
+      if (authLoading || !user) {
+        return;
+      }
+
+      void loadOrders('background');
+    },
+    POLL_INTERVAL_MS,
+    isVisible
+  );
 
   const deliveryOrders = useMemo(
     () => orders.filter((order) => (order.fulfillmentType ?? 'delivery') === 'delivery'),

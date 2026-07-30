@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
 import { getAdminDashboardSnapshot, type AdminDashboardSnapshot } from '../services/platformReads';
+import { useAppVisibility } from '../lib/useAppVisibility';
 
 const POLL_INTERVAL_MS = 20000;
 
@@ -26,6 +28,7 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const activeRef = useRef(true);
+  const isVisible = useAppVisibility();
 
   const refresh = useCallback(async () => {
     try {
@@ -54,15 +57,15 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     activeRef.current = true;
     void refresh();
-    const interval = setInterval(() => {
-      void refresh();
-    }, POLL_INTERVAL_MS);
 
     return () => {
       activeRef.current = false;
-      clearInterval(interval);
     };
   }, [refresh]);
+
+  // Polls only while the tab is in the foreground. A dashboard parked on a second
+  // monitor was the heaviest idle caller in the system.
+  useVisiblePolling(refresh, POLL_INTERVAL_MS, isVisible);
 
   const value = useMemo(
     () => ({ snapshot, loading, error, lastUpdated, refresh }),
