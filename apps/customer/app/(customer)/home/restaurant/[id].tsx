@@ -15,6 +15,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
+import DishRow from '../../../../src/components/DishRow';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { customerTheme } from '../../../../src/theme/palette';
@@ -325,27 +326,15 @@ export default function RestaurantDetail() {
               <Text style={styles.categoryCount}>{category.items.length} meals</Text>
             </View>
             {category.items.map((menuItem) => (
-              <View key={menuItem.id} style={styles.menuItemCard}>
-                {menuItem.image ? (
-                  <Image source={{ uri: menuItem.image }} style={styles.menuItemImage} />
-                ) : (
-                  <View style={[styles.menuItemImage, styles.menuItemImagePlaceholder]}>
-                    <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
-                  </View>
-                )}
-                <View style={styles.menuItemInfo}>
-                  <Text style={styles.itemName}>{menuItem.name}</Text>
-                  {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
-                  <Text style={styles.itemPrice}>{formatMoney(menuItem.price)}</Text>
-                </View>
-                <TouchableOpacity
-                  style={[styles.addButton, restaurant.isOpen === false ? styles.addButtonDisabled : null]}
-                  onPress={() => handleAddToCart(menuItem)}
-                  disabled={restaurant.isOpen === false}
-                >
-                  <Text style={styles.addButtonText}>Add</Text>
-                </TouchableOpacity>
-              </View>
+              <DishRow
+                key={menuItem.id}
+                name={menuItem.name}
+                description={menuItem.description}
+                price={formatMoney(menuItem.price)}
+                image={menuItem.image}
+                disabled={restaurant.isOpen === false}
+                onAdd={() => handleAddToCart(menuItem)}
+              />
             ))}
           </Animated.View>
         )}
@@ -611,65 +600,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
-  },
-  menuItemCard: {
-    alignItems: 'stretch',
-    backgroundColor: customerTheme.surface,
-    borderRadius: 20,
-    flexDirection: 'row',
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  menuItemImage: {
-    alignSelf: 'stretch',
-    backgroundColor: customerTheme.surfaceMuted,
-    width: 104,
-  },
-  menuItemImagePlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuItemInfo: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
-  },
-  itemName: {
-    color: customerTheme.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  itemDesc: {
-    color: customerTheme.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
-  },
-  itemPrice: {
-    color: customerTheme.accentStrong,
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: 10,
-  },
-  addButton: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: customerTheme.accentStrong,
-    borderRadius: 18,
-    justifyContent: 'center',
-    marginRight: 10,
-    minWidth: 72,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginTop: 80,
-  },
-  addButtonDisabled: {
-    backgroundColor: '#b9b0a0',
-  },
-  addButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800',
   },
   emptyState: {
     alignItems: 'center',
