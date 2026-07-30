@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
+import CartLineItem from '../../src/components/CartLineItem';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
 import type { RestaurantDocument } from '../../src/domain/entities';
@@ -275,25 +276,15 @@ export default function CartScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <View style={styles.itemCard}>
-            <View style={styles.itemCopy}>
-              <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>{formatMoney(item.price)} each</Text>
-            </View>
-
-            <View style={styles.itemActions}>
-              <TouchableOpacity style={styles.quantityButton} onPress={() => updateQuantity(item.id, item.quantity - 1)}>
-                <Text style={styles.quantityButtonText}>-</Text>
-              </TouchableOpacity>
-              <Text style={styles.quantityText}>{item.quantity}</Text>
-              <TouchableOpacity style={styles.quantityButton} onPress={() => updateQuantity(item.id, item.quantity + 1)}>
-                <Text style={styles.quantityButtonText}>+</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.removeButton} onPress={() => removeItem(item.id)}>
-                <Text style={styles.removeButtonText}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <CartLineItem
+            name={item.name}
+            unitPrice={formatMoney(item.price)}
+            lineTotal={formatMoney(item.price * item.quantity)}
+            quantity={item.quantity}
+            onIncrement={() => updateQuantity(item.id, item.quantity + 1)}
+            onDecrement={() => updateQuantity(item.id, item.quantity - 1)}
+            onRemove={() => removeItem(item.id)}
+          />
         )}
         ListFooterComponent={
           <View style={styles.footer}>
@@ -597,58 +588,6 @@ const styles = StyleSheet.create({
     color: customerTheme.textMuted,
     fontSize: 13,
     marginTop: 5,
-  },
-  itemCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 10,
-    padding: 14,
-  },
-  itemCopy: {
-    marginBottom: 10,
-  },
-  itemName: {
-    color: customerTheme.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  itemMeta: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  itemActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
-  quantityButton: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 10,
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  quantityButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  quantityText: {
-    color: customerTheme.text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginHorizontal: 12,
-  },
-  removeButton: {
-    marginLeft: 'auto',
-  },
-  removeButtonText: {
-    color: customerTheme.danger,
-    fontSize: 12,
-    fontWeight: '800',
   },
   footer: {
     paddingTop: 4,
