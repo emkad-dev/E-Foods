@@ -5,6 +5,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import CartLineItem from '../../src/components/CartLineItem';
+import { Text as DSText, Button as DSButton, brand } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
 import type { RestaurantDocument } from '../../src/domain/entities';
@@ -485,45 +486,42 @@ export default function CartScreen() {
               ) : null}
               <Text style={styles.sectionLabel}>Summary</Text>
               <View style={styles.summarySplit}>
-                <Text style={styles.summaryDetailLabel}>Subtotal</Text>
-                <Text style={styles.summaryDetailValue}>{formatMoney(total)}</Text>
+                <DSText variant="callout" tone="secondary">Subtotal</DSText>
+                <DSText variant="bodyStrong">{formatMoney(total)}</DSText>
               </View>
               <View style={styles.summarySplit}>
-                <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
-                <Text style={styles.summaryDetailValue}>
+                <DSText variant="callout" tone="secondary">Delivery fee</DSText>
+                <DSText variant="bodyStrong">
                   {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'No delivery fee'}
-                </Text>
+                </DSText>
               </View>
               <View style={styles.summarySplit}>
-                <Text style={styles.summaryDetailLabel}>Tip</Text>
-                <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.tip)}</Text>
+                <DSText variant="callout" tone="secondary">Tip</DSText>
+                <DSText variant="bodyStrong">{formatMoney(pricingPreview.tip)}</DSText>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Order total</Text>
-                <Text style={styles.summaryValue}>{formatMoney(pricingPreview.total)}</Text>
+                <DSText variant="title3">Order total</DSText>
+                <DSText variant="title2" style={{ color: brand.primaryStrong }}>
+                  {formatMoney(pricingPreview.total)}
+                </DSText>
               </View>
-              <TouchableOpacity
-                style={[
-                  styles.checkoutButton,
-                  submitting || Boolean(restaurantUnavailableReason) ? styles.checkoutButtonDisabled : null,
-                ]}
-                onPress={handlePlaceOrder}
-                disabled={submitting || Boolean(restaurantUnavailableReason)}
-              >
-                <Text style={styles.checkoutButtonText}>
-                  {user
+              <DSButton
+                label={
+                  user
                     ? fulfillmentType === 'delivery'
                       ? deliveryLocation
-                        ? submitting
-                          ? 'Opening payment...'
-                          : 'Pay and place order'
+                        ? 'Pay and place order'
                         : 'Choose delivery location'
-                      : submitting
-                        ? 'Opening payment...'
-                        : 'Pay and place order'
-                    : 'Sign in to place order'}
-                </Text>
-              </TouchableOpacity>
+                      : 'Pay and place order'
+                    : 'Sign in to place order'
+                }
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={submitting}
+                disabled={Boolean(restaurantUnavailableReason)}
+                onPress={handlePlaceOrder}
+              />
               <Text style={styles.paymentHint}>
                 A secure in-app payment screen will open. The order goes live after payment confirms.
               </Text>
@@ -839,16 +837,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  summaryDetailLabel: {
-    color: customerTheme.textMuted,
-    fontSize: 13,
-  },
-  summaryDetailValue: {
-    color: customerTheme.text,
-    fontSize: 13,
-    fontWeight: '700',
-  },
   summaryRow: {
+    alignItems: 'center',
     borderTopColor: customerTheme.border,
     borderTopWidth: 1,
     flexDirection: 'row',
@@ -856,30 +846,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     marginTop: 4,
     paddingTop: 12,
-  },
-  summaryLabel: {
-    color: customerTheme.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  summaryValue: {
-    color: customerTheme.accentStrong,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  checkoutButton: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 12,
-    paddingVertical: 14,
-  },
-  checkoutButtonDisabled: {
-    backgroundColor: '#d1d5db',
-  },
-  checkoutButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '800',
   },
   paymentHint: {
     color: customerTheme.textMuted,

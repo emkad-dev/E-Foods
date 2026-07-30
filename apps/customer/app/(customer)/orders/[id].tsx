@@ -4,6 +4,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import OrderStatusTracker from '../../../src/components/OrderStatusTracker';
+import { Text as DSText } from '@feasty/design-system';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
@@ -197,9 +198,9 @@ export default function OrderTracking() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <View style={styles.heroCard}>
-        <Text style={styles.eyebrow}>Order detail</Text>
-        <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
-        <Text style={styles.restaurant}>{order.restaurantName}</Text>
+        <DSText variant="caption" tone="secondary" style={styles.eyebrow}>ORDER DETAIL</DSText>
+        <DSText variant="title1" style={styles.title}>Order #{order.id.slice(-6)}</DSText>
+        <DSText variant="title3" tone="secondary" style={styles.restaurant}>{order.restaurantName}</DSText>
         <View style={styles.badgesRow}>
           <View style={styles.fulfillmentBadge}>
             <Text style={styles.fulfillmentBadgeText}>{fulfillmentType === 'pickup' ? 'Pickup' : 'Delivery'}</Text>
@@ -218,13 +219,13 @@ export default function OrderTracking() {
       </View>
 
       <View style={styles.progressCard}>
-        <Text style={styles.sectionTitle}>Tracking</Text>
+        <DSText variant="title3" style={styles.sectionTitle}>Tracking</DSText>
         <OrderStatusTracker labels={trackingSteps.map(formatOrderStatusLabel)} currentStep={currentStep} />
       </View>
 
       <View style={styles.detailCard}>
-        <Text style={styles.sectionTitle}>Payment and delivery</Text>
-        <Text style={styles.total}>Total: {formatMoney(total)}</Text>
+        <DSText variant="title3" style={styles.sectionTitle}>Payment and delivery</DSText>
+        <DSText variant="title2" style={styles.total}>Total: {formatMoney(total)}</DSText>
         <Text style={styles.detailLine}>Subtotal: {formatMoney(order.pricing?.subtotal ?? total)}</Text>
         <Text style={styles.detailLine}>Delivery fee: {formatMoney(order.pricing?.deliveryFee ?? 0)}</Text>
         {order.pricing?.serviceFee ? (
@@ -259,7 +260,7 @@ export default function OrderTracking() {
         <View style={styles.riderCard}>
           <View style={styles.riderHeader}>
             <View>
-          <Text style={styles.sectionTitle}>Live rider location</Text>
+          <DSText variant="title3" style={styles.sectionTitle}>Live rider location</DSText>
           <Text style={styles.riderName}>{order.assignment?.courierName ?? 'Your rider'}</Text>
             </View>
             <View style={styles.liveBadge}>
@@ -351,21 +352,12 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   eyebrow: {
-    color: customerTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '800',
     letterSpacing: 0.7,
-    textTransform: 'uppercase',
   },
   title: {
-    color: customerTheme.text,
-    fontSize: 22,
-    fontWeight: '800',
     marginTop: 8,
   },
   restaurant: {
-    color: customerTheme.textMuted,
-    fontSize: 14,
     marginTop: 4,
   },
   badgesRow: {
@@ -418,11 +410,6 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   sectionTitle: {
-    color: customerTheme.text,
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: '800',
-    letterSpacing: 0.2,
     marginBottom: 8,
   },
   detailCard: {
@@ -435,8 +422,6 @@ const styles = StyleSheet.create({
   },
   total: {
     color: customerTheme.accentStrong,
-    fontSize: 18,
-    fontWeight: '800',
     marginBottom: 8,
   },
   detailLine: {

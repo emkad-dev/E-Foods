@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import RestaurantCard from '../../../src/components/RestaurantCard';
+import { Text as DSText, Button as DSButton } from '@feasty/design-system';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
@@ -370,9 +371,9 @@ export default function HomeScreen() {
       <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.homeHeader}>
         <View style={styles.headerTopRow}>
           <View style={styles.greetingBlock}>
-            <Text style={styles.greetingText} numberOfLines={1}>
+            <DSText variant="title2" numberOfLines={1}>
               {greeting}
-            </Text>
+            </DSText>
           </View>
           <Text style={styles.headerWordmark} numberOfLines={1}>
             <Text style={styles.headerWordmarkGreen}>FEAST</Text>
@@ -418,17 +419,21 @@ export default function HomeScreen() {
       {catalogError ? (
         <Animated.View entering={FadeInDown.delay(160).duration(500)} style={styles.catalogStatusCard}>
           <View style={styles.catalogStatusHeader}>
-            <Text style={styles.catalogStatusTitle}>Restaurant service unavailable</Text>
+            <DSText variant="title3">Restaurant service unavailable</DSText>
             {refreshingCatalog ? <ActivityIndicator size="small" color={customerTheme.accentStrong} /> : null}
           </View>
-          <Text style={styles.catalogStatusCopy}>{catalogError}</Text>
-          <TouchableOpacity
-            style={[styles.catalogRetryButton, refreshingCatalog ? styles.catalogRetryButtonDisabled : null]}
-            onPress={handleRetryCatalog}
-            disabled={refreshingCatalog}
-          >
-            <Text style={styles.catalogRetryButtonText}>{refreshingCatalog ? 'Retrying...' : 'Retry now'}</Text>
-          </TouchableOpacity>
+          <DSText variant="callout" tone="secondary" style={styles.catalogStatusCopy}>
+            {catalogError}
+          </DSText>
+          <View style={styles.catalogRetryRow}>
+            <DSButton
+              label={refreshingCatalog ? 'Retrying…' : 'Retry now'}
+              variant="primary"
+              size="sm"
+              loading={refreshingCatalog}
+              onPress={handleRetryCatalog}
+            />
+          </View>
         </Animated.View>
       ) : null}
 
@@ -527,12 +532,10 @@ export default function HomeScreen() {
       {deliveryLocation ? (
         <Animated.View entering={FadeInDown.delay(360).duration(500)} style={styles.sectionBlock}>
           <View style={styles.sectionHeader}>
-            <View>
-              <Text style={styles.sectionTitle}>Near your delivery point</Text>
-            </View>
+            <DSText variant="title2">Near your delivery point</DSText>
             {nearbyRestaurants.length > 4 ? (
               <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'nearby' ? null : 'nearby')}>
-                <Text style={styles.sectionActionText}>{expandedShelf === 'nearby' ? 'Show less' : 'See all'}</Text>
+                <DSText variant="callout">{expandedShelf === 'nearby' ? 'Show less' : 'See all'}</DSText>
                 <FontAwesome name="arrow-right" size={12} color={customerTheme.text} />
               </TouchableOpacity>
             ) : null}
@@ -571,17 +574,19 @@ export default function HomeScreen() {
 
       {availableRestaurants.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>{emptyState.title}</Text>
-          <Text style={styles.emptyCopy}>{emptyState.copy}</Text>
+          <DSText variant="title2" align="center">{emptyState.title}</DSText>
+          <DSText variant="callout" tone="secondary" align="center" style={styles.emptyCopy}>
+            {emptyState.copy}
+          </DSText>
         </View>
       ) : null}
 
       {unavailableRestaurants.length > 0 ? (
         <View style={styles.unavailableSection}>
-          <Text style={styles.unavailableTitle}>Outside your current delivery zone</Text>
-          <Text style={styles.unavailableCopy}>
+          <DSText variant="title2" style={styles.unavailableTitle}>Outside your current delivery zone</DSText>
+          <DSText variant="callout" tone="secondary" style={styles.unavailableCopy}>
             These kitchens are visible, but your current delivery point places them outside their supported range.
-          </Text>
+          </DSText>
           {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => {
             const mealPreview = getMealPreview(restaurant, search);
             const isClosed = availability.reason === 'closed';
@@ -661,11 +666,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'flex-start',
     marginRight: 12,
-  },
-  greetingText: {
-    color: customerTheme.text,
-    fontSize: 20,
-    fontWeight: '800',
   },
   headerWordmark: {
     flexShrink: 0,
@@ -765,33 +765,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  catalogStatusTitle: {
-    color: customerTheme.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
   catalogStatusCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
     marginTop: 8,
   },
-  catalogRetryButton: {
-    alignItems: 'center',
+  catalogRetryRow: {
     alignSelf: 'flex-start',
-    backgroundColor: customerTheme.accentStrong,
-    borderRadius: 999,
     marginTop: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  catalogRetryButtonDisabled: {
-    opacity: 0.7,
-  },
-  catalogRetryButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
   },
   featureSection: {
     marginTop: 12,
@@ -957,24 +936,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  sectionTitle: {
-    color: customerTheme.text,
-    fontSize: 20,
-    fontWeight: '800',
-  },
   sectionAction: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderRadius: 999,
     flexDirection: 'row',
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-  },
-  sectionActionText: {
-    color: customerTheme.text,
-    fontSize: 11,
-    fontWeight: '700',
-    marginRight: 6,
   },
   topRatedRow: {
     paddingRight: 10,
@@ -1135,31 +1104,16 @@ const styles = StyleSheet.create({
     marginTop: 10,
     padding: 20,
   },
-  emptyTitle: {
-    color: customerTheme.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
   emptyCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
     marginTop: 8,
-    textAlign: 'center',
   },
   unavailableSection: {
     marginTop: 20,
   },
   unavailableTitle: {
-    color: customerTheme.text,
-    fontSize: 18,
-    fontWeight: '800',
+    marginBottom: 6,
   },
   unavailableCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
     marginBottom: 12,
-    marginTop: 6,
   },
 });
