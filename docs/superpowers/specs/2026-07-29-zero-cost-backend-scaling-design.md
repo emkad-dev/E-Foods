@@ -141,10 +141,21 @@ needs trimming.
 ### Compatibility note
 
 `UNLOGGED` tables are not replicated and do not appear in the WAL, so Supabase
-Realtime's `postgres_changes` cannot observe them. This project does not use
-`postgres_changes` — `_shared/realtime.ts` broadcasts explicitly through the
-Realtime Broadcast API — so there is no impact. This constraint must be
-respected by future work: nothing may subscribe to changes on this table.
+Realtime's `postgres_changes` cannot observe them.
+
+Correction (verified 2026-07-29, deploy day): the project **does** use
+`postgres_changes` — `apps/customer/src/hooks/useCustomerOrder.ts` and
+`apps/customer/app/(customer)/orders/index.tsx` subscribe to it. But both
+subscribe only to `CustomerOrder` and `DeliveryAssignment`, filtered per order.
+**Nothing subscribes to `postgres_changes` on `DispatchRiderRecord` or on
+`rider_live_location`.** Rider position reaches clients through `app-rpc` reads
+plus the explicit `broadcastRidersChanged` Broadcast helper, not
+`postgres_changes`. So making `rider_live_location` UNLOGGED, and throttling the
+durable `DispatchRiderRecord` write to once a minute, degrades no live
+subscription. This constraint must be respected by future work: nothing may
+subscribe to `postgres_changes` on `rider_live_location`, and no live-tracking
+feature may be built expecting `postgres_changes` on `DispatchRiderRecord`'s
+lat/long (it now updates at most once a minute — use the Broadcast path).
 
 ## 4. Phase 2 — Nearest-rider ranking
 
