@@ -120,7 +120,7 @@ export const getKitchenSignalColors = (tone: QueueTone) => {
     case 'danger':
       return { backgroundColor: partnerTheme.dangerSoft, textColor: partnerTheme.danger };
     case 'warning':
-      return { backgroundColor: partnerTheme.warningSoft, textColor: partnerTheme.warning };
+      return { backgroundColor: partnerTheme.warningSoft, textColor: partnerTheme.warningText };
     case 'accent':
       return { backgroundColor: partnerTheme.heroSoft, textColor: partnerTheme.accentStrong };
     case 'success':

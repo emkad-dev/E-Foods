@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
 import { Stack, useRouter } from 'expo-router';
 import { AuthProvider } from '../src/contexts/AuthContext';
+import { useFeastyFonts } from '@feasty/design-system';
 
 function RootLayoutNav() {
   const router = useRouter();
@@ -60,6 +61,11 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  // Deliberately NOT gated on `fontsReady`, unlike the customer app: per the note
+  // above, swapping the navigator out on a state change unmounts the whole tree and
+  // makes the panel thrash. Partner accepts a brief fallback-face render instead.
+  useFeastyFonts();
+
   return (
     <AuthProvider>
       <RootLayoutNav />

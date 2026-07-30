@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   closedBadgeText: {
-    color: customerTheme.warning,
+    color: customerTheme.warningText,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -555,7 +555,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   noticeText: {
-    color: customerTheme.warning,
+    color: customerTheme.warningText,
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 19,

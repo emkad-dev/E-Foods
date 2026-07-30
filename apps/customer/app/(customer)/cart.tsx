@@ -710,7 +710,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   fulfillmentSoonText: {
-    color: customerTheme.warning,
+    color: customerTheme.warningText,
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.2,

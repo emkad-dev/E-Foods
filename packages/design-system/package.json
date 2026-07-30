@@ -1,0 +1,17 @@
+{
+  "name": "@feasty/design-system",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
+    "@expo-google-fonts/karla": "^0.4.1"
+  },
+  "peerDependencies": {
+    "expo-font": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

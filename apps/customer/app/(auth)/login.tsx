@@ -1,11 +1,21 @@
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { Link, useLocalSearchParams } from 'expo-router';
+import {
+  Button,
+  Input,
+  Text,
+  border,
+  brand,
+  space,
+  status,
+  surface,
+  typeScale,
+} from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import AuthLegalFooter from '../../src/components/AuthLegalFooter';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
-import { customerTheme } from '../../src/theme/palette';
 
 export default function LoginScreen() {
   const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
@@ -43,17 +53,27 @@ export default function LoginScreen() {
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>Login</Text>
-      {error && <Text style={styles.errorText}>{error}</Text>}
-      <TextInput
-        style={styles.input}
+      <Text variant="title1" align="center" style={styles.title}>
+        Login
+      </Text>
+
+      {error ? (
+        <Text variant="body" align="center" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : null}
+
+      <Input
         placeholder="Email"
+        accessibilityLabel="Email"
         value={email}
         onChangeText={handleEmailChange}
         autoCapitalize="none"
         keyboardType="email-address"
         editable={!loading}
+        containerStyle={styles.field}
       />
+
       <AuthPasswordField
         placeholder="Password"
         value={password}
@@ -61,13 +81,21 @@ export default function LoginScreen() {
         editable={!loading}
         showHint
       />
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Loading...' : 'Sign In'}</Text>
-      </TouchableOpacity>
+
+      <Button
+        label="Sign In"
+        size="lg"
+        fullWidth
+        loading={loading}
+        onPress={handleLogin}
+        style={styles.submit}
+      />
 
       <View style={styles.divider}>
         <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>Or sign in with</Text>
+        <Text variant="callout" tone="secondary" style={styles.dividerText}>
+          Or sign in with
+        </Text>
         <View style={styles.dividerLine} />
       </View>
 
@@ -80,7 +108,11 @@ export default function LoginScreen() {
         Create an account
       </Link>
       <Link
-        href={redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'}
+        href={
+          redirectTo
+            ? { pathname: '/(auth)/forgot-password', params: { redirectTo } }
+            : '/(auth)/forgot-password'
+        }
         style={styles.link}
       >
         Forgot password?
@@ -92,23 +124,47 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: customerTheme.background, flex: 1 },
-  container: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  title: { color: customerTheme.text, fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  errorText: { color: customerTheme.danger, marginBottom: 16, textAlign: 'center', fontSize: 14 },
-  input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: customerTheme.border,
-    backgroundColor: customerTheme.surface,
-    color: customerTheme.text,
-    borderRadius: 10,
-    paddingHorizontal: 16,
+  screen: {
+    backgroundColor: surface.canvas,
+    flex: 1,
   },
-  button: { backgroundColor: customerTheme.accent, padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 16 },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
-  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: customerTheme.border },
-  dividerText: { marginHorizontal: 10, color: customerTheme.textMuted, fontSize: 14 },
-  link: { marginTop: 12, color: customerTheme.link, textAlign: 'center' },
+  container: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: space.xl,
+  },
+  title: {
+    marginBottom: space.xl,
+  },
+  errorText: {
+    color: status.danger,
+    marginBottom: space.lg,
+  },
+  field: {
+    // The previous version left no gap here, so the email and password fields sat flush.
+    marginBottom: space.md,
+  },
+  submit: {
+    marginTop: space.lg,
+    marginBottom: space.lg,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: space.xl,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: border.subtle,
+  },
+  dividerText: {
+    marginHorizontal: space.md,
+  },
+  link: {
+    ...typeScale.body,
+    marginTop: space.md,
+    color: brand.primaryStrong,
+    textAlign: 'center',
+  },
 });

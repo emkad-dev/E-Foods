@@ -1,9 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
+import {
+  Card,
+  Chip,
+  EmptyState,
+  Skeleton,
+  SkeletonRow,
+  SkeletonScreen,
+  Text,
+  radius,
+  space,
+  surface,
+} from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
-import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
   formatOrderStatusLabel,
@@ -14,7 +25,6 @@ import {
 } from '../../../src/domain/orders';
 import { getCustomerOrders } from '../../../src/services/customerReadModel';
 import { supabase } from '../../../src/services/supabase/config';
-import { customerTheme } from '../../../src/theme/palette';
 
 type Order = {
   id: string;
@@ -59,7 +69,6 @@ const ORDER_FILTERS: { label: string; value: OrderFilter }[] = [
   { label: 'Ongoing', value: 'ongoing' },
   { label: 'Placed', value: 'placed' },
   { label: 'Cancelled', value: 'cancelled' },
-  
 ];
 
 const matchesOrderFilter = (order: Order, filter: OrderFilter) => {
@@ -86,7 +95,7 @@ const getEmptyStateCopy = (filter: OrderFilter) => {
     case 'cancelled':
       return 'No cancelled orders yet.';
     default:
-      return 'No orders yet.';
+      return "When you place an order, you'll be able to track it here.";
   }
 };
 
@@ -193,11 +202,12 @@ export default function OrdersList() {
   if (loading) {
     return (
       <SkeletonScreen>
-        <SkeletonListRow />
-        <SkeletonListRow />
-        <SkeletonListRow />
-        <SkeletonListRow />
-        <SkeletonListRow />
+        <Skeleton width={220} height={44} radius="lg" style={styles.filterSkeleton} />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
       </SkeletonScreen>
     );
   }
@@ -207,52 +217,59 @@ export default function OrdersList() {
       data={visibleOrders}
       keyExtractor={(item) => item.id}
       ListHeaderComponent={
-        <View style={styles.filterShell}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {ORDER_FILTERS.map((filter) => {
-              const active = filter.value === activeFilter;
-
-              return (
-                <TouchableOpacity
-                  key={filter.value}
-                  activeOpacity={0.9}
-                  onPress={() => setActiveFilter(filter.value)}
-                  style={[styles.filterButton, active ? styles.filterButtonActive : null]}
-                >
-                  <Text style={[styles.filterButtonText, active ? styles.filterButtonTextActive : null]}>
-                    {filter.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          {ORDER_FILTERS.map((filter) => (
+            <Chip
+              key={filter.value}
+              label={filter.label}
+              selected={filter.value === activeFilter}
+              onPress={() => setActiveFilter(filter.value)}
+            />
+          ))}
+        </ScrollView>
       }
       ListEmptyComponent={
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>{getEmptyStateTitle(activeFilter)}</Text>
-          <Text style={styles.emptyStateCopy}>{getEmptyStateCopy(activeFilter)}</Text>
-        </View>
+        <EmptyState
+          title={getEmptyStateTitle(activeFilter)}
+          body={getEmptyStateCopy(activeFilter)}
+        />
       }
       renderItem={({ item, index }) => (
         <Animated.View entering={FadeInUp.delay(index * 90)}>
-          <TouchableOpacity style={styles.orderCard} onPress={() => router.push(`/orders/${item.id}`)}>
+          <Card
+            padding="md"
+            radius="xl"
+            style={styles.orderCard}
+            onPress={() => router.push(`/orders/${item.id}`)}
+          >
             <View style={styles.orderHeader}>
-              <Text style={styles.restaurantName}>{item.restaurantName}</Text>
+              <Text variant="title3" style={styles.restaurantName} numberOfLines={1}>
+                {item.restaurantName}
+              </Text>
               <View style={styles.statusBadge}>
-                <Text style={[styles.status, { color: getOrderStatusColor(item.status) }]}>
+                <Text variant="caption" style={{ color: getOrderStatusColor(item.status) }}>
                   {formatOrderStatusLabel(item.status).toUpperCase()}
                 </Text>
               </View>
             </View>
-            <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>
+
+            <Text variant="title2" tone="primary" style={styles.total}>
+              {formatMoney(item.pricing?.total ?? item.total ?? 0)}
+            </Text>
+
             <View style={styles.metaRow}>
-              <Text style={styles.payment}>
+              <Text variant="callout" tone="secondary" style={styles.payment} numberOfLines={1}>
                 {formatPaymentStatusLabel(item.payment?.status ?? 'pending', item.payment?.method)}
               </Text>
-              <Text style={styles.date}>{formatOrderDate(item.createdAt)}</Text>
+              <Text variant="caption" tone="secondary">
+                {formatOrderDate(item.createdAt)}
+              </Text>
             </View>
-          </TouchableOpacity>
+          </Card>
         </Animated.View>
       )}
       contentContainerStyle={styles.list}
@@ -261,128 +278,52 @@ export default function OrdersList() {
 }
 
 const styles = StyleSheet.create({
-  centered: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-  },
-  emptyStateCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginTop: 10,
-    padding: 18,
-  },
-  emptyStateTitle: {
-    color: customerTheme.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  emptyStateCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
-  },
   list: {
-    padding: 14,
-    paddingBottom: 30,
+    padding: space.lg,
+    paddingBottom: space['3xl'],
   },
   promptContainer: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: space.xl,
   },
-  filterShell: {
-    backgroundColor: customerTheme.headerSurface,
-    borderColor: 'rgba(3, 184, 51, 0.12)',
-    borderRadius: 20,
-    borderWidth: 1,
-    marginBottom: 14,
-    padding: 4,
+  filterSkeleton: {
+    marginBottom: space.lg,
   },
   filterRow: {
     flexDirection: 'row',
-  },
-  filterButton: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginRight: 8,
-    minWidth: 80,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  filterButtonActive: {
-    backgroundColor: customerTheme.accentStrong,
-    borderColor: customerTheme.accentStrong,
-    shadowColor: customerTheme.accentStrong,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  filterButtonText: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  filterButtonTextActive: {
-    color: '#ffffff',
+    gap: space.sm,
+    marginBottom: space.lg,
   },
   orderCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 12,
-    padding: 14,
+    marginBottom: space.md,
   },
   orderHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: space.md,
   },
   restaurantName: {
-    color: customerTheme.text,
     flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-    marginRight: 10,
   },
   statusBadge: {
-    backgroundColor: customerTheme.accentTint,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  status: {
-    fontSize: 10,
-    fontWeight: '800',
+    backgroundColor: surface.muted,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
   },
   total: {
-    color: customerTheme.accentStrong,
-    fontSize: 18,
-    fontWeight: '800',
-    marginTop: 10,
+    marginTop: space.md,
   },
   metaRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 8,
+    gap: space.sm,
+    marginTop: space.sm,
   },
   payment: {
-    color: customerTheme.textMuted,
     flex: 1,
-    fontSize: 12,
-    marginRight: 8,
-  },
-  date: {
-    color: customerTheme.textSoft,
-    fontSize: 11,
   },
 });
