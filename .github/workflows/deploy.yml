@@ -22,12 +22,6 @@ jobs:
       - name: Install deps
         run: npm ci --ignore-scripts
 
-      - name: Deploy Prisma migrations
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-        run: npm run db:migrate:deploy
-
       - name: Deploy Supabase Edge Functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
