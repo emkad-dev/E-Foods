@@ -37,7 +37,7 @@ Deliver a minimal, reliable ordering platform that covers the full conversion lo
 
 - Paystack test transactions for card and bank transfer
 - Webhook replay tests for `paystack-webhook`
-- Prisma migration deploy on staging
+- Supabase migration deploy (`supabase db push`) on staging
 - Role and claim tests for admin and partner flows
 
 ## Ownership
