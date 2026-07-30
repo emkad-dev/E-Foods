@@ -9,8 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ebuy.dispatch",
-      "associatedDomains": ["applinks:feasty.com"]
+      "bundleIdentifier": "com.ebuy.dispatch"
     },
     "android": {
       "adaptiveIcon": {
@@ -23,10 +22,7 @@
       "intentFilters": [
         {
           "action": "VIEW",
-          "data": [
-            { "scheme": "https", "host": "feasty.com" },
-            { "scheme": "feasty-dispatch" }
-          ],
+          "data": [{ "scheme": "feasty-dispatch" }],
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
@@ -64,7 +60,6 @@
       "autolinkingModuleResolution": true
     },
     "extra": {
-      "EXPO_PUBLIC_APP_DOMAIN": "feasty.com",
       "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"

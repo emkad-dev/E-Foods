@@ -28,11 +28,12 @@ export const supabaseEnv = {
 };
 
 export const appEnv = {
-  appDomain:
-    getEnvValue(
-      process.env.EXPO_PUBLIC_APP_DOMAIN,
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_DOMAIN
-    ) ?? 'feasty.com',
+  // Optional: only set once a rider web host actually exists. Unset means auth action
+  // links stay on the app's own scheme instead of pointing at a host we do not serve.
+  dispatchWebOrigin: getEnvValue(
+    process.env.EXPO_PUBLIC_DISPATCH_WEB_ORIGIN,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_DISPATCH_WEB_ORIGIN
+  ),
   appScheme:
     getEnvValue(
       process.env.EXPO_PUBLIC_APP_SCHEME,

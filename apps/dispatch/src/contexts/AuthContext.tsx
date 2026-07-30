@@ -11,10 +11,10 @@ import {
   signOutUser,
   formatAuthError,
   sendPasswordReset,
-  sendVerificationEmail,
 } from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
 import { appEnv } from '../config/env';
+import { buildDispatchActionCodeSettings } from '../utils/authActionUrls';
 import { deleteOwnAccount as deleteOwnDispatchAccount } from '../services/accountManagement';
 import {
   clearStoredUserProfile,
@@ -55,9 +55,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const getActionCodeSettings = (path: string) => ({
-  url: `https://${appEnv.appDomain}${path.startsWith('/') ? path : `/${path}`}`,
-});
+const getActionCodeSettings = (path: string) =>
+  buildDispatchActionCodeSettings(path, {
+    appScheme: appEnv.appScheme,
+    webOrigin: appEnv.dispatchWebOrigin,
+  });
 
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
@@ -334,28 +336,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const { user: authUser, session } = await createUserWithEmail(supabase, email, password, {
-        display_name: userData.displayName.trim(),
-        phone: userData.phoneNumber.trim(),
-        role: 'customer',
-      });
+      // The sign-up call itself sends the confirmation email, so the redirect goes with it.
+      // Resending here would only trip Supabase's 60s cooldown and leave the first
+      // (Site URL) email as the one the rider actually receives.
+      const { session } = await createUserWithEmail(
+        supabase,
+        email,
+        password,
+        {
+          display_name: userData.displayName.trim(),
+          phone: userData.phoneNumber.trim(),
+          role: 'customer',
+        },
+        getActionCodeSettings(appEnv.verifyEmailPath)
+      );
 
       if (!session) {
-        let verificationEmailSent = false;
-
-        try {
-          await sendVerificationEmail(
-            supabase,
-            authUser.email ?? email,
-            getActionCodeSettings(appEnv.verifyEmailPath)
-          );
-          verificationEmailSent = true;
-        } catch (verificationError) {
-          console.warn('Dispatch login created, but verification email could not be sent:', verificationError);
-        }
-
         setError('Verify your email, then sign in to finish setting up your rider account.');
-        return { verificationEmailSent, sessionPresent: false };
+        return { verificationEmailSent: true, sessionPresent: false };
       }
 
       return { verificationEmailSent: false, sessionPresent: true };

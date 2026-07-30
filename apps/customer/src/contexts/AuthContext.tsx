@@ -459,36 +459,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         throw new Error('Accept the Terms and Privacy Policy before creating an account.');
       }
 
-      const { user: authUser } = await createUserWithEmail(supabase, email, password, {
-        display_name: userData?.displayName,
-        phone: userData?.phoneNumber,
-        role: DEFAULT_APP_ROLE,
-      });
+      // The sign-up call itself sends the confirmation email, so the redirect goes with it.
+      // Resending here would only trip Supabase's 60s cooldown and leave the first
+      // (Site URL) email as the one the customer actually receives.
+      await createUserWithEmail(
+        supabase,
+        email,
+        password,
+        {
+          display_name: userData?.displayName,
+          phone: userData?.phoneNumber,
+          role: DEFAULT_APP_ROLE,
+        },
+        getActionCodeSettings(appEnv.verifyEmailPath)
+      );
       const policyAcceptance = userData.policyAcceptance;
       setPolicyAccepted(true);
       void storePolicyAccepted(true);
 
-      try {
-        await sendVerificationEmailWithFallback(
-          supabase,
-          authUser.email ?? email,
-          getActionCodeSettings(appEnv.verifyEmailPath)
-        );
-        trackAnalyticsEvent('customer_sign_up_completed', {
-          auth_method: 'email',
-          policy_source: policyAcceptance.source || 'customer_signup',
-          verification_email_sent: true,
-        });
-        return { verificationEmailSent: true };
-      } catch (verificationError) {
-        console.warn('Account created, but verification email could not be sent:', verificationError);
-        trackAnalyticsEvent('customer_sign_up_completed', {
-          auth_method: 'email',
-          policy_source: policyAcceptance.source || 'customer_signup',
-          verification_email_sent: false,
-        });
-        return { verificationEmailSent: false };
-      }
+      trackAnalyticsEvent('customer_sign_up_completed', {
+        auth_method: 'email',
+        policy_source: policyAcceptance.source || 'customer_signup',
+        verification_email_sent: true,
+      });
+      return { verificationEmailSent: true };
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to create account');
       setError(formattedError);

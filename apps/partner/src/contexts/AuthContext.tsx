@@ -7,7 +7,6 @@ import {
   formatAuthError,
   getUserRoleClaim,
   isNetworkRequestError,
-  sendVerificationEmail,
   signInWithEmail,
   signOutUser,
   sendPasswordReset,
@@ -333,29 +332,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const { user: authUser, session } = await createUserWithEmail(supabase, email, password, {
-        display_name: userData.contactName.trim(),
-        phone: userData.phoneNumber.trim(),
-        role: 'customer',
-      });
+      // The sign-up call itself sends the confirmation email, so the partner redirect goes
+      // with it. Resending here would only trip Supabase's 60s cooldown and leave the first
+      // (Site URL) email as the one the partner actually receives.
+      const { session } = await createUserWithEmail(
+        supabase,
+        email,
+        password,
+        {
+          display_name: userData.contactName.trim(),
+          phone: userData.phoneNumber.trim(),
+          role: 'customer',
+        },
+        buildPartnerActionCodeSettings(appEnv.verifyEmailPath, {
+          appScheme: appEnv.appScheme,
+          webOrigin: appEnv.partnerWebOrigin,
+        })
+      );
 
-      let verificationEmailSent = false;
-
-      try {
-        await sendVerificationEmail(
-          supabase,
-          authUser.email ?? email,
-          buildPartnerActionCodeSettings(appEnv.verifyEmailPath, {
-            appScheme: appEnv.appScheme,
-            webOrigin: appEnv.partnerWebOrigin,
-          })
-        );
-        verificationEmailSent = true;
-      } catch (verificationError) {
-        console.warn('Partner login created, but verification email could not be sent:', verificationError);
-      }
-
-      return { verificationEmailSent, sessionPresent: Boolean(session) };
+      return { verificationEmailSent: true, sessionPresent: Boolean(session) };
     } catch (nextError: any) {
       const resolvedMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
 
