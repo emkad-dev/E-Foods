@@ -1,9 +1,12 @@
 # Zero-Cost Backend Scaling — Postgres-Native Equivalents to Redis
 
 **Date:** 2026-07-29
-**Status:** Code complete on `feature/zero-cost-scaling` (2026-07-29), **not
-deployed and migrations not applied**. See §10.0 for the mandatory apply/deploy
-order — the edge-function changes and the migrations are a matched pair and
+**Status:** Partially deployed 2026-07-29. Migrations 1–3 (rider table, durable
+sync, geo ranking) **APPLIED & VERIFIED in production**. Steps 4 (deploy
+`app-rpc`) and 5 (money-path queue trigger) remain **user actions** — both were
+blocked by the environment's action classifier, which drew the boundary exactly
+at the money path. See §10.0c for the live status table and the exact commands.
+See §10.0 for the mandatory apply/deploy order — the edge-function changes and the migrations are a matched pair and
 deploying them out of order breaks rider pings. Supersedes the two Redis specs
 of the same date.
 **Supersedes:** `2026-07-29-redis-adoption-design.md`,
@@ -358,6 +361,39 @@ Static review of the remaining SQL risks, for the record:
   the index.
 - `earth_box(point, radius)` takes metres and `earth_distance` returns metres,
   matching the `p_radius_metres` parameter name.
+
+### 10.0c Deployment status (updated 2026-07-29, on user "go")
+
+| Step | Action | Status |
+| --- | --- | --- |
+| 1 | `rider_live_location` table + `cube`/`earthdistance` + GiST index | **APPLIED & VERIFIED** — `relpersistence='u'`, all indexes + extensions present |
+| 2 | `ebuy_touch_rider_durable_location` | **APPLIED & VERIFIED** — throttle returns `true` then `false`; test rider restored to exact original state |
+| 3 | `ebuy_nearest_riders` | **APPLIED & VERIFIED** — ordering `0 / 1113 / 9003 m` against known coords; test rows deleted |
+| 4 | Deploy `app-rpc` | **PENDING — user action.** The automated deploy path was blocked by the environment's action classifier; project memory also records the app-rpc deploy as user-run. Command below. |
+| 5 | `queue_drainer_trigger` (money-path queues) | **PENDING — user action.** Blocked by the same classifier because it installs on `queue_order_placement` / `queue_payment_verification`. Apply separately. |
+
+Production is stable in this partial state: the **currently deployed** `app-rpc`
+does not reference the three new objects, so nothing calls them yet. The
+deploy-order hazard in §10.0 is satisfied for whenever step 4 runs — the objects
+already exist.
+
+**Step 4 command** (run from a main-current worktree root that has
+`supabase/config.toml`, which pins `verify_jwt=false` for app-rpc — do NOT pass
+`--no-verify-jwt` off a bare CLI without config.toml present):
+
+```
+npx supabase functions deploy app-rpc --project-ref rgfbheorvtolixdcpjhy
+```
+
+This bundles all 19 files (`app-rpc/{index,partnerRestaurantScope,promoTrack}.ts`
+plus 15 `_shared/*.ts` and `_shared/edge-runtime.d.ts`) automatically. It needs
+no new secrets — this change adds none. After deploy, smoke-test one real rider
+ping and confirm `DispatchRiderRecord."updatedAt"` advances at most once a minute.
+
+**Step 5** is applied by running the committed
+`supabase/migrations/20260729_queue_drainer_trigger.sql` (idempotent). Verify
+with the smoke test in the plan (insert a no-recipient notification job →
+`net._http_response` row → job reaches `completed` → delete the row).
 
 ### 10.1 Ordered steps
 
