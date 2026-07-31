@@ -104,7 +104,7 @@ as the DDL in Task 2, which is the only artifact the database ever saw anyway.
 - Produces: tables `RestaurantKyc`, `RestaurantPayout`, `RestaurantHours` and the
   new `RestaurantRecord` columns, live in Postgres. Task 3 backfills them.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/20260731_partner_kyc_payout_hours.sql`:
 
@@ -213,7 +213,7 @@ ALTER TABLE "public"."RestaurantRecord"
   ADD COLUMN IF NOT EXISTS "reverificationNotifiedAt" TIMESTAMP(3);
 ```
 
-- [ ] **Step 2: Confirm the target database state before applying**
+- [x] **Step 2: Confirm the target database state before applying**
 
 Run against the project (Supabase MCP `execute_sql`):
 
@@ -262,7 +262,7 @@ FROM "RestaurantRecord";
 Expected: `total = 6`, `published = 6` — unchanged from the spec §13 audit. If
 either number moved, stop and investigate before continuing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add supabase/migrations/20260731_partner_kyc_payout_hours.sql
@@ -281,7 +281,7 @@ git commit -m "feat(db): create KYC, payout, and hours tables with RLS enabled"
 - Produces: every existing restaurant has 7 `RestaurantHours` rows, a populated
   `cuisines` array, and a `formattedAddress`. No behaviour changes.
 
-- [ ] **Step 1: Write the backfill migration**
+- [x] **Step 1: Write the backfill migration**
 
 Create `supabase/migrations/20260731_partner_onboarding_backfills.sql`:
 
@@ -361,7 +361,7 @@ Expected: each restaurant has `day_count = 7`, and `opensAt` / `closesAt` equal
 that restaurant's `openingTime` / `closingTime` (both NULL where the restaurant
 never set hours — spec §13 shows 3 such restaurants).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add supabase/migrations/20260731_partner_onboarding_backfills.sql
@@ -380,7 +380,7 @@ git commit -m "feat(db): backfill hours, cuisines, and formatted address"
 - Produces: a re-runnable audit. Stage 4 runs it before enabling the geo-gate;
   stage 7 runs it before the re-verification cutover.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Create `scripts/audit-partner-readiness.sql`:
 
@@ -410,7 +410,7 @@ SELECT
 FROM "RestaurantRecord";
 ```
 
-- [ ] **Step 2: Run it and confirm it executes**
+- [x] **Step 2: Run it and confirm it executes**
 
 Run the file's contents against the project (Supabase SQL editor or MCP
 `execute_sql`).
@@ -418,7 +418,7 @@ Expected: one row. `published_missing_coords` should still be `5` and
 `details_never_confirmed` should equal the restaurant count, since nothing has
 confirmed details yet.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/audit-partner-readiness.sql
@@ -442,7 +442,7 @@ git commit -m "chore(db): add re-runnable partner readiness audit"
 
   Task 6 imports `resolvePartnerSubmitOutcome`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/partnerApplicationTransitions.test.ts`:
 
@@ -497,12 +497,12 @@ Deno.test('status matching ignores case and surrounding whitespace', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `deno test -A --no-lock supabase/functions/_shared/partnerApplicationTransitions.test.ts`
 Expected: FAIL — module `./partnerApplicationTransitions.ts` not found.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `supabase/functions/_shared/partnerApplicationTransitions.ts`:
 
@@ -541,12 +541,12 @@ export const resolvePartnerSubmitOutcome = (
 };
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `deno test -A --no-lock supabase/functions/_shared/partnerApplicationTransitions.test.ts`
 Expected: PASS — 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add supabase/functions/_shared/partnerApplicationTransitions.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts
@@ -566,7 +566,7 @@ git commit -m "feat(app-rpc): add pure partner submit-transition rule"
 - Produces: the RPC now returns `{ status: 'pending', submittedAt, restaurantId,
   targetUid }`. Task 7 consumes that response shape.
 
-- [ ] **Step 1: Import the transition module**
+- [x] **Step 1: Import the transition module**
 
 At the top of `supabase/functions/app-rpc/index.ts`, alongside the other
 `_shared` imports, add:
@@ -575,7 +575,7 @@ At the top of `supabase/functions/app-rpc/index.ts`, alongside the other
 import { resolvePartnerSubmitOutcome } from '../_shared/partnerApplicationTransitions.ts';
 ```
 
-- [ ] **Step 2: Replace the approval short-circuit with the pending outcome**
+- [x] **Step 2: Replace the approval short-circuit with the pending outcome**
 
 In the `submitPartnerApplication` handler, replace the existing block:
 
@@ -600,7 +600,7 @@ with:
     }
 ```
 
-- [ ] **Step 3: Write the application as pending, not approved**
+- [x] **Step 3: Write the application as pending, not approved**
 
 In the same handler, in the `PartnerApplicationRecord` upsert, change these
 fields:
@@ -627,7 +627,7 @@ to:
         rejectionReason: null,
 ```
 
-- [ ] **Step 4: Remove the self-grant of the restaurant role and the self-publish**
+- [x] **Step 4: Remove the self-grant of the restaurant role and the self-publish**
 
 Still in the same handler, **delete** the `syncUserRoleState(...)` call that
 grants `'restaurant'` with `restaurantLinkSource: 'partner_application_self_publish'`,
@@ -643,7 +643,7 @@ on the application here is still correct and sufficient.
 Keep `const currentAccount = await loadUserAccount(context.uid);` — the account
 upsert below still uses `currentAccount?.createdAt`.
 
-- [ ] **Step 5: Record the account as pending, not approved**
+- [x] **Step 5: Record the account as pending, not approved**
 
 Change the `upsertUserAccount({ ... })` call's role and status fields from:
 
@@ -667,7 +667,7 @@ to:
       partnerApplicationRejectionReason: null,
 ```
 
-- [ ] **Step 6: Fix the admin notification copy**
+- [x] **Step 6: Fix the admin notification copy**
 
 The notification currently announces a live restaurant. Change its `title` and
 `body` from:
@@ -684,7 +684,7 @@ to:
       body: `${restaurantName} has applied and is waiting for review.`,
 ```
 
-- [ ] **Step 7: Fix the approval that admin review writes (REQUIRED — do not skip)**
+- [x] **Step 7: Fix the approval that admin review writes (REQUIRED — do not skip)**
 
 Deleting the `RestaurantApproval` upsert in Step 4 removes the **only** code path
 in the entire function that ever writes `status: 'approved'` (it was at line
@@ -730,32 +730,32 @@ to:
 
 Leave `isPublished: false` on the `RestaurantRecord` upsert exactly as it is.
 
-- [ ] **Step 8: Update the returned status**
+- [x] **Step 8: Update the returned status**
 
 Find the handler's success response and change the returned `status` from
 `'approved'` to `PARTNER_APPLICATION_STATUS.PENDING`, leaving `submittedAt`,
 `restaurantId`, and `targetUid` as they are.
 
-- [ ] **Step 9: Type-check the edge function**
+- [x] **Step 9: Type-check the edge function**
 
 Run: `deno check supabase/functions/app-rpc/index.ts`
 Expected: PASS. If it reports an unused `broadcastRestaurantsChanged` or similar,
 that helper is still used by other handlers — leave it defined and only remove
 the call site from this handler.
 
-- [ ] **Step 10: Confirm no remaining path self-approves**
+- [x] **Step 10: Confirm no remaining path self-approves**
 
 Run: `rg -n "status: 'approved'" supabase/functions/app-rpc/index.ts`
 Expected: exactly one hit — the `RestaurantApproval` upsert inside
 `adminReviewPartnerApplication` from Step 7. If a hit remains inside
 `submitPartnerApplication`, Step 4 was incomplete.
 
-- [ ] **Step 11: Run the full edge-function test suite**
+- [x] **Step 11: Run the full edge-function test suite**
 
 Run: `npm run test:deno`
 Expected: PASS, including the new transition tests.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add supabase/functions/app-rpc/index.ts
@@ -779,7 +779,7 @@ git commit -m "feat(app-rpc): submit partner applications as pending, not approv
 - Produces: `resolvePartnerLandingRoute({ role, applicationStatus })` returning
   `'dashboard' | 'under-review' | 'apply'`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/partner/src/contexts/partnerAuthFlow.test.ts`:
 
@@ -825,12 +825,12 @@ test('the restaurant role wins even if the application status lags behind', () =
 Add `resolvePartnerLandingRoute` to the existing import from
 `./partnerAuthFlow.ts` at the top of that test file.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `node --test --experimental-strip-types apps/partner/src/contexts/partnerAuthFlow.test.ts`
 Expected: FAIL — `resolvePartnerLandingRoute is not a function`.
 
-- [ ] **Step 3: Implement the helper**
+- [x] **Step 3: Implement the helper**
 
 Append to `apps/partner/src/contexts/partnerAuthFlow.ts`:
 
@@ -859,12 +859,12 @@ export const resolvePartnerLandingRoute = ({
 };
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `node --test --experimental-strip-types apps/partner/src/contexts/partnerAuthFlow.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Create the under-review screen**
+- [x] **Step 5: Create the under-review screen**
 
 Create `apps/partner/app/(partner)/application-under-review.tsx`:
 
@@ -950,7 +950,7 @@ const styles = StyleSheet.create({
 });
 ```
 
-- [ ] **Step 6: Route non-restaurant users by application status**
+- [x] **Step 6: Route non-restaurant users by application status**
 
 In `apps/partner/app/(partner)/_layout.tsx`, replace the block at lines 170–176:
 
@@ -989,7 +989,7 @@ Add the import at the top of the file:
 import { resolvePartnerLandingRoute } from '../../src/contexts/partnerAuthFlow';
 ```
 
-- [ ] **Step 7: Add the new route to the shell's loading mode**
+- [x] **Step 7: Add the new route to the shell's loading mode**
 
 In the same file, inside `getPartnerShellLoadingMode`, add before the final
 `return 'dashboard';`:
@@ -1000,7 +1000,7 @@ In the same file, inside `getPartnerShellLoadingMode`, add before the final
   }
 ```
 
-- [ ] **Step 8: Stop the form from waiting for a dashboard handoff**
+- [x] **Step 8: Stop the form from waiting for a dashboard handoff**
 
 In `apps/partner/app/(partner)/complete-restaurant-details.tsx`, in `handleSubmit`,
 replace:
@@ -1036,7 +1036,7 @@ And change the submit button's idle label from `'Save and open dashboard'` to
 `'Submit for review'`, and the note under it from the handoff sentence to
 `'We review new restaurants before they go live. This usually takes 1-2 business days.'`
 
-- [ ] **Step 9: Update the RPC response type**
+- [x] **Step 9: Update the RPC response type**
 
 In `apps/partner/src/services/partnerApplications.ts`, change:
 
@@ -1050,7 +1050,7 @@ to:
     status: 'pending';
 ```
 
-- [ ] **Step 10: Type-check and lint the partner app**
+- [x] **Step 10: Type-check and lint the partner app**
 
 Run: `npm run typecheck:partner`
 Expected: PASS.
@@ -1064,7 +1064,7 @@ If typecheck reports `handoffStartedAt` or
 that screen. **Do not** delete `resolvePartnerRestaurantCompletionState` from
 `partnerAuthFlow.ts` — it is still needed on the post-approval sign-in path.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/partner/src/contexts/partnerAuthFlow.ts apps/partner/src/contexts/partnerAuthFlow.test.ts apps/partner/app/\(partner\)/application-under-review.tsx apps/partner/app/\(partner\)/_layout.tsx apps/partner/app/\(partner\)/complete-restaurant-details.tsx apps/partner/src/services/partnerApplications.ts
@@ -1082,7 +1082,7 @@ git commit -m "feat(partner): route pending applicants to an under-review screen
 - Consumes: the test files from Tasks 5 and 7.
 - Produces: both run in CI via `npm test`.
 
-- [ ] **Step 1: Register the new Deno test file**
+- [x] **Step 1: Register the new Deno test file**
 
 In `package.json`, append to the `test:deno` script's file list (the
 `partnerAuthFlow.test.ts` node test is already registered, so only the Deno file
@@ -1099,14 +1099,14 @@ stay; the string originally written here dropped it):
 "test:deno": "deno test -A --no-lock supabase/functions/_shared/media_test.ts supabase/functions/_shared/pricing.test.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts supabase/functions/_shared/requireRole.test.ts supabase/functions/_shared/validation.test.ts supabase/functions/app-rpc/partnerRestaurantScope.test.ts supabase/functions/app-rpc/promoTrack.test.ts supabase/functions/auth-gateway/errors.test.ts supabase/functions/auth-gateway/hash.test.ts supabase/functions/auth-gateway/router.test.ts supabase/functions/payment-verification/invariants.test.ts supabase/functions/paystack-webhook/invariants.test.ts"
 ```
 
-- [ ] **Step 2: Run the whole suite**
+- [x] **Step 2: Run the whole suite**
 
 Run: `npm test`
 Expected: PASS. Confirm the output includes the new
 `partnerApplicationTransitions` tests and the new `resolvePartnerLandingRoute`
 tests — if a file is silently absent from the output, it was not registered.
 
-- [ ] **Step 3: Verify no restaurant was published by the code change**
+- [x] **Step 3: Verify no restaurant was published by the code change**
 
 ```sql
 SELECT COUNT(*) AS total,
@@ -1157,7 +1157,7 @@ checkout with "This restaurant is not accepting orders right now."
    customer order against it and confirm checkout succeeds. This is the only
    check that exercises the approval guard end to end.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json
@@ -1196,3 +1196,42 @@ real checkout.
 plan both are set by the same admin action. Stage 6 adds the readiness gate that
 governs `isPublished` separately; until then an approved restaurant is created
 unpublished and is published by the existing profile toggle.
+
+---
+
+## Execution status — 2026-07-31
+
+**Done and committed** (branch `worktree-partner-onboarding-kyc`, 7 commits from
+`6f10a98` to `f82ab57`): every code artifact. Both migration files, the audit
+script, the transition module and its 7 tests, the app-rpc behaviour change, the
+partner routing and under-review screen, and the test registration.
+`npm test` passes: 35 node, 70 deno, zero failures. `npm run typecheck:partner`
+and expo lint are clean.
+
+**Blocked, needs an operator** — the 7 unchecked steps above:
+
+1. Apply `supabase/migrations/20260731_partner_kyc_payout_hours.sql`, then
+   `supabase/migrations/20260731_partner_onboarding_backfills.sql`, in that order.
+   The MCP `apply_migration` call is refused by the Claude Code auto-mode
+   classifier. `npx supabase db push` is **not** a safe substitute in this repo:
+   local file names are 8-digit dates (`20260712_auth_gateway.sql`) while the
+   remote registry holds 14-digit versions (`20260715072405 auth_gateway`), so
+   push would treat several applied migrations as new and re-run them. Use the
+   Supabase SQL editor, or approve the MCP call.
+2. Run the two verification queries in Task 2 Steps 4-5 and Task 3 Steps 3-4.
+3. Deploy `app-rpc`. Until it is deployed, production still self-approves every
+   partner applicant. The deploy is independent of the migrations: nothing in
+   this stage's code reads the new tables.
+4. The manual end-to-end check in Task 8 Step 4.
+
+**Baseline measured against production before any change** (2026-07-31): 6
+restaurants, 6 published, 5 published without coordinates, 6 without a Paystack
+subaccount, 4 with no minimum order, 3 with no hours, 1 delivery restaurant
+without a pin — an exact match for the spec §13 audit. All 4 existing
+`PartnerApplicationRecord` rows are `approved`, so no current user lands on the
+new under-review screen after deploy.
+
+**Correction to Task 6 Step 9:** `deno check supabase/functions/app-rpc/index.ts`
+does not pass and did not pass before this work — it reports 207 errors on the
+unmodified file. The error sets before and after the change are identical, which
+is the verification that was actually run.
