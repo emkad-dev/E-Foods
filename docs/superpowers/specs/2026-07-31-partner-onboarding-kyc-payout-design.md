@@ -103,9 +103,38 @@ application cannot be resubmitted.
 4. `latitude` and `longitude` are both non-null
 5. at least one menu item with a non-empty name and a price > 0
 6. at least one `RestaurantHours` day with `isClosed = false` and valid times
+7. `minOrder` explicitly set (≥ 0; `0` is a valid deliberate "no minimum")
+8. `deliveryRadiusKm` set and > 0 **when `supportsDelivery` is true**
 
 Readiness is evaluated **server-side** in app-rpc. The dashboard shows the
 checklist with unmet items linked to the screen that fixes them.
+
+### 1a. Mandatory fields — coordinates, minimum order, delivery radius
+
+These are **required at application submit**, not optional and not silently
+defaulted:
+
+| field | rule |
+|---|---|
+| `latitude` / `longitude` | required, non-null, from the map pin (§4) |
+| `minOrder` | required; the partner must make an explicit choice. `0` is allowed but only via a deliberate "No minimum order" control — never a silent default |
+| `deliveryRadiusKm` | required and > 0 **when `supportsDelivery` is true**; ignored (and not asked for) when the restaurant is pickup-only |
+
+Two notes on why these are phrased this way:
+
+- **"Required" has to mean *explicitly chosen*, not *non-null*.** The audit (§13)
+  shows `deliveryRadiusKm` is never null — `submitPartnerApplication` hard-codes
+  `12`, and `minOrder` is hard-coded to `0`. So a null check would pass for every
+  existing restaurant while none of them has actually chosen a value. The server
+  therefore stops defaulting these: the submit payload must carry them, and
+  validation rejects a missing field rather than substituting a default.
+- **Delivery radius is conditional on delivery.** Demanding a radius from a
+  pickup-only restaurant is meaningless, and 5 of the 6 current restaurants are
+  pickup-only. The field is required exactly when it has meaning.
+
+Coordinates being mandatory also fixes a live data defect the audit found: one
+restaurant currently has `supportsDelivery = true` with **no coordinates**, so its
+delivery radius is computed from no origin at all.
 
 ### 2. Customer visibility (geo-gate)
 
@@ -193,6 +222,13 @@ enabled with no policies, consistent with `docs/rls-posture.md`.
   (`pending` | `approved` | `merged` | `rejected`) for the Others flow.
 - `formattedAddress String?`, `addressComponents Json?`, `buildingInfo String?`,
   `deliveryNotes String?`.
+- `detailsConfirmedAt DateTime?` — stamped when a partner explicitly confirms
+  `minOrder` and `deliveryRadiusKm`. This is what distinguishes "the partner chose
+  ₦0" from "the server defaulted to 0", which no value check on the column itself
+  can tell apart (§1a). `latitude`/`longitude`/`minOrder`/`deliveryRadiusKm` stay
+  nullable in the schema — the requirement is enforced in app-rpc validation and
+  by the readiness gate, so the migration does not have to backfill fabricated
+  values into existing rows.
 - `openingTime` / `closingTime` are **retained for backward compatibility only**.
   They are written **once at save time** as the most frequently occurring
   open/close pair across the restaurant's open days (ties broken by the earliest
@@ -254,7 +290,10 @@ build reuses the `navigator.geolocation` approach already established in
 cannot reverse geocode on web.
 
 Manual latitude/longitude text inputs are **removed** from
-`complete-restaurant-details.tsx` and `profile.tsx`.
+`complete-restaurant-details.tsx` and `profile.tsx`. Coordinates are **mandatory**
+(§1a): the address step cannot be completed without a confirmed pin, and
+`submitPartnerApplication` rejects a payload without them instead of accepting
+`null` as it does today.
 
 ### 5. Payout and settlement
 
@@ -453,8 +492,14 @@ existing restaurant can actually lack is:
 1. a `RestaurantKyc` row (NIN images, number, legal name)
 2. a `RestaurantPayout` row with `status = 'active'` and a subaccount
 3. non-null `latitude` / `longitude` (where the §2 backfill could not geocode)
+4. `detailsConfirmedAt` — an explicit `minOrder`, plus `deliveryRadiusKm` if the
+   restaurant offers delivery (§1a)
 
-A restaurant satisfying all three is untouched — no sign-out, no prompt.
+A restaurant satisfying all four is untouched — no sign-out, no prompt.
+
+Per the §13 audit this is currently **all 6 restaurants**, since none has a payout
+subaccount. That is expected — no subaccount flow has ever existed — and at this
+scale the cutover is a handful of conversations, not a mass migration.
 
 **New `RestaurantRecord` columns:**
 
@@ -524,7 +569,13 @@ is implausibly high, the backfill is wrong and the cutover does not run.
 
 **Unit**
 
-- go-live readiness: each of the six conditions independently blocks publication
+- go-live readiness: each of the eight conditions independently blocks publication
+- **mandatory fields (§1a)**: submit is rejected when coordinates, `minOrder`, or
+  (for a delivery restaurant) `deliveryRadiusKm` are absent; the server no longer
+  substitutes the old `12` / `0` defaults; `minOrder = 0` is accepted **only** with
+  `detailsConfirmedAt` set, proving deliberate choice; a pickup-only restaurant is
+  neither asked for nor blocked on `deliveryRadiusKm`; enabling `supportsDelivery`
+  later makes the radius required from that point on
 - split math against pricing-v2 fixtures: a ₦5,000 base item at qty 2 produces a
   ₦12,200 charge and a ₦2,200 `transaction_charge`, leaving the restaurant
   ₦10,000
@@ -580,6 +631,41 @@ is implausibly high, the backfill is wrong and the cutover does not run.
   permission-denied path and the photo-library fallback
 - address autocomplete, pin drag, and reverse geocode on both native and web
 
+### 13. Audit findings (run 2026-07-31 against production)
+
+The audit called for in §2 has been run. Results, from `RestaurantRecord`:
+
+| metric | count |
+|---|---|
+| total restaurants | 6 |
+| published | 6 |
+| **published with null coordinates** | **5** |
+| missing a Paystack subaccount | 6 (100%) |
+| `minOrder` of 0 | 4 (the other 2 are ₦1) |
+| missing `openingTime`/`closingTime` | 3 |
+| missing cuisine | 0 |
+| `deliveryRadiusKm` null | 0 (all defaulted, none chosen) |
+| `supportsDelivery = true` | 1 — **and it has no coordinates** |
+
+Four consequences, all already folded into this design:
+
+1. **The geo-gate must not ship before the coordinate backfill.** Enabling it
+   today would cut the customer catalog from 6 restaurants to 1. §2 already
+   sequences the backfill first; this audit is the evidence for why that ordering
+   is non-negotiable.
+2. **The cutover is small.** All 6 restaurants need re-verification, but 6 is a
+   hand-held onboarding, not a migration. The 14-day grace window in §11 is
+   comfortable and no cohort staging is needed — the open item asking whether the
+   window should be longer is resolved: it should not.
+3. **"Required" cannot mean "non-null."** `deliveryRadiusKm` is null for nobody
+   yet chosen by nobody, because submit hard-codes `12`. This is what motivates
+   `detailsConfirmedAt` in §3 and the explicit-choice rule in §1a.
+4. **One restaurant offers delivery with no origin point.** Coordinates being
+   mandatory (§1a) closes a defect that exists in production right now.
+
+The audit query should be re-run immediately before the cutover flag is enabled,
+since these counts will have moved.
+
 ## Suggested implementation order
 
 The pieces are interdependent (approval gates payout, payout gates go-live), so
@@ -598,9 +684,12 @@ verifiable stages rather than one commit:
    cuisines with the Others field, the `hours` array in the `public-catalog`
    payload, and the `restaurantAvailability.ts` switch to today's entry. Ship the
    catalog payload **before** the client switch so old clients keep working.
-4. **Address module** — Photon/Nominatim + draggable pin, replacing manual
-   coordinates in both onboarding and `profile.tsx`. Enable the geo-gate **only
-   after** the coordinate backfill from stage 1 is confirmed empty.
+4. **Address module + mandatory details** — Photon/Nominatim + draggable pin,
+   replacing manual coordinates in both onboarding and `profile.tsx`; plus the
+   §1a mandatory-field validation (coordinates, `minOrder`, conditional
+   `deliveryRadiusKm`, `detailsConfirmedAt`) and removal of the server-side `12`
+   and `0` defaults. Enable the geo-gate **only after** the coordinate backfill
+   from stage 1 is confirmed empty — per §13 that is 5 of 6 restaurants today.
 5. **KYC + payout capture** — private bucket, compressed NIN upload, bank resolve
    and subaccount creation, and the admin review surface.
 6. **Split at charge + go-live gate** — send `subaccount`/`transaction_charge`,
@@ -622,15 +711,15 @@ that cannot yet accept their details.
 
 ## Open items for the implementation plan
 
-- Exact count and identity of published restaurants with null coordinates
-  (audit query runs first; backfill before the geo-gate is enabled).
 - Whether the 90-day KYC purge and the §11 cutover/deadline sweeps run on the
   existing cron infrastructure (`broadcast-runner` / `queue-drainer` pattern) or a
   new scheduled function.
-- How many existing restaurants each §11 criterion catches. If nearly all of them
-  lack payout data — likely, since no subaccount flow has ever existed — the
-  14-day window may need to be longer, or the cutover staged by cohort. The audit
-  runs before the flag is enabled and the number decides.
+- How the 5 restaurants with null coordinates get them: geocoding their stored
+  address strings during the backfill, or asking each partner to drop a pin during
+  re-verification. At 5 restaurants either is cheap; geocoding first and letting
+  re-verification correct the result is the lower-friction default.
+
+*(The two audit-dependent open items are resolved in §13.)*
 
 ## Out of scope
 
