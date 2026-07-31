@@ -49,7 +49,8 @@ const formatPlainNumber = (value: number | null | undefined) =>
   value === null || value === undefined ? 'Not set' : Math.round(value).toLocaleString('en-US');
 
 export default function RestaurantDetail() {
-  const { id } = useLocalSearchParams();
+  const { id, highlight } = useLocalSearchParams<{ id: string; highlight?: string }>();
+  const highlightId = typeof highlight === 'string' && highlight ? highlight : null;
   const [restaurant, setRestaurant] = useState<DiscoveryRestaurant | null>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,9 +95,16 @@ export default function RestaurantDetail() {
 
         const filteredMenu = nextMenu.filter((category) => category.items.length > 0);
 
+        // When arriving from a meal search, open the category that holds the
+        // matched item so the highlighted card is on screen immediately.
+        const highlightedCategory = highlightId
+          ? filteredMenu.find((category) => category.items.some((item) => item.id === highlightId))?.category ?? null
+          : null;
+        const fallbackCategory = filteredMenu.length > 0 ? filteredMenu[0].category : null;
+
         setRestaurant(nextRestaurant as DiscoveryRestaurant);
         setMenu(filteredMenu);
-        setSelectedCategory((current) => (current ? current : filteredMenu.length > 0 ? filteredMenu[0].category : null));
+        setSelectedCategory((current) => current ?? highlightedCategory ?? fallbackCategory);
       } catch (error) {
         console.error('Error fetching restaurant:', error);
         Alert.alert('Error', 'Could not load restaurant details');
@@ -114,7 +122,7 @@ export default function RestaurantDetail() {
       active = false;
       clearInterval(interval);
     };
-  }, [id]);
+  }, [id, highlightId]);
 
   useEffect(() => {
     return () => {
@@ -325,7 +333,10 @@ export default function RestaurantDetail() {
               <Text style={styles.categoryCount}>{category.items.length} meals</Text>
             </View>
             {category.items.map((menuItem) => (
-              <View key={menuItem.id} style={styles.menuItemCard}>
+              <View
+                key={menuItem.id}
+                style={[styles.menuItemCard, menuItem.id === highlightId ? styles.menuItemCardHighlighted : null]}
+              >
                 {menuItem.image ? (
                   <Image source={{ uri: menuItem.image }} style={styles.menuItemImage} />
                 ) : (
@@ -334,6 +345,12 @@ export default function RestaurantDetail() {
                   </View>
                 )}
                 <View style={styles.menuItemInfo}>
+                  {menuItem.id === highlightId ? (
+                    <View style={styles.matchTag}>
+                      <FontAwesome name="search" size={10} color="#ffffff" />
+                      <Text style={styles.matchTagText}>Your search match</Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.itemName}>{menuItem.name}</Text>
                   {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
                   <Text style={styles.itemPrice}>{formatMoney(menuItem.price)}</Text>
@@ -619,6 +636,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 10,
     overflow: 'hidden',
+  },
+  menuItemCardHighlighted: {
+    borderColor: customerTheme.accentStrong,
+    borderWidth: 2,
+  },
+  matchTag: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: customerTheme.accentStrong,
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 5,
+    marginBottom: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  matchTagText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   menuItemImage: {
     alignSelf: 'stretch',
