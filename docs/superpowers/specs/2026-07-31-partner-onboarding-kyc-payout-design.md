@@ -31,6 +31,11 @@ Two structural corrections come with this:
 Money and PII each get their own table (`RestaurantPayout`, `RestaurantKyc`)
 rather than being denormalized onto the application record.
 
+**Existing partners are not grandfathered.** Any restaurant already signed in that
+lacks the new data is force-signed-out and must supply it on next sign-in (§11).
+It keeps selling during a 14-day grace window, then goes unpublished if it has
+still not submitted.
+
 ## Current state being replaced
 
 - `submitPartnerApplication` (`supabase/functions/app-rpc/index.ts`) hard-codes
@@ -410,18 +415,19 @@ messages, real errors are logged server-side only.
 | NIN image upload fails | retry without losing form state; the form is not cleared |
 | Image over 500 KB | rejected client-side with a "photo is too large" message before any upload |
 | Role claim not yet synced after approval | reuse the existing `resolvePartnerRestaurantCompletionState` timeout/handoff logic |
+| Forced re-verification sign-out | must raise a distinct message, never `SESSION_CONFLICT_ERROR` — see §11 |
+| Partner has a live order at cutover | deferred to the next batch; never signed out mid-service (§11) |
 
 ### 10. Migration and compatibility
 
-The migration must not disturb restaurants that are already live.
+Existing partners are **not** grandfathered — they are forced through
+re-verification (§11). The migration itself is still behaviour-preserving; the
+cutover is what changes their state.
 
-- **Grandfather existing restaurants.** Every `RestaurantRecord` currently
-  `isPublished = true` with an `approved` `RestaurantApproval` stays published and
-  approved. The new gate applies to applications submitted after the change.
-- Existing approved partners are **not** required to supply NIN or payout data to
-  keep operating, but the dashboard surfaces a persistent "complete your payout
-  details" prompt, because without a subaccount they cannot be settled by the new
-  split.
+- **Existing approvals are preserved.** A restaurant currently `isPublished = true`
+  with an `approved` `RestaurantApproval` keeps that approval and its `restaurant`
+  role. It is not sent back through the full application; it is asked only for the
+  data it is missing.
 - Backfill `RestaurantHours` from each restaurant's existing
   `openingTime`/`closingTime` across all 7 days, `isClosed = false`. This is
   behaviour-preserving: a restaurant currently open 08:00–22:00 every day keeps
@@ -435,7 +441,86 @@ The migration must not disturb restaurants that are already live.
 - Backfill `formattedAddress` from the existing `address`.
 - Coordinate audit and backfill (§2) **precedes** enabling the geo-gate.
 
-### 11. Testing
+### 11. Forced re-verification of existing partners
+
+Every already-signed-in restaurant missing the new data is **signed out**, and on
+signing back in is required to supply it before regaining the dashboard.
+
+**Who is affected.** After the §10 backfills run, hours and `cuisines[]` are
+always populated, so they can never be the missing piece. The only data an
+existing restaurant can actually lack is:
+
+1. a `RestaurantKyc` row (NIN images, number, legal name)
+2. a `RestaurantPayout` row with `status = 'active'` and a subaccount
+3. non-null `latitude` / `longitude` (where the §2 backfill could not geocode)
+
+A restaurant satisfying all three is untouched — no sign-out, no prompt.
+
+**New `RestaurantRecord` columns:**
+
+| column | type | notes |
+|---|---|---|
+| `reverificationStatus` | String @default("not_required") | `not_required` \| `required` \| `submitted` \| `complete` |
+| `reverificationDueAt` | DateTime? | end of the grace window |
+| `reverificationNotifiedAt` | DateTime? | last reminder sent |
+
+**Forced sign-out mechanism.** Reuse the existing single-device session control
+rather than inventing one. `syncSingleDeviceSession`
+(`apps/partner/src/contexts/AuthContext.tsx:143-153`) signs a user out when the
+locally stored session id differs from `UserAccount.activeSessionId`. The cutover
+job rotates `activeSessionId` to a **new non-null sentinel**, `reverify:<timestamp>`,
+mirroring the existing `disabled:<timestamp>` pattern used when an account is
+disabled (`app-rpc/index.ts:3932`).
+
+Two defects must be avoided here, both of which a naive implementation would hit:
+
+- **Setting `activeSessionId` to `null` does not sign anyone out.** The guard
+  requires *both* the local and remote ids to be non-null and different. A null
+  remote id is treated as "no active session" and the partner stays signed in.
+  The value must be a fresh sentinel.
+- **The default message is wrong and alarming.** That code path currently raises
+  `SESSION_CONFLICT_ERROR` — *"This account was signed in on another device."*
+  Showing that to every affected partner is a false security alert and a support
+  flood. The sentinel prefix `reverify:` must be distinguishable so the partner
+  app raises a distinct, accurate message: *"We need a few extra details before
+  you can keep selling. Sign in to finish."*
+
+**Re-entry flow.** On sign-in, the partner keeps the `restaurant` role, so no role
+re-sync is needed. The `(partner)` layout routes to a re-verification screen
+whenever `reverificationStatus` is `required`, and the dashboard stays
+unreachable until the missing items are supplied. The screen reuses the Phase 1
+components and **asks only for what is missing** — a partner who already has
+coordinates is not asked to re-pin an address. Submitting sets
+`reverificationStatus = 'submitted'` and queues the KYC for admin review.
+
+**Grace window (14 days).**
+
+- The storefront **stays published and orderable** for the whole window. Sign-out
+  is immediate; going dark is not.
+- Reminders escalate: in-app banner on every dashboard visit, plus email at
+  day 0, 7, 12, and 13 via the existing Resend infrastructure.
+- At the deadline, a restaurant still in `required` is set to
+  `isPublished = false`. It is **not** un-approved and its data is untouched, so
+  completing the details republishes it immediately once approved.
+- A restaurant in `submitted` at the deadline **stays published**. An admin review
+  backlog must never cost a partner revenue; only partner inaction does.
+- Once admin-approved, `reverificationStatus` becomes `complete` and the payout
+  subaccount goes `active`.
+
+**Do not sign anyone out mid-service.** The cutover runs as a scheduled batch. A
+partner with a live order (any non-terminal status) is **deferred to the next
+run**, so nobody loses the dashboard while food is being prepared. Deferral does
+**not** extend `reverificationDueAt` — the deadline is set once, when the
+restaurant first becomes eligible, so a permanently busy restaurant cannot defer
+its way past the grace window.
+
+**Rollout safety.** The cutover is driven by a config flag and runs in batches
+rather than signing out every partner at once, so a mistake affects a cohort
+instead of the whole marketplace. The audit query from §2 runs first and reports
+exactly how many restaurants each of the three criteria would catch. If that count
+is implausibly high, the backfill is wrong and the cutover does not run.
+
+### 12. Testing
 
 **Unit**
 
@@ -471,6 +556,24 @@ The migration must not disturb restaurants that are already live.
 - a client that has not yet received the `hours` array (pre-migration payload)
   still renders correct availability via the legacy fields
 
+**Forced re-verification (§11)**
+
+- a restaurant with KYC, active payout, and coordinates is **not** signed out and
+  sees no prompt
+- a restaurant missing any one of the three is signed out on next session sync
+- setting `activeSessionId` to `null` does **not** sign the partner out; the
+  `reverify:<ts>` sentinel does — this is the regression guard for the guard
+  condition at `AuthContext.tsx:147`
+- the re-verification sign-out surfaces its own message, never
+  "signed in on another device"
+- the re-entry screen asks only for missing items: a partner with valid
+  coordinates is not asked to re-pin
+- a partner with a live order is skipped by the batch and picked up by the next
+  run, with `reverificationDueAt` unchanged across deferrals
+- at the deadline: `required` → unpublished; `submitted` → stays published
+- unpublishing at the deadline leaves the approval and all restaurant data intact,
+  and completing re-verification republishes without a new application
+
 **Manual**
 
 - camera capture on a physical device for NIN front/back, including the
@@ -480,16 +583,17 @@ The migration must not disturb restaurants that are already live.
 ## Suggested implementation order
 
 The pieces are interdependent (approval gates payout, payout gates go-live), so
-this stays a single spec — but it should land as six sequenced, independently
+this stays a single spec — but it should land as seven sequenced, independently
 verifiable stages rather than one commit:
 
 1. **Schema + migration** — the three new tables, the `RestaurantRecord` additive
    columns, all backfills (§10), and the coordinate audit. Nothing user-visible
    changes. Verifies: existing restaurants still resolve identically.
 2. **Reviewed approval** — flip `submitPartnerApplication` to write `pending` and
-   stop granting the role/publishing; wire the "under review" screen; grandfather
-   existing partners. This is the smallest change with the largest trust payoff
-   and is shippable on its own.
+   stop granting the role/publishing; wire the "under review" screen. Applies to
+   **new** applications only; existing partners are untouched until stage 7. This
+   is the smallest change with the largest trust payoff and is shippable on its
+   own.
 3. **Hours + cuisines** — per-day hours editor in `profile.tsx`, multi-select
    cuisines with the Others field, the `hours` array in the `public-catalog`
    payload, and the `restaurantAvailability.ts` switch to today's entry. Ship the
@@ -502,19 +606,31 @@ verifiable stages rather than one commit:
 6. **Split at charge + go-live gate** — send `subaccount`/`transaction_charge`,
    enforce readiness before `isPublished`. Money moves last, after every gate that
    protects it is already in place.
+7. **Forced re-verification cutover** (§11) — the batch job, the `reverify:`
+   sentinel and its distinct message, the re-entry screen, reminder emails, and
+   the deadline sweep. Runs **last**, behind a config flag, because it is the only
+   stage that can take existing revenue offline.
 
-Stage 6 is deliberately last: the split must not go live until reviewed approval
-(stage 2) and KYC (stage 5) are both enforcing, or an unvetted merchant could be
-payable. Stage 3 is ordered before stage 4 because the go-live readiness check
-depends on hours existing, and because it is the only stage that touches the
-customer app.
+Stage 6 is deliberately before stage 7 but after everything else: the split must
+not go live until reviewed approval (stage 2) and KYC (stage 5) are both
+enforcing, or an unvetted merchant could be payable. Stage 3 is ordered before
+stage 4 because the go-live readiness check depends on hours existing, and because
+it is the only stage that touches the customer app. Stage 7 is last because
+partners cannot complete re-verification until the screens and payout plumbing
+from stages 4–6 exist — cutting over sooner would sign partners out into a flow
+that cannot yet accept their details.
 
 ## Open items for the implementation plan
 
 - Exact count and identity of published restaurants with null coordinates
   (audit query runs first; backfill before the geo-gate is enabled).
-- Whether the 90-day KYC purge runs on the existing cron infrastructure
-  (`broadcast-runner` / `queue-drainer` pattern) or a new scheduled function.
+- Whether the 90-day KYC purge and the §11 cutover/deadline sweeps run on the
+  existing cron infrastructure (`broadcast-runner` / `queue-drainer` pattern) or a
+  new scheduled function.
+- How many existing restaurants each §11 criterion catches. If nearly all of them
+  lack payout data — likely, since no subaccount flow has ever existed — the
+  14-day window may need to be longer, or the cutover staged by cohort. The audit
+  runs before the flag is enabled and the number decides.
 
 ## Out of scope
 
