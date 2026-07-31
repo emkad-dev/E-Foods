@@ -22,26 +22,27 @@ jobs:
       - name: Install deps
         run: npm ci --ignore-scripts
 
-      - name: Deploy Prisma migrations
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-        run: npm run db:migrate:deploy
-
       - name: Deploy Supabase Edge Functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
         run: |
+          # The supabase CLI is a devDependency, so it lives in node_modules/.bin,
+          # which Actions does not put on PATH for `run:` steps. Every invocation
+          # must go through npx or it fails with "supabase: command not found".
           npx supabase --version
-          supabase login --token "$SUPABASE_ACCESS_TOKEN"
-          supabase functions deploy app-rpc payment-verification paystack-webhook public-catalog --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
+          npx supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          npx supabase functions deploy app-rpc payment-verification paystack-webhook public-catalog --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
 
       - name: Deploy Cloudflare Worker (feasty-hooks)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          # wrangler-action defaults to wrangler 3.90.0, which has no global
+          # --cwd flag and needs --experimental-json-config to read the
+          # wrangler.jsonc files these Workers use. Both are standard in v4.
+          wranglerVersion: '4.116.0'
           command: deploy --cwd cloudflare/hooks
 
       - name: Report Cloudflare Worker deployment
@@ -49,6 +50,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          # wrangler-action defaults to wrangler 3.90.0, which has no global
+          # --cwd flag and needs --experimental-json-config to read the
+          # wrangler.jsonc files these Workers use. Both are standard in v4.
+          wranglerVersion: '4.116.0'
           command: deployments status --name feasty-hooks
 
       - name: Deploy Cloudflare Worker (feasty-edge-cache)
@@ -56,6 +61,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          # wrangler-action defaults to wrangler 3.90.0, which has no global
+          # --cwd flag and needs --experimental-json-config to read the
+          # wrangler.jsonc files these Workers use. Both are standard in v4.
+          wranglerVersion: '4.116.0'
           command: deploy --cwd cloudflare/edge-cache
 
       - name: Report Cloudflare Worker deployment (edge-cache)
@@ -63,6 +72,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          # wrangler-action defaults to wrangler 3.90.0, which has no global
+          # --cwd flag and needs --experimental-json-config to read the
+          # wrangler.jsonc files these Workers use. Both are standard in v4.
+          wranglerVersion: '4.116.0'
           command: deployments status --name feasty-edge-cache
 
       - name: Web deploys

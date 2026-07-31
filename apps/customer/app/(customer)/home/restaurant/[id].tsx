@@ -50,7 +50,8 @@ const formatPlainNumber = (value: number | null | undefined) =>
   value === null || value === undefined ? 'Not set' : Math.round(value).toLocaleString('en-US');
 
 export default function RestaurantDetail() {
-  const { id } = useLocalSearchParams();
+  const { id, highlight } = useLocalSearchParams<{ id: string; highlight?: string }>();
+  const highlightId = typeof highlight === 'string' && highlight ? highlight : null;
   const [restaurant, setRestaurant] = useState<DiscoveryRestaurant | null>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,9 +96,16 @@ export default function RestaurantDetail() {
 
         const filteredMenu = nextMenu.filter((category) => category.items.length > 0);
 
+        // When arriving from a meal search, open the category that holds the
+        // matched item so the highlighted card is on screen immediately.
+        const highlightedCategory = highlightId
+          ? filteredMenu.find((category) => category.items.some((item) => item.id === highlightId))?.category ?? null
+          : null;
+        const fallbackCategory = filteredMenu.length > 0 ? filteredMenu[0].category : null;
+
         setRestaurant(nextRestaurant as DiscoveryRestaurant);
         setMenu(filteredMenu);
-        setSelectedCategory((current) => (current ? current : filteredMenu.length > 0 ? filteredMenu[0].category : null));
+        setSelectedCategory((current) => current ?? highlightedCategory ?? fallbackCategory);
       } catch (error) {
         console.error('Error fetching restaurant:', error);
         Alert.alert('Error', 'Could not load restaurant details');
@@ -115,7 +123,7 @@ export default function RestaurantDetail() {
       active = false;
       clearInterval(interval);
     };
-  }, [id]);
+  }, [id, highlightId]);
 
   useEffect(() => {
     return () => {
@@ -333,6 +341,7 @@ export default function RestaurantDetail() {
                 price={formatMoney(menuItem.price)}
                 image={menuItem.image}
                 disabled={restaurant.isOpen === false}
+                highlighted={menuItem.id === highlightId}
                 onAdd={() => handleAddToCart(menuItem)}
               />
             ))}

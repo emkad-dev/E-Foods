@@ -1,6 +1,7 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Redirect, Tabs, usePathname } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
@@ -36,6 +37,7 @@ const getCustomerShellLoadingMode = (pathname: string | null | undefined): Custo
 export default function CustomerLayout() {
   const { loading, user } = useAuth();
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
   usePushNotifications();
 
   if (loading) {
@@ -62,7 +64,9 @@ export default function CustomerLayout() {
             borderTopColor: customerTheme.border,
             borderTopWidth: 1,
             borderRadius: 22,
-            bottom: 10,
+            // Float the pill above the device's bottom safe area (home indicator /
+            // gesture bar) on mobile; falls back to 10 on web where the inset is 0.
+            bottom: Math.max(insets.bottom, 10),
             elevation: 8,
             height: 70,
             left: 10,
@@ -83,6 +87,13 @@ export default function CustomerLayout() {
           options={{
             title: 'Home',
             tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
+          }}
+        />
+        <Tabs.Screen
+          name="search"
+          options={{
+            title: 'Search',
+            tabBarIcon: ({ color, focused }) => renderTabIcon('search', color, focused),
           }}
         />
         <Tabs.Screen
@@ -109,10 +120,12 @@ export default function CustomerLayout() {
         <Tabs.Screen
           name="orders"
           options={{
+            // Order history now lives inside Profile, so keep the route mounted
+            // (Profile links to it) but drop it from the tab bar.
+            href: null,
             title: 'Order',
             headerShown: false,
             tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('list', color, focused),
           }}
         />
         <Tabs.Screen

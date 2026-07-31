@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { border, surface } from '../tokens/color';
 import { radius, type RadiusToken } from '../tokens/radius';
@@ -16,7 +16,7 @@ export type CardProps = {
   onPress?: () => void;
   /** Hairline border instead of a shadow — for dense lists where shadows get noisy. */
   bordered?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 };
 
 export function Card({

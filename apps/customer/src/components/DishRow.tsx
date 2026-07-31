@@ -1,6 +1,6 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Image, StyleSheet, View } from 'react-native';
-import { Button, Card, Text, brand, space, surface, text as textColor } from '@feasty/design-system';
+import { Badge, Button, Card, Text, brand, space, surface, text as textColor } from '@feasty/design-system';
 
 type DishRowProps = {
   name: string;
@@ -9,6 +9,8 @@ type DishRowProps = {
   price: string;
   image?: string | null;
   disabled?: boolean;
+  /** True when the customer arrived from a meal search and this is the matched item. */
+  highlighted?: boolean;
   onAdd: () => void;
 };
 
@@ -18,11 +20,25 @@ type DishRowProps = {
  *
  * Name is `title3`, description recedes to `callout` secondary, and the price is the
  * one brand-green beat (primaryStrong, 7.87:1). The Add control is the Button primitive,
- * so it inherits the 44pt minimum tap target for free.
+ * so it inherits the 44pt minimum tap target for free. When `highlighted`, the card
+ * gets a brand-green ring and a "Your search match" badge (meal-search landings).
  */
-export default function DishRow({ name, description, price, image, disabled = false, onAdd }: DishRowProps) {
+export default function DishRow({
+  name,
+  description,
+  price,
+  image,
+  disabled = false,
+  highlighted = false,
+  onAdd,
+}: DishRowProps) {
   return (
-    <Card padding="none" radius="lg" elevation="sm" style={styles.card}>
+    <Card
+      padding="none"
+      radius="lg"
+      elevation="sm"
+      style={[styles.card, highlighted ? styles.highlighted : null]}
+    >
       <View style={styles.row}>
         {image ? (
           <Image source={{ uri: image }} style={styles.image} />
@@ -33,6 +49,11 @@ export default function DishRow({ name, description, price, image, disabled = fa
         )}
 
         <View style={styles.info}>
+          {highlighted ? (
+            <View style={styles.matchTag}>
+              <Badge label="Your search match" tone="success" />
+            </View>
+          ) : null}
           <Text variant="title3" numberOfLines={1}>
             {name}
           </Text>
@@ -58,6 +79,14 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: space.sm,
     overflow: 'hidden',
+  },
+  highlighted: {
+    borderColor: brand.primary,
+    borderWidth: 2,
+  },
+  matchTag: {
+    alignSelf: 'flex-start',
+    marginBottom: space.xs,
   },
   row: {
     flexDirection: 'row',
