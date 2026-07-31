@@ -86,8 +86,18 @@ constants, all three finally used): `pending` → `approved` | `rejected`.
 - **Approve** (`adminReviewPartnerApplication`, already built) grants the
   `restaurant` role via `syncUserRoleState` with
   `restaurantLinkSource: 'partner_application_approved'`, creates/updates the
-  `RestaurantRecord` with **`isPublished: false`**, and activates the payout
-  subaccount.
+  `RestaurantRecord` with **`isPublished: false`**, writes `RestaurantApproval`
+  as **`approved`**, and activates the payout subaccount.
+
+  **Two approval records, one action.** `PartnerApplicationRecord.status` tracks
+  the *application*; `RestaurantApproval.status` gates *order placement*
+  (`app-rpc/index.ts:1861` refuses any restaurant whose approval row is not
+  `approved`). Today the only code that writes `approved` to `RestaurantApproval`
+  is the self-approval inside `submitPartnerApplication`, while
+  `adminReviewPartnerApplication` writes `pending`. Removing the self-approval
+  therefore **must** be paired with moving the `approved` write into the admin
+  review branch, or every admin-approved restaurant becomes permanently unable to
+  take orders. This is a real trap, not a theoretical one.
 - **Reject** stores `rejectionReason`, leaves the user as `customer`, and allows
   edit-and-resubmit (submit accepts a `rejected` application and returns it to
   `pending`).
