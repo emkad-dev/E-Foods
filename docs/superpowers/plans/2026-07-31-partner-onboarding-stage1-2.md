@@ -225,14 +225,14 @@ FROM "RestaurantRecord";
 
 Record the numbers. Step 5 asserts they are unchanged.
 
-- [ ] **Step 3: Apply the migration**
+- [x] **Step 3: Apply the migration**
 
 Apply the file with the Supabase MCP `apply_migration` (name
 `20260731_partner_kyc_payout_hours`), or `npx supabase db push` if working from
 the CLI. Expected: applied with no error. The DDL is idempotent
 (`IF NOT EXISTS` throughout), so a re-run is safe.
 
-- [ ] **Step 4: Verify the tables exist, are RLS-enabled, and have no policies**
+- [x] **Step 4: Verify the tables exist, are RLS-enabled, and have no policies**
 
 Run this against the project (Supabase SQL editor or MCP `execute_sql`):
 
@@ -251,7 +251,7 @@ ORDER BY c.relname;
 
 Expected: three rows, `rls_enabled = true`, `policy_count = 0` for each.
 
-- [ ] **Step 5: Verify existing restaurants are untouched**
+- [x] **Step 5: Verify existing restaurants are untouched**
 
 ```sql
 SELECT COUNT(*) AS total,
@@ -323,14 +323,14 @@ WHERE "formattedAddress" IS NULL
   AND "address" <> '';
 ```
 
-- [ ] **Step 2: Apply the migration**
+- [x] **Step 2: Apply the migration**
 
 Apply the file with the Supabase MCP `apply_migration` (name
 `20260731_partner_onboarding_backfills`), or `npx supabase db push`.
 Expected: applied with no error. The inserts are `ON CONFLICT DO NOTHING` and the
 updates are guarded, so a re-run is a no-op.
 
-- [ ] **Step 3: Verify the backfill is correct and complete**
+- [x] **Step 3: Verify the backfill is correct and complete**
 
 ```sql
 SELECT
@@ -346,7 +346,7 @@ Expected: `hours_rows = expected_hours_rows` (42 at 6 restaurants),
 `restaurants_without_cuisines = 0` (spec §13 shows 0 restaurants missing a
 cuisine), `restaurants_without_formatted_address = 0`.
 
-- [ ] **Step 4: Verify hours round-trip to the original values**
+- [x] **Step 4: Verify hours round-trip to the original values**
 
 ```sql
 SELECT r."name", r."openingTime", r."closingTime",
@@ -1208,21 +1208,32 @@ partner routing and under-review screen, and the test registration.
 `npm test` passes: 35 node, 70 deno, zero failures. `npm run typecheck:partner`
 and expo lint are clean.
 
-**Blocked, needs an operator** — the 7 unchecked steps above:
+**Migrations applied to production 2026-07-31**, on the user's instruction, after
+the first MCP `apply_migration` attempt was refused by the Claude Code auto-mode
+classifier. Recorded as `20260731200316 partner_kyc_payout_hours` and
+`20260731200549 partner_onboarding_backfills`. Verified after applying:
 
-1. Apply `supabase/migrations/20260731_partner_kyc_payout_hours.sql`, then
-   `supabase/migrations/20260731_partner_onboarding_backfills.sql`, in that order.
-   The MCP `apply_migration` call is refused by the Claude Code auto-mode
-   classifier. `npx supabase db push` is **not** a safe substitute in this repo:
-   local file names are 8-digit dates (`20260712_auth_gateway.sql`) while the
-   remote registry holds 14-digit versions (`20260715072405 auth_gateway`), so
-   push would treat several applied migrations as new and re-run them. Use the
-   Supabase SQL editor, or approve the MCP call.
-2. Run the two verification queries in Task 2 Steps 4-5 and Task 3 Steps 3-4.
-3. Deploy `app-rpc`. Until it is deployed, production still self-approves every
-   partner applicant. The deploy is independent of the migrations: nothing in
-   this stage's code reads the new tables.
-4. The manual end-to-end check in Task 8 Step 4.
+- All three new tables exist with `relrowsecurity = true` and **0** policies.
+- `RestaurantRecord` still 6 rows, 6 published — unchanged by both migrations.
+- `RestaurantHours` holds 42 rows = 6 × 7, and each restaurant's `opensAt` /
+  `closesAt` equal its `openingTime` / `closingTime` on all 7 days, nulls
+  included, so no restaurant's "open now" answer moved.
+- 0 restaurants without `cuisines`, 0 without `formattedAddress`.
+- Full audit re-run including the new column: 6 total, 6 published, 5 published
+  without coordinates, 6 without a subaccount, 4 with no minimum order, 6 never
+  details-confirmed, 3 with no hours, 1 delivery restaurant without a pin.
+
+`npx supabase db push` remains unsafe in this repo: local file names are 8-digit
+dates (`20260712_auth_gateway.sql`) while the remote registry holds 14-digit
+versions (`20260715072405 auth_gateway`), so push would treat several applied
+migrations as new and re-run them.
+
+**Still blocked, needs an operator** — the 1 unchecked step above:
+
+1. Deploy `app-rpc`. Until it is deployed, production still self-approves every
+   partner applicant — the migrations changed nothing about that, since no
+   stage-1 code reads the new tables.
+2. The manual end-to-end check in Task 8 Step 4, after that deploy.
 
 **Baseline measured against production before any change** (2026-07-31): 6
 restaurants, 6 published, 5 published without coordinates, 6 without a Paystack
