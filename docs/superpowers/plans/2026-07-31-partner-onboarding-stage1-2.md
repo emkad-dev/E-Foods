@@ -15,9 +15,18 @@ without a database or a running edge function, matching how
 `supabase/functions/_shared/pricing.ts` and
 `apps/partner/src/contexts/partnerAuthFlow.ts` are already tested.
 
-**Tech Stack:** Postgres (Supabase, Frankfurt), Prisma migrations
-(`functions/prisma`), Deno edge functions (`supabase/functions/app-rpc`), Expo /
+**Tech Stack:** Postgres (Supabase, Frankfurt), Supabase SQL migrations
+(`supabase/migrations`), Deno edge functions (`supabase/functions/app-rpc`), Expo /
 React Native partner app (`apps/partner`), `node --test` and `deno test`.
+
+> **Amended 2026-07-31 (execution):** this plan was written against Prisma, which
+> was retired on 2026-07-30 in `a193b1d`. `functions/prisma/schema.prisma`,
+> `prisma.config.ts` and the `db:*` npm scripts no longer exist, and
+> `functions/prisma/migrations/` is a frozen archive whose README says not to
+> extend it. Task 1 is therefore removed, and Tasks 2–3 now write flat
+> `supabase/migrations/<YYYYMMDD>_<name>.sql` files applied with the Supabase CLI
+> or the Supabase MCP `apply_migration`. Task numbering is unchanged so the
+> cross-references in Task 6 and the Self-Review Notes still resolve.
 
 **Spec:** `docs/superpowers/specs/2026-07-31-partner-onboarding-kyc-payout-design.md`
 
@@ -36,8 +45,9 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 - Existing approvals are preserved: a restaurant that is already
   `isPublished = true` with an `approved` `RestaurantApproval` must remain exactly
   so after every migration in this plan.
-- Migrations live in `functions/prisma/migrations/<YYYYMMDD>_<name>/migration.sql`,
-  matching the existing convention (e.g. `20260701_enable_rls_exposed_tables`).
+- Migrations live in `supabase/migrations/<YYYYMMDD>_<name>.sql`, matching the
+  existing convention (e.g. `20260717_platform_settings_pricing.sql`). Nothing is
+  added to `functions/prisma/migrations/` — it is a frozen archive.
 - New test files must be **added to the explicit file lists** in the root
   `package.json` `test:node` / `test:deno` scripts, or they will never run.
 - Error messages returned to clients follow the existing `ClientSafeError`
@@ -50,9 +60,9 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 ## File Structure
 
 **Created:**
-- `functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql` —
+- `supabase/migrations/20260731_partner_kyc_payout_hours.sql` —
   DDL for the three new tables, the additive `RestaurantRecord` columns, and RLS.
-- `functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql` —
+- `supabase/migrations/20260731_partner_onboarding_backfills.sql` —
   behaviour-preserving backfills for hours, cuisines, formattedAddress.
 - `scripts/audit-partner-readiness.sql` — re-runnable readiness audit (spec §13).
 - `supabase/functions/_shared/partnerApplicationTransitions.ts` — pure decision
@@ -61,7 +71,6 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 - `apps/partner/app/(partner)/application-under-review.tsx` — the pending screen.
 
 **Modified:**
-- `functions/prisma/schema.prisma` — new models + `RestaurantRecord` columns.
 - `supabase/functions/app-rpc/index.ts` — `submitPartnerApplication` handler.
 - `apps/partner/src/contexts/partnerAuthFlow.ts` — add `resolvePartnerLandingRoute`.
 - `apps/partner/src/contexts/partnerAuthFlow.test.ts` — its tests.
@@ -73,138 +82,31 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 
 ---
 
-## Task 1: Prisma schema — new models and additive columns
+## Task 1: REMOVED — Prisma was retired before this plan ran
 
-**Files:**
-- Modify: `functions/prisma/schema.prisma`
+There is no ORM schema to update. `functions/prisma/schema.prisma` was deleted in
+`a193b1d` (2026-07-30) because it had drifted from the live database and nothing
+consumed the generated client; `supabase/migrations/*.sql` is now the single
+source of truth for schema. The models this task described are expressed directly
+as the DDL in Task 2, which is the only artifact the database ever saw anyway.
 
-**Interfaces:**
-- Consumes: nothing.
-- Produces: models `RestaurantKyc`, `RestaurantPayout`, `RestaurantHours`; new
-  `RestaurantRecord` fields `cuisines`, `customCuisine`, `customCuisineStatus`,
-  `formattedAddress`, `addressComponents`, `buildingInfo`, `deliveryNotes`,
-  `detailsConfirmedAt`, `reverificationStatus`, `reverificationDueAt`,
-  `reverificationNotifiedAt`. Task 2 turns these into SQL.
-
-- [ ] **Step 1: Add the three new models**
-
-Append to `functions/prisma/schema.prisma`, after the `PartnerApplicationRecord`
-model (around line 152):
-
-```prisma
-model RestaurantKyc {
-  id             String    @id @default(cuid())
-  uid            String    @unique
-  restaurantId   String?
-  legalName      String
-  ninNumber      String?
-  ninLast4       String
-  ninHash        String
-  ninFrontPath   String
-  ninBackPath    String
-  verification   String    @default("manual")
-  verifiedByUid  String?
-  verifiedAt     DateTime?
-  reviewNotes    String?
-  purgedAt       DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  @@index([restaurantId])
-}
-
-model RestaurantPayout {
-  id                     String    @id @default(cuid())
-  uid                    String    @unique
-  restaurantId           String?
-  bankCode               String
-  bankName               String
-  accountNumber          String
-  accountLast4           String
-  resolvedAccountName    String
-  paystackSubaccountCode String?
-  status                 String    @default("pending")
-  lastError              String?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-
-  @@index([restaurantId])
-  @@index([status])
-}
-
-model RestaurantHours {
-  id           String           @id @default(cuid())
-  restaurantId String
-  dayOfWeek    Int
-  isClosed     Boolean          @default(false)
-  opensAt      String?
-  closesAt     String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  restaurant   RestaurantRecord @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-
-  @@unique([restaurantId, dayOfWeek])
-  @@index([restaurantId])
-}
-```
-
-- [ ] **Step 2: Add the additive columns to `RestaurantRecord`**
-
-In `functions/prisma/schema.prisma`, inside `model RestaurantRecord`, add these
-fields immediately after the existing `paystackSubaccountCode` line, and add the
-`hours` relation alongside the existing `approval` / `orders` relations:
-
-```prisma
-  cuisines                 String[]  @default([])
-  customCuisine            String?
-  customCuisineStatus      String?   @default("pending")
-  formattedAddress         String?
-  addressComponents        Json?
-  buildingInfo             String?
-  deliveryNotes            String?
-  detailsConfirmedAt       DateTime?
-  reverificationStatus     String    @default("not_required")
-  reverificationDueAt      DateTime?
-  reverificationNotifiedAt DateTime?
-```
-
-And in the relations block of the same model:
-
-```prisma
-  hours            RestaurantHours[]
-```
-
-- [ ] **Step 3: Validate the schema**
-
-Run: `npm run db:validate`
-Expected: PASS — "The schema at ... is valid".
-
-If it fails on the `hours` relation, confirm `RestaurantHours.restaurant` and
-`RestaurantRecord.hours` name the same relation and that `restaurantId`
-references `RestaurantRecord.id`.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add functions/prisma/schema.prisma
-git commit -m "feat(db): add partner KYC, payout, and per-day hours models"
-```
+- [x] **Nothing to do. Proceed to Task 2.**
 
 ---
 
 ## Task 2: DDL migration with RLS
 
 **Files:**
-- Create: `functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql`
+- Create: `supabase/migrations/20260731_partner_kyc_payout_hours.sql`
 
 **Interfaces:**
-- Consumes: the Prisma models from Task 1.
+- Consumes: nothing.
 - Produces: tables `RestaurantKyc`, `RestaurantPayout`, `RestaurantHours` and the
   new `RestaurantRecord` columns, live in Postgres. Task 3 backfills them.
 
 - [ ] **Step 1: Write the migration**
 
-Create `functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql`:
+Create `supabase/migrations/20260731_partner_kyc_payout_hours.sql`:
 
 ```sql
 -- Partner onboarding stage 1: KYC, payout, and per-day trading hours.
@@ -311,16 +213,24 @@ ALTER TABLE "public"."RestaurantRecord"
   ADD COLUMN IF NOT EXISTS "reverificationNotifiedAt" TIMESTAMP(3);
 ```
 
-- [ ] **Step 2: Verify the SQL parses without applying it**
+- [ ] **Step 2: Confirm the target database state before applying**
 
-Run: `npm run db:validate`
-Expected: PASS. (`db:validate` checks the schema; it does not execute SQL. The
-migration is executed in Step 3.)
+Run against the project (Supabase MCP `execute_sql`):
+
+```sql
+SELECT COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE "isPublished") AS published
+FROM "RestaurantRecord";
+```
+
+Record the numbers. Step 5 asserts they are unchanged.
 
 - [ ] **Step 3: Apply the migration**
 
-Run: `npm run db:migrate:deploy`
-Expected: the new migration is listed as applied, with no error.
+Apply the file with the Supabase MCP `apply_migration` (name
+`20260731_partner_kyc_payout_hours`), or `npx supabase db push` if working from
+the CLI. Expected: applied with no error. The DDL is idempotent
+(`IF NOT EXISTS` throughout), so a re-run is safe.
 
 - [ ] **Step 4: Verify the tables exist, are RLS-enabled, and have no policies**
 
@@ -355,7 +265,7 @@ either number moved, stop and investigate before continuing.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql
+git add supabase/migrations/20260731_partner_kyc_payout_hours.sql
 git commit -m "feat(db): create KYC, payout, and hours tables with RLS enabled"
 ```
 
@@ -364,7 +274,7 @@ git commit -m "feat(db): create KYC, payout, and hours tables with RLS enabled"
 ## Task 3: Behaviour-preserving backfills
 
 **Files:**
-- Create: `functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql`
+- Create: `supabase/migrations/20260731_partner_onboarding_backfills.sql`
 
 **Interfaces:**
 - Consumes: the tables and columns from Task 2.
@@ -373,8 +283,7 @@ git commit -m "feat(db): create KYC, payout, and hours tables with RLS enabled"
 
 - [ ] **Step 1: Write the backfill migration**
 
-Create
-`functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql`:
+Create `supabase/migrations/20260731_partner_onboarding_backfills.sql`:
 
 ```sql
 -- Partner onboarding stage 1 backfills. All are behaviour-preserving:
@@ -416,8 +325,10 @@ WHERE "formattedAddress" IS NULL
 
 - [ ] **Step 2: Apply the migration**
 
-Run: `npm run db:migrate:deploy`
-Expected: applied with no error.
+Apply the file with the Supabase MCP `apply_migration` (name
+`20260731_partner_onboarding_backfills`), or `npx supabase db push`.
+Expected: applied with no error. The inserts are `ON CONFLICT DO NOTHING` and the
+updates are guarded, so a re-run is a no-op.
 
 - [ ] **Step 3: Verify the backfill is correct and complete**
 
@@ -453,7 +364,7 @@ never set hours — spec §13 shows 3 such restaurants).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql
+git add supabase/migrations/20260731_partner_onboarding_backfills.sql
 git commit -m "feat(db): backfill hours, cuisines, and formatted address"
 ```
 
@@ -1181,10 +1092,11 @@ is new):
 supabase/functions/_shared/partnerApplicationTransitions.test.ts
 ```
 
-The script becomes:
+The script becomes (note `promoTrack.test.ts` — it is already registered and must
+stay; the string originally written here dropped it):
 
 ```
-"test:deno": "deno test -A --no-lock supabase/functions/_shared/media_test.ts supabase/functions/_shared/pricing.test.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts supabase/functions/_shared/requireRole.test.ts supabase/functions/_shared/validation.test.ts supabase/functions/app-rpc/partnerRestaurantScope.test.ts supabase/functions/auth-gateway/errors.test.ts supabase/functions/auth-gateway/hash.test.ts supabase/functions/auth-gateway/router.test.ts supabase/functions/payment-verification/invariants.test.ts supabase/functions/paystack-webhook/invariants.test.ts"
+"test:deno": "deno test -A --no-lock supabase/functions/_shared/media_test.ts supabase/functions/_shared/pricing.test.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts supabase/functions/_shared/requireRole.test.ts supabase/functions/_shared/validation.test.ts supabase/functions/app-rpc/partnerRestaurantScope.test.ts supabase/functions/app-rpc/promoTrack.test.ts supabase/functions/auth-gateway/errors.test.ts supabase/functions/auth-gateway/hash.test.ts supabase/functions/auth-gateway/router.test.ts supabase/functions/payment-verification/invariants.test.ts supabase/functions/paystack-webhook/invariants.test.ts"
 ```
 
 - [ ] **Step 2: Run the whole suite**
