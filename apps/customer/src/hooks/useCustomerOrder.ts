@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreakdown } from '../domain/entities';
 import type { FulfillmentType } from '../domain/orders';
 import { getCustomerOrderDetail } from '../services/customerReadModel';
 import { supabase } from '../services/supabase/config';
+
+const POLL_INTERVAL_MS = 30000;
 
 export type Order = OrderDocument & {
   id: string;
@@ -16,6 +20,45 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isVisible = useAppStateVisibility();
+  // Replaces the per-effect `cancelled` flag: loadOrder is now shared between the
+  // subscription effect and the visibility-gated poll, so the guard has to outlive
+  // any single effect run.
+  const activeRef = useRef(false);
+
+  const loadOrder = useCallback(async () => {
+    if (!orderId || !customerId) {
+      return;
+    }
+
+    try {
+      const nextData = await getCustomerOrderDetail(orderId);
+
+      if (!activeRef.current) {
+        return;
+      }
+
+      if (nextData.order.customerId !== customerId) {
+        setOrder(null);
+        setError('Order not found');
+        return;
+      }
+
+      setOrder(nextData.order as Order);
+      setError(null);
+    } catch (err: any) {
+      if (!activeRef.current) {
+        return;
+      }
+
+      setOrder(null);
+      setError(err.message ?? 'Order not found');
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [customerId, orderId]);
 
   useEffect(() => {
     if (!orderId || !customerId) {
@@ -26,37 +69,7 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     }
 
     setLoading(true);
-    let cancelled = false;
-
-    const loadOrder = async () => {
-      try {
-        const nextData = await getCustomerOrderDetail(orderId);
-
-        if (cancelled) {
-          return;
-        }
-
-        if (nextData.order.customerId !== customerId) {
-          setOrder(null);
-          setError('Order not found');
-          return;
-        }
-
-        setOrder(nextData.order as Order);
-        setError(null);
-      } catch (err: any) {
-        if (cancelled) {
-          return;
-        }
-
-        setOrder(null);
-        setError(err.message ?? 'Order not found');
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
+    activeRef.current = true;
 
     void loadOrder();
     const channel = supabase
@@ -91,16 +104,21 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
         }
       });
 
-    const interval = setInterval(() => {
-      void loadOrder();
-    }, 30000);
-
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      activeRef.current = false;
       void supabase.removeChannel(channel);
     };
-  }, [customerId, orderId]);
+  }, [customerId, loadOrder, orderId]);
+
+  // Fallback poll for a silently-dropped Realtime connection. Paused while the app
+  // is backgrounded; returning to the foreground fires one immediate catch-up read.
+  useVisiblePolling(
+    () => {
+      void loadOrder();
+    },
+    POLL_INTERVAL_MS,
+    isVisible
+  );
 
   return { order, loading, error };
 };

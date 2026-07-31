@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
+import { useVisiblePolling } from '../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
@@ -103,12 +105,45 @@ const getEmptyStateTitle = (filter: OrderFilter) => {
   }
 };
 
+const POLL_INTERVAL_MS = 30000;
+
 export default function OrdersList() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<OrderFilter>('all');
   const router = useRouter();
+  const isVisible = useAppStateVisibility();
+  // Shared by the subscription effect and the visibility-gated poll, so the
+  // in-flight guard has to outlive any single effect run.
+  const activeRef = useRef(false);
+
+  const loadOrders = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      const nextData = await getCustomerOrders();
+
+      if (!activeRef.current) {
+        return;
+      }
+
+      setOrders(nextData.orders as Order[]);
+    } catch (nextError) {
+      if (!activeRef.current) {
+        return;
+      }
+
+      console.error('Error fetching orders:', nextError);
+      setOrders([]);
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -117,30 +152,7 @@ export default function OrdersList() {
       return;
     }
 
-    let cancelled = false;
-
-    const loadOrders = async () => {
-      try {
-        const nextData = await getCustomerOrders();
-
-        if (cancelled) {
-          return;
-        }
-
-        setOrders(nextData.orders as Order[]);
-      } catch (nextError) {
-        if (cancelled) {
-          return;
-        }
-
-        console.error('Error fetching orders:', nextError);
-        setOrders([]);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
+    activeRef.current = true;
 
     void loadOrders();
     const channel = supabase
@@ -163,16 +175,21 @@ export default function OrdersList() {
         }
       });
 
-    const interval = setInterval(() => {
-      void loadOrders();
-    }, 30000);
-
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      activeRef.current = false;
       void supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [loadOrders, user]);
+
+  // Fallback poll for a silently-dropped Realtime connection. Paused while the app
+  // is backgrounded; returning to the foreground fires one immediate catch-up read.
+  useVisiblePolling(
+    () => {
+      void loadOrders();
+    },
+    POLL_INTERVAL_MS,
+    isVisible
+  );
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => matchesOrderFilter(order, activeFilter)),
