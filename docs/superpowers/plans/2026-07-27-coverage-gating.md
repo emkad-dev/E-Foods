@@ -214,7 +214,7 @@ Follow the established pattern for testable `app-rpc` logic — a pure sibling m
 **Files:**
 - Create: `supabase/functions/app-rpc/deliveryCoverage.ts`
 - Test: `supabase/functions/app-rpc/deliveryCoverage.test.ts` (create)
-- Modify: `supabase/functions/app-rpc/index.ts` — delete the private `getDistanceKm` (`:1425-1440`), import from the new module, insert the guard after `:1979`
+- Modify: `supabase/functions/app-rpc/index.ts` — delete the private `toRadians` + `getDistanceKm` (`:1428-1445`), import from the new module, insert the guard after `:1983`
 
 **Interfaces:**
 - Consumes: nothing from Task 1 (the edge function cannot import app code).
@@ -446,7 +446,7 @@ In `supabase/functions/app-rpc/index.ts`, add the import beside the other local 
 import { calculateDistanceKm, isDeliveryOutOfRange } from './deliveryCoverage.ts';
 ```
 
-Delete the now-duplicated private helper at `:1425-1440` (`const getDistanceKm = (origin, target) => { ... }`) and update its call site at `:1560-1561` to use the imported function:
+Delete the now-duplicated private helper at `:1430-1445` (`const getDistanceKm = (origin, target) => { ... }`) and update its call site at `:1565-1566` to use the imported function:
 
 ```ts
       const distanceKm =
@@ -455,9 +455,9 @@ Delete the now-duplicated private helper at `:1425-1440` (`const getDistanceKm =
           : null;
 ```
 
-Leave the `toRadians` helper at `:1423` in place only if something else still uses it; if the deleted `getDistanceKm` was its sole consumer, delete it too and let the compiler confirm.
+Also delete the `toRadians` helper at `:1428`. It has exactly four call sites, all inside the `getDistanceKm` you just deleted, so it becomes dead code; the new module carries its own copy. `deno check` in Step 6 confirms nothing else referenced it.
 
-In `prepareCustomerOrderDraft`, immediately after the existing delivery-location null check (`:1975-1979`), insert:
+In `prepareCustomerOrderDraft`, immediately after the existing delivery-location null check (`:1979-1983`, ending in `fail(400, 'A valid delivery location is required.')`), insert:
 
 ```ts
   // Delivery range is enforced here, not in the client alone: a stale or tampered client
@@ -500,11 +500,13 @@ git commit -m "feat(app-rpc): reject delivery orders outside the restaurant serv
 **Files:**
 - Create: `apps/customer/src/utils/coverageMessaging.ts`
 - Create: `apps/customer/src/contexts/CoverageContext.tsx`
-- Modify: `apps/customer/app/(customer)/_layout.tsx` (mount the provider inside `FavoritesProvider`, `:34`)
+- Modify: `apps/customer/app/(customer)/_layout.tsx` (mount the provider inside `FavoritesProvider`, `:42`; closing tags at `:143-144`)
 
 **Interfaces:**
 - Consumes: `getPlatformCoverage`, `PlatformCoverage` from Task 1; `useCart()` from `apps/customer/src/contexts/CartContext.tsx`; `getPublishedRestaurants` from `apps/customer/src/services/publicRestaurantReadModel.ts:115`.
-- Produces: `useCoverage(): { isCovered: boolean; nearestDeliverableKm: number | null; isLoading: boolean }`, plus `COVERAGE_COMING_SOON_TITLE`, `COVERAGE_COMING_SOON_COPY`, `COVERAGE_UNAVAILABLE_TAG`, and `describeNearestKitchen(nearestDeliverableKm)`.
+- Produces: `useCoverage(): { isCovered: boolean; nearestDeliverableKm: number | null; isLoading: boolean; checkCoverage: (location: AddressRecord | null) => PlatformCoverage }`, plus `COVERAGE_COMING_SOON_TITLE`, `COVERAGE_COMING_SOON_COPY`, `COVERAGE_UNAVAILABLE_TAG`, and `describeNearestKitchen(nearestDeliverableKm)`.
+
+`checkCoverage` evaluates an arbitrary location against the loaded catalogue **synchronously**. It exists because `isCovered` is React state: a screen that has just called `setDeliveryLocation` cannot read a coverage verdict for the address it just saved until the next render. Any caller deciding something in the same tick as a save must use `checkCoverage(theAddressBeingSaved)`, never `isCovered`. Rendering may use `isCovered` freely.
 
 - [ ] **Step 1: Write the copy module**
 
@@ -636,7 +638,14 @@ git commit -m "feat(customer): add coverage context and shared coming-soon copy"
 The moment of truth — where the customer learns FEASTY is not live where they are.
 
 **Files:**
-- Modify: `apps/customer/app/(customer)/delivery-location.tsx` (`handleSave` at `:128-149`, and the header block at `:156-164`)
+- Modify: `apps/customer/app/(customer)/delivery-location.tsx` (`handleSave` at `:141-162`, and the header block at `:171-179`)
+
+**Note:** this screen was rewritten on 2026-07-27 (commit `187ebd5`). It now delegates GPS and
+reverse geocoding to `src/services/deviceLocation.ts` and `src/services/locationResolution.ts`,
+uses a local `status` state for transient banners instead of `Alert`, and imports no
+`customerTheme` — every colour in its `StyleSheet` is a raw hex literal. Match that convention:
+do not import `customerTheme`, and do not route the coverage panel through `setStatus`. Coverage
+is a persistent condition, not a transient status message.
 
 **Interfaces:**
 - Consumes: `useCoverage()` from Task 3; `COVERAGE_COMING_SOON_TITLE`, `COVERAGE_COMING_SOON_COPY`, `describeNearestKitchen` from Task 3.
@@ -644,7 +653,7 @@ The moment of truth — where the customer learns FEASTY is not live where they 
 
 - [ ] **Step 1: Read the current save flow**
 
-`handleSave` (`:128`) validates the address, calls `setDeliveryLocation({...})` (`:137`), stops live tracking, then `router.replace('/cart')` (`:148`). The pin must still be saved when out of coverage — the customer keeps a usable address for launch day — but the navigation to cart must not happen.
+`handleSave` (`:141`) validates the address, calls `setDeliveryLocation({...})` (`:150`), stops live tracking, then `router.replace('/cart')` (`:161`). The pin must still be saved when out of coverage — the customer keeps a usable address for launch day — but the navigation to cart must not happen.
 
 - [ ] **Step 2: Add coverage state to the screen**
 
@@ -659,31 +668,45 @@ import {
 } from '../../src/utils/coverageMessaging';
 ```
 
-Add beside the existing `useCart()` call (`:23`):
+Add beside the existing `useCart()` call (`:36`):
 
 ```tsx
-  const { isCovered, nearestDeliverableKm } = useCoverage();
+  const { checkCoverage, isCovered, nearestDeliverableKm } = useCoverage();
 ```
 
 - [ ] **Step 3: Keep the customer on the screen when out of coverage**
 
-Replace the tail of `handleSave` (`:147-148`) so the save still happens but the redirect does not:
+Rework `handleSave` so the save still happens but the redirect does not. **Gate on `checkCoverage(nextLocation)`, never on `isCovered`.** `setDeliveryLocation` is plain `useState` — it only schedules a re-render, so `isCovered` on the following line still describes the *previous* address. Reading it there inverts the gate: a first-ever pin (previous location `null`, treated as covered by design) would redirect an out-of-coverage customer straight to the cart.
+
+Build the saved location once, reuse it for both the save and the check:
 
 ```tsx
+    const nextLocation = {
+      address: trimmedAddress,
+      label: trimmedLabel || null,
+      latitude,
+      longitude,
+      note: note.trim() || null,
+      shortAddress: trimmedLabel || trimmedAddress,
+      coordinateSource,
+    };
+
+    setDeliveryLocation(nextLocation);
     stopLiveTracking();
 
-    // Coverage is recomputed from the address we just saved, so it is only accurate on the
-    // next render. Gate on the coordinates being saved and let the panel below react.
-    if (!isCovered) {
+    // Synchronous verdict for the address just saved — isCovered is a render behind.
+    if (!checkCoverage(nextLocation).isCovered) {
       return;
     }
 
     router.replace('/cart');
 ```
 
+The rendered panel below still reads `isCovered`, which is correct: by the time it renders, the context has recomputed from the newly saved address.
+
 - [ ] **Step 4: Render the coming-soon panel**
 
-Insert directly below the header `View` (after `:164`), so it is visible without scrolling:
+Insert directly below the header `View` (after `:179`, before the `ScrollView` opens at `:181`), so it is visible without scrolling:
 
 ```tsx
       {!isCovered ? (
@@ -697,7 +720,7 @@ Insert directly below the header `View` (after `:164`), so it is visible without
       ) : null}
 ```
 
-Add to the `StyleSheet.create` block at the bottom of the file, using the existing theme tokens (`customerTheme.warning` `#ef6c00`, `customerTheme.warningSoft` `#ffe0b2` — import `customerTheme` from `../../src/theme/palette` if the file does not already):
+Add to the `StyleSheet.create` block at the bottom of the file (starts `:274`). Raw hex literals, matching this file's existing convention — do not import `customerTheme`:
 
 ```tsx
   comingSoonPanel: {
@@ -744,7 +767,7 @@ git commit -m "feat(customer): show coming-soon panel when a pinned address is o
 ### Task 5: Home screen browse-only mode
 
 **Files:**
-- Modify: `apps/customer/app/(customer)/home/index.tsx` (`:221-260`, `:307-316`, the nearby shelf render at `:536`)
+- Modify: `apps/customer/app/(customer)/home/index.tsx` (`:222-261`, `:308-317`, the nearby shelf render at `:541`)
 
 **Interfaces:**
 - Consumes: `useCoverage()` from Task 3; `COVERAGE_COMING_SOON_TITLE`, `COVERAGE_COMING_SOON_COPY`, `COVERAGE_UNAVAILABLE_TAG`, `describeNearestKitchen` from Task 3.
@@ -772,7 +795,7 @@ Add near the other hook calls in the component body:
 
 - [ ] **Step 2: Bypass the availability split when out of coverage**
 
-Replace the `availableRestaurants` memo (`:230-233`). Out of coverage every restaurant would land on the unavailable shelf, leaving an empty app — so in browse-only mode all matched restaurants stay in the main list:
+Replace the `availableRestaurants` memo (`:231-234`). Out of coverage every restaurant would land on the unavailable shelf, leaving an empty app — so in browse-only mode all matched restaurants stay in the main list:
 
 ```tsx
   const availableRestaurants = useMemo(
@@ -784,19 +807,19 @@ Replace the `availableRestaurants` memo (`:230-233`). Out of coverage every rest
   );
 ```
 
-Leave `unavailableRestaurants` (`:234-237`) as it is. Then suppress the redundant secondary shelf — it would repeat the whole catalogue. Change its render condition at `:592`:
+Leave `unavailableRestaurants` (`:235-238`) as it is. Then suppress the redundant secondary shelf — it would repeat the whole catalogue. Change its render condition at `:597`:
 
 ```tsx
       {isCovered && unavailableRestaurants.length > 0 ? (
 ```
 
-The existing `nearbyRestaurants` memo (`:252-260`) already sorts by ascending `availability.distanceKm`, which delivers the required nearest-first ordering with no change.
+The existing `nearbyRestaurants` memo (`:253-261`) already sorts by ascending `availability.distanceKm`, which delivers the required nearest-first ordering with no change.
 
-Note the knock-on effect: `topRatedRestaurants` (`:239`), `featuredRestaurants` (`:262`) and `spotlightSlides` (`:266`) all derive from `availableRestaurants`, so in browse-only mode the spotlight carousel features restaurants the customer cannot order from. That is correct — the slides link to restaurant pages, which stay browsable — and it keeps the screen from rendering an empty carousel. Do not add a separate filter for them.
+Note the knock-on effect: `topRatedRestaurants` (`:240`), `featuredRestaurants` (`:263`) and `spotlightSlides` (`:267`) all derive from `availableRestaurants`, so in browse-only mode the spotlight carousel features restaurants the customer cannot order from. That is correct — the slides link to restaurant pages, which stay browsable — and it keeps the screen from rendering an empty carousel. Do not add a separate filter for them.
 
 - [ ] **Step 3: Suppress the duplicated empty-state message**
 
-`getDiscoveryEmptyState` returns "Not available in your area" whenever a pinned location has no available restaurants — the banner now says that properly. Replace the `emptyState` assignment (`:309-316`):
+`getDiscoveryEmptyState` returns "Not available in your area" whenever a pinned location has no available restaurants — the banner now says that properly. Replace the `emptyState` assignment (`:310-317`):
 
 ```tsx
   const emptyState = getDiscoveryEmptyState({
@@ -813,7 +836,7 @@ Note the knock-on effect: `topRatedRestaurants` (`:239`), `featuredRestaurants` 
 
 - [ ] **Step 4: Render the banner**
 
-Insert above the nearby shelf, immediately before the `{nearbyVisible.map(...)}` block at `:536`:
+Insert above the nearby shelf, immediately before the `{nearbyVisible.map(...)}` block at `:541`:
 
 ```tsx
           {!isCovered ? (
@@ -865,7 +888,7 @@ Add to the file's `StyleSheet.create` block:
 
 - [ ] **Step 5: Tag every card**
 
-Inside the `{nearbyVisible.map(({ restaurant, availability }) => {` render at `:536`, add the tag next to the existing meta line (`:566-568`):
+Inside the `{nearbyVisible.map(({ restaurant, availability }) => {` render at `:541`, add the tag next to the existing `nearbyMeta` line (around `:571-573`):
 
 ```tsx
                   {!isCovered ? <Text style={styles.coverageCardTag}>{COVERAGE_UNAVAILABLE_TAG}</Text> : null}
@@ -1027,7 +1050,7 @@ git commit -m "feat(customer): block checkout when the pinned address is out of 
 
 - [ ] `node --test apps/customer/src/utils/restaurantAvailability.test.ts` — passes
 - [ ] `deno test supabase/functions/app-rpc/deliveryCoverage.test.ts` — passes
-- [ ] `deno check supabase/functions/app-rpc/index.ts` — clean
+- [ ] `deno check supabase/functions/app-rpc/index.ts` — NOT clean, and was not clean before this plan: the file carries 210 pre-existing strict-mode errors at the branch point. The check is only useful as a delta. Task 2 measured +3 errors, all of the class `'restaurant' is possibly null`, matching the idiom already used two lines above the insertion point.
 - [ ] `npm run lint:customer` — no new errors
 - [ ] End-to-end with an in-range pinned address: browse, add to cart, place an order — unchanged from before this plan
 - [ ] End-to-end with an out-of-coverage pinned address: banner on home, full catalogue browsable nearest-first, Add buttons explain and refuse, checkout disabled, delivery-location panel shown

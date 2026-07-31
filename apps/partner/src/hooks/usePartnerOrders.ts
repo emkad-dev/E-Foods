@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
-import { usePartnerRestaurant } from './usePartnerRestaurant';
-import type { OrderDocument } from '../domain/entities';
+import type { OrderDocument, RestaurantDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getPartnerRestaurantOrders } from '../services/partnerReadModel';
 import { supabase } from '../services/supabase/config';
@@ -10,8 +9,8 @@ import { sortKitchenHistoryOrders } from '../utils/partnerQueue';
 export type PartnerOrder = OrderDocument;
 
 export const usePartnerOrders = () => {
-  const { error: restaurantError, loading: restaurantLoading, restaurant } = usePartnerRestaurant();
   const [orders, setOrders] = useState<PartnerOrder[]>([]);
+  const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,10 +24,12 @@ export const usePartnerOrders = () => {
 
         const nextData = await getPartnerRestaurantOrders();
         setOrders(nextData.orders as PartnerOrder[]);
+        setRestaurant(nextData.restaurant);
         setError(null);
       } catch (nextError: any) {
         console.error('Error loading partner orders:', nextError);
         setOrders([]);
+        setRestaurant(null);
         setError(nextError.message ?? 'Unable to load restaurant orders right now.');
       } finally {
         if (mode === 'refresh') {
@@ -44,36 +45,40 @@ export const usePartnerOrders = () => {
   );
 
   useEffect(() => {
+    if (restaurant?.id) {
+      return;
+    }
+
+    void loadOrders('initial');
+  }, [loadOrders, restaurant?.id]);
+
+  useEffect(() => {
     if (!restaurant?.id) {
-      setOrders([]);
-      setError(restaurantError ?? null);
-      setLoading(restaurantLoading);
       return;
     }
 
     let cancelled = false;
 
-    const guardedLoad = async (mode: 'initial' | 'background' = 'initial') => {
-        if (cancelled) {
-          return;
-        }
+    const guardedLoad = async (mode: 'background' = 'background') => {
+      if (cancelled) {
+        return;
+      }
 
       await loadOrders(mode);
     };
 
-    void guardedLoad();
     const unsubscribe = subscribeToRealtimeChanges(supabase, [ORDERS_REALTIME_TOPIC], (payload) => {
       // Global topic carries every order change; skip refetches for other restaurants when tagged.
       const changedRestaurantId = typeof payload.restaurantId === 'string' ? payload.restaurantId : null;
-      if (changedRestaurantId && restaurant?.id && changedRestaurantId !== restaurant.id) {
+      if (changedRestaurantId && restaurant.id && changedRestaurantId !== restaurant.id) {
         return;
       }
 
-      void guardedLoad('background');
+      void guardedLoad();
     });
     // Slow fallback poll in case the realtime connection drops silently.
     const interval = setInterval(() => {
-      void guardedLoad('background');
+      void guardedLoad();
     }, 30000);
 
     return () => {
@@ -81,7 +86,7 @@ export const usePartnerOrders = () => {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [loadOrders, restaurant?.id, restaurantError, restaurantLoading]);
+  }, [loadOrders, restaurant?.id]);
 
   const restaurantOrders = useMemo(() => orders, [orders]);
 
@@ -117,9 +122,9 @@ export const usePartnerOrders = () => {
   return {
     activeOrders,
     completedToday,
-    error: error ?? restaurantError,
+    error,
     incomingOrders,
-    loading: loading || restaurantLoading,
+    loading,
     orders: restaurantOrders,
     preparingOrders,
     refreshing,

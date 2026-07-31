@@ -1,10 +1,8 @@
 import { FontAwesome } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -16,11 +14,33 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
-import { fallbackAddressFromCoords, formatDeliveryLocation } from '../../src/utils/deliveryLocation';
+import { useCoverage } from '../../src/contexts/CoverageContext';
+import {
+  getCurrentCoordinates,
+  reverseGeocode,
+  watchCoordinates,
+  type Coordinates,
+  type LocationWatch,
+} from '../../src/services/deviceLocation';
+import { LOCATION_ERROR_MESSAGES, coordinatesLabel } from '../../src/services/locationResolution';
+import { fallbackAddressFromCoords } from '../../src/utils/deliveryLocation';
+import {
+  COVERAGE_COMING_SOON_COPY,
+  COVERAGE_COMING_SOON_TITLE,
+  describeNearestKitchen,
+} from '../../src/utils/coverageMessaging';
+
+type Status = {
+  tone: 'error' | 'info';
+  text: string;
+};
+
+const LIVE_GEOCODE_INTERVAL_MS = 15000;
 
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
   const { deliveryLocation, setDeliveryLocation } = useCart();
+  const { checkCoverage, isCovered, nearestOrderableKm } = useCoverage();
   const [address, setAddress] = useState(deliveryLocation?.address ?? '');
   const [label, setLabel] = useState(deliveryLocation?.label ?? deliveryLocation?.shortAddress ?? '');
   const [note, setNote] = useState(deliveryLocation?.note ?? '');
@@ -29,112 +49,112 @@ export default function DeliveryLocationScreen() {
   const [coordinateSource, setCoordinateSource] = useState(deliveryLocation ? 'Saved coordinates' : 'Manual address');
   const [liveTracking, setLiveTracking] = useState(false);
   const [locating, setLocating] = useState(false);
-  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
-  const reverseGeocodeCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+  const locationWatchRef = useRef<LocationWatch | null>(null);
+  const lastGeocodeAtRef = useRef(0);
+  const addressEditedRef = useRef(Boolean(deliveryLocation?.address));
 
   const stopLiveTracking = useCallback(() => {
-    locationSubscriptionRef.current?.remove();
-    locationSubscriptionRef.current = null;
-    if (reverseGeocodeCooldownRef.current) {
-      clearTimeout(reverseGeocodeCooldownRef.current);
-      reverseGeocodeCooldownRef.current = null;
-    }
+    locationWatchRef.current?.remove();
+    locationWatchRef.current = null;
     setLiveTracking(false);
   }, []);
 
   useEffect(() => {
     return () => {
-      stopLiveTracking();
+      locationWatchRef.current?.remove();
+      locationWatchRef.current = null;
     };
-  }, [stopLiveTracking]);
+  }, []);
 
+  const handleAddressChange = useCallback((value: string) => {
+    addressEditedRef.current = true;
+    setAddress(value);
+  }, []);
+
+  /**
+   * Reverse geocoding is throttled for live updates only — a deliberate tap on
+   * "Use current location" always resolves a fresh address.
+   */
   const updateAddressFromCoordinates = useCallback(
-    async (nextLatitude: number, nextLongitude: number) => {
-      if (reverseGeocodeCooldownRef.current) {
+    async ({ latitude: nextLatitude, longitude: nextLongitude }: Coordinates, force: boolean) => {
+      if (!force && Date.now() - lastGeocodeAtRef.current < LIVE_GEOCODE_INTERVAL_MS) {
         return;
       }
 
-      reverseGeocodeCooldownRef.current = setTimeout(() => {
-        reverseGeocodeCooldownRef.current = null;
-      }, 10000);
+      lastGeocodeAtRef.current = Date.now();
 
-      const geocoded = await Location.reverseGeocodeAsync({
-        latitude: nextLatitude,
-        longitude: nextLongitude,
-      }).catch(() => []);
-      const formatted = formatDeliveryLocation(geocoded[0] ?? null);
+      const resolved = await reverseGeocode(nextLatitude, nextLongitude);
 
-      if (!address.trim()) {
-        setAddress(formatted.address || fallbackAddressFromCoords(nextLatitude, nextLongitude));
+      if (!addressEditedRef.current) {
+        setAddress(resolved?.address ?? fallbackAddressFromCoords(nextLatitude, nextLongitude));
       }
 
-      if (!label.trim()) {
-        setLabel(formatted.shortAddress);
+      if (resolved?.shortAddress) {
+        setLabel((current) => (current.trim() ? current : resolved.shortAddress));
+      }
+
+      if (!resolved) {
+        setStatus({
+          tone: 'info',
+          text: 'We pinned your exact spot but could not name the street. Add a landmark below so the rider finds you.',
+        });
       }
     },
-    [address, label]
+    []
   );
+
+  const applyCoordinates = useCallback((coordinates: Coordinates, source: string) => {
+    setLatitude(coordinates.latitude);
+    setLongitude(coordinates.longitude);
+    setCoordinateSource(source);
+  }, []);
 
   const handleUseCurrentLocation = useCallback(async () => {
     setLocating(true);
+    setStatus({ tone: 'info', text: 'Searching for your location...' });
+    stopLiveTracking();
 
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Location off', 'Enter your address manually or allow location access.');
-        return;
-      }
+    const result = await getCurrentCoordinates();
 
-      stopLiveTracking();
-
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-        mayShowUserSettingsDialog: true,
-      });
-
-      const nextLatitude = position.coords.latitude;
-      const nextLongitude = position.coords.longitude;
-      setLatitude(nextLatitude);
-      setLongitude(nextLongitude);
-      setCoordinateSource('Current location');
-      await updateAddressFromCoordinates(nextLatitude, nextLongitude);
-
-      const subscription = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 10,
-          timeInterval: 5000,
-        },
-        async (nextPosition) => {
-          const liveLatitude = nextPosition.coords.latitude;
-          const liveLongitude = nextPosition.coords.longitude;
-          setLatitude(liveLatitude);
-          setLongitude(liveLongitude);
-          setCoordinateSource('Live location');
-          await updateAddressFromCoordinates(liveLatitude, liveLongitude);
-        }
-      );
-
-      locationSubscriptionRef.current = subscription;
-      setLiveTracking(true);
-    } catch (error) {
-      console.error('Failed to use current delivery location:', error);
-      Alert.alert('Location unavailable', 'Enter your address manually for now.');
-    } finally {
+    if (!result.ok) {
+      setStatus({ tone: 'error', text: result.message });
       setLocating(false);
+      return;
     }
-  }, [stopLiveTracking, updateAddressFromCoordinates]);
+
+    applyCoordinates(result.coordinates, 'Current location');
+    setStatus(null);
+    await updateAddressFromCoordinates(result.coordinates, true);
+    setLocating(false);
+
+    const watch = await watchCoordinates(
+      (coordinates) => {
+        applyCoordinates(coordinates, 'Live location');
+        void updateAddressFromCoordinates(coordinates, false);
+      },
+      (reason) => {
+        stopLiveTracking();
+        setStatus({ tone: 'error', text: LOCATION_ERROR_MESSAGES[reason] });
+      }
+    );
+
+    if (watch) {
+      locationWatchRef.current = watch;
+      setLiveTracking(true);
+    }
+  }, [applyCoordinates, stopLiveTracking, updateAddressFromCoordinates]);
 
   const handleSave = () => {
     const trimmedAddress = address.trim();
     const trimmedLabel = label.trim();
 
     if (!trimmedAddress) {
-      Alert.alert('Address needed', 'Enter your delivery address.');
+      setStatus({ tone: 'error', text: 'Enter your delivery address before saving.' });
       return;
     }
 
-    setDeliveryLocation({
+    const nextLocation = {
       address: trimmedAddress,
       label: trimmedLabel || null,
       latitude,
@@ -142,11 +162,21 @@ export default function DeliveryLocationScreen() {
       note: note.trim() || null,
       shortAddress: trimmedLabel || trimmedAddress,
       coordinateSource,
-    });
+    };
 
+    setDeliveryLocation(nextLocation);
     stopLiveTracking();
+
+    // Synchronous verdict for the address just saved — isCovered is a render behind.
+    if (!checkCoverage(nextLocation).isCovered) {
+      return;
+    }
+
     router.replace('/cart');
   };
+
+  const hasCoordinates = latitude !== null && longitude !== null;
+  const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
 
   return (
     <KeyboardAvoidingView
@@ -159,9 +189,19 @@ export default function DeliveryLocationScreen() {
         </TouchableOpacity>
         <View>
           <Text style={styles.title}>Delivery address</Text>
-          <Text style={styles.subtitle}>Manual entry</Text>
+          <Text style={styles.subtitle}>{liveTracking ? 'Live location on' : 'Manual entry'}</Text>
         </View>
       </View>
+
+      {!isCovered ? (
+        <View style={styles.comingSoonPanel}>
+          <Text style={styles.comingSoonTitle}>{COVERAGE_COMING_SOON_TITLE}</Text>
+          <Text style={styles.comingSoonCopy}>{COVERAGE_COMING_SOON_COPY}</Text>
+          {nearestKitchenDescription ? (
+            <Text style={styles.comingSoonMeta}>{nearestKitchenDescription}</Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
@@ -171,7 +211,7 @@ export default function DeliveryLocationScreen() {
           <Text style={styles.label}>Address</Text>
           <TextInput
             multiline
-            onChangeText={setAddress}
+            onChangeText={handleAddressChange}
             placeholder="Street, house number, area"
             placeholderTextColor="#8b9690"
             style={[styles.input, styles.addressInput]}
@@ -203,7 +243,7 @@ export default function DeliveryLocationScreen() {
             activeOpacity={0.85}
             disabled={locating}
             onPress={handleUseCurrentLocation}
-            style={styles.locationButton}
+            style={[styles.locationButton, locating ? styles.locationButtonBusy : null]}
           >
             {locating ? (
               <ActivityIndicator color="#07140c" />
@@ -211,13 +251,28 @@ export default function DeliveryLocationScreen() {
               <FontAwesome name="location-arrow" size={16} color="#07140c" />
             )}
             <Text style={styles.locationButtonText}>
-              {locating ? 'Getting location' : liveTracking ? 'Live location on' : 'Use current location'}
+              {locating ? 'Getting location' : liveTracking ? 'Refresh my location' : 'Use current location'}
             </Text>
           </TouchableOpacity>
 
+          {status ? (
+            <View style={[styles.statusBanner, status.tone === 'error' ? styles.statusBannerError : null]}>
+              <FontAwesome
+                name={status.tone === 'error' ? 'exclamation-circle' : 'info-circle'}
+                size={14}
+                color={status.tone === 'error' ? '#a3231f' : '#25613a'}
+              />
+              <Text style={[styles.statusText, status.tone === 'error' ? styles.statusTextError : null]}>
+                {status.text}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.coordinatePill}>
             <FontAwesome name="map-marker" size={14} color="#069b3f" />
-            <Text style={styles.coordinateText}>{coordinateSource}</Text>
+            <Text style={styles.coordinateText}>
+              {hasCoordinates ? `${coordinateSource} · ${coordinatesLabel(latitude, longitude)}` : coordinateSource}
+            </Text>
           </View>
           {liveTracking ? <Text style={styles.liveHint}>Location keeps updating while this screen is open.</Text> : null}
 
@@ -315,11 +370,37 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: 16,
   },
+  locationButtonBusy: {
+    opacity: 0.75,
+  },
   locationButtonText: {
     color: '#07140c',
     fontSize: 15,
     fontWeight: '900',
     marginLeft: 8,
+  },
+  statusBanner: {
+    alignItems: 'flex-start',
+    backgroundColor: '#eefaf2',
+    borderRadius: 16,
+    flexDirection: 'row',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  statusBannerError: {
+    backgroundColor: '#fdecea',
+  },
+  statusText: {
+    color: '#25613a',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginLeft: 8,
+  },
+  statusTextError: {
+    color: '#a3231f',
   },
   coordinatePill: {
     alignItems: 'center',
@@ -358,5 +439,31 @@ const styles = StyleSheet.create({
   stopButton: {
     backgroundColor: '#dff4e7',
     marginTop: 12,
+  },
+  comingSoonPanel: {
+    backgroundColor: '#ffe0b2',
+    borderColor: '#ef6c00',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+  },
+  comingSoonTitle: {
+    color: '#7a3c00',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  comingSoonCopy: {
+    color: '#7a3c00',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  comingSoonMeta: {
+    color: '#7a3c00',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
   },
 });

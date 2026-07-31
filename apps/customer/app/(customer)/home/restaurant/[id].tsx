@@ -17,8 +17,13 @@ import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavor
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
+import { useCoverage } from '../../../../src/contexts/CoverageContext';
 import { customerTheme } from '../../../../src/theme/palette';
 import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
+import {
+  COVERAGE_COMING_SOON_COPY,
+  COVERAGE_COMING_SOON_TITLE,
+} from '../../../../src/utils/coverageMessaging';
 import {
   type DiscoveryRestaurant,
   getRestaurantAvailability,
@@ -56,7 +61,8 @@ export default function RestaurantDetail() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [addedToCartVisible, setAddedToCartVisible] = useState(false);
-  const { addItem, items, restaurantId: cartRestaurantId } = useCart();
+  const { addItem, deliveryLocation, items, restaurantId: cartRestaurantId } = useCart();
+  const { isCovered } = useCoverage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const addedToCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,6 +151,11 @@ export default function RestaurantDetail() {
   };
 
   const handleAddToCart = (item: MenuItem) => {
+    if (!isCovered) {
+      Alert.alert(COVERAGE_COMING_SOON_TITLE, COVERAGE_COMING_SOON_COPY);
+      return;
+    }
+
     if (cartRestaurantId && cartRestaurantId !== id) {
       Alert.alert(
         'Replace cart?',
@@ -202,7 +213,7 @@ export default function RestaurantDetail() {
   }, [menu, selectedCategory]);
 
   const totalItemsInCart = items.reduce((sum, item) => sum + item.quantity, 0);
-  const availability = restaurant ? getRestaurantAvailability(restaurant, null) : null;
+  const availability = restaurant ? getRestaurantAvailability(restaurant, deliveryLocation) : null;
   const availabilityBadge = availability ? getRestaurantAvailabilityBadge(availability) : null;
   const operatingHoursLabel = restaurant ? getRestaurantOperatingHoursLabel(restaurant) : null;
   const cartFooterBottom = insets.bottom + 92;
@@ -356,8 +367,17 @@ export default function RestaurantDetail() {
                   <Text style={styles.itemPrice}>{formatMoney(menuItem.price)}</Text>
                 </View>
                 <TouchableOpacity
-                  style={[styles.addButton, restaurant.isOpen === false ? styles.addButtonDisabled : null]}
+                  style={[
+                    styles.addButton,
+                    restaurant.isOpen === false || !isCovered ? styles.addButtonDisabled : null,
+                  ]}
                   onPress={() => handleAddToCart(menuItem)}
+                  // Intentionally NOT `restaurant.isOpen === false || !isCovered` here: a
+                  // disabled TouchableOpacity swallows the press entirely, so an out-of-coverage
+                  // customer must still be able to tap Add and receive handleAddToCart's
+                  // COVERAGE_COMING_SOON explanation, rather than hit a dead button with no
+                  // feedback. The disabled STYLE reflects both conditions; `disabled` itself
+                  // stays keyed only on isOpen.
                   disabled={restaurant.isOpen === false}
                 >
                   <Text style={styles.addButtonText}>Add</Text>

@@ -42,6 +42,7 @@ import {
   dedupeRestaurantRowsById,
   resolvePartnerRestaurantScope,
 } from './partnerRestaurantScope.ts';
+import { calculateDistanceKm, isDeliveryOutOfRange } from './deliveryCoverage.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -1420,25 +1421,6 @@ const selectDispatchOwnerForRestaurant = async (restaurantId: string) => {
   return null;
 };
 
-const toRadians = (value: number) => (value * Math.PI) / 180;
-
-const getDistanceKm = (
-  origin: { latitude: number; longitude: number },
-  target: { latitude: number; longitude: number }
-) => {
-  const earthRadiusKm = 6371;
-  const dLat = toRadians(target.latitude - origin.latitude);
-  const dLon = toRadians(target.longitude - origin.longitude);
-  const lat1 = toRadians(origin.latitude);
-  const lat2 = toRadians(target.latitude);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
 const adjustDispatchRiderLoad = async (riderId: string | null | undefined, delta: number) => {
   const safeRiderId = sanitizeText(riderId);
   if (!safeRiderId || !Number.isFinite(delta) || delta === 0) {
@@ -1558,7 +1540,9 @@ const loadDispatchCourierCandidates = async (restaurantId: string) => {
           ? { latitude: Number(rider.latitude), longitude: Number(rider.longitude) }
           : null;
       const distanceKm =
-        restaurantCoordinates && riderCoordinates ? getDistanceKm(restaurantCoordinates, riderCoordinates) : null;
+        restaurantCoordinates && riderCoordinates
+          ? calculateDistanceKm(restaurantCoordinates, riderCoordinates)
+          : null;
 
       return {
         rider: rider as DispatchRiderRow,
@@ -1902,6 +1886,21 @@ const prepareCustomerOrderDraft = async (
     fulfillmentType === 'delivery' ? normalizeDeliveryLocation(requestData.deliveryLocation) : null;
   if (fulfillmentType === 'delivery' && !deliveryLocation) {
     fail(400, 'A valid delivery location is required.');
+  }
+
+  // Delivery range is enforced here, not in the client alone: a stale or tampered client
+  // must not be able to book a delivery the restaurant cannot reach.
+  if (
+    fulfillmentType === 'delivery' &&
+    isDeliveryOutOfRange({
+      restaurantLatitude: restaurant.latitude,
+      restaurantLongitude: restaurant.longitude,
+      deliveryLatitude: deliveryLocation?.latitude,
+      deliveryLongitude: deliveryLocation?.longitude,
+      deliveryRadiusKm: restaurant.deliveryRadiusKm,
+    })
+  ) {
+    fail(412, 'This restaurant does not deliver to your selected location yet.');
   }
 
   const pricing = calculateOrderPricing({

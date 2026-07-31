@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
+import { useCoverage } from '../../../src/contexts/CoverageContext';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
@@ -29,6 +30,12 @@ import {
   matchesRestaurantQuery,
   normalizeRestaurantQuery,
 } from '../../../src/utils/restaurantAvailability';
+import {
+  COVERAGE_COMING_SOON_COPY,
+  COVERAGE_COMING_SOON_TITLE,
+  COVERAGE_UNAVAILABLE_TAG,
+  describeNearestKitchen,
+} from '../../../src/utils/coverageMessaging';
 import { customerTheme } from '../../../src/theme/palette';
 
 type Restaurant = DiscoveryRestaurant & {
@@ -89,6 +96,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { deliveryLocation } = useCart();
+  const { isCovered, nearestOrderableKm } = useCoverage();
 
   const loadRestaurants = useCallback(
     async (mode: 'initial' | 'manual' | 'background' = 'initial') => {
@@ -179,8 +187,11 @@ export default function HomeScreen() {
   }, [deliveryLocation, restaurants, search]);
 
   const availableRestaurants = useMemo(
-    () => discoveryResults.filter((entry) => entry.availability.isAvailable),
-    [discoveryResults]
+    () =>
+      isCovered
+        ? discoveryResults.filter((entry) => entry.availability.isAvailable)
+        : discoveryResults,
+    [discoveryResults, isCovered]
   );
   const unavailableRestaurants = useMemo(
     () => discoveryResults.filter((entry) => !entry.availability.isAvailable),
@@ -198,6 +209,7 @@ export default function HomeScreen() {
   );
 
   const nearbyVisible = toShelfEntries(nearbyRestaurants, expandedShelf === 'nearby' ? undefined : 4);
+  const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
 
   const emptyState = getDiscoveryEmptyState({
     availableCount: availableRestaurants.length,
@@ -205,7 +217,9 @@ export default function HomeScreen() {
     unavailableReasons: unavailableRestaurants.map((entry) => entry.availability.reason),
     query: search,
     unavailableCount: unavailableRestaurants.length,
-    deliveryLocation,
+    // In browse-only mode the banner carries the out-of-area message; passing the pinned
+    // location here would repeat it inside the empty state.
+    deliveryLocation: isCovered ? deliveryLocation : null,
   });
 
   const handleSearchSubmit = () => {
@@ -330,6 +344,16 @@ export default function HomeScreen() {
             ) : null}
           </View>
 
+          {!isCovered ? (
+            <View style={styles.coverageBanner}>
+              <Text style={styles.coverageBannerTitle}>{COVERAGE_COMING_SOON_TITLE}</Text>
+              <Text style={styles.coverageBannerCopy}>{COVERAGE_COMING_SOON_COPY}</Text>
+              {nearestKitchenDescription ? (
+                <Text style={styles.coverageBannerMeta}>{nearestKitchenDescription}</Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {nearbyVisible.map(({ restaurant, availability }) => {
             const mealPreview = getMealPreview(restaurant, search);
 
@@ -363,15 +387,27 @@ export default function HomeScreen() {
                     </Text>
                   ) : null}
                   <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {availability.distanceKm ? `${availability.distanceKm.toFixed(1)} km away` : 'Within your zone'}
-                    {' · '}
-                    {restaurant.deliveryTime ?? '25-35 min'}
+                    {[
+                      availability.distanceKm
+                        ? `${availability.distanceKm.toFixed(1)} km away`
+                        // "Within your zone" only makes sense when we actually have coverage
+                        // here — in browse-only (out-of-coverage) mode this card can sit right
+                        // under the "not delivering here" banner, so say nothing rather than
+                        // contradict it.
+                        : isCovered
+                          ? 'Within your zone'
+                          : null,
+                      restaurant.deliveryTime ?? '25-35 min',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </Text>
                   {getRestaurantOperatingHoursLabel(restaurant) ? (
                     <Text style={styles.nearbyMeta} numberOfLines={1}>
                       {getRestaurantOperatingHoursLabel(restaurant)}
                     </Text>
                   ) : null}
+                  {!isCovered ? <Text style={styles.coverageCardTag}>{COVERAGE_UNAVAILABLE_TAG}</Text> : null}
                 </View>
               </TouchableOpacity>
             );
@@ -386,7 +422,7 @@ export default function HomeScreen() {
         </View>
       ) : null}
 
-      {unavailableRestaurants.length > 0 ? (
+      {isCovered && unavailableRestaurants.length > 0 ? (
         <View style={styles.unavailableSection}>
           <Text style={styles.unavailableTitle}>Outside your current delivery zone</Text>
           <Text style={styles.unavailableCopy}>
@@ -1000,6 +1036,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 17,
     marginTop: 8,
+  },
+  coverageBanner: {
+    backgroundColor: '#ffe0b2',
+    borderColor: '#ef6c00',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 14,
+  },
+  coverageBannerTitle: {
+    color: '#7a3c00',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  coverageBannerCopy: {
+    color: '#7a3c00',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  coverageBannerMeta: {
+    color: '#7a3c00',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  coverageCardTag: {
+    color: '#7a3c00',
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 2,
   },
   emptyState: {
     alignItems: 'center',

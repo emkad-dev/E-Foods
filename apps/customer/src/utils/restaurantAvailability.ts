@@ -337,3 +337,86 @@ export const getRestaurantOperatingHoursLabel = (restaurant: DiscoveryRestaurant
 
   return `${openingTime} - ${closingTime}`;
 };
+
+export type PlatformCoverage = {
+  isCovered: boolean;
+  nearestOrderableKm: number | null;
+};
+
+/**
+ * Platform-level coverage: is FEASTY live where this customer pinned their address?
+ *
+ * Derived from the published catalogue, never configured — onboarding an orderable
+ * (delivery- or pickup-capable) partner in a new area opens that area automatically.
+ * Distinct from getRestaurantAvailability, which answers the narrower "can this one
+ * restaurant serve this one order".
+ *
+ * Coverage counts a restaurant as a candidate when it is visible to customers, has
+ * coordinates, and is orderable in some form — supports delivery OR pickup. This platform
+ * is pickup-first by design (self-provisioned delivery is opt-in), so a pickup-only
+ * restaurant must create coverage just like a delivery one. A restaurant is excluded only
+ * when it explicitly opts out of both (`supportsDelivery === false && supportsPickup ===
+ * false`).
+ *
+ * If zero candidates pass that eligibility filter — e.g. every published restaurant is
+ * missing coordinates, which is the live production shape today — there is nothing to
+ * check distance against, so coverage must fail open rather than block every customer
+ * platform-wide.
+ */
+export const getPlatformCoverage = (
+  restaurants: DiscoveryRestaurant[],
+  deliveryLocation: AddressRecord | null
+): PlatformCoverage => {
+  const customerCoordinates = deliveryLocation
+    ? extractCoordinatePoint({
+        latitude: deliveryLocation.latitude,
+        longitude: deliveryLocation.longitude,
+      })
+    : null;
+
+  // Unknown location is never gated. The customer cannot reach delivery checkout without
+  // pinning an address, and the server check is the real boundary.
+  if (!customerCoordinates) {
+    return { isCovered: true, nearestOrderableKm: null };
+  }
+
+  let eligibleCandidateCount = 0;
+  let isCovered = false;
+  let nearestOrderableKm: number | null = null;
+
+  restaurants.forEach((restaurant) => {
+    if (!isRestaurantVisibleToCustomers(restaurant)) {
+      return;
+    }
+
+    if (restaurant.supportsDelivery === false && restaurant.supportsPickup === false) {
+      return;
+    }
+
+    const restaurantCoordinates = extractRestaurantCoordinates(restaurant);
+    if (!restaurantCoordinates) {
+      return;
+    }
+
+    eligibleCandidateCount += 1;
+
+    const distanceKm = calculateDistanceKm(restaurantCoordinates, customerCoordinates);
+
+    if (nearestOrderableKm === null || distanceKm < nearestOrderableKm) {
+      nearestOrderableKm = distanceKm;
+    }
+
+    if (distanceKm <= getRestaurantServiceRadiusKm(restaurant)) {
+      isCovered = true;
+    }
+  });
+
+  // No eligible candidates means there is nothing to gate against — fail open rather than
+  // block every customer platform-wide (the live 6-restaurant catalogue is exactly this
+  // shape: zero published restaurants currently have coordinates AND are delivery-only).
+  if (eligibleCandidateCount === 0) {
+    return { isCovered: true, nearestOrderableKm: null };
+  }
+
+  return { isCovered, nearestOrderableKm };
+};

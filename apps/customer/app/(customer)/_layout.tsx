@@ -1,12 +1,13 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Redirect, Tabs, usePathname } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import PromoBanner from '../../src/components/PromoBanner';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { CoverageProvider } from '../../src/contexts/CoverageContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { customerTheme } from '../../src/theme/palette';
@@ -15,9 +16,12 @@ export const unstable_settings = {
   initialRouteName: 'home',
 };
 
+const TAB_BAR_MAX_WIDTH = 380;
+const TAB_BAR_SIDE_INSET = 24;
+
 const renderTabIcon = (iconName: React.ComponentProps<typeof FontAwesome>['name'], color: string, focused: boolean) => (
   <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
-    <FontAwesome name={iconName} size={focused ? 21 : 20} color={focused ? '#ffffff' : color} />
+    <FontAwesome name={iconName} size={focused ? 19 : 18} color={focused ? '#ffffff' : color} />
   </View>
 );
 
@@ -38,7 +42,12 @@ export default function CustomerLayout() {
   const { loading, user } = useAuth();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   usePushNotifications();
+
+  // Keep the floating bar off the screen edges, and stop it stretching across wide web viewports.
+  const tabBarWidth = Math.min(width - TAB_BAR_SIDE_INSET * 2, TAB_BAR_MAX_WIDTH);
+  const tabBarLeft = Math.max((width - tabBarWidth) / 2, TAB_BAR_SIDE_INSET);
 
   if (loading) {
     return <LoadingSkeleton mode={getCustomerShellLoadingMode(pathname)} />;
@@ -52,118 +61,120 @@ export default function CustomerLayout() {
 
   return (
     <FavoritesProvider>
-      <PromoBanner />
-      <Tabs
-        screenOptions={{
-          tabBarActiveTintColor: customerTheme.accentStrong,
-          tabBarInactiveTintColor: customerTheme.textMuted,
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '700', paddingBottom: 2 },
-          tabBarItemStyle: { paddingVertical: 6 },
-          tabBarStyle: {
-            backgroundColor: customerTheme.surface,
-            borderTopColor: customerTheme.border,
-            borderTopWidth: 1,
-            borderRadius: 22,
-            // Float the pill above the device's bottom safe area (home indicator /
-            // gesture bar) on mobile; falls back to 10 on web where the inset is 0.
-            bottom: Math.max(insets.bottom, 10),
-            elevation: 8,
-            height: 70,
-            left: 10,
-            paddingBottom: 10,
-            paddingTop: 8,
-            position: 'absolute',
-            right: 10,
-            shadowColor: '#684612',
-            shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 0.14,
-            shadowRadius: 14,
-          },
-          headerShown: false,
-        }}
-      >
-        <Tabs.Screen
-          name="home"
-          options={{
-            title: 'Home',
-            tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="search"
-          options={{
-            title: 'Search',
-            tabBarIcon: ({ color, focused }) => renderTabIcon('search', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="favorites"
-          options={{
-            title: 'Favorites',
-            headerShown: true,
-            headerLeft: () => <CustomerHeaderBackButton href="/home" />,
-            headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('heart', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="cart"
-          options={{
-            title: 'Cart',
-            headerShown: true,
-            headerLeft: () => <CustomerHeaderBackButton href="/home" />,
-            headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
-            tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('shopping-cart', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="orders"
-          options={{
-            // Order history now lives inside Profile, so keep the route mounted
-            // (Profile links to it) but drop it from the tab bar.
-            href: null,
-            title: 'Order',
-            headerShown: false,
-            tabBarStyle: { display: 'none' },
-          }}
-        />
-        <Tabs.Screen
-          name="profile"
-          options={{
-            title: 'Profile',
-            headerShown: false,
-            tabBarStyle: { display: 'none' },
-            tabBarIcon: ({ color, focused }) => renderTabIcon('user', color, focused),
-          }}
-        />
-        <Tabs.Screen
-          name="deals"
-          options={{
-            href: null,
-            headerShown: true,
-            title: 'Deals',
-            headerRight: () => <AuthHeaderActions />,
-          }}
-        />
-        <Tabs.Screen
-          name="delivery-location"
-          options={{
-            href: null,
+      <CoverageProvider>
+        <PromoBanner />
+        <Tabs
+          screenOptions={{
+            tabBarActiveTintColor: customerTheme.accentStrong,
+            tabBarInactiveTintColor: customerTheme.textMuted,
+            tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
+            tabBarItemStyle: { paddingVertical: 2 },
+            tabBarStyle: {
+              backgroundColor: customerTheme.surface,
+              borderTopColor: customerTheme.border,
+              borderTopWidth: 1,
+              borderRadius: 20,
+              // Float the pill above the device's bottom safe area (home indicator /
+              // gesture bar) on mobile; falls back to 12 on web where the inset is 0.
+              bottom: Math.max(insets.bottom, 12),
+              elevation: 8,
+              height: 58,
+              left: tabBarLeft,
+              paddingBottom: 6,
+              paddingTop: 6,
+              position: 'absolute',
+              shadowColor: '#684612',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.14,
+              shadowRadius: 14,
+              width: tabBarWidth,
+            },
             headerShown: false,
           }}
-        />
-        <Tabs.Screen
-          name="support"
-          options={{
-            href: null,
-            headerShown: true,
-            title: 'Help & Support',
-            headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
-            tabBarStyle: { display: 'none' },
-          }}
-        />
-      </Tabs>
+        >
+          <Tabs.Screen
+            name="home"
+            options={{
+              title: 'Home',
+              tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="search"
+            options={{
+              title: 'Search',
+              tabBarIcon: ({ color, focused }) => renderTabIcon('search', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="favorites"
+            options={{
+              title: 'Favorites',
+              headerShown: true,
+              headerLeft: () => <CustomerHeaderBackButton href="/home" />,
+              headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('heart', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="cart"
+            options={{
+              title: 'Cart',
+              headerShown: true,
+              headerLeft: () => <CustomerHeaderBackButton href="/home" />,
+              headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
+              tabBarStyle: { display: 'none' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('shopping-cart', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="orders"
+            options={{
+              // Order history now lives inside Profile, so keep the route mounted
+              // (Profile links to it) but drop it from the tab bar.
+              href: null,
+              title: 'Order',
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+            }}
+          />
+          <Tabs.Screen
+            name="profile"
+            options={{
+              title: 'Profile',
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+              tabBarIcon: ({ color, focused }) => renderTabIcon('user', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="deals"
+            options={{
+              href: null,
+              headerShown: true,
+              title: 'Deals',
+              headerRight: () => <AuthHeaderActions />,
+            }}
+          />
+          <Tabs.Screen
+            name="delivery-location"
+            options={{
+              href: null,
+              headerShown: false,
+            }}
+          />
+          <Tabs.Screen
+            name="support"
+            options={{
+              href: null,
+              headerShown: true,
+              title: 'Help & Support',
+              headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
+              tabBarStyle: { display: 'none' },
+            }}
+          />
+        </Tabs>
+      </CoverageProvider>
     </FavoritesProvider>
   );
 }
@@ -171,10 +182,10 @@ export default function CustomerLayout() {
 const styles = StyleSheet.create({
   tabIconWrap: {
     alignItems: 'center',
-    borderRadius: 14,
-    height: 34,
+    borderRadius: 12,
+    height: 30,
     justifyContent: 'center',
-    width: 34,
+    width: 30,
   },
   tabIconWrapActive: {
     backgroundColor: customerTheme.accentSoft,

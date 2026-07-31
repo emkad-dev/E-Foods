@@ -6,6 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
+import { useCoverage } from '../../src/contexts/CoverageContext';
 import type { RestaurantDocument } from '../../src/domain/entities';
 import {
   type CheckoutPaymentMethod,
@@ -20,6 +21,8 @@ import { getPublishedRestaurantDetail } from '../../src/services/publicRestauran
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
+import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
+import { getRestaurantAvailability } from '../../src/utils/restaurantAvailability';
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
@@ -42,6 +45,7 @@ export default function CartScreen() {
     updateQuantity,
   } = useCart();
   const { user } = useAuth();
+  const { isCovered } = useCoverage();
   const [deliveryNote, setDeliveryNote] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
   const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
@@ -66,18 +70,30 @@ export default function CartScreen() {
   const isPickupSupported = restaurant?.supportsPickup !== false;
   const deliveryComingSoon = Boolean(restaurant) && !isDeliverySupported;
   const isRestaurantPublished = restaurant?.isPublished === true;
+  // Per-restaurant delivery-radius check (Finding 2): platform coverage only tells us FEASTY
+  // serves this area at all — a customer can still be inside platform coverage but outside
+  // THIS restaurant's own deliveryRadiusKm. Only a delivery order can be blocked by this; a
+  // pickup order never touches a delivery radius. Only the 'out_of_area' reason applies here —
+  // 'closed' / 'pickup_only' / 'delivery_disabled' are already handled by the branches above.
+  const restaurantDeliveryAvailability = restaurant ? getRestaurantAvailability(restaurant, deliveryLocation) : null;
+  const isOutOfRestaurantDeliveryRange =
+    fulfillmentType === 'delivery' && restaurantDeliveryAvailability?.reason === 'out_of_area';
   const restaurantUnavailableReason =
-    !restaurant
-      ? 'This restaurant is no longer available for checkout.'
-      : restaurant.isOpen === false
-        ? 'This restaurant is currently closed.'
-          : !isRestaurantPublished
-          ? 'This restaurant is currently unavailable for new orders.'
-          : fulfillmentType === 'pickup' && !isPickupSupported
-            ? 'Pickup is no longer available for this restaurant.'
-            : belowMinimum
-              ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
-              : null;
+    !isCovered
+      ? COVERAGE_COMING_SOON_COPY
+      : !restaurant
+        ? 'This restaurant is no longer available for checkout.'
+        : restaurant.isOpen === false
+          ? 'This restaurant is currently closed.'
+            : !isRestaurantPublished
+            ? 'This restaurant is currently unavailable for new orders.'
+            : isOutOfRestaurantDeliveryRange
+              ? 'This restaurant does not deliver to your pinned address. Try pickup or choose a closer restaurant.'
+              : fulfillmentType === 'pickup' && !isPickupSupported
+              ? 'Pickup is no longer available for this restaurant.'
+              : belowMinimum
+                ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
+                : null;
 
   useEffect(() => {
     setDeliveryNote(deliveryLocation?.note ?? '');
