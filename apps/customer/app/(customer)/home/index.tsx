@@ -578,6 +578,7 @@ export default function HomeScreen() {
                 name={restaurant.name}
                 image={restaurant.image}
                 cuisine={restaurant.cuisine}
+                rating={restaurant.rating}
                 metaLine={metaLine}
                 statusLabel={statusLabel}
                 statusTone={isClosed ? 'danger' : 'warning'}
