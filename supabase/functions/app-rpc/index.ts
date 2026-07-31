@@ -36,6 +36,7 @@ import {
 } from '../_shared/observability.ts';
 import { validatePromoTrack } from './promoTrack.ts';
 import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
+import { resolvePartnerSubmitOutcome } from '../_shared/partnerApplicationTransitions.ts';
 import { loadPricingConfig } from '../_shared/platformSettings.ts';
 import {
   canClaimRestaurantLink,
@@ -4297,12 +4298,9 @@ const handleNativeAction = async (
     }
 
     const existingApplication = await loadPartnerApplication(context.uid);
-    const currentStatus = sanitizeText(existingApplication?.status, PARTNER_APPLICATION_STATUS.PENDING);
-    if (existingApplication && currentStatus === PARTNER_APPLICATION_STATUS.APPROVED) {
-      fail(
-        412,
-        'This partner application has already been approved. Sign in from the partner login screen.'
-      );
+    const submitOutcome = resolvePartnerSubmitOutcome(existingApplication?.status);
+    if (!submitOutcome.allowed) {
+      fail(submitOutcome.httpStatus, submitOutcome.message);
     }
 
     const submittedAt = existingApplication?.submittedAt ?? nowIso();
@@ -4324,11 +4322,13 @@ const handleNativeAction = async (
         latitude: hasLatitude ? latitude : null,
         longitude: hasLongitude ? longitude : null,
         deliveryTime,
-        status: PARTNER_APPLICATION_STATUS.APPROVED,
+        status: PARTNER_APPLICATION_STATUS.PENDING,
         restaurantId,
         submittedAt,
-        reviewedAt: updatedAt,
-        approvedByUid: context.uid,
+        // An admin has not looked at this yet. Clearing the review fields also
+        // wipes a previous rejection reason when a rejected partner resubmits.
+        reviewedAt: null,
+        approvedByUid: null,
         rejectionReason: null,
         updatedAt,
       },
@@ -4339,66 +4339,10 @@ const handleNativeAction = async (
       throw new Error(applicationError.message);
     }
 
+    // Submitting creates no restaurant and grants no role. The RestaurantRecord
+    // and RestaurantApproval rows are written by adminReviewPartnerApplication
+    // when an admin approves; it reuses the restaurantId allocated above.
     const currentAccount = await loadUserAccount(context.uid);
-    await syncUserRoleState(context.uid, 'restaurant', null, {
-      accountDisabled: false,
-      disabledAt: null,
-      disabledByUid: null,
-      lastPrivilegedRole: 'restaurant',
-      restaurantId,
-      restaurantLinkedAt: updatedAt,
-      restaurantLinkSource: 'partner_application_self_publish',
-      restaurantName: restaurantName,
-    });
-    const { error: restaurantError } = await serviceClient.from('RestaurantRecord').upsert(
-      {
-        id: restaurantId,
-        ownerId: context.uid,
-        name: restaurantName,
-        nameKey: buildNameKey(restaurantName),
-        cuisine,
-        address,
-        description: description ?? '',
-        image: '',
-        logoImage: logoImage ?? '',
-        menu: [],
-        deliveryFee: 0,
-        deliveryRadiusKm: 12,
-        deliveryTime,
-        latitude: hasLatitude ? latitude : null,
-        longitude: hasLongitude ? longitude : null,
-        minOrder: 0,
-        // Delivery is opt-in: restaurants self-provision it later from their
-        // profile. New restaurants launch pickup-only ("delivery coming soon").
-        supportsDelivery: false,
-        supportsPickup: true,
-        isOpen: true,
-        isPublished: true,
-        updatedAt,
-      },
-      { onConflict: 'id' }
-    );
-
-    if (restaurantError) {
-      throw new Error(restaurantError.message);
-    }
-
-    await broadcastRestaurantsChanged({ restaurantId });
-
-    const { error: approvalError } = await serviceClient.from('RestaurantApproval').upsert(
-      {
-        restaurantId,
-        status: 'approved',
-        approvedByUid: context.uid,
-        approvedAt: updatedAt,
-        updatedAt,
-      },
-      { onConflict: 'restaurantId' }
-    );
-
-    if (approvalError) {
-      throw new Error(approvalError.message);
-    }
 
     await upsertUserAccount({
       uid: context.uid,
@@ -4406,12 +4350,12 @@ const handleNativeAction = async (
       displayName: contactName,
       phoneNumber,
       emailVerified: true,
-      roleDisplay: 'restaurant',
-      partnerApplicationStatus: PARTNER_APPLICATION_STATUS.APPROVED,
-      partnerApplicationReviewedAt: updatedAt,
+      // Role stays 'customer' until an admin approves. The restaurant link is
+      // written by adminReviewPartnerApplication, not here.
+      roleDisplay: 'customer',
+      partnerApplicationStatus: PARTNER_APPLICATION_STATUS.PENDING,
+      partnerApplicationReviewedAt: null,
       partnerApplicationRejectionReason: null,
-      restaurantId,
-      restaurantName,
       createdAt: currentAccount?.createdAt ?? updatedAt,
       updatedAt,
     });
@@ -4422,8 +4366,8 @@ const handleNativeAction = async (
       logoImage: logoImage ?? null,
     });
     await notifyAdmins({
-      title: 'New restaurant published',
-      body: `${restaurantName} is now live for customer discovery and partner management.`,
+      title: 'New restaurant application',
+      body: `${restaurantName} has applied and is waiting for review.`,
       data: buildNotificationData({
         app: 'admin',
         extra: {
@@ -4436,7 +4380,7 @@ const handleNativeAction = async (
 
     return json(200, {
       data: {
-        status: PARTNER_APPLICATION_STATUS.APPROVED,
+        status: PARTNER_APPLICATION_STATUS.PENDING,
         submittedAt,
         restaurantId,
         targetUid: context.uid,
@@ -4769,9 +4713,14 @@ const handleNativeAction = async (
       const { error: approvalError } = await serviceClient.from('RestaurantApproval').upsert(
         {
           restaurantId,
-          status: 'pending',
-          approvedByUid: null,
-          approvedAt: null,
+          // Approval and publication are separate concerns: the restaurant is
+          // approved here but stays isPublished=false until it completes setup
+          // and goes live. Order placement refuses any restaurant whose
+          // approval row is not 'approved', so this write is what lets an
+          // approved restaurant take orders at all.
+          status: 'approved',
+          approvedByUid: context.uid,
+          approvedAt: reviewedAt,
           updatedAt: reviewedAt,
         },
         { onConflict: 'restaurantId' }
