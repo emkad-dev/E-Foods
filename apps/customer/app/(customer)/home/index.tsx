@@ -30,10 +30,8 @@ import {
   type DiscoveryRestaurant,
   getDiscoveryEmptyState,
   getRestaurantAvailability,
-  getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
-  normalizeRestaurantQuery,
 } from '../../../src/utils/restaurantAvailability';
 import { customerTheme } from '../../../src/theme/palette';
 
@@ -93,32 +91,6 @@ const FEATURED_CURATIONS: {
 const getCustomerName = (displayName: string | undefined, email: string | undefined) => {
   const rawValue = displayName?.trim() || email?.split('@')[0]?.trim() || 'there';
   return rawValue.charAt(0).toUpperCase() + rawValue.slice(1);
-};
-
-const getMealPreview = (restaurant: Restaurant, searchQuery: string) => {
-  const normalizedQuery = normalizeRestaurantQuery(searchQuery);
-  const seen = new Set<string>();
-
-  (restaurant.menu ?? []).forEach((menuCategory) => {
-    (menuCategory.items ?? []).forEach((item) => {
-      if (item.isAvailable === false) {
-        return;
-      }
-
-      if (normalizedQuery) {
-        const haystack = [item.name, item.categoryLabel ?? '', menuCategory.category ?? ''].join(' ').toLowerCase();
-        if (!haystack.includes(normalizedQuery)) {
-          return;
-        }
-      }
-
-      if (!seen.has(item.name)) {
-        seen.add(item.name);
-      }
-    });
-  });
-
-  return Array.from(seen).slice(0, 2);
 };
 
 const toShelfEntries = (entries: DiscoveryEntry[], limit?: number) => (limit ? entries.slice(0, limit) : entries);
@@ -542,7 +514,6 @@ export default function HomeScreen() {
           </View>
 
           {nearbyVisible.map(({ restaurant, availability }) => {
-            const mealPreview = getMealPreview(restaurant, search);
             const metaLine = availability.distanceKm
               ? `${availability.distanceKm.toFixed(1)} km away`
               : 'Within your zone';
@@ -557,8 +528,6 @@ export default function HomeScreen() {
                 rating={restaurant.rating}
                 deliveryTime={restaurant.deliveryTime}
                 metaLine={metaLine}
-                hoursLabel={getRestaurantOperatingHoursLabel(restaurant)}
-                mealPreview={mealPreview}
                 onPress={() => {
                   trackAnalyticsEvent('customer_restaurant_opened', {
                     restaurant_id: restaurant.id,
@@ -588,7 +557,6 @@ export default function HomeScreen() {
             These kitchens are visible, but your current delivery point places them outside their supported range.
           </DSText>
           {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => {
-            const mealPreview = getMealPreview(restaurant, search);
             const isClosed = availability.reason === 'closed';
             const statusLabel =
               availability.reason === 'delivery_disabled'
@@ -611,7 +579,6 @@ export default function HomeScreen() {
                 image={restaurant.image}
                 cuisine={restaurant.cuisine}
                 metaLine={metaLine}
-                mealPreview={mealPreview}
                 statusLabel={statusLabel}
                 statusTone={isClosed ? 'danger' : 'warning'}
                 onPress={() => {

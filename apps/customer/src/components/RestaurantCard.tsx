@@ -13,8 +13,6 @@ type RestaurantCardProps = {
   deliveryTime?: string | null;
   /** e.g. "1.2 km away · Within your zone" */
   metaLine: string;
-  hoursLabel?: string | null;
-  mealPreview?: string[];
   /** Status pill for out-of-zone / closed / pickup-only cards. */
   statusLabel?: string | null;
   statusTone?: 'warning' | 'danger';
@@ -25,9 +23,9 @@ type RestaurantCardProps = {
  * The customer-facing restaurant row — the most-repeated unit on the home feed.
  *
  * Domain component (knows what a restaurant is) composed entirely from design-system
- * primitives. Hierarchy is carried by the type scale and colour, not by the old
- * everything-is-weight-800 approach: the name is `title3` (Bricolage 17), the rating is
- * the one bold beat, and metadata recedes to `callout`/`caption` secondary.
+ * primitives. Every card is a fixed height so the feed reads as an even grid; the name
+ * is `title3` (Bricolage 17), metadata (distance · delivery time) recedes to secondary,
+ * and the overall rating is pinned to the bottom-right as the one bold beat.
  */
 export default function RestaurantCard({
   id,
@@ -37,13 +35,12 @@ export default function RestaurantCard({
   rating,
   deliveryTime,
   metaLine,
-  hoursLabel,
-  mealPreview,
   statusLabel,
   statusTone = 'warning',
   onPress,
 }: RestaurantCardProps) {
   const hasRating = typeof rating === 'number' && rating > 0;
+  const metaText = [metaLine, deliveryTime].filter(Boolean).join('  ·  ');
 
   return (
     <Card padding="none" radius="lg" elevation="sm" onPress={onPress} style={styles.card}>
@@ -66,53 +63,30 @@ export default function RestaurantCard({
         </View>
 
         <View style={styles.info}>
-          <View style={styles.headerRow}>
-            <Text variant="title3" numberOfLines={1} style={styles.name}>
-              {name}
+          <View>
+            <View style={styles.headerRow}>
+              <Text variant="title3" numberOfLines={1} style={styles.name}>
+                {name}
+              </Text>
+              <RestaurantFavoriteButton restaurantId={id} size={13} style={styles.favorite} />
+            </View>
+
+            <Text variant="callout" tone="secondary" numberOfLines={1} style={styles.cuisine}>
+              {cuisine ?? 'Kitchen update pending'}
             </Text>
-            <RestaurantFavoriteButton restaurantId={id} size={13} style={styles.favorite} />
           </View>
 
-          {hasRating || deliveryTime ? (
-            <View style={styles.ratingRow}>
-              {hasRating ? (
-                <>
-                  <FontAwesome name="star" size={12} color={brand.accent} />
-                  <Text variant="bodyStrong">{rating!.toFixed(1)}</Text>
-                </>
-              ) : null}
-              {hasRating && deliveryTime ? (
-                <Text variant="callout" tone="secondary">
-                  ·
-                </Text>
-              ) : null}
-              {deliveryTime ? (
-                <Text variant="callout" tone="secondary">
-                  {deliveryTime}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          <Text variant="callout" tone="secondary" numberOfLines={1} style={styles.cuisine}>
-            {cuisine ?? 'Kitchen update pending'}
-          </Text>
-
-          {mealPreview && mealPreview.length > 0 ? (
-            <Text variant="caption" tone="primary" numberOfLines={2} style={styles.meals}>
-              {mealPreview.join('  ·  ')}
+          <View style={styles.footerRow}>
+            <Text variant="caption" tone="secondary" numberOfLines={1} style={styles.meta}>
+              {metaText}
             </Text>
-          ) : null}
-
-          <Text variant="caption" tone="secondary" numberOfLines={1} style={styles.meta}>
-            {metaLine}
-          </Text>
-
-          {hoursLabel ? (
-            <Text variant="caption" tone="secondary" numberOfLines={1}>
-              {hoursLabel}
-            </Text>
-          ) : null}
+            {hasRating ? (
+              <View style={styles.rating}>
+                <FontAwesome name="star" size={12} color={brand.accent} />
+                <Text variant="bodyStrong">{rating!.toFixed(1)}</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
       </View>
     </Card>
@@ -126,7 +100,7 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    minHeight: 124,
+    height: 116,
   },
   imageWrap: {
     width: 108,
@@ -151,7 +125,7 @@ const styles = StyleSheet.create({
   info: {
     flex: 1,
     padding: space.md,
-    justifyContent: 'center',
+    justifyContent: 'space-between',
   },
   headerRow: {
     alignItems: 'center',
@@ -168,20 +142,21 @@ const styles = StyleSheet.create({
     width: 30,
     borderRadius: radius.pill,
   },
-  ratingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: space.xs,
-    marginTop: space.xs,
-  },
   cuisine: {
     marginTop: space.xs,
   },
-  meals: {
-    marginTop: space.sm,
-    lineHeight: 16,
+  footerRow: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: space.sm,
   },
   meta: {
-    marginTop: space.xs,
+    flex: 1,
+  },
+  rating: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: space.xs,
   },
 });
