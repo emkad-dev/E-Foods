@@ -15,9 +15,18 @@ without a database or a running edge function, matching how
 `supabase/functions/_shared/pricing.ts` and
 `apps/partner/src/contexts/partnerAuthFlow.ts` are already tested.
 
-**Tech Stack:** Postgres (Supabase, Frankfurt), Prisma migrations
-(`functions/prisma`), Deno edge functions (`supabase/functions/app-rpc`), Expo /
+**Tech Stack:** Postgres (Supabase, Frankfurt), Supabase SQL migrations
+(`supabase/migrations`), Deno edge functions (`supabase/functions/app-rpc`), Expo /
 React Native partner app (`apps/partner`), `node --test` and `deno test`.
+
+> **Amended 2026-07-31 (execution):** this plan was written against Prisma, which
+> was retired on 2026-07-30 in `a193b1d`. `functions/prisma/schema.prisma`,
+> `prisma.config.ts` and the `db:*` npm scripts no longer exist, and
+> `functions/prisma/migrations/` is a frozen archive whose README says not to
+> extend it. Task 1 is therefore removed, and Tasks 2–3 now write flat
+> `supabase/migrations/<YYYYMMDD>_<name>.sql` files applied with the Supabase CLI
+> or the Supabase MCP `apply_migration`. Task numbering is unchanged so the
+> cross-references in Task 6 and the Self-Review Notes still resolve.
 
 **Spec:** `docs/superpowers/specs/2026-07-31-partner-onboarding-kyc-payout-design.md`
 
@@ -36,8 +45,9 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 - Existing approvals are preserved: a restaurant that is already
   `isPublished = true` with an `approved` `RestaurantApproval` must remain exactly
   so after every migration in this plan.
-- Migrations live in `functions/prisma/migrations/<YYYYMMDD>_<name>/migration.sql`,
-  matching the existing convention (e.g. `20260701_enable_rls_exposed_tables`).
+- Migrations live in `supabase/migrations/<YYYYMMDD>_<name>.sql`, matching the
+  existing convention (e.g. `20260717_platform_settings_pricing.sql`). Nothing is
+  added to `functions/prisma/migrations/` — it is a frozen archive.
 - New test files must be **added to the explicit file lists** in the root
   `package.json` `test:node` / `test:deno` scripts, or they will never run.
 - Error messages returned to clients follow the existing `ClientSafeError`
@@ -50,9 +60,9 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 ## File Structure
 
 **Created:**
-- `functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql` —
+- `supabase/migrations/20260731_partner_kyc_payout_hours.sql` —
   DDL for the three new tables, the additive `RestaurantRecord` columns, and RLS.
-- `functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql` —
+- `supabase/migrations/20260731_partner_onboarding_backfills.sql` —
   behaviour-preserving backfills for hours, cuisines, formattedAddress.
 - `scripts/audit-partner-readiness.sql` — re-runnable readiness audit (spec §13).
 - `supabase/functions/_shared/partnerApplicationTransitions.ts` — pure decision
@@ -61,7 +71,6 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 - `apps/partner/app/(partner)/application-under-review.tsx` — the pending screen.
 
 **Modified:**
-- `functions/prisma/schema.prisma` — new models + `RestaurantRecord` columns.
 - `supabase/functions/app-rpc/index.ts` — `submitPartnerApplication` handler.
 - `apps/partner/src/contexts/partnerAuthFlow.ts` — add `resolvePartnerLandingRoute`.
 - `apps/partner/src/contexts/partnerAuthFlow.test.ts` — its tests.
@@ -73,138 +82,31 @@ React Native partner app (`apps/partner`), `node --test` and `deno test`.
 
 ---
 
-## Task 1: Prisma schema — new models and additive columns
+## Task 1: REMOVED — Prisma was retired before this plan ran
 
-**Files:**
-- Modify: `functions/prisma/schema.prisma`
+There is no ORM schema to update. `functions/prisma/schema.prisma` was deleted in
+`a193b1d` (2026-07-30) because it had drifted from the live database and nothing
+consumed the generated client; `supabase/migrations/*.sql` is now the single
+source of truth for schema. The models this task described are expressed directly
+as the DDL in Task 2, which is the only artifact the database ever saw anyway.
 
-**Interfaces:**
-- Consumes: nothing.
-- Produces: models `RestaurantKyc`, `RestaurantPayout`, `RestaurantHours`; new
-  `RestaurantRecord` fields `cuisines`, `customCuisine`, `customCuisineStatus`,
-  `formattedAddress`, `addressComponents`, `buildingInfo`, `deliveryNotes`,
-  `detailsConfirmedAt`, `reverificationStatus`, `reverificationDueAt`,
-  `reverificationNotifiedAt`. Task 2 turns these into SQL.
-
-- [ ] **Step 1: Add the three new models**
-
-Append to `functions/prisma/schema.prisma`, after the `PartnerApplicationRecord`
-model (around line 152):
-
-```prisma
-model RestaurantKyc {
-  id             String    @id @default(cuid())
-  uid            String    @unique
-  restaurantId   String?
-  legalName      String
-  ninNumber      String?
-  ninLast4       String
-  ninHash        String
-  ninFrontPath   String
-  ninBackPath    String
-  verification   String    @default("manual")
-  verifiedByUid  String?
-  verifiedAt     DateTime?
-  reviewNotes    String?
-  purgedAt       DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  @@index([restaurantId])
-}
-
-model RestaurantPayout {
-  id                     String    @id @default(cuid())
-  uid                    String    @unique
-  restaurantId           String?
-  bankCode               String
-  bankName               String
-  accountNumber          String
-  accountLast4           String
-  resolvedAccountName    String
-  paystackSubaccountCode String?
-  status                 String    @default("pending")
-  lastError              String?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-
-  @@index([restaurantId])
-  @@index([status])
-}
-
-model RestaurantHours {
-  id           String           @id @default(cuid())
-  restaurantId String
-  dayOfWeek    Int
-  isClosed     Boolean          @default(false)
-  opensAt      String?
-  closesAt     String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  restaurant   RestaurantRecord @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-
-  @@unique([restaurantId, dayOfWeek])
-  @@index([restaurantId])
-}
-```
-
-- [ ] **Step 2: Add the additive columns to `RestaurantRecord`**
-
-In `functions/prisma/schema.prisma`, inside `model RestaurantRecord`, add these
-fields immediately after the existing `paystackSubaccountCode` line, and add the
-`hours` relation alongside the existing `approval` / `orders` relations:
-
-```prisma
-  cuisines                 String[]  @default([])
-  customCuisine            String?
-  customCuisineStatus      String?   @default("pending")
-  formattedAddress         String?
-  addressComponents        Json?
-  buildingInfo             String?
-  deliveryNotes            String?
-  detailsConfirmedAt       DateTime?
-  reverificationStatus     String    @default("not_required")
-  reverificationDueAt      DateTime?
-  reverificationNotifiedAt DateTime?
-```
-
-And in the relations block of the same model:
-
-```prisma
-  hours            RestaurantHours[]
-```
-
-- [ ] **Step 3: Validate the schema**
-
-Run: `npm run db:validate`
-Expected: PASS — "The schema at ... is valid".
-
-If it fails on the `hours` relation, confirm `RestaurantHours.restaurant` and
-`RestaurantRecord.hours` name the same relation and that `restaurantId`
-references `RestaurantRecord.id`.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add functions/prisma/schema.prisma
-git commit -m "feat(db): add partner KYC, payout, and per-day hours models"
-```
+- [x] **Nothing to do. Proceed to Task 2.**
 
 ---
 
 ## Task 2: DDL migration with RLS
 
 **Files:**
-- Create: `functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql`
+- Create: `supabase/migrations/20260731_partner_kyc_payout_hours.sql`
 
 **Interfaces:**
-- Consumes: the Prisma models from Task 1.
+- Consumes: nothing.
 - Produces: tables `RestaurantKyc`, `RestaurantPayout`, `RestaurantHours` and the
   new `RestaurantRecord` columns, live in Postgres. Task 3 backfills them.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
-Create `functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql`:
+Create `supabase/migrations/20260731_partner_kyc_payout_hours.sql`:
 
 ```sql
 -- Partner onboarding stage 1: KYC, payout, and per-day trading hours.
@@ -311,18 +213,26 @@ ALTER TABLE "public"."RestaurantRecord"
   ADD COLUMN IF NOT EXISTS "reverificationNotifiedAt" TIMESTAMP(3);
 ```
 
-- [ ] **Step 2: Verify the SQL parses without applying it**
+- [x] **Step 2: Confirm the target database state before applying**
 
-Run: `npm run db:validate`
-Expected: PASS. (`db:validate` checks the schema; it does not execute SQL. The
-migration is executed in Step 3.)
+Run against the project (Supabase MCP `execute_sql`):
 
-- [ ] **Step 3: Apply the migration**
+```sql
+SELECT COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE "isPublished") AS published
+FROM "RestaurantRecord";
+```
 
-Run: `npm run db:migrate:deploy`
-Expected: the new migration is listed as applied, with no error.
+Record the numbers. Step 5 asserts they are unchanged.
 
-- [ ] **Step 4: Verify the tables exist, are RLS-enabled, and have no policies**
+- [x] **Step 3: Apply the migration**
+
+Apply the file with the Supabase MCP `apply_migration` (name
+`20260731_partner_kyc_payout_hours`), or `npx supabase db push` if working from
+the CLI. Expected: applied with no error. The DDL is idempotent
+(`IF NOT EXISTS` throughout), so a re-run is safe.
+
+- [x] **Step 4: Verify the tables exist, are RLS-enabled, and have no policies**
 
 Run this against the project (Supabase SQL editor or MCP `execute_sql`):
 
@@ -341,7 +251,7 @@ ORDER BY c.relname;
 
 Expected: three rows, `rls_enabled = true`, `policy_count = 0` for each.
 
-- [ ] **Step 5: Verify existing restaurants are untouched**
+- [x] **Step 5: Verify existing restaurants are untouched**
 
 ```sql
 SELECT COUNT(*) AS total,
@@ -352,10 +262,10 @@ FROM "RestaurantRecord";
 Expected: `total = 6`, `published = 6` — unchanged from the spec §13 audit. If
 either number moved, stop and investigate before continuing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
-git add functions/prisma/migrations/20260731_partner_kyc_payout_hours/migration.sql
+git add supabase/migrations/20260731_partner_kyc_payout_hours.sql
 git commit -m "feat(db): create KYC, payout, and hours tables with RLS enabled"
 ```
 
@@ -364,17 +274,16 @@ git commit -m "feat(db): create KYC, payout, and hours tables with RLS enabled"
 ## Task 3: Behaviour-preserving backfills
 
 **Files:**
-- Create: `functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql`
+- Create: `supabase/migrations/20260731_partner_onboarding_backfills.sql`
 
 **Interfaces:**
 - Consumes: the tables and columns from Task 2.
 - Produces: every existing restaurant has 7 `RestaurantHours` rows, a populated
   `cuisines` array, and a `formattedAddress`. No behaviour changes.
 
-- [ ] **Step 1: Write the backfill migration**
+- [x] **Step 1: Write the backfill migration**
 
-Create
-`functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql`:
+Create `supabase/migrations/20260731_partner_onboarding_backfills.sql`:
 
 ```sql
 -- Partner onboarding stage 1 backfills. All are behaviour-preserving:
@@ -414,12 +323,14 @@ WHERE "formattedAddress" IS NULL
   AND "address" <> '';
 ```
 
-- [ ] **Step 2: Apply the migration**
+- [x] **Step 2: Apply the migration**
 
-Run: `npm run db:migrate:deploy`
-Expected: applied with no error.
+Apply the file with the Supabase MCP `apply_migration` (name
+`20260731_partner_onboarding_backfills`), or `npx supabase db push`.
+Expected: applied with no error. The inserts are `ON CONFLICT DO NOTHING` and the
+updates are guarded, so a re-run is a no-op.
 
-- [ ] **Step 3: Verify the backfill is correct and complete**
+- [x] **Step 3: Verify the backfill is correct and complete**
 
 ```sql
 SELECT
@@ -435,7 +346,7 @@ Expected: `hours_rows = expected_hours_rows` (42 at 6 restaurants),
 `restaurants_without_cuisines = 0` (spec §13 shows 0 restaurants missing a
 cuisine), `restaurants_without_formatted_address = 0`.
 
-- [ ] **Step 4: Verify hours round-trip to the original values**
+- [x] **Step 4: Verify hours round-trip to the original values**
 
 ```sql
 SELECT r."name", r."openingTime", r."closingTime",
@@ -450,10 +361,10 @@ Expected: each restaurant has `day_count = 7`, and `opensAt` / `closesAt` equal
 that restaurant's `openingTime` / `closingTime` (both NULL where the restaurant
 never set hours — spec §13 shows 3 such restaurants).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add functions/prisma/migrations/20260731_partner_onboarding_backfills/migration.sql
+git add supabase/migrations/20260731_partner_onboarding_backfills.sql
 git commit -m "feat(db): backfill hours, cuisines, and formatted address"
 ```
 
@@ -469,7 +380,7 @@ git commit -m "feat(db): backfill hours, cuisines, and formatted address"
 - Produces: a re-runnable audit. Stage 4 runs it before enabling the geo-gate;
   stage 7 runs it before the re-verification cutover.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Create `scripts/audit-partner-readiness.sql`:
 
@@ -499,7 +410,7 @@ SELECT
 FROM "RestaurantRecord";
 ```
 
-- [ ] **Step 2: Run it and confirm it executes**
+- [x] **Step 2: Run it and confirm it executes**
 
 Run the file's contents against the project (Supabase SQL editor or MCP
 `execute_sql`).
@@ -507,7 +418,7 @@ Expected: one row. `published_missing_coords` should still be `5` and
 `details_never_confirmed` should equal the restaurant count, since nothing has
 confirmed details yet.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/audit-partner-readiness.sql
@@ -531,7 +442,7 @@ git commit -m "chore(db): add re-runnable partner readiness audit"
 
   Task 6 imports `resolvePartnerSubmitOutcome`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/partnerApplicationTransitions.test.ts`:
 
@@ -586,12 +497,12 @@ Deno.test('status matching ignores case and surrounding whitespace', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `deno test -A --no-lock supabase/functions/_shared/partnerApplicationTransitions.test.ts`
 Expected: FAIL — module `./partnerApplicationTransitions.ts` not found.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `supabase/functions/_shared/partnerApplicationTransitions.ts`:
 
@@ -630,12 +541,12 @@ export const resolvePartnerSubmitOutcome = (
 };
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `deno test -A --no-lock supabase/functions/_shared/partnerApplicationTransitions.test.ts`
 Expected: PASS — 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add supabase/functions/_shared/partnerApplicationTransitions.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts
@@ -655,7 +566,7 @@ git commit -m "feat(app-rpc): add pure partner submit-transition rule"
 - Produces: the RPC now returns `{ status: 'pending', submittedAt, restaurantId,
   targetUid }`. Task 7 consumes that response shape.
 
-- [ ] **Step 1: Import the transition module**
+- [x] **Step 1: Import the transition module**
 
 At the top of `supabase/functions/app-rpc/index.ts`, alongside the other
 `_shared` imports, add:
@@ -664,7 +575,7 @@ At the top of `supabase/functions/app-rpc/index.ts`, alongside the other
 import { resolvePartnerSubmitOutcome } from '../_shared/partnerApplicationTransitions.ts';
 ```
 
-- [ ] **Step 2: Replace the approval short-circuit with the pending outcome**
+- [x] **Step 2: Replace the approval short-circuit with the pending outcome**
 
 In the `submitPartnerApplication` handler, replace the existing block:
 
@@ -689,7 +600,7 @@ with:
     }
 ```
 
-- [ ] **Step 3: Write the application as pending, not approved**
+- [x] **Step 3: Write the application as pending, not approved**
 
 In the same handler, in the `PartnerApplicationRecord` upsert, change these
 fields:
@@ -716,7 +627,7 @@ to:
         rejectionReason: null,
 ```
 
-- [ ] **Step 4: Remove the self-grant of the restaurant role and the self-publish**
+- [x] **Step 4: Remove the self-grant of the restaurant role and the self-publish**
 
 Still in the same handler, **delete** the `syncUserRoleState(...)` call that
 grants `'restaurant'` with `restaurantLinkSource: 'partner_application_self_publish'`,
@@ -732,7 +643,7 @@ on the application here is still correct and sufficient.
 Keep `const currentAccount = await loadUserAccount(context.uid);` — the account
 upsert below still uses `currentAccount?.createdAt`.
 
-- [ ] **Step 5: Record the account as pending, not approved**
+- [x] **Step 5: Record the account as pending, not approved**
 
 Change the `upsertUserAccount({ ... })` call's role and status fields from:
 
@@ -756,7 +667,7 @@ to:
       partnerApplicationRejectionReason: null,
 ```
 
-- [ ] **Step 6: Fix the admin notification copy**
+- [x] **Step 6: Fix the admin notification copy**
 
 The notification currently announces a live restaurant. Change its `title` and
 `body` from:
@@ -773,7 +684,7 @@ to:
       body: `${restaurantName} has applied and is waiting for review.`,
 ```
 
-- [ ] **Step 7: Fix the approval that admin review writes (REQUIRED — do not skip)**
+- [x] **Step 7: Fix the approval that admin review writes (REQUIRED — do not skip)**
 
 Deleting the `RestaurantApproval` upsert in Step 4 removes the **only** code path
 in the entire function that ever writes `status: 'approved'` (it was at line
@@ -819,32 +730,32 @@ to:
 
 Leave `isPublished: false` on the `RestaurantRecord` upsert exactly as it is.
 
-- [ ] **Step 8: Update the returned status**
+- [x] **Step 8: Update the returned status**
 
 Find the handler's success response and change the returned `status` from
 `'approved'` to `PARTNER_APPLICATION_STATUS.PENDING`, leaving `submittedAt`,
 `restaurantId`, and `targetUid` as they are.
 
-- [ ] **Step 9: Type-check the edge function**
+- [x] **Step 9: Type-check the edge function**
 
 Run: `deno check supabase/functions/app-rpc/index.ts`
 Expected: PASS. If it reports an unused `broadcastRestaurantsChanged` or similar,
 that helper is still used by other handlers — leave it defined and only remove
 the call site from this handler.
 
-- [ ] **Step 10: Confirm no remaining path self-approves**
+- [x] **Step 10: Confirm no remaining path self-approves**
 
 Run: `rg -n "status: 'approved'" supabase/functions/app-rpc/index.ts`
 Expected: exactly one hit — the `RestaurantApproval` upsert inside
 `adminReviewPartnerApplication` from Step 7. If a hit remains inside
 `submitPartnerApplication`, Step 4 was incomplete.
 
-- [ ] **Step 11: Run the full edge-function test suite**
+- [x] **Step 11: Run the full edge-function test suite**
 
 Run: `npm run test:deno`
 Expected: PASS, including the new transition tests.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add supabase/functions/app-rpc/index.ts
@@ -868,7 +779,7 @@ git commit -m "feat(app-rpc): submit partner applications as pending, not approv
 - Produces: `resolvePartnerLandingRoute({ role, applicationStatus })` returning
   `'dashboard' | 'under-review' | 'apply'`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/partner/src/contexts/partnerAuthFlow.test.ts`:
 
@@ -914,12 +825,12 @@ test('the restaurant role wins even if the application status lags behind', () =
 Add `resolvePartnerLandingRoute` to the existing import from
 `./partnerAuthFlow.ts` at the top of that test file.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `node --test --experimental-strip-types apps/partner/src/contexts/partnerAuthFlow.test.ts`
 Expected: FAIL — `resolvePartnerLandingRoute is not a function`.
 
-- [ ] **Step 3: Implement the helper**
+- [x] **Step 3: Implement the helper**
 
 Append to `apps/partner/src/contexts/partnerAuthFlow.ts`:
 
@@ -948,12 +859,12 @@ export const resolvePartnerLandingRoute = ({
 };
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `node --test --experimental-strip-types apps/partner/src/contexts/partnerAuthFlow.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Create the under-review screen**
+- [x] **Step 5: Create the under-review screen**
 
 Create `apps/partner/app/(partner)/application-under-review.tsx`:
 
@@ -1039,7 +950,7 @@ const styles = StyleSheet.create({
 });
 ```
 
-- [ ] **Step 6: Route non-restaurant users by application status**
+- [x] **Step 6: Route non-restaurant users by application status**
 
 In `apps/partner/app/(partner)/_layout.tsx`, replace the block at lines 170–176:
 
@@ -1078,7 +989,7 @@ Add the import at the top of the file:
 import { resolvePartnerLandingRoute } from '../../src/contexts/partnerAuthFlow';
 ```
 
-- [ ] **Step 7: Add the new route to the shell's loading mode**
+- [x] **Step 7: Add the new route to the shell's loading mode**
 
 In the same file, inside `getPartnerShellLoadingMode`, add before the final
 `return 'dashboard';`:
@@ -1089,7 +1000,7 @@ In the same file, inside `getPartnerShellLoadingMode`, add before the final
   }
 ```
 
-- [ ] **Step 8: Stop the form from waiting for a dashboard handoff**
+- [x] **Step 8: Stop the form from waiting for a dashboard handoff**
 
 In `apps/partner/app/(partner)/complete-restaurant-details.tsx`, in `handleSubmit`,
 replace:
@@ -1125,7 +1036,7 @@ And change the submit button's idle label from `'Save and open dashboard'` to
 `'Submit for review'`, and the note under it from the handoff sentence to
 `'We review new restaurants before they go live. This usually takes 1-2 business days.'`
 
-- [ ] **Step 9: Update the RPC response type**
+- [x] **Step 9: Update the RPC response type**
 
 In `apps/partner/src/services/partnerApplications.ts`, change:
 
@@ -1139,7 +1050,7 @@ to:
     status: 'pending';
 ```
 
-- [ ] **Step 10: Type-check and lint the partner app**
+- [x] **Step 10: Type-check and lint the partner app**
 
 Run: `npm run typecheck:partner`
 Expected: PASS.
@@ -1153,7 +1064,7 @@ If typecheck reports `handoffStartedAt` or
 that screen. **Do not** delete `resolvePartnerRestaurantCompletionState` from
 `partnerAuthFlow.ts` — it is still needed on the post-approval sign-in path.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/partner/src/contexts/partnerAuthFlow.ts apps/partner/src/contexts/partnerAuthFlow.test.ts apps/partner/app/\(partner\)/application-under-review.tsx apps/partner/app/\(partner\)/_layout.tsx apps/partner/app/\(partner\)/complete-restaurant-details.tsx apps/partner/src/services/partnerApplications.ts
@@ -1171,7 +1082,7 @@ git commit -m "feat(partner): route pending applicants to an under-review screen
 - Consumes: the test files from Tasks 5 and 7.
 - Produces: both run in CI via `npm test`.
 
-- [ ] **Step 1: Register the new Deno test file**
+- [x] **Step 1: Register the new Deno test file**
 
 In `package.json`, append to the `test:deno` script's file list (the
 `partnerAuthFlow.test.ts` node test is already registered, so only the Deno file
@@ -1181,20 +1092,21 @@ is new):
 supabase/functions/_shared/partnerApplicationTransitions.test.ts
 ```
 
-The script becomes:
+The script becomes (note `promoTrack.test.ts` — it is already registered and must
+stay; the string originally written here dropped it):
 
 ```
-"test:deno": "deno test -A --no-lock supabase/functions/_shared/media_test.ts supabase/functions/_shared/pricing.test.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts supabase/functions/_shared/requireRole.test.ts supabase/functions/_shared/validation.test.ts supabase/functions/app-rpc/partnerRestaurantScope.test.ts supabase/functions/auth-gateway/errors.test.ts supabase/functions/auth-gateway/hash.test.ts supabase/functions/auth-gateway/router.test.ts supabase/functions/payment-verification/invariants.test.ts supabase/functions/paystack-webhook/invariants.test.ts"
+"test:deno": "deno test -A --no-lock supabase/functions/_shared/media_test.ts supabase/functions/_shared/pricing.test.ts supabase/functions/_shared/partnerApplicationTransitions.test.ts supabase/functions/_shared/requireRole.test.ts supabase/functions/_shared/validation.test.ts supabase/functions/app-rpc/partnerRestaurantScope.test.ts supabase/functions/app-rpc/promoTrack.test.ts supabase/functions/auth-gateway/errors.test.ts supabase/functions/auth-gateway/hash.test.ts supabase/functions/auth-gateway/router.test.ts supabase/functions/payment-verification/invariants.test.ts supabase/functions/paystack-webhook/invariants.test.ts"
 ```
 
-- [ ] **Step 2: Run the whole suite**
+- [x] **Step 2: Run the whole suite**
 
 Run: `npm test`
 Expected: PASS. Confirm the output includes the new
 `partnerApplicationTransitions` tests and the new `resolvePartnerLandingRoute`
 tests — if a file is silently absent from the output, it was not registered.
 
-- [ ] **Step 3: Verify no restaurant was published by the code change**
+- [x] **Step 3: Verify no restaurant was published by the code change**
 
 ```sql
 SELECT COUNT(*) AS total,
@@ -1245,7 +1157,7 @@ checkout with "This restaurant is not accepting orders right now."
    customer order against it and confirm checkout succeeds. This is the only
    check that exercises the approval guard end to end.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json
@@ -1284,3 +1196,53 @@ real checkout.
 plan both are set by the same admin action. Stage 6 adds the readiness gate that
 governs `isPublished` separately; until then an approved restaurant is created
 unpublished and is published by the existing profile toggle.
+
+---
+
+## Execution status — 2026-07-31
+
+**Done and committed** (branch `worktree-partner-onboarding-kyc`, 7 commits from
+`6f10a98` to `f82ab57`): every code artifact. Both migration files, the audit
+script, the transition module and its 7 tests, the app-rpc behaviour change, the
+partner routing and under-review screen, and the test registration.
+`npm test` passes: 35 node, 70 deno, zero failures. `npm run typecheck:partner`
+and expo lint are clean.
+
+**Migrations applied to production 2026-07-31**, on the user's instruction, after
+the first MCP `apply_migration` attempt was refused by the Claude Code auto-mode
+classifier. Recorded as `20260731200316 partner_kyc_payout_hours` and
+`20260731200549 partner_onboarding_backfills`. Verified after applying:
+
+- All three new tables exist with `relrowsecurity = true` and **0** policies.
+- `RestaurantRecord` still 6 rows, 6 published — unchanged by both migrations.
+- `RestaurantHours` holds 42 rows = 6 × 7, and each restaurant's `opensAt` /
+  `closesAt` equal its `openingTime` / `closingTime` on all 7 days, nulls
+  included, so no restaurant's "open now" answer moved.
+- 0 restaurants without `cuisines`, 0 without `formattedAddress`.
+- Full audit re-run including the new column: 6 total, 6 published, 5 published
+  without coordinates, 6 without a subaccount, 4 with no minimum order, 6 never
+  details-confirmed, 3 with no hours, 1 delivery restaurant without a pin.
+
+`npx supabase db push` remains unsafe in this repo: local file names are 8-digit
+dates (`20260712_auth_gateway.sql`) while the remote registry holds 14-digit
+versions (`20260715072405 auth_gateway`), so push would treat several applied
+migrations as new and re-run them.
+
+**Still blocked, needs an operator** — the 1 unchecked step above:
+
+1. Deploy `app-rpc`. Until it is deployed, production still self-approves every
+   partner applicant — the migrations changed nothing about that, since no
+   stage-1 code reads the new tables.
+2. The manual end-to-end check in Task 8 Step 4, after that deploy.
+
+**Baseline measured against production before any change** (2026-07-31): 6
+restaurants, 6 published, 5 published without coordinates, 6 without a Paystack
+subaccount, 4 with no minimum order, 3 with no hours, 1 delivery restaurant
+without a pin — an exact match for the spec §13 audit. All 4 existing
+`PartnerApplicationRecord` rows are `approved`, so no current user lands on the
+new under-review screen after deploy.
+
+**Correction to Task 6 Step 9:** `deno check supabase/functions/app-rpc/index.ts`
+does not pass and did not pass before this work — it reports 207 errors on the
+unmodified file. The error sets before and after the change are identical, which
+is the verification that was actually run.

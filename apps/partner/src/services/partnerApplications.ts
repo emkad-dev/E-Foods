@@ -17,7 +17,7 @@ export type PartnerApplicationInput = {
 
 export const submitPartnerApplication = async (input: PartnerApplicationInput) =>
   callPartnerBackendRpc<{
-    status: 'approved';
+    status: 'pending';
     submittedAt: string;
     restaurantId: string;
     targetUid: string;
