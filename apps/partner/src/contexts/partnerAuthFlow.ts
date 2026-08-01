@@ -117,3 +117,26 @@ export const resolvePartnerRestaurantCompletionState = ({
     kind: 'waiting',
   };
 };
+
+export type PartnerLandingRoute = 'dashboard' | 'under-review' | 'apply';
+
+/**
+ * Decides where a signed-in partner user belongs.
+ *
+ * Role is checked first and wins: the `restaurant` claim is granted only by an
+ * admin approval, so once it is present the partner must reach the dashboard
+ * even if the cached application status still reads `pending`.
+ */
+export const resolvePartnerLandingRoute = ({
+  role,
+  applicationStatus,
+}: {
+  role: string | null | undefined;
+  applicationStatus: string | null | undefined;
+}): PartnerLandingRoute => {
+  if (role === 'restaurant') {
+    return 'dashboard';
+  }
+
+  return (applicationStatus ?? '').trim().toLowerCase() === 'pending' ? 'under-review' : 'apply';
+};
