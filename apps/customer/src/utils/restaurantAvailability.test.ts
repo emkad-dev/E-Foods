@@ -23,7 +23,12 @@ const restaurant = (overrides: Partial<DiscoveryRestaurant> = {}): DiscoveryRest
   latitude: 6.4600,
   longitude: 3.3900,
   deliveryRadiusKm: 5,
-  menu: [{ category: 'Mains', items: [{ id: 'item-1', name: 'Jollof', price: 2000, isAvailable: true }] }],
+  menu: [
+    {
+      category: 'Mains',
+      items: [{ id: 'item-1', name: 'Jollof', description: '', price: 2000, isAvailable: true }],
+    },
+  ],
   ...overrides,
 });
 
