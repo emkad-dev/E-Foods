@@ -18,7 +18,6 @@ import {
   broadcastSupportInboxChanged,
   broadcastSupportThreadChanged,
 } from '../_shared/realtime.ts';
-import { toCdnImageUrl } from '../_shared/media.ts';
 import { resolveBroadcastAudience, type BroadcastSegment } from '../_shared/broadcast.ts';
 import {
   buildTransactionalEmailHtml,
@@ -749,6 +748,11 @@ const toOrderSnapshotResponse = (
   updatedAt: order.updatedAt ?? null,
 });
 
+// Serves partner and admin surfaces, which round-trip these fields: the
+// partner profile form loads image/logoImage into state and saves them back,
+// so anything rewritten here would be persisted into RestaurantRecord and
+// outlive the rewrite itself. Image URLs therefore stay raw on this path; the
+// CDN wrap belongs to the read-only customer path in public-catalog.
 const buildRestaurantResponse = (
   restaurant: RestaurantRecordRow,
   approval: RestaurantApprovalRow | null = null
@@ -764,8 +768,8 @@ const buildRestaurantResponse = (
   closingTime: sanitizeOptionalText(restaurant.closingTime),
   description: sanitizeOptionalText(restaurant.description),
   id: restaurant.id,
-  image: toCdnImageUrl(sanitizeOptionalText(restaurant.image)),
-  logoImage: toCdnImageUrl(sanitizeOptionalText(restaurant.logoImage)),
+  image: sanitizeOptionalText(restaurant.image),
+  logoImage: sanitizeOptionalText(restaurant.logoImage),
   isOpen: restaurant.isOpen !== false,
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,

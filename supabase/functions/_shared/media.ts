@@ -35,6 +35,37 @@ export const rewriteImageUrl = <T extends string | null | undefined>(
     : url) as T;
 };
 
+// Menu item images live inside the restaurant's `menu` JSON, so they need the
+// same rewrite as the cover/logo columns or the two drift apart. Malformed
+// categories/items pass through untouched, mirroring the price mapper.
+export const rewriteMenuImageUrls = (menu: unknown[], config: ImageRewriteConfig): unknown[] =>
+  menu.map((category) => {
+    if (!category || typeof category !== 'object') {
+      return category;
+    }
+
+    const categoryRecord = category as Record<string, unknown>;
+    if (!Array.isArray(categoryRecord.items)) {
+      return category;
+    }
+
+    return {
+      ...categoryRecord,
+      items: categoryRecord.items.map((item) => {
+        if (!item || typeof item !== 'object') {
+          return item;
+        }
+
+        const itemRecord = item as Record<string, unknown>;
+        if (typeof itemRecord.image !== 'string') {
+          return item;
+        }
+
+        return { ...itemRecord, image: rewriteImageUrl(itemRecord.image, config) };
+      }),
+    };
+  });
+
 const envConfig: ImageRewriteConfig = {
   storagePublicPrefix,
   // IMAGE_CDN_BASE_URL is the live knob; CDN_BASE_URL is the dead Bunny-era
@@ -44,3 +75,6 @@ const envConfig: ImageRewriteConfig = {
 
 export const toCdnImageUrl = <T extends string | null | undefined>(url: T): T =>
   rewriteImageUrl(url, envConfig);
+
+export const toCdnMenuImageUrls = (menu: unknown[]): unknown[] =>
+  rewriteMenuImageUrls(menu, envConfig);

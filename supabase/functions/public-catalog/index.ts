@@ -2,7 +2,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
-import { toCdnImageUrl } from '../_shared/media.ts';
+import { toCdnImageUrl, toCdnMenuImageUrls } from '../_shared/media.ts';
 import { toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
 import { loadPricingConfig } from '../_shared/platformSettings.ts';
 import {
@@ -95,7 +95,9 @@ const toRestaurantResponse = (
   isPublished: restaurant.isPublished === true,
   latitude: restaurant.latitude ?? null,
   longitude: restaurant.longitude ?? null,
-  menu: Array.isArray(restaurant.menu) ? withDisplayMenuPrices(restaurant.menu, pricingConfig) : [],
+  menu: Array.isArray(restaurant.menu)
+    ? toCdnMenuImageUrls(withDisplayMenuPrices(restaurant.menu, pricingConfig))
+    : [],
   minOrder: restaurant.minOrder ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
