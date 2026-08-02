@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, withSpring } f
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import RemoteImage from '../../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
@@ -249,13 +249,15 @@ export default function RestaurantDetail() {
         ListHeaderComponent={
           <View>
             <View style={styles.heroShell}>
-              {restaurant.image ? (
-                <Image source={{ uri: restaurant.image }} style={styles.restaurantImage} />
-              ) : (
-                <View style={styles.restaurantImageFallback}>
-                  <Text style={styles.restaurantImageFallbackText}>{restaurant.name?.slice(0, 1)?.toUpperCase() ?? 'R'}</Text>
-                </View>
-              )}
+              <RemoteImage
+                uri={restaurant.image}
+                style={styles.restaurantImage}
+                fallback={
+                  <View style={styles.restaurantImageFallback}>
+                    <Text style={styles.restaurantImageFallbackText}>{restaurant.name?.slice(0, 1)?.toUpperCase() ?? 'R'}</Text>
+                  </View>
+                }
+              />
 
               <View style={styles.heroOverlay}>
                 <TouchableOpacity style={styles.heroBackButton} onPress={handleBack}>
@@ -348,13 +350,15 @@ export default function RestaurantDetail() {
                 key={menuItem.id}
                 style={[styles.menuItemCard, menuItem.id === highlightId ? styles.menuItemCardHighlighted : null]}
               >
-                {menuItem.image ? (
-                  <Image source={{ uri: menuItem.image }} style={styles.menuItemImage} />
-                ) : (
-                  <View style={[styles.menuItemImage, styles.menuItemImagePlaceholder]}>
-                    <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
-                  </View>
-                )}
+                <RemoteImage
+                  uri={menuItem.image}
+                  style={styles.menuItemImage}
+                  fallback={
+                    <View style={[styles.menuItemImage, styles.menuItemImagePlaceholder]}>
+                      <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
+                    </View>
+                  }
+                />
                 <View style={styles.menuItemInfo}>
                   {menuItem.id === highlightId ? (
                     <View style={styles.matchTag}>
