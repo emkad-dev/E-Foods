@@ -63,7 +63,7 @@ These bind every task. A reviewer checks them on every diff.
 
 Everything downstream is safer once a dispatch change cannot break checkout. Do this first.
 
-### Task A1 — Extract app-rpc into domain modules
+### Task 1 — [A1] Extract app-rpc into domain modules
 
 **Goal:** `supabase/functions/app-rpc/index.ts` (~7,100 lines, 59 `if (action === …)` branches)
 becomes a thin router over five domain modules. Behaviour is byte-for-byte identical; this is
@@ -124,7 +124,7 @@ five domains' action lists equals the 59-name set above, so a dropped action fai
 
 ---
 
-### Task A2 — Five deployable functions
+### Task 2 — [A2] Five deployable functions
 
 **Goal:** each domain gets its own Edge Function directory whose `index.ts` is ~30 lines:
 build context, dispatch that domain, respond.
@@ -156,7 +156,7 @@ feasty-admin feasty-account` — then verify each responds before switching clie
 
 ---
 
-### Task A3 — Client action→function routing
+### Task 3 — [A3] Client action→function routing
 
 **Goal:** every app calls the right function without any call site changing.
 
@@ -178,7 +178,7 @@ admin build, and `npm run test` all pass.
 
 ---
 
-### Task A4 — Per-function deploy and CI
+### Task 4 — [A4] Per-function deploy and CI
 
 **Goal:** deploying one function does not redeploy the others.
 
@@ -198,7 +198,7 @@ off. No deploy is executed by the implementer.
 
 ## Phase B — Cost: stop polling, stop shipping the whole catalog
 
-### Task B1 — Realtime-first order and queue data
+### Task 5 — [B1] Realtime-first order and queue data
 
 **Goal:** delete the `setInterval` polls that drive live screens and drive them from the
 Realtime Broadcast channels that already exist (`orders`, `order-<id>`, `dispatch-riders`,
@@ -238,7 +238,7 @@ animation code, and every touched app typechecks and lints.
 
 ---
 
-### Task B2 — Split the catalog read
+### Task 6 — [B2] Split the catalog read
 
 **Goal:** stop returning every restaurant's full menu on every call.
 
@@ -274,7 +274,7 @@ a restaurant issues exactly one detail request.
 
 ## Phase C — Money: automatic settlement
 
-### Task C1 — Paystack subaccounts at approval
+### Task 7 — [C1] Paystack subaccounts at approval
 
 **Goal:** `RestaurantPayout` stops being an unused table.
 
@@ -295,7 +295,7 @@ failure, and re-approval with an existing code (must not call create).
 
 ---
 
-### Task C2 — Split the charge
+### Task 8 — [C2] Split the charge
 
 **Goal:** money reaches the restaurant without a human.
 
@@ -319,7 +319,7 @@ split order end to end before enabling for all restaurants.
 
 ## Phase D — Dispatch automation
 
-### Task D1 — Automatic courier selection
+### Task 9 — [D1] Automatic courier selection
 
 **Goal:** stop requiring a human to pick every rider.
 
@@ -344,7 +344,7 @@ under a fixed candidate list.
 
 ---
 
-### Task D2 — Offer / accept / decline
+### Task 10 — [D2] Offer / accept / decline
 
 **Goal:** riders stop being assigned to and start accepting.
 
@@ -367,7 +367,7 @@ superseded offer rejected.
 
 ---
 
-### Task D3 — Rider location track
+### Task 11 — [D3] Rider location track
 
 **Goal:** a position history, not one overwritten row.
 
@@ -386,7 +386,7 @@ kept) and for retention deleting only rows older than the cutoff.
 
 ## Phase E — The customer-visible layer
 
-### Task E1 — Ratings
+### Task 12 — [E1] Ratings
 
 **Goal:** a quality signal on both sides of the marketplace.
 
@@ -408,7 +408,7 @@ average maths correct across increments, "New" threshold at 5.
 
 ---
 
-### Task E2 — Customer live tracking
+### Task 13 — [E2] Customer live tracking
 
 **Goal:** the thing people mean when they say a delivery app feels real.
 
@@ -430,7 +430,7 @@ only the rider's coordinates — never the rider's phone, id, or other assignmen
 
 ---
 
-### Task E3 — Acceptance deadline
+### Task 14 — [E3] Acceptance deadline
 
 **Goal:** close the path where a paid customer waits forever.
 
@@ -450,7 +450,7 @@ only once; at 2× it cancels and refunds in full; an order already `accepted` is
 
 ## Phase F — Partner as a real in-store surface
 
-### Task F1 — Kitchen display mode
+### Task 15 — [F1] Kitchen display mode
 
 **Goal:** the partner app is Android/iOS **and** an in-store tablet. Make the tablet case real.
 
@@ -470,7 +470,7 @@ a second order re-arms it, mute suppresses sound but not the interstitial.
 
 ---
 
-### Task F2 — Availability control
+### Task 16 — [F2] Availability control
 
 **Goal:** a kitchen that has run out of something can say so in two taps.
 
@@ -491,7 +491,7 @@ list and rejects placement; auto-resume at expiry.
 Phases A–F remove ceilings; Phase G is the revenue and growth surface. Each task here is
 independent of the others and can be reordered if something proves harder than expected.
 
-### Task G1 — Promotions engine
+### Task 17 — [G1] Promotions engine
 Codes and automatic campaigns validated at checkout: `PromoCode` (code, type
 `percent | fixed | free_delivery`, value, min basket, per-user and global usage caps, validity
 window, restaurant scope, funding source `platform | restaurant`), `PromoRedemption` for
@@ -501,21 +501,21 @@ funding source. Customer app gets a code field in the cart and shows eligible au
 **Tests:** cap enforcement, expiry, restaurant scoping, discount never exceeding subtotal,
 settlement correctness for both funding sources.
 
-### Task G2 — Scheduled orders
+### Task 18 — [G2] Scheduled orders
 `scheduledFor` on the order; placement accepts a slot inside the restaurant's
 `RestaurantHours`; a scheduler releases the order into the kitchen queue at
 `scheduledFor − prepTimeMinutes`. Payment is captured at placement. Customer sees the slot in
 tracking; the kitchen board shows scheduled orders in a separate lane.
 **Tests:** slot validation against per-day hours, release timing, cancellation before release.
 
-### Task G3 — Item modifiers
+### Task 19 — [G3] Item modifiers
 Menu items gain typed option groups (`single | multi`, required, min/max, per-option price
 delta). Order items carry the selected options and the priced delta. Markup applies to the
 option-inclusive base price — verify against `_shared/pricing.ts` rather than assuming.
 **Tests:** required-group enforcement, min/max, price maths with the v2 markup, and an order
 whose options changed between cart and placement being rejected.
 
-### Task G4 — Multi-store cart
+### Task 20 — [G4] Multi-store cart
 The cart holds per-restaurant sub-carts; placement creates one `CustomerOrder` per restaurant
 under a shared `OrderGroup`, each with its own kitchen and dispatch lifecycle; one payment
 covers the group. Tracking shows the group. This touches settlement — each order settles to its
@@ -523,14 +523,14 @@ own restaurant.
 **Tests:** group placement atomicity (all orders created or none), per-order settlement,
 partial cancellation.
 
-### Task G5 — Prep-time and dynamic ETA
+### Task 21 — [G5] Prep-time and dynamic ETA
 Record actual `acceptedAt → readyAt` per restaurant. Predict prep time as a rolling median over
 the last 20 orders for that restaurant and hour-of-day bucket, falling back to the restaurant's
 static `deliveryTime` until 20 samples exist. Feed the prediction into the courier offer timing
 (don't dispatch a rider to wait) and into customer ETA.
 **Tests:** median maths, the cold-start fallback, and bucket isolation.
 
-### Task G6 — Courier supply
+### Task 22 — [G6] Courier supply
 Courier onboarding with document capture (same service-role-only, storage-path posture as
 `RestaurantKyc` — never public URLs), vehicle and licence fields, and an admin verification
 step. Shift slots against forecast demand. A per-delivery earnings ledger (`CourierEarning`)
@@ -538,13 +538,13 @@ replacing the derived weekly sum, with a payout record mirroring `RestaurantPayo
 **Tests:** ledger accrual on delivery, no double-accrual on re-run, payout totals matching the
 ledger.
 
-### Task G7 — Fraud and abuse signals
+### Task 23 — [G7] Fraud and abuse signals
 Velocity checks (orders per account/device/card per hour), refund-abuse scoring, and a
 `RiskEvent` table feeding an admin review queue. Nothing auto-blocks in this task — it flags,
 and a human decides. Auto-blocking without a human is a separate decision.
 **Tests:** each rule fires on its threshold and not below it.
 
-### Task G8 — Observability and flags
+### Task 24 — [G8] Observability and flags
 `@sentry/browser` is already a dependency and unused. Wire error and performance capture in all
 four apps and structured error capture in the Edge Functions. Add a `FeatureFlag` table plus a
 tiny client so a risky path ships dark. Add alerting on: payment webhook failure rate, dispatch
@@ -556,8 +556,9 @@ calls.
 
 ## Sequencing
 
-A1 → A2 → A3 → A4 → B1 → B2 → C1 → C2 → D1 → D2 → D3 → E1 → E2 → E3 → F1 → F2 →
-G1 → G2 → G3 → G4 → G5 → G6 → G7 → G8
+Task 1 [A1] -> 2 [A2] -> 3 [A3] -> 4 [A4] -> 5 [B1] -> 6 [B2] -> 7 [C1] -> 8 [C2] ->
+9 [D1] -> 10 [D2] -> 11 [D3] -> 12 [E1] -> 13 [E2] -> 14 [E3] -> 15 [F1] -> 16 [F2] ->
+17 [G1] -> 18 [G2] -> 19 [G3] -> 20 [G4] -> 21 [G5] -> 22 [G6] -> 23 [G7] -> 24 [G8]
 
 A is first because every later task lands in a smaller blast radius once it is done. B is
 second because it is the live cost problem. C removes the hardest operational ceiling. D is
