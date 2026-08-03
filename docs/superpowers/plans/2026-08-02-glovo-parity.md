@@ -323,20 +323,37 @@ split order end to end before enabling for all restaurants.
 
 **Goal:** stop requiring a human to pick every rider.
 
-`selectDispatchCourierForRestaurant` already exists and is distance-weighted. It is never
-called from the order flow. Wire it:
+**Corrected premise (found during Task 1, 2026-08-03).** An earlier draft of this task said it
+would "replace the current weighted-random owner pick". **There is no current pick.**
+`assignDispatchOwnerForOrder` is defined in the pre-refactor `app-rpc/index.ts` at line 2332
+and has **no caller anywhere in the 59-action surface** — confirmed by grep against the
+baseline file and independently by the Task 1 implementer and reviewer. The whole automatic
+dispatch path — `assignDispatchOwnerForOrder`, `selectDispatchOwnerForRestaurant`,
+`selectDispatchCourierForRestaurant`, both candidate loaders, the eligibility predicate and
+both weight functions — is unreachable code, now parked verbatim in
+`_shared/dispatchSelection.ts`. Today an order reaches a rider **only** when a human calls
+`dispatchAssignOrderCourier`, and nothing assigns a dispatch owner at all.
 
-- When an order reaches `accepted` and `fulfillmentType === 'delivery'`, after the dispatch
-  owner is chosen, select a courier and create the assignment automatically.
-- Replace the current weighted-random owner pick with a deterministic score:
+So this task **introduces** automatic assignment rather than rewiring it. Treat
+`dispatchSelection.ts` as a starting sketch to rewrite, not as working code to call — it has
+never executed, so none of it is proven.
+
+- **Call site:** when an order reaches `accepted` and `fulfillmentType === 'delivery'`, select
+  a dispatch owner, then a courier, and create the `DeliveryAssignment` automatically. This
+  call site does not exist yet — add it in `partnerUpdateOrderStatus` where the status
+  transition is committed, and make it non-fatal: a selection failure must log and leave the
+  order accepted, never roll back the restaurant's accept.
+- **Scoring** replaces the sketch's `selectWeightedRandomCandidate` entirely:
   `score = w_load × activeLoad + w_distance × distanceKm`, lowest wins, ties broken by
   `activeLoad` then `id`. Weights live in `PlatformSettings` (`dispatchWeights`) with defaults
-  `{ load: 1.0, distance: 0.15 }` so they are tunable without a deploy. Randomness stays only
-  as a tie-break of last resort — a random assignment is not explainable to a rider.
+  `{ load: 1.0, distance: 0.15 }` so they are tunable without a deploy. No randomness — a
+  random assignment is not explainable to a rider. Delete the weighted-random helpers.
 - The dispatcher keeps `dispatchAssignOrderCourier` as an **override**, which must log a
   `courier_reassigned` event with `reason: 'manual_override'`.
-- No eligible courier → existing `dispatch_pool_empty` behaviour, plus a retry on the next
-  status change.
+- No eligible courier → emit the `dispatch_pool_empty` event and admin notification the sketch
+  describes (also never yet executed — verify it works), plus a retry on the next status change.
+- Delete anything in `dispatchSelection.ts` this task does not adopt. It is dead code that has
+  been carried forward once already; do not carry it again.
 
 **Tests:** Deno tests for the scorer — nearest wins at equal load, least-loaded wins at equal
 distance, missing coordinates degrade to load-only, empty pool returns null, deterministic
