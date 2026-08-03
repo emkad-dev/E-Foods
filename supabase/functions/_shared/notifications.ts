@@ -292,3 +292,72 @@ export const sendPushNotificationsToRoles = async (
   const userIds = await loadUserIdsByRoles(roles);
   return sendPushNotificationsToUsers(userIds, payload);
 };
+
+// ---------------------------------------------------------------------------
+// Fire-and-forget wrappers used by the RPC domains.
+//
+// A push failure must never fail the mutation that triggered it: the order has
+// already been written, so the caller gets its success response and the
+// delivery failure is logged instead of thrown.
+// ---------------------------------------------------------------------------
+
+const notifySafely = async (work: () => Promise<void>) => {
+  try {
+    await work();
+  } catch (error) {
+    console.error('Notification dispatch failed.', error);
+  }
+};
+
+export const notifyUsers = async (
+  userIds: string[],
+  payload: {
+    body: string;
+    data?: JsonObject;
+    title: string;
+  }
+) => {
+  await notifySafely(async () => {
+    await sendPushNotificationsToUsers(userIds, {
+      body: payload.body,
+      data: payload.data ?? {},
+      title: payload.title,
+    });
+  });
+};
+
+export const notifyAdmins = async (
+  payload: {
+    body: string;
+    data?: JsonObject;
+    title: string;
+  }
+) => {
+  await notifySafely(async () => {
+    await sendPushNotificationsToRoles(['admin'], {
+      body: payload.body,
+      data: payload.data ?? {},
+      title: payload.title,
+    });
+  });
+};
+
+export const notifyRestaurantUsers = async (
+  restaurantId: string,
+  payload: {
+    body: string;
+    data?: JsonObject;
+    title: string;
+  }
+) => {
+  await notifySafely(async () => {
+    const userIds = await loadRestaurantRecipientUserIds(restaurantId);
+    await sendPushNotificationsToUsers(userIds, {
+      body: payload.body,
+      data: payload.data ?? {},
+      title: payload.title,
+    });
+  });
+};
+
+export { notifySafely };
