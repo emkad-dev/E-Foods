@@ -1,8 +1,10 @@
 // Domain registry: the only thing that knows how an action name becomes a
 // handler. It is generic over the authenticated-context type and imports
-// nothing, so a domain module can be lifted into its own Edge Function
-// directory later without touching this file, and so the registry stays
-// testable without a Supabase client.
+// nothing except the dependency-free action contract, so a domain module can
+// be lifted into its own Edge Function directory later without touching this
+// file, and so the registry stays testable without a Supabase client.
+
+import { ANONYMOUS_ACTIONS } from './actions.ts';
 
 export type RpcRequestInput = {
   data: Record<string, unknown>;
@@ -72,6 +74,15 @@ export type RpcDispatcher<TContext> = {
  * Merges domains into one lookup. Two domains may not claim the same action:
  * the flat `if (action === …)` chain this replaced resolved a duplicate by
  * source order, which is exactly the kind of accident worth failing on.
+ *
+ * It also enforces the pre-auth allowlist: no domain may register an
+ * `anonymousHandlers` entry for an action outside `ANONYMOUS_ACTIONS`. A
+ * domain adding a new pre-auth handler without updating the allowlist throws
+ * here, at cold start, rather than quietly widening the set of actions
+ * reachable without a JWT. (This is a one-way subset check, not a full-set
+ * equality, so building a dispatcher from a subset of domains — as the test
+ * suite does — is unaffected; it can never register an anonymous action that
+ * isn't allowlisted, it just may not cover every allowlisted one.)
  */
 export const buildDispatcher = <TContext>(
   domains: readonly RpcDomain<TContext>[]
@@ -98,6 +109,17 @@ export const buildDispatcher = <TContext>(
     for (const [action, handler] of Object.entries(domain.anonymousHandlers)) {
       anonymousHandlers.set(action, handler);
     }
+  }
+
+  const registeredAnonymous = [...anonymousHandlers.keys()].sort();
+  const allowedAnonymous = ANONYMOUS_ACTIONS as readonly string[];
+  const unallowed = registeredAnonymous.filter((action) => !allowedAnonymous.includes(action));
+
+  if (unallowed.length > 0) {
+    throw new Error(
+      'RPC pre-auth registration is wider than ANONYMOUS_ACTIONS — registered but not ' +
+        `allowlisted (reachable without a JWT!): ${unallowed.join(', ')}.`
+    );
   }
 
   return {
