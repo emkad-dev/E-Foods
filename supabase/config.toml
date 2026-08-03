@@ -9,6 +9,29 @@ skip_nonce_check = false
 [functions.app-rpc]
 verify_jwt = false
 
+# The five domain-scoped RPC functions (task A2) split app-rpc's actions
+# apart but keep its auth model exactly: each verifies the caller's JWT
+# itself inside createRpcDispatch/getAuthenticatedRequestContext, and each
+# must stay reachable pre-auth for its share of ANONYMOUS_ACTIONS
+# (bootstrapFirstAdmin on feasty-admin, promoTrack on feasty-account).
+# Turning gateway JWT verification on here would double-auth those two
+# actions and change the error shape for every unauthenticated call — do not
+# "tighten" these to true.
+[functions.feasty-orders]
+verify_jwt = false
+
+[functions.feasty-dispatch]
+verify_jwt = false
+
+[functions.feasty-partner]
+verify_jwt = false
+
+[functions.feasty-admin]
+verify_jwt = false
+
+[functions.feasty-account]
+verify_jwt = false
+
 [functions.public-catalog]
 verify_jwt = false
 

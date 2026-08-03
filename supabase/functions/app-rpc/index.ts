@@ -1,31 +1,31 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
-// app-rpc — the single POST endpoint every FEASTY client talks to.
+// app-rpc — DEPRECATED compatibility shim.
 //
-// This file does nothing but wire HTTP to the domain dispatcher: parse, apply
-// backpressure to the hot writes, dispatch, and shape the response. All action
-// logic lives in _shared/domains/*, so lifting a domain into its own Edge
-// Function later is a matter of pointing a new entrypoint at its handler map.
+// This used to be the single POST endpoint every FEASTY client talked to. As
+// of the Glovo-parity backend split (task A2), its 59 actions now also live
+// behind five domain-scoped functions (feasty-orders, feasty-dispatch,
+// feasty-partner, feasty-admin, feasty-account — see supabase/functions/ and
+// _shared/domains/*). app-rpc itself is kept, unchanged, routing all 59
+// actions exactly as before: already-installed mobile builds hardcode this
+// URL and cannot be updated by a deploy, so this stays live as their
+// compatibility shim until the next mobile release lets clients move to the
+// split functions (task A3). Remove this directory once that release ships
+// and no client still calls it.
+//
+// The actual HTTP wiring (parse, backpressure, dispatch, respond, observe) is
+// shared with the five split functions via _shared/rpc/serve.ts — this file
+// only supplies app-rpc's identity (its own name, for observability and
+// backpressure-key attribution) and its domain list (all five, since it must
+// keep routing everything).
 
-import { corsHeaders } from '../_shared/cors.ts';
 import { accountDomain } from '../_shared/domains/account.ts';
 import { adminDomain } from '../_shared/domains/admin.ts';
 import { dispatchDomain } from '../_shared/domains/dispatch.ts';
 import { ordersDomain } from '../_shared/domains/orders.ts';
 import { partnerDomain } from '../_shared/domains/partner.ts';
-import {
-  createEdgeObservation,
-  finishEdgeObservation,
-  runWithBackpressure,
-} from '../_shared/observability.ts';
-import { sanitizeText } from '../_shared/rpc/coercion.ts';
-import {
-  HOT_WRITE_ACTIONS,
-  HOT_WRITE_BACKPRESSURE_LIMITS,
-  createRpcDispatch,
-} from '../_shared/rpc/context.ts';
 import { buildDispatcher } from '../_shared/rpc/registry.ts';
-import { errorResponse, json } from '../_shared/rpc/respond.ts';
+import { serveRpcFunction } from '../_shared/rpc/serve.ts';
 
 const dispatcher = buildDispatcher([
   ordersDomain,
@@ -35,82 +35,4 @@ const dispatcher = buildDispatcher([
   accountDomain,
 ]);
 
-const dispatchRpcAction = createRpcDispatch(dispatcher);
-
-Deno.serve(async (request) => {
-  const observation = createEdgeObservation(request, 'app-rpc');
-  let response: Response | undefined;
-  let capturedError: unknown = null;
-
-  if (request.method === 'OPTIONS') {
-    // A 204 response must not carry a body — Deno throws a TypeError otherwise,
-    // which crashed the CORS preflight once gateway JWT verification was disabled.
-    response = new Response(null, {
-      headers: corsHeaders,
-      status: 204,
-    });
-    finishEdgeObservation(observation, { status: response.status });
-    return response;
-  }
-
-  if (request.method !== 'POST') {
-    response = json(405, {
-      error: {
-        message: 'Use POST for app RPC requests.',
-      },
-    });
-    finishEdgeObservation(observation, { status: response.status });
-    return response;
-  }
-
-  let payload: { action?: string; data?: Record<string, unknown> } = {};
-
-  try {
-    payload = (await request.json().catch(() => ({}))) as typeof payload;
-    const action = sanitizeText(payload.action);
-    observation.action = action || undefined;
-
-    if (!action) {
-      response = json(400, {
-        error: {
-          message: 'An RPC action is required.',
-        },
-      });
-      return response;
-    }
-
-    const executeAction = async () => {
-      const nativeResponse = await dispatchRpcAction(action, request, payload.data ?? {});
-      return (
-        nativeResponse ??
-        json(501, {
-          error: {
-            message: `The RPC action "${action}" is not implemented in the native Supabase backend.`,
-          },
-        })
-      );
-    };
-
-    response = HOT_WRITE_ACTIONS.has(action)
-      ? await runWithBackpressure(
-          `app-rpc:${action}`,
-          {
-            maxConcurrent: HOT_WRITE_BACKPRESSURE_LIMITS[action] ?? 8,
-            retryAfterSeconds: 3,
-          },
-          executeAction
-        )
-      : await executeAction();
-
-    return response;
-  } catch (error) {
-    capturedError = error;
-    response = errorResponse(error);
-    return response;
-  } finally {
-    finishEdgeObservation(observation, {
-      error: capturedError ?? undefined,
-      status: response?.status ?? 500,
-    });
-  }
-});
+serveRpcFunction('app-rpc', dispatcher);
