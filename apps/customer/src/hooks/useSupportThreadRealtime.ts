@@ -1,32 +1,31 @@
-import { useEffect } from 'react';
+import { useCallback } from 'react';
+import { subscribeToRealtimeChanges, supportThreadTopic } from '../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { supabase } from '../services/supabase/config';
 
-const POLL_FALLBACK_MS = 30000;
+const FALLBACK_MS = 120000;
 
 // Subscribes to the `support-<conversationId>` broadcast topic emitted by the
 // app-rpc edge function (event name `changed`, matching REALTIME_CHANGED_EVENT)
-// so agent replies arrive live. A 30s poll mirrors the resilience pattern used
-// by the customer order hooks in case a broadcast is missed.
+// so agent replies arrive live. The 120s fallback poll only runs while the
+// channel is not confirmed SUBSCRIBED, and is paused while the app is
+// backgrounded.
 export function useSupportThreadRealtime(conversationId: string | null, onChange: () => void) {
-  useEffect(() => {
-    if (!conversationId) {
-      return;
-    }
+  const isVisible = useAppStateVisibility();
 
-    const channel = supabase
-      .channel(`support-${conversationId}`)
-      .on('broadcast', { event: 'changed' }, () => {
-        onChange();
-      })
-      .subscribe();
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(supabase, [supportThreadTopic(conversationId ?? '')], () => onChanged(), onStatusChange),
+    [conversationId]
+  );
 
-    const interval = setInterval(() => {
-      onChange();
-    }, POLL_FALLBACK_MS);
-
-    return () => {
-      clearInterval(interval);
-      void supabase.removeChannel(channel);
-    };
-  }, [conversationId, onChange]);
+  useRealtimeResource({
+    subscribe,
+    load: onChange,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled: Boolean(conversationId),
+  });
 }

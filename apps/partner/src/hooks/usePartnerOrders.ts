@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { OrderDocument, RestaurantDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getPartnerRestaurantOrders } from '../services/partnerReadModel';
@@ -8,12 +11,15 @@ import { sortKitchenHistoryOrders } from '../utils/partnerQueue';
 
 export type PartnerOrder = OrderDocument;
 
+const FALLBACK_MS = 120000;
+
 export const usePartnerOrders = () => {
   const [orders, setOrders] = useState<PartnerOrder[]>([]);
   const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isVisible = useAppStateVisibility();
 
   const loadOrders = useCallback(
     async (mode: 'initial' | 'refresh' | 'background' = 'initial') => {
@@ -52,41 +58,41 @@ export const usePartnerOrders = () => {
     void loadOrders('initial');
   }, [loadOrders, restaurant?.id]);
 
-  useEffect(() => {
-    if (!restaurant?.id) {
-      return;
-    }
+  const restaurantId = restaurant?.id ?? null;
 
-    let cancelled = false;
+  // A stable reference so useRealtimeResource's subscription effect only
+  // restarts when loadOrders itself changes (it never does -- empty deps),
+  // not on every render of this hook.
+  const loadOrdersInBackground = useCallback(() => loadOrders('background'), [loadOrders]);
 
-    const guardedLoad = async (mode: 'background' = 'background') => {
-      if (cancelled) {
-        return;
-      }
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(
+        supabase,
+        [ORDERS_REALTIME_TOPIC],
+        (payload) => {
+          // Global topic carries every order change; skip refetches for other restaurants when tagged.
+          const changedRestaurantId = typeof payload.restaurantId === 'string' ? payload.restaurantId : null;
+          if (changedRestaurantId && restaurantId && changedRestaurantId !== restaurantId) {
+            return;
+          }
 
-      await loadOrders(mode);
-    };
+          onChanged();
+        },
+        onStatusChange
+      ),
+    [restaurantId]
+  );
 
-    const unsubscribe = subscribeToRealtimeChanges(supabase, [ORDERS_REALTIME_TOPIC], (payload) => {
-      // Global topic carries every order change; skip refetches for other restaurants when tagged.
-      const changedRestaurantId = typeof payload.restaurantId === 'string' ? payload.restaurantId : null;
-      if (changedRestaurantId && restaurant.id && changedRestaurantId !== restaurant.id) {
-        return;
-      }
-
-      void guardedLoad();
-    });
-    // Slow fallback poll in case the realtime connection drops silently.
-    const interval = setInterval(() => {
-      void guardedLoad();
-    }, 30000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      unsubscribe();
-    };
-  }, [loadOrders, restaurant?.id]);
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadOrdersInBackground,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled: Boolean(restaurantId),
+  });
 
   const restaurantOrders = useMemo(() => orders, [orders]);
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
-import { useVisiblePolling } from '../../../../packages/runtime/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { useAuth } from '../contexts/AuthContext';
 import type { RestaurantDocument } from '../domain/entities';
@@ -9,7 +10,10 @@ import { supabase } from '../services/supabase/config';
 
 export type RestaurantProfile = RestaurantDocument;
 
-const POLL_INTERVAL_MS = 60000;
+// Was a 60s unconditional poll; the B1 cost-reduction plan raises every
+// fallback to 120s and gates it to only run while the channel is not
+// confirmed SUBSCRIBED.
+const FALLBACK_MS = 120000;
 
 export const usePartnerRestaurant = () => {
   const { user } = useAuth();
@@ -71,26 +75,26 @@ export const usePartnerRestaurant = () => {
 
     activeRef.current = true;
 
-    void loadContext();
-    const unsubscribe = subscribeToRealtimeChanges(supabase, [RESTAURANTS_REALTIME_TOPIC], () => {
-      void loadContext();
-    });
-
     return () => {
       activeRef.current = false;
-      unsubscribe();
     };
-  }, [loadContext, user]);
+  }, [user]);
 
-  // Slow fallback poll in case the realtime connection drops silently. Paused while
-  // the app is backgrounded; returning to the foreground fires one catch-up read.
-  useVisiblePolling(
-    () => {
-      void loadContext();
-    },
-    POLL_INTERVAL_MS,
-    isVisible
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(supabase, [RESTAURANTS_REALTIME_TOPIC], () => onChanged(), onStatusChange),
+    []
   );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadContext,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled: Boolean(user),
+  });
 
   return {
     claimableRestaurants,
