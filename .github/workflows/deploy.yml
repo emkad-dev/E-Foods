@@ -22,6 +22,32 @@ jobs:
       - name: Install deps
         run: npm ci --ignore-scripts
 
+      # This list is FOUR functions, and that is deliberate as of 2026-08-06 -
+      # do not add the other eleven. This workflow has no `paths:` filter, so
+      # it runs on every push to main; the eleven functions absent here each
+      # have their own path-filtered workflow instead (deploy-feasty-*.yml for
+      # the five split RPC domains, plus deploy-{auth-gateway,notifications,
+      # broadcast-runner,queue-drainer,order-placement,unsubscribe}.yml).
+      #
+      # The two sets are disjoint and together cover all 15 deployable
+      # functions. Keep them disjoint: adding a path-filtered function here
+      # would deploy it twice, concurrently, on exactly the pushes that change
+      # it - this unfiltered workflow and that function's own workflow both
+      # racing `supabase functions deploy <fn>` with no `concurrency:` guard
+      # anywhere in .github/workflows. Both check out the same commit so the
+      # bytes match, but it burns double the CI and can fail one of the two
+      # runs on a concurrent-deploy conflict, reddening main for no reason.
+      #
+      # History, so this isn't re-litigated a third time: the four names below
+      # were never revisited as functions were added, which read as an
+      # oversight rather than a decision (see
+      # .superpowers/sdd/2026-08-02-glovo-parity/task-4-report.md §2). It was
+      # a real gap - six functions were redeployed by nothing at all - but it
+      # was closed in 5c22ed5 with path-filtered workflows, which are strictly
+      # more precise than extending this list. The safety blocker is also gone:
+      # 0574883 declared verify_jwt for unsubscribe/broadcast-runner/
+      # order-placement in supabase/config.toml, so a `--use-api` deploy can no
+      # longer silently flip their JWT enforcement.
       - name: Deploy Supabase Edge Functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
