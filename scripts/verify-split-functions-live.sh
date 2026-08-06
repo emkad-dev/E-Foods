@@ -36,8 +36,13 @@ FUNCTIONS=(feasty-orders feasty-dispatch feasty-partner feasty-admin feasty-acco
 failed=0
 for fn in "${FUNCTIONS[@]}"; do
   url="${EXPO_PUBLIC_SUPABASE_URL%/}/functions/v1/${fn}"
-  status="$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "$url")" || status="000"
-  if [ "$status" = "204" ] || [ "$status" = "200" ]; then
+  # --max-time/--retry: a hung connection should fail this step in seconds,
+  # not stall all the way out to the workflow's own timeout. 200 is not a
+  # valid outcome here (dropped from the accept set) - createRpcHttpHandler
+  # in _shared/rpc/serve.ts only ever answers OPTIONS with a bare 204; a 200
+  # would mean something other than the RPC handler answered this URL.
+  status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --retry 2 -X OPTIONS "$url")" || status="000"
+  if [ "$status" = "204" ]; then
     echo "OK   $fn -> HTTP $status"
   else
     echo "FAIL $fn -> HTTP $status (expected 204) - not deployed yet?"
