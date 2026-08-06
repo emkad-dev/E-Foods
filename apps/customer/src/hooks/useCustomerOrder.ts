@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useVisiblePolling } from '../../../../packages/runtime/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreakdown } from '../domain/entities';
 import type { FulfillmentType } from '../domain/orders';
 import { getCustomerOrderDetail } from '../services/customerReadModel';
 import { supabase } from '../services/supabase/config';
 
-const POLL_INTERVAL_MS = 30000;
+// RLS self-read policies on CustomerOrder and DeliveryAssignment are applied
+// in production, so `postgres_changes` works for this screen specifically --
+// most other tables are service-role-only and cannot use it. See
+// docs/rls-posture.md.
+const FALLBACK_MS = 120000;
 
 export type Order = OrderDocument & {
   id: string;
@@ -60,8 +65,10 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     }
   }, [customerId, orderId]);
 
+  const enabled = Boolean(orderId && customerId);
+
   useEffect(() => {
-    if (!orderId || !customerId) {
+    if (!enabled) {
       setOrder(null);
       setError(null);
       setLoading(false);
@@ -71,54 +78,53 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     setLoading(true);
     activeRef.current = true;
 
-    void loadOrder();
-    const channel = supabase
-      .channel(`customer-order:${orderId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'CustomerOrder',
-          filter: `id=eq.${orderId}`,
-        },
-        () => {
-          void loadOrder();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'DeliveryAssignment',
-          filter: `orderId=eq.${orderId}`,
-        },
-        () => {
-          void loadOrder();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void loadOrder();
-        }
-      });
-
     return () => {
       activeRef.current = false;
-      void supabase.removeChannel(channel);
     };
-  }, [customerId, loadOrder, orderId]);
+  }, [enabled]);
 
-  // Fallback poll for a silently-dropped Realtime connection. Paused while the app
-  // is backgrounded; returning to the foreground fires one immediate catch-up read.
-  useVisiblePolling(
-    () => {
-      void loadOrder();
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) => {
+      const channel = supabase
+        .channel(`customer-order:${orderId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'CustomerOrder',
+            filter: `id=eq.${orderId}`,
+          },
+          () => onChanged()
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'DeliveryAssignment',
+            filter: `orderId=eq.${orderId}`,
+          },
+          () => onChanged()
+        )
+        .subscribe((status) => onStatusChange(status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'DISCONNECTED'));
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
     },
-    POLL_INTERVAL_MS,
-    isVisible
+    [orderId]
   );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadOrder,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled,
+  });
 
   return { order, loading, error };
 };

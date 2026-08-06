@@ -10,9 +10,16 @@ export const orderRealtimeTopic = (orderId: string) => `order-${orderId}`;
 
 export type RealtimeChangeHandler = (payload: Record<string, unknown>) => void;
 
+// Collapses every raw Supabase channel status (SUBSCRIBED, TIMED_OUT,
+// CLOSED, CHANNEL_ERROR, and the transient "joining" state before the first
+// callback) down to the one distinction realtime-resource consumers act on.
+export type RealtimeSubscriptionStatus = 'SUBSCRIBED' | 'DISCONNECTED';
+
 type TopicSubscription = {
   channel: RealtimeChannel;
   handlers: Set<RealtimeChangeHandler>;
+  statusHandlers: Set<(status: RealtimeSubscriptionStatus) => void>;
+  status: RealtimeSubscriptionStatus;
 };
 
 // One websocket channel per topic, shared across hooks. Subscribing to the
@@ -27,7 +34,15 @@ const getTopicSubscription = (supabase: SupabaseClient, topic: string): TopicSub
   }
 
   const handlers = new Set<RealtimeChangeHandler>();
-  const channel = supabase
+  const statusHandlers = new Set<(status: RealtimeSubscriptionStatus) => void>();
+  const subscription: TopicSubscription = {
+    channel: undefined as unknown as RealtimeChannel,
+    handlers,
+    statusHandlers,
+    status: 'DISCONNECTED',
+  };
+
+  subscription.channel = supabase
     .channel(topic)
     .on('broadcast', { event: REALTIME_CHANGED_EVENT }, (message) => {
       const payload = (message.payload ?? {}) as Record<string, unknown>;
@@ -35,9 +50,18 @@ const getTopicSubscription = (supabase: SupabaseClient, topic: string): TopicSub
         handler(payload);
       }
     })
-    .subscribe();
+    .subscribe((rawStatus) => {
+      const nextStatus: RealtimeSubscriptionStatus = rawStatus === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'DISCONNECTED';
+      if (subscription.status === nextStatus) {
+        return;
+      }
 
-  const subscription: TopicSubscription = { channel, handlers };
+      subscription.status = nextStatus;
+      for (const handler of statusHandlers) {
+        handler(nextStatus);
+      }
+    });
+
   topicSubscriptions.set(topic, subscription);
   return subscription;
 };
@@ -45,12 +69,23 @@ const getTopicSubscription = (supabase: SupabaseClient, topic: string): TopicSub
 export const subscribeToRealtimeChanges = (
   supabase: SupabaseClient,
   topics: string[],
-  onChange: RealtimeChangeHandler
+  onChange: RealtimeChangeHandler,
+  onStatusChange?: (status: RealtimeSubscriptionStatus) => void
 ): (() => void) => {
   const uniqueTopics = Array.from(new Set(topics.filter(Boolean)));
 
   for (const topic of uniqueTopics) {
-    getTopicSubscription(supabase, topic).handlers.add(onChange);
+    const subscription = getTopicSubscription(supabase, topic);
+    subscription.handlers.add(onChange);
+
+    if (onStatusChange) {
+      subscription.statusHandlers.add(onStatusChange);
+      // Replay the current status immediately so a subscriber that joins an
+      // already-connected (or still-connecting) topic learns it right away,
+      // rather than waiting for the next transition -- topics are shared
+      // and may already be SUBSCRIBED by the time a second hook joins.
+      onStatusChange(subscription.status);
+    }
   }
 
   return () => {
@@ -61,6 +96,9 @@ export const subscribeToRealtimeChanges = (
       }
 
       subscription.handlers.delete(onChange);
+      if (onStatusChange) {
+        subscription.statusHandlers.delete(onStatusChange);
+      }
       if (subscription.handlers.size === 0) {
         topicSubscriptions.delete(topic);
         void supabase.removeChannel(subscription.channel);

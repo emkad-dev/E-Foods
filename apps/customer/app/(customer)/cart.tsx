@@ -3,6 +3,10 @@ import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } 
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
@@ -18,6 +22,7 @@ import {
 } from '../../src/services/customerOrderActions';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
+import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
@@ -131,40 +136,70 @@ export default function CartScreen() {
     }, [])
   );
 
+  const isVisible = useAppStateVisibility();
+  const activeRef = useRef(false);
+
   useEffect(() => {
     if (!restaurantId) {
       setRestaurant(null);
       return;
     }
 
-    let active = true;
-
-    const loadRestaurant = async () => {
-      try {
-        const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(restaurantId);
-        if (!active) {
-          return;
-        }
-
-        setRestaurant(nextRestaurant as RestaurantDocument | null);
-      } catch {
-        console.warn('Unable to load checkout restaurant.');
-        if (active) {
-          setRestaurant(null);
-        }
-      }
-    };
-
-    void loadRestaurant();
-    const interval = setInterval(() => {
-      void loadRestaurant();
-    }, 30000);
+    activeRef.current = true;
 
     return () => {
-      active = false;
-      clearInterval(interval);
+      activeRef.current = false;
     };
   }, [restaurantId]);
+
+  const loadRestaurant = useCallback(async () => {
+    if (!restaurantId) {
+      return;
+    }
+
+    try {
+      const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(restaurantId);
+      if (!activeRef.current) {
+        return;
+      }
+
+      setRestaurant(nextRestaurant as RestaurantDocument | null);
+    } catch {
+      console.warn('Unable to load checkout restaurant.');
+      if (activeRef.current) {
+        setRestaurant(null);
+      }
+    }
+  }, [restaurantId]);
+
+  const subscribeToRestaurant = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(
+        supabase,
+        [RESTAURANTS_REALTIME_TOPIC],
+        (payload) => {
+          // The topic is global; skip refetches for other restaurants when tagged.
+          const changedRestaurantId = typeof payload.restaurantId === 'string' ? payload.restaurantId : null;
+          if (changedRestaurantId && restaurantId && changedRestaurantId !== restaurantId) {
+            return;
+          }
+
+          onChanged();
+        },
+        onStatusChange
+      ),
+    [restaurantId]
+  );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe: subscribeToRestaurant,
+    load: loadRestaurant,
+    isVisible,
+    fallbackMs: 120000,
+    enabled: Boolean(restaurantId),
+  });
 
   const handleFulfillmentChange = (nextType: FulfillmentType) => {
     if (nextType === 'delivery' && !isDeliverySupported) {

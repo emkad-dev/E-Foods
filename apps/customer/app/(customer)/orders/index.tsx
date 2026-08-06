@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { useVisiblePolling } from '../../../../../packages/runtime/src';
+import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
@@ -105,7 +106,10 @@ const getEmptyStateTitle = (filter: OrderFilter) => {
   }
 };
 
-const POLL_INTERVAL_MS = 30000;
+// RLS self-read policy on CustomerOrder is applied in production, so
+// `postgres_changes` works for this screen. Most other tables are
+// service-role-only and cannot use it -- see docs/rls-posture.md.
+const FALLBACK_MS = 120000;
 
 export default function OrdersList() {
   const { user } = useAuth();
@@ -154,42 +158,47 @@ export default function OrdersList() {
 
     activeRef.current = true;
 
-    void loadOrders();
-    const channel = supabase
-      .channel(`customer-orders:${user.uid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'CustomerOrder',
-          filter: `customerId=eq.${user.uid}`,
-        },
-        () => {
-          void loadOrders();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void loadOrders();
-        }
-      });
-
     return () => {
       activeRef.current = false;
-      void supabase.removeChannel(channel);
     };
-  }, [loadOrders, user]);
+  }, [user]);
 
-  // Fallback poll for a silently-dropped Realtime connection. Paused while the app
-  // is backgrounded; returning to the foreground fires one immediate catch-up read.
-  useVisiblePolling(
-    () => {
-      void loadOrders();
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) => {
+      if (!user) {
+        return () => undefined;
+      }
+
+      const channel = supabase
+        .channel(`customer-orders:${user.uid}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'CustomerOrder',
+            filter: `customerId=eq.${user.uid}`,
+          },
+          () => onChanged()
+        )
+        .subscribe((status) => onStatusChange(status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'DISCONNECTED'));
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
     },
-    POLL_INTERVAL_MS,
-    isVisible
+    [user]
   );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadOrders,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled: Boolean(user),
+  });
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => matchesOrderFilter(order, activeFilter)),
