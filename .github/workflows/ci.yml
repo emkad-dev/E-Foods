@@ -55,14 +55,13 @@ jobs:
       - name: Build partner web (expo export)
         run: npm run build:partner
 
-      # Pinned to the exact version this gate (and its committed
-      # scripts/deno-check.lock) were validated against. A floating v2.x
-      # here would let a new Deno point release shift deno check's own
-      # lib.d.ts and change the type-error set for reasons unrelated to any
-      # change in this repo - exactly the kind of unrelated-PR breakage the
-      # fingerprint gate below exists to prevent. Bump deliberately (and
-      # regenerate scripts/deno-check-baseline.txt / scripts/deno-check.lock
-      # if the error set moves) rather than loosening this back to v2.x.
+      # Pinned to the exact version this gate was validated against. A
+      # floating v2.x here would let a new Deno point release shift deno
+      # check's own lib.d.ts and change the type-error set for reasons
+      # unrelated to any change in this repo - exactly the kind of
+      # unrelated-PR breakage the fingerprint gate below exists to prevent.
+      # Bump deliberately (and regenerate scripts/deno-check-baseline.txt if
+      # the error set moves) rather than loosening this back to v2.x.
       - name: Use Deno
         uses: denoland/setup-deno@v2
         with:
@@ -77,10 +76,12 @@ jobs:
       # undetected. app-rpc's domain modules have never type-checked (206
       # pre-existing errors, reconciled from 210 during the Task 1 app-rpc
       # split; +6 from dispatchSelection.ts = 212 error occurrences / 193
-      # unique locations - see scripts/deno-check-baseline.txt). Runs
-      # against a committed lockfile (scripts/deno-check.lock, --frozen) so
-      # an unpinned npm:@supabase/supabase-js@2 resolving to a newer patch
-      # can't shift the error set out from under an unrelated PR either.
+      # unique locations - see scripts/deno-check-baseline.txt). The
+      # npm:@supabase/supabase-js@2 specifier reachable from this graph is
+      # pinned by package-lock.json (installed above via `npm ci`), not by a
+      # deno lockfile - see scripts/check-deno-types.mjs's header for why a
+      # deno.lock was tried here and removed (it turned out not to be
+      # consulted once node_modules/ exists).
       - name: Deno type check (supabase/functions)
         run: node scripts/check-deno-types.mjs
 

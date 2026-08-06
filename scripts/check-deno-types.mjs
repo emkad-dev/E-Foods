@@ -41,21 +41,33 @@
 // disjoint from the 206 (confirmed: checking it alongside every entrypoint
 // adds exactly 6, not fewer - no overlap): 206 + 6 = 212 fingerprints.
 //
-// Reproducibility (fixed after code review): this used to run with
-// `--no-lock`, and CI's `deno-version: v2.x` floats. `_shared/client.ts`
-// imports `npm:@supabase/supabase-js@2` - an unpinned major-version range -
-// inside the checked graph, reachable from nearly every function. Without a
-// lockfile, a new supabase-js *patch* release (or a new Deno *point*
-// release changing its own lib.d.ts) can shift the error set for reasons
-// that have nothing to do with any change in this repo, and the fastest way
-// to unblock an unrelated PR when that happens is to bump the pin - which is
-// exactly the erosion this gate exists to prevent. Fixed by committing
-// scripts/deno-check.lock (`deno cache --lock=scripts/deno-check.lock
-// <targets>`, pins @supabase/supabase-js to 2.110.2 as resolved at the time
-// this gate was built) and running with `--lock=... --frozen` instead of
-// `--no-lock`, plus pinning `deno-version: '2.9.3'` in ci.yml to the exact
-// version this was validated against. `--frozen` errors out rather than
-// silently rewriting the lock if resolution ever disagrees with it.
+// Reproducibility: `ci.yml`'s `deno-version` is pinned to the exact `'2.9.3'`
+// this gate was built and validated against, so the Deno toolchain itself
+// (and its own lib.d.ts) can't drift under an unrelated PR.
+//
+// `_shared/client.ts` imports `npm:@supabase/supabase-js@2` - an unpinned
+// major-version range - inside the checked graph, reachable from nearly
+// every function. A first attempt at pinning that too (scripts/deno-check.lock,
+// `deno check --lock=... --frozen`) turned out not to work and was removed:
+// `ci.yml` runs `npm ci --ignore-scripts` before this step, which populates
+// node_modules/, and once node_modules/ exists Deno resolves `npm:` specifiers
+// straight from it rather than consulting a `--lock` file's npm section at
+// all - confirmed by deliberately corrupting the committed lock's pinned
+// version and re-running with `--frozen`: the gate still exited 0 with an
+// identical error set, no "lock file is out of date" error, nothing. A
+// mechanism that reads as protection but enforces nothing is worse than no
+// mechanism, so it was deleted rather than left in place.
+//
+// The real pin for `npm:@supabase/supabase-js@2` already existed before this
+// gate did and needs no extra machinery: `package-lock.json` pins
+// `@supabase/supabase-js` to an exact resolved version (2.105.4 as of this
+// writing), and `npm ci` (which every workflow that runs this gate calls
+// first) installs exactly that into node_modules/ every time. If that pinned
+// version ever bumps via a normal `npm install`/`package-lock.json` update,
+// deno check will resolve the new one and this gate's fingerprint set may
+// need regenerating (`--write-baseline`) as part of that same PR - which is
+// the correct, visible place for that drift to surface, not a separate lock
+// file nobody remembers to keep in sync.
 //
 // This does NOT catch a new file that type-checks fine on its own but is
 // never imported from anywhere (the same blind spot dispatchSelection.ts
@@ -74,7 +86,6 @@ const EXTRA_CHECK_TARGETS = ['supabase/functions/_shared/dispatchSelection.ts'];
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const functionsDir = path.join(repoRoot, 'supabase', 'functions');
-const lockPath = path.join(repoRoot, 'scripts', 'deno-check.lock');
 const baselinePath = path.join(repoRoot, 'scripts', 'deno-check-baseline.txt');
 
 const writeBaseline = process.argv.includes('--write-baseline');
@@ -105,18 +116,23 @@ if (targets.length === 0) {
   process.exit(1);
 }
 
-if (!existsSync(lockPath)) {
-  console.error(`check-deno-types: lock file not found at ${path.relative(repoRoot, lockPath)}.`);
-  console.error('Regenerate it with: deno cache --lock=scripts/deno-check.lock <targets> (see this file\'s header comment).');
-  process.exit(1);
-}
-
 console.log(`check-deno-types: running deno check over ${targets.length} target(s):`);
 for (const target of targets) console.log(`  - ${target}`);
 
 const result = spawnSync(
   'deno',
-  ['check', `--lock=${path.relative(repoRoot, lockPath)}`, '--frozen', ...targets],
+  [
+    'check',
+    // --no-lock: deliberate, not an oversight. See the header comment - a
+    // committed deno.lock was tried and removed because Deno resolves
+    // npm: specifiers straight from node_modules/ once it exists (which
+    // `npm ci` always populates before this step runs), bypassing a
+    // --lock file's npm section entirely. --no-lock here is honest about
+    // that: it disables lock-file discovery/writing outright instead of
+    // leaving a lock in place that looks authoritative but isn't consulted.
+    '--no-lock',
+    ...targets,
+  ],
   {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -135,17 +151,6 @@ if (result.error) {
 }
 
 const stderr = result.stderr ?? '';
-
-if (/error: Lock file is out of date/i.test(stderr) || /lockfile is out of date/i.test(stderr)) {
-  console.error('check-deno-types: FAIL - the lock file at scripts/deno-check.lock is out of date.');
-  console.error('This means a dependency (e.g. npm:@supabase/supabase-js) would resolve to a');
-  console.error('different version than the one pinned. Regenerate deliberately with:');
-  console.error('  deno cache --lock=scripts/deno-check.lock <targets listed above>');
-  console.error('and review the diff before committing it.');
-  console.error('');
-  console.error(stderr);
-  process.exit(1);
-}
 
 const foundMatch = stderr.match(/Found (\d+) errors?\./);
 const reportedCount = foundMatch ? Number(foundMatch[1]) : result.status === 0 ? 0 : null;
