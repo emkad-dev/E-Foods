@@ -1,0 +1,50 @@
+name: Deploy feasty-partner
+
+# Path-filtered per-function deploy. Runs when feasty-partner's own code
+# changes, or when _shared/** changes (every deployable function transitively
+# imports _shared, at minimum via the ../_shared/edge-runtime.d.ts triple-
+# slash reference; see task-4-report.md for the full importer list) - so a
+# _shared edit deploys all five domain-scoped functions, one workflow run
+# each, rather than a single workflow silently redeploying only some of them.
+#
+# This does NOT redeploy app-rpc (the compatibility shim) - that stays on the
+# unconditional list in deploy.yml, since it must always track main
+# regardless of which _shared paths changed.
+on:
+  push:
+    branches: [ 'main' ]
+    paths:
+      - 'supabase/functions/feasty-partner/**'
+      - 'supabase/functions/_shared/**'
+      - '.github/workflows/deploy-feasty-partner.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy feasty-partner Edge Function
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      - name: Deploy feasty-partner
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          # The supabase CLI is a devDependency, so it lives in node_modules/.bin,
+          # which Actions does not put on PATH for `run:` steps. Every invocation
+          # must go through npx or it fails with "supabase: command not found".
+          npx supabase --version
+          npx supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          npx supabase functions deploy feasty-partner --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes

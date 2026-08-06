@@ -36,6 +36,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Sequencing guard: this build ships with EXPO_PUBLIC_RPC_MODE=split,
+      # which targets the five feasty-* domain functions directly. Those
+      # deploy from their own path-filtered workflows
+      # (deploy-feasty-*.yml), which are separate GitHub Actions runs with no
+      # ordering guarantee relative to this one. Rather than trying to make
+      # GitHub Actions order two independent workflows, this step makes the
+      # dependency self-enforcing: if the backend isn't live yet, this job
+      # fails here, before any build or deploy work happens, instead of
+      # shipping a client that 404s on every RPC call.
+      - name: Verify split-mode backend functions are live
+        if: env.EXPO_PUBLIC_RPC_MODE == 'split'
+        run: bash scripts/verify-split-functions-live.sh
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
