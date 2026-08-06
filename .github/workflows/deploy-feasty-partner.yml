@@ -16,6 +16,7 @@ on:
     paths:
       - 'supabase/functions/feasty-partner/**'
       - 'supabase/functions/_shared/**'
+      - 'supabase/config.toml'
       - '.github/workflows/deploy-feasty-partner.yml'
   workflow_dispatch:
 

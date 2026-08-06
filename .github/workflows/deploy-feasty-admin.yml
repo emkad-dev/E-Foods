@@ -20,6 +20,7 @@ on:
     paths:
       - 'supabase/functions/feasty-admin/**'
       - 'supabase/functions/_shared/**'
+      - 'supabase/config.toml'
       - '.github/workflows/deploy-feasty-admin.yml'
   workflow_dispatch:
 

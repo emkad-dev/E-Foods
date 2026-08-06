@@ -16,6 +16,7 @@ on:
     paths:
       - 'supabase/functions/feasty-account/**'
       - 'supabase/functions/_shared/**'
+      - 'supabase/config.toml'
       - '.github/workflows/deploy-feasty-account.yml'
   workflow_dispatch:
 
