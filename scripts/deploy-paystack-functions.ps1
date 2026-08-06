@@ -3,41 +3,27 @@ param(
   [string]$ProjectRef
 )
 
+# This script has never synced Supabase secrets (that behaviour lived only
+# in deploy-realtime-email-functions.ps1) - nothing to make opt-in here.
+# It now delegates to deploy-function.ps1 for the actual deploy so the
+# known-function-name guard applies uniformly across every deploy script.
+
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$supabaseCli = Join-Path $repoRoot 'node_modules\.bin\supabase.cmd'
+$deployFunctionScript = Join-Path $PSScriptRoot 'deploy-function.ps1'
+$functionsEnv = Join-Path $repoRoot 'functions\.env'
 
-if (-not (Test-Path -LiteralPath $supabaseCli)) {
-  throw 'Supabase CLI was not found at node_modules\.bin\supabase.cmd. Run npm install at the repo root first.'
+if (-not (Test-Path -LiteralPath $deployFunctionScript)) {
+  throw 'scripts\deploy-function.ps1 was not found.'
 }
 
-$resolvedProjectRef = $ProjectRef
-if ([string]::IsNullOrWhiteSpace($resolvedProjectRef)) {
-  $functionsEnv = Join-Path $repoRoot 'functions\.env'
-  if (Test-Path -LiteralPath $functionsEnv) {
-    $match = Select-String -Path $functionsEnv -Pattern '^SUPABASE_PROJECT_REF="?([^"\r\n]+)"?$' | Select-Object -First 1
-    if ($match) {
-      $resolvedProjectRef = $match.Matches[0].Groups[1].Value.Trim()
-    }
-  }
-}
+. (Join-Path $PSScriptRoot 'lib\DeploySecrets.ps1')
 
-if ([string]::IsNullOrWhiteSpace($resolvedProjectRef)) {
-  throw 'Missing Supabase project ref. Pass -ProjectRef or set SUPABASE_PROJECT_REF in functions/.env.'
-}
+$resolvedProjectRef = Resolve-SupabaseProjectRef -ProjectRef $ProjectRef -EnvPath $functionsEnv
 
-Write-Host "Deploying payment-verification to $resolvedProjectRef ..." -ForegroundColor Cyan
-& $supabaseCli functions deploy payment-verification --project-ref $resolvedProjectRef
-if ($LASTEXITCODE -ne 0) {
-  throw 'Failed to deploy payment-verification.'
-}
-
-Write-Host "Deploying paystack-webhook to $resolvedProjectRef ..." -ForegroundColor Cyan
-& $supabaseCli functions deploy paystack-webhook --project-ref $resolvedProjectRef
-if ($LASTEXITCODE -ne 0) {
-  throw 'Failed to deploy paystack-webhook.'
-}
+& $deployFunctionScript -Name 'payment-verification' -ProjectRef $resolvedProjectRef
+& $deployFunctionScript -Name 'paystack-webhook' -ProjectRef $resolvedProjectRef
 
 Write-Host ''
 Write-Host 'Paystack function deploy complete.' -ForegroundColor Green

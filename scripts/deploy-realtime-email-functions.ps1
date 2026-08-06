@@ -1,138 +1,45 @@
 [CmdletBinding()]
 param(
   [string]$ProjectRef,
-  [string[]]$Functions = @('app-rpc', 'order-placement', 'payment-verification', 'paystack-webhook')
+  [string[]]$Functions = @('app-rpc', 'order-placement', 'payment-verification', 'paystack-webhook'),
+
+  # Secrets sync is opt-in. It used to run unconditionally on every deploy,
+  # re-writing every Supabase secret from functions/.env - which has
+  # clobbered live Paystack keys with placeholder values when functions/.env
+  # locally held sandbox values. Pass -SyncSecrets when you specifically mean
+  # to push functions/.env's values to the live project.
+  [switch]$SyncSecrets
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$supabaseCli = Join-Path $repoRoot 'node_modules\.bin\supabase.cmd'
+$deployFunctionScript = Join-Path $PSScriptRoot 'deploy-function.ps1'
 $functionsEnv = Join-Path $repoRoot 'functions\.env'
 
-if (-not (Test-Path -LiteralPath $supabaseCli)) {
-  throw 'Supabase CLI was not found at node_modules\.bin\supabase.cmd. Run npm install at the repo root first.'
+if (-not (Test-Path -LiteralPath $deployFunctionScript)) {
+  throw 'scripts\deploy-function.ps1 was not found.'
 }
 
-function Read-DotEnvValue {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path,
-    [Parameter(Mandatory = $true)]
-    [string]$Key
-  )
+. (Join-Path $PSScriptRoot 'lib\DeploySecrets.ps1')
 
-  if (-not (Test-Path -LiteralPath $Path)) {
-    return $null
+$resolvedProjectRef = Resolve-SupabaseProjectRef -ProjectRef $ProjectRef -EnvPath $functionsEnv
+
+if ($SyncSecrets) {
+  $supabaseCli = Join-Path $repoRoot 'node_modules\.bin\supabase.cmd'
+  if (-not (Test-Path -LiteralPath $supabaseCli)) {
+    throw 'Supabase CLI was not found at node_modules\.bin\supabase.cmd. Run npm install at the repo root first.'
   }
-
-  foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
-    $trimmed = $line.Trim()
-    if (-not $trimmed -or $trimmed.StartsWith('#')) {
-      continue
-    }
-
-    if ($trimmed -notmatch '^\s*([^=]+)=(.*)\s*$') {
-      continue
-    }
-
-    $candidateKey = $matches[1].Trim()
-    if ($candidateKey -ne $Key) {
-      continue
-    }
-
-    $rawValue = $matches[2].Trim()
-    if (
-      ($rawValue.StartsWith('"') -and $rawValue.EndsWith('"')) -or
-      ($rawValue.StartsWith("'") -and $rawValue.EndsWith("'"))
-    ) {
-      return $rawValue.Substring(1, $rawValue.Length - 2)
-    }
-
-    return $rawValue
-  }
-
-  return $null
+  Sync-SupabaseSecrets -SupabaseCli $supabaseCli -ProjectRef $resolvedProjectRef -EnvPath $functionsEnv
+} else {
+  Write-Host 'Skipping secret sync (pass -SyncSecrets to sync functions/.env to Supabase secrets). This is deliberate: syncing on every deploy has clobbered live keys before.' -ForegroundColor DarkYellow
 }
-
-function Sync-SupabaseSecrets {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$ProjectRef,
-    [Parameter(Mandatory = $true)]
-    [string]$EnvPath,
-    [Parameter(Mandatory = $true)]
-    [hashtable[]]$Mappings
-  )
-
-  $secretPairs = New-Object System.Collections.Generic.List[string]
-
-  foreach ($mapping in $Mappings) {
-    $key = $mapping.Key
-    $aliases = @($mapping.Aliases)
-    $value = Read-DotEnvValue -Path $EnvPath -Key $key
-
-    if ([string]::IsNullOrWhiteSpace($value)) {
-      foreach ($alias in $aliases) {
-        $value = Read-DotEnvValue -Path $EnvPath -Key $alias
-        if (-not [string]::IsNullOrWhiteSpace($value)) {
-          break
-        }
-      }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($value)) {
-      $secretPairs.Add("$key=$value")
-    }
-  }
-
-  if ($secretPairs.Count -eq 0) {
-    Write-Host "No deploy secrets were found in $EnvPath. Skipping secret sync." -ForegroundColor DarkYellow
-    return
-  }
-
-  Write-Host "Syncing $($secretPairs.Count) Supabase secrets from functions/.env ..." -ForegroundColor Cyan
-  & $supabaseCli secrets set @secretPairs --project-ref $ProjectRef
-  if ($LASTEXITCODE -ne 0) {
-    throw 'Failed to sync Supabase secrets.'
-  }
-}
-
-$resolvedProjectRef = $ProjectRef
-if ([string]::IsNullOrWhiteSpace($resolvedProjectRef)) {
-  if (Test-Path -LiteralPath $functionsEnv) {
-    $match = Select-String -Path $functionsEnv -Pattern '^SUPABASE_PROJECT_REF="?([^"\r\n]+)"?$' | Select-Object -First 1
-    if ($match) {
-      $resolvedProjectRef = $match.Matches[0].Groups[1].Value.Trim()
-    }
-  }
-}
-
-if ([string]::IsNullOrWhiteSpace($resolvedProjectRef)) {
-  throw 'Missing Supabase project ref. Pass -ProjectRef or set SUPABASE_PROJECT_REF in functions/.env.'
-}
-
-Sync-SupabaseSecrets -ProjectRef $resolvedProjectRef -EnvPath $functionsEnv -Mappings @(
-  @{ Key = 'SUPABASE_URL'; Aliases = @('SUPABASE_URL') },
-  @{ Key = 'SUPABASE_ANON_KEY'; Aliases = @('SUPABASE_ANON_KEY') },
-  @{ Key = 'SUPABASE_SERVICE_ROLE_KEY'; Aliases = @('SUPABASE_SERVICE_ROLE_KEY', 'SERVICE_ROLE_KEY') },
-  @{ Key = 'SUPABASE_JWT_SECRET'; Aliases = @('SUPABASE_JWT_SECRET', 'JWT_SECRET') },
-  @{ Key = 'SUPABASE_PROJECT_REF'; Aliases = @('SUPABASE_PROJECT_REF') },
-  @{ Key = 'PAYSTACK_SECRET_KEY'; Aliases = @('PAYSTACK_SECRET_KEY') },
-  @{ Key = 'PAYSTACK_PUBLIC_KEY'; Aliases = @('PAYSTACK_PUBLIC_KEY') },
-  @{ Key = 'PAYSTACK_CALLBACK_URL'; Aliases = @('PAYSTACK_CALLBACK_URL') },
-  @{ Key = 'RESEND_API_KEY'; Aliases = @('RESEND_API_KEY') },
-  @{ Key = 'TRANSACTIONAL_EMAIL_FROM'; Aliases = @('TRANSACTIONAL_EMAIL_FROM') },
-  @{ Key = 'CDN_BASE_URL'; Aliases = @('CDN_BASE_URL') }
-)
 
 foreach ($functionName in $Functions) {
-  Write-Host "Deploying $functionName to $resolvedProjectRef ..." -ForegroundColor Cyan
-  & $supabaseCli functions deploy $functionName --project-ref $resolvedProjectRef
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to deploy $functionName."
-  }
+  & $deployFunctionScript -Name $functionName -ProjectRef $resolvedProjectRef
 }
 
 Write-Host 'All functions deployed.' -ForegroundColor Green
-Write-Host 'Reminder: keep functions/.env current before deploying so secrets stay in sync.' -ForegroundColor Yellow
+if (-not $SyncSecrets) {
+  Write-Host 'Reminder: secrets were NOT synced this run. Pass -SyncSecrets if functions/.env changed.' -ForegroundColor Yellow
+}

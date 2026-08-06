@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param(
-  [string]$ProjectRef
+  [string]$ProjectRef,
+
+  # Passed straight through to deploy-realtime-email-functions.ps1. Off by
+  # default - see that script for why re-syncing secrets on every deploy is
+  # opt-in now.
+  [switch]$SyncSecrets
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,4 +17,4 @@ if (-not (Test-Path -LiteralPath $deployScript)) {
   throw 'The shared deploy helper was not found at scripts\deploy-realtime-email-functions.ps1.'
 }
 
-& $deployScript -ProjectRef $ProjectRef -Functions @('app-rpc')
+& $deployScript -ProjectRef $ProjectRef -Functions @('app-rpc') -SyncSecrets:$SyncSecrets
