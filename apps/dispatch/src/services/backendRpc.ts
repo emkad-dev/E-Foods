@@ -8,5 +8,6 @@ export const callDispatchBackendRpc = <T>(action: string, data?: Record<string, 
     backendRpcUrl: appEnv.backendRpcUrl,
     projectId: appEnv.projectId,
     region: appEnv.functionsRegion,
+    rpcMode: appEnv.rpcMode,
     supabaseUrl: supabaseEnv.url,
   }, action, data);

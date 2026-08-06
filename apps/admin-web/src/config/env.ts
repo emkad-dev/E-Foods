@@ -32,4 +32,9 @@ export const appEnv = {
     import.meta.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     import.meta.env.BACKEND_RPC_URL
   ),
+  // Kill switch for RPC routing: 'split' (default) sends each action to its
+  // own domain function; 'legacy' routes everything to app-rpc. Passed
+  // through raw — resolveRpcMode normalizes unset/blank/unrecognized values
+  // to 'split'.
+  rpcMode: resolveEnv(import.meta.env.VITE_RPC_MODE, import.meta.env.EXPO_PUBLIC_RPC_MODE),
 };
