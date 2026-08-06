@@ -403,7 +403,7 @@ export default function CartScreen() {
                       <View style={styles.locationCopy}>
                         <Text style={styles.locationTitle}>Choose where we should deliver</Text>
                         <Text style={styles.locationAddress}>
-                          Drop a pin on the map, just like Glovo or Uber Eats.
+                          Drop a pin on the map to set your exact delivery spot.
                         </Text>
                       </View>
                     </TouchableOpacity>

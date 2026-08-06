@@ -3,7 +3,7 @@
 // app-rpc — DEPRECATED compatibility shim.
 //
 // This used to be the single POST endpoint every FEASTY client talked to. As
-// of the Glovo-parity backend split (task A2), its 59 actions now also live
+// of the parity backend split (task A2), its 59 actions now also live
 // behind five domain-scoped functions (feasty-orders, feasty-dispatch,
 // feasty-partner, feasty-admin, feasty-account — see supabase/functions/ and
 // _shared/domains/*). app-rpc itself is kept, unchanged, routing all 59

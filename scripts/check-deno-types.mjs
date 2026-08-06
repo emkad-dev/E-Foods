@@ -8,7 +8,7 @@
 // type-checked. Task 1 (splitting app-rpc into domain modules) reconciled
 // the pre-existing error count from 210 down to 206 and fully explained the
 // delta - see
-// .superpowers/sdd/2026-08-02-glovo-parity/task-1-report.md, section 6 note 2.
+// .superpowers/sdd/2026-08-02-parity/task-1-report.md, section 6 note 2.
 // Requiring a clean `deno check` here would either block unrelated tooling
 // work on fixing that backlog, or invite quietly loosening the gate with
 // `--no-check` on more files. A pinned baseline catches *new* errors on the
@@ -34,7 +34,7 @@
 // deps - every other function's own index.ts type-checks clean on top of
 // that same graph, verified by running this exact command by hand).
 // `_shared/dispatchSelection.ts` (338 lines, zero importers, parked for
-// Task 9 per docs/superpowers/plans/2026-08-02-glovo-parity.md) sits outside
+// Task 9 per docs/superpowers/plans/2026-08-02-parity.md) sits outside
 // every entrypoint's import graph, so no `deno check` invocation could ever
 // see it - it could rot silently and nothing would notice. It is listed as
 // an explicit extra target below so it can't. Its 6 errors are additive and

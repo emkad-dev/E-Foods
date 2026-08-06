@@ -41,7 +41,7 @@ jobs:
       # History, so this isn't re-litigated a third time: the four names below
       # were never revisited as functions were added, which read as an
       # oversight rather than a decision (see
-      # .superpowers/sdd/2026-08-02-glovo-parity/task-4-report.md §2). It was
+      # .superpowers/sdd/2026-08-02-parity/task-4-report.md §2). It was
       # a real gap - six functions were redeployed by nothing at all - but it
       # was closed in 5c22ed5 with path-filtered workflows, which are strictly
       # more precise than extending this list. The safety blocker is also gone:
