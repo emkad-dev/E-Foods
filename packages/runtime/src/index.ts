@@ -8,3 +8,5 @@
 //   import { useAppStateVisibility } from '<...>/packages/runtime/src/useAppStateVisibility';
 export * from './useVisiblePolling';
 export * from './visiblePoller';
+export * from './realtimeResource';
+export * from './useRealtimeResource';
