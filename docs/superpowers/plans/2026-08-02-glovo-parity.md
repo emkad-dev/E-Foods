@@ -571,11 +571,48 @@ calls.
 
 ---
 
+### Task 25 — [H1] Admin restaurant publish control
+
+**Why this exists:** Task 3's call-site audit found `adminUpdateRestaurantApproval` wired into
+the admin Approvals page (Publish / Unpublish buttons) with **no server-side implementation —
+it never existed**, verified by grep against the 7,168-line pre-split `app-rpc`. The buttons
+have been hitting a 501 for as long as they have shipped. Task 3 deletes the dead UI; this
+task builds the capability properly.
+
+**Goal:** an admin can publish and unpublish an already-approved restaurant without going
+through the application flow.
+
+- New action `adminSetRestaurantPublished` in the `admin` domain, registered in
+  `_shared/rpc/actions.ts` `ADMIN_ACTIONS` (which raises the action count to 60 — the
+  generator's count assertions in `packages/domain/src/rpcRoutes.test.ts` must be updated in
+  the same commit or the suite fails, which is the intended safety net working).
+- `ensureRole(context.role, ['admin'])`. Takes `{ restaurantId, isPublished }`, writes
+  `RestaurantRecord.isPublished`, writes an audit entry, and broadcasts on the `restaurants`
+  topic so open customer apps update without a poll.
+- Unpublishing must **not** cancel in-flight orders — it only removes the restaurant from
+  discovery and blocks new placement. `placeCustomerOrder` already rejects unpublished
+  restaurants; verify that path rather than duplicating the check.
+- Restore the Publish / Unpublish controls in `apps/admin-web/src/pages/ApprovalsPage.tsx`
+  against the real action, with the error surfaced through the existing `ErrorBanner` path.
+
+**Tests:** Deno tests — non-admin rejected 403; unknown restaurant 404; publish and unpublish
+both persist and emit an audit row; the broadcast fires. Node test — the regenerated route map
+still round-trips and the count assertions match 60.
+
+**Done when:** `npm run test`, `npm run build:admin` pass, and the buttons work against a real
+action rather than a 501.
+
+---
+
 ## Sequencing
 
 Task 1 [A1] -> 2 [A2] -> 3 [A3] -> 4 [A4] -> 5 [B1] -> 6 [B2] -> 7 [C1] -> 8 [C2] ->
 9 [D1] -> 10 [D2] -> 11 [D3] -> 12 [E1] -> 13 [E2] -> 14 [E3] -> 15 [F1] -> 16 [F2] ->
-17 [G1] -> 18 [G2] -> 19 [G3] -> 20 [G4] -> 21 [G5] -> 22 [G6] -> 23 [G7] -> 24 [G8]
+17 [G1] -> 18 [G2] -> 19 [G3] -> 20 [G4] -> 21 [G5] -> 22 [G6] -> 23 [G7] -> 24 [G8] ->
+25 [H1]
+
+Task 25 [H1] is appended rather than inserted: it is a latent defect Task 3's gate surfaced,
+not a dependency of anything. It may be pulled forward if an admin needs the control sooner.
 
 A is first because every later task lands in a smaller blast radius once it is done. B is
 second because it is the live cost problem. C removes the hardest operational ceiling. D is
