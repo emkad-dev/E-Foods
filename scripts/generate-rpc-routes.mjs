@@ -16,12 +16,17 @@ import fs from 'node:fs';
 
 import { ACTIONS_SOURCE_PATH, RPC_ROUTES_OUTPUT_PATH, buildRpcRoutes, renderRpcRoutesModule } from './rpc-routes-lib.mjs';
 
+// Optional output-path override (argv[2]), used only by
+// packages/domain/src/rpcRoutes.test.ts's idempotency check so it can run
+// this exact CLI twice against a scratch file without ever writing to the
+// tracked packages/domain/src/rpcRoutes.ts. `npm run generate:rpc-routes`
+// passes no argument and always writes the real committed path.
+const outputPath = process.argv[2] ?? RPC_ROUTES_OUTPUT_PATH;
+
 const actionsSource = fs.readFileSync(ACTIONS_SOURCE_PATH, 'utf8');
-const { rpcRoutes, anonymousActions } = buildRpcRoutes(actionsSource);
-const output = renderRpcRoutesModule({ rpcRoutes, anonymousActions });
+const { rpcRoutes } = buildRpcRoutes(actionsSource);
+const output = renderRpcRoutesModule({ rpcRoutes });
 
-fs.writeFileSync(RPC_ROUTES_OUTPUT_PATH, output, 'utf8');
+fs.writeFileSync(outputPath, output, 'utf8');
 
-console.log(
-  `generate-rpc-routes: wrote ${Object.keys(rpcRoutes).length} action route(s) and ${anonymousActions.length} anonymous action(s) to ${RPC_ROUTES_OUTPUT_PATH}`
-);
+console.log(`generate-rpc-routes: wrote ${Object.keys(rpcRoutes).length} action route(s) to ${outputPath}`);

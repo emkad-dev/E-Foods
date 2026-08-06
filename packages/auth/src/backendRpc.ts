@@ -4,7 +4,7 @@ import {
   FunctionsRelayError,
   type SupabaseClient,
 } from '@supabase/supabase-js';
-import { resolveRpcMode, resolveRpcTarget } from '../../domain/src/rpcRoutes';
+import { KNOWN_RPC_TARGETS, resolveRpcMode, resolveRpcTarget } from '../../domain/src/rpcRoutes';
 import { deriveRpcFunctionUrl } from '../../domain/src/rpcUrl';
 import { clearSupabaseSession, isStaleSupabaseSessionError, SESSION_EXPIRED_ERROR_MESSAGE } from './session';
 
@@ -113,7 +113,7 @@ export const callBackendRpc = async <T>(
     // transport-level failure by the catch below, falling back to the
     // relay — it is not a routing bug, so it doesn't need to fail loudly
     // the way an unknown action does.
-    const targetUrl = deriveRpcFunctionUrl(env.backendRpcUrl.trim(), targetFunction);
+    const targetUrl = deriveRpcFunctionUrl(env.backendRpcUrl.trim(), targetFunction, KNOWN_RPC_TARGETS);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

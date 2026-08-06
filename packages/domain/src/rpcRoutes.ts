@@ -31,6 +31,16 @@ export type RpcMode = 'split' | 'legacy';
  */
 export type RpcTarget = RpcFunction | typeof LEGACY_RPC_FUNCTION;
 
+/**
+ * Runtime-checkable list of every valid RpcTarget value. RpcTarget only
+ * exists at compile time; packages/domain/src/rpcUrl.ts's
+ * deriveRpcFunctionUrl needs this at runtime to validate that the URL
+ * segment it's about to replace is actually a known Edge Function name
+ * rather than guessing — e.g. refusing to mistake an API-version segment
+ * like "v1" for a function name.
+ */
+export const KNOWN_RPC_TARGETS: readonly RpcTarget[] = ['feasty-orders', 'feasty-dispatch', 'feasty-partner', 'feasty-admin', 'feasty-account', LEGACY_RPC_FUNCTION];
+
 /** The authoritative action -> split-mode Edge Function map. Covers exactly the 59 actions in actions.ts. */
 export const RPC_ROUTES: Record<string, RpcFunction> = {
   "customerGetOrders": 'feasty-orders',
@@ -94,9 +104,6 @@ export const RPC_ROUTES: Record<string, RpcFunction> = {
   "deleteAdminAccess": 'feasty-account',
 };
 
-/** Actions that must be resolvable (and, server-side, callable) before authentication. Mirrors actions.ts's ANONYMOUS_ACTIONS. */
-export const ANONYMOUS_RPC_ACTIONS: readonly string[] = ["promoTrack", "bootstrapFirstAdmin"];
-
 /**
  * Resolves the split-mode Edge Function for an action. Throws on an unknown
  * action — a typo'd action name must fail loudly at the call site, never
@@ -129,6 +136,16 @@ export const resolveRpcTarget = (action: string, mode: RpcMode): RpcTarget => {
  * rather than throwing, so a missing or mistyped env var never breaks
  * routing — only the literal value 'legacy' (case-insensitive, trimmed)
  * activates the kill switch.
+ *
+ * Honest recovery path — this is NOT a runtime flip: EXPO_PUBLIC_RPC_MODE /
+ * VITE_RPC_MODE are inlined into the bundle at build time (Metro for the
+ * three Expo web apps, Vite for admin-web), so recovering from a bad
+ * split-function deploy means editing the value in
+ * .github/workflows/deploy-{customer,partner,admin}.yml (and .env.apps for
+ * local builds) and letting CI rebuild + redeploy — a workflow edit plus a
+ * redeploy, not an instant flip. Installed native mobile builds (customer/
+ * partner/dispatch on iOS/Android) need an EAS Update or a store release to
+ * pick up the change; there is no web-only equivalent for those.
  */
 export const resolveRpcMode = (value: string | undefined | null): RpcMode =>
   value?.trim().toLowerCase() === 'legacy' ? 'legacy' : 'split';

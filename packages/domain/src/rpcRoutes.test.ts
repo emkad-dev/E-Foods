@@ -20,18 +20,26 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import { test } from 'node:test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  ANONYMOUS_RPC_ACTIONS,
   LEGACY_RPC_FUNCTION,
   RPC_ROUTES,
   resolveRpcFunction,
   resolveRpcMode,
   resolveRpcTarget,
 } from './rpcRoutes.ts';
+
+// The generator always writes LF; on a Windows checkout with
+// core.autocrlf=true the committed file can check out as CRLF (a
+// .gitattributes entry pins rpcRoutes.ts to eol=lf to prevent that going
+// forward, but this normalization is a second line of defense so a raw
+// string comparison here never reports a false "drift" — and never
+// overwrites the tracked file — over a line-ending difference alone).
+const normalizeLineEndings = (text: string): string => text.replace(/\r\n/g, '\n');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -91,11 +99,6 @@ test('generated rpcRoutes.ts has not drifted from actions.ts', async () => {
   assert.deepEqual(RPC_ROUTES, expected);
 });
 
-test('ANONYMOUS_RPC_ACTIONS mirrors actions.ts ANONYMOUS_ACTIONS', () => {
-  const expected = extractActionArrayIndependently(actionsSource, 'ANONYMOUS_ACTIONS');
-  assert.deepEqual([...ANONYMOUS_RPC_ACTIONS], expected);
-});
-
 test('resolveRpcFunction throws on an unknown action', () => {
   assert.throws(() => resolveRpcFunction('notARealAction'), /Unknown RPC action/);
 });
@@ -132,14 +135,35 @@ test('resolveRpcMode resolves "legacy" case- and whitespace-insensitively', () =
   assert.equal(resolveRpcMode('  Legacy  '), 'legacy');
 });
 
-test('generator is idempotent: running it twice leaves rpcRoutes.ts byte-identical', () => {
-  const committed = fs.readFileSync(RPC_ROUTES_OUTPUT_PATH, 'utf8');
+test('generator is idempotent and matches the committed file, without writing to it', () => {
+  // Runs the real generator CLI twice, but redirected (via its optional
+  // argv[2] output-path override) to a scratch file in a temp dir — never
+  // the tracked packages/domain/src/rpcRoutes.ts. A prior version of this
+  // test wrote directly to the tracked file: on a fresh Windows checkout
+  // (core.autocrlf=true, no .gitattributes pin) that produced a misleading
+  // "drifted" failure from a pure line-ending mismatch, and — because the
+  // test still passed on a second run — silently rewrote a tracked file
+  // (and any in-progress hand edit to it) as a side effect of `npm test`.
+  // This version never writes to a tracked path and normalizes line
+  // endings before comparing, so only real content drift can fail it.
+  const committed = normalizeLineEndings(fs.readFileSync(RPC_ROUTES_OUTPUT_PATH, 'utf8'));
 
-  execFileSync(process.execPath, [GENERATOR_PATH], { stdio: 'pipe' });
-  const afterFirstRun = fs.readFileSync(RPC_ROUTES_OUTPUT_PATH, 'utf8');
-  assert.equal(afterFirstRun, committed, 'regenerating changed the committed file — it had drifted from actions.ts');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpc-routes-idempotency-'));
+  const tmpOutputPath = path.join(tmpDir, 'rpcRoutes.ts');
 
-  execFileSync(process.execPath, [GENERATOR_PATH], { stdio: 'pipe' });
-  const afterSecondRun = fs.readFileSync(RPC_ROUTES_OUTPUT_PATH, 'utf8');
-  assert.equal(afterSecondRun, afterFirstRun, 'a second regeneration produced different output — generator is not idempotent');
+  try {
+    execFileSync(process.execPath, [GENERATOR_PATH, tmpOutputPath], { stdio: 'pipe' });
+    const firstRun = normalizeLineEndings(fs.readFileSync(tmpOutputPath, 'utf8'));
+    assert.equal(
+      firstRun,
+      committed,
+      'the generator\'s output no longer matches the committed rpcRoutes.ts — run `npm run generate:rpc-routes` and commit the result'
+    );
+
+    execFileSync(process.execPath, [GENERATOR_PATH, tmpOutputPath], { stdio: 'pipe' });
+    const secondRun = normalizeLineEndings(fs.readFileSync(tmpOutputPath, 'utf8'));
+    assert.equal(secondRun, firstRun, 'a second regeneration produced different output — generator is not idempotent');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
