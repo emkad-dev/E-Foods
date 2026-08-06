@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RIDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { useAuth } from '../contexts/AuthContext';
 import { getDispatchRiders as getDispatchRidersReadModel } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
 import { resolveDispatchRiderCoordinate } from '../utils/dispatchRiderLocation';
+
+const FALLBACK_MS = 120000;
 
 export type DispatchRider = {
   activeLoadCount: number;
@@ -127,6 +132,10 @@ export const useDispatchRiders = () => {
   const [riders, setRiders] = useState<DispatchRider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isVisible = useAppStateVisibility();
+  const activeRef = useRef(false);
+
+  const enabled = !authLoading && Boolean(user);
 
   useEffect(() => {
     if (authLoading) {
@@ -140,52 +149,57 @@ export const useDispatchRiders = () => {
       return;
     }
 
-    let cancelled = false;
-
-    const loadRiders = async () => {
-      try {
-        const nextData = await getDispatchRidersReadModel();
-
-        if (cancelled) {
-          return;
-        }
-
-        const nextRiders = nextData.riders.map((rider: { id: string } & Record<string, unknown>) =>
-          normalizeDispatchRider(rider.id, rider as unknown as Record<string, unknown>)
-        );
-
-        setRiders(nextRiders);
-        setError(null);
-      } catch (nextError: any) {
-        if (cancelled) {
-          return;
-        }
-
-        console.error('Error loading dispatch riders:', nextError);
-        setRiders([]);
-        setError(nextError.message ?? 'Unable to load dispatch riders right now.');
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void loadRiders();
-    const unsubscribe = subscribeToRealtimeChanges(supabase, [RIDERS_REALTIME_TOPIC], () => {
-      void loadRiders();
-    });
-    // Slow fallback poll in case the realtime connection drops silently.
-    const interval = setInterval(() => {
-      void loadRiders();
-    }, 30000);
+    activeRef.current = true;
 
     return () => {
-      cancelled = true;
-      clearInterval(interval);
-      unsubscribe();
+      activeRef.current = false;
     };
   }, [authLoading, user]);
+
+  const loadRiders = useCallback(async () => {
+    try {
+      const nextData = await getDispatchRidersReadModel();
+
+      if (!activeRef.current) {
+        return;
+      }
+
+      const nextRiders = nextData.riders.map((rider: { id: string } & Record<string, unknown>) =>
+        normalizeDispatchRider(rider.id, rider as unknown as Record<string, unknown>)
+      );
+
+      setRiders(nextRiders);
+      setError(null);
+    } catch (nextError: any) {
+      if (!activeRef.current) {
+        return;
+      }
+
+      console.error('Error loading dispatch riders:', nextError);
+      setRiders([]);
+      setError(nextError.message ?? 'Unable to load dispatch riders right now.');
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(supabase, [RIDERS_REALTIME_TOPIC], () => onChanged(), onStatusChange),
+    []
+  );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadRiders,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled,
+  });
 
   const onlineRiders = useMemo(
     () => riders.filter((rider) => !rider.status.toLowerCase().includes('offline')),
