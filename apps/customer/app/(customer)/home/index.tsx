@@ -1,5 +1,5 @@
 import { FontAwesome } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,12 +14,17 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
+import { supabase } from '../../../src/services/supabase/config';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
 import {
   type DiscoveryRestaurant,
@@ -90,8 +95,13 @@ export default function HomeScreen() {
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [expandedShelf, setExpandedShelf] = useState<'nearby' | null>(null);
-  const catalogRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMountedRef = useRef(true);
+  // Distinguishes the very first load (shows the full-screen skeleton) from
+  // every later refresh driven by useRealtimeResource -- changed broadcast,
+  // reconnect, foreground resume, or the disconnected-only fallback poll --
+  // which should refresh quietly (mode: 'background') rather than re-flash
+  // the skeleton on the highest-traffic screen in the app.
+  const hasLoadedOnceRef = useRef(false);
+  const isVisible = useAppStateVisibility();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -141,41 +151,32 @@ export default function HomeScreen() {
     []
   );
 
-  const scheduleCatalogRefresh = useCallback(
-    (delayMs: number) => {
-      if (!isMountedRef.current) {
-        return;
-      }
+  // First call is 'initial' (full skeleton); every later call -- from
+  // useRealtimeResource's changed/reconnect/foreground-resume/fallback-poll
+  // triggers -- is 'background' (quiet), matching the old scheduler's
+  // initial-vs-recurring split without a second, separate mount fetch.
+  const refreshCatalog = useCallback(async () => {
+    const mode = hasLoadedOnceRef.current ? 'background' : 'initial';
+    hasLoadedOnceRef.current = true;
+    await loadRestaurants(mode);
+  }, [loadRestaurants]);
 
-      if (catalogRefreshTimerRef.current) {
-        clearTimeout(catalogRefreshTimerRef.current);
-      }
-
-      catalogRefreshTimerRef.current = setTimeout(async () => {
-        const succeeded = await loadRestaurants('background');
-        scheduleCatalogRefresh(succeeded ? 30000 : 120000);
-      }, delayMs);
-    },
-    [loadRestaurants]
+  const subscribeToCatalog = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(supabase, [RESTAURANTS_REALTIME_TOPIC], () => onChanged(), onStatusChange),
+    []
   );
 
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    const initializeCatalog = async () => {
-      const succeeded = await loadRestaurants('initial');
-      scheduleCatalogRefresh(succeeded ? 30000 : 120000);
-    };
-
-    void initializeCatalog();
-
-    return () => {
-      isMountedRef.current = false;
-      if (catalogRefreshTimerRef.current) {
-        clearTimeout(catalogRefreshTimerRef.current);
-      }
-    };
-  }, [loadRestaurants, scheduleCatalogRefresh]);
+  // Realtime is the transport (this screen shows every restaurant, so unlike
+  // cart.tsx/restaurant/[id].tsx it doesn't filter the topic to one id); the
+  // fallback poll only fires while the channel is not confirmed SUBSCRIBED,
+  // and only while the app is visible.
+  useRealtimeResource({
+    subscribe: subscribeToCatalog,
+    load: refreshCatalog,
+    isVisible,
+    fallbackMs: 120000,
+  });
 
   const discoveryResults = useMemo(() => {
     return restaurants
@@ -234,13 +235,7 @@ export default function HomeScreen() {
   };
 
   const handleRetryCatalog = async () => {
-    if (catalogRefreshTimerRef.current) {
-      clearTimeout(catalogRefreshTimerRef.current);
-      catalogRefreshTimerRef.current = null;
-    }
-
-    const succeeded = await loadRestaurants('manual');
-    scheduleCatalogRefresh(succeeded ? 30000 : 120000);
+    await loadRestaurants('manual');
   };
 
   const customerName = getCustomerName(user?.displayName, user?.email);
