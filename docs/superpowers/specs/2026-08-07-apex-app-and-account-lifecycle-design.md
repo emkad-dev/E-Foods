@@ -127,6 +127,10 @@ Two cancel paths, both restoring by clearing `deletionRequestedAt`, `purgeSchedu
 
 **Access denial is enforced on the backend, not by the client.** A client-side sign-out would leave a live session window and make the protection depend on app behaviour — a stale client, an in-flight background request, or any non-app caller holding a valid JWT could keep operating.
 
+There are **two** paths into the backend, and both must be gated. Gating only the edge functions is insufficient: the apps also talk to the Supabase Data API directly (`apps/customer/src/services/supabase/profile.ts:38,63,114`), so a pending-deletion user holding a valid JWT could bypass the edge functions entirely.
+
+#### C3a — edge-function gate
+
 The gate lives in `getAuthenticatedRequestContext` (`supabase/functions/_shared/request-context.ts:22`), immediately after the existing `accountDisabled` check at line 46. It is the single chokepoint for every authenticated backend request: `app-rpc` (`index.ts:3533`) and `notifications` (`index.ts:32`) both resolve their context through it, so one change covers both, and any future function using it inherits the gate.
 
 Signature becomes:
@@ -140,6 +144,44 @@ Default is `false` — a request from an account with `deletionRequestedAt != nu
 The rejection is a **structured 403**, not a bare `Error`. It carries `code: 'ACCOUNT_PENDING_DELETION'` and `purgeScheduledAt` in the body. The client therefore renders the pending-deletion screen from the rejection itself and needs no separate profile read — which is why the exemption list stays at exactly one action rather than growing to cover profile hydration.
 
 Note this differs from the existing `accountDisabled` throw, which is a bare `Error` with no `.status` (see the comment at `index.ts:7142`). The new rejection needs `.status = 403` so it is not surfaced as a 500.
+
+#### The error envelope must carry the code
+
+The structured rejection does **not** work with the current response plumbing. Both `app-rpc` (`index.ts:7137`) and `notifications` (`index.ts:122`) serialize exactly `{ error: { message } }` and drop everything else, so `code` and `purgeScheduledAt` would never reach the client and the "no separate profile read" path would silently fail.
+
+`_shared/observability.ts` already has the right primitive: `ClientSafeError`, carrying `.status` plus an `expose` marker, with `getErrorStatus` reading `.status` and a convention that only 4xx client-safe errors are surfaced. Extend it with optional `code` and `details`, and update both catch blocks to include them when present, subject to the existing exposure rule.
+
+This also removes a live wart: `app-rpc` currently forces the disabled-account 403 by **string-comparing** `error.message === 'This account is disabled.'`. Once that throw becomes a `ClientSafeError(403, …)`, the string match goes away.
+
+#### C3b — Data API gate
+
+Verified against production: `UserAccount` has RLS enabled with three policies, all `uid = auth.uid()` self-access, and the UPDATE policy carries **no column restriction**. A pending-deletion user could therefore `UPDATE` their own row over the Data API and clear `deletionRequestedAt` themselves — cancelling their own deletion without ever calling the RPC. The deletion state would be client-writable.
+
+Production already has the right mechanism for this: the `ebuy_guard_useraccount_sensitive_update` trigger, which raises on direct updates to sensitive `UserAccount` columns (`accountDisabled`, `disabledAt`, `roleDisplay`, the application-status fields, …) unless the caller is `service_role` or an admin. Two changes, no new mechanism:
+
+1. **Add the new columns to that trigger's guarded list** — `deletionRequestedAt`, `purgeScheduledAt`, `deletionCancelTokenHash`, `purgeAttemptCount`, `purgeLastAttemptAt`, `purgeLastError`. This alone closes the self-cancel hole. `deleteOwnAccount` and the purge runner both write via `serviceClient`, which the trigger already exempts.
+2. **Reject all self-writes during the grace period.** Extend the same trigger so any non-service, non-admin update where `OLD."deletionRequestedAt" IS NOT NULL` raises.
+
+The other three client-writable tables get the same condition. The full set of tables `authenticated` can write, verified in production, is exactly four:
+
+| Table | Client writes | Treatment |
+|---|---|---|
+| `UserAccount` | INSERT, UPDATE | trigger, as above |
+| `UserRole` | INSERT | policy condition |
+| `UserPolicyAcceptance` | INSERT | policy condition |
+| `CustomerFavoriteRestaurant` | INSERT, UPDATE, DELETE | policy condition |
+
+`CustomerOrder` is **not** client-writable — orders already go through `app-rpc` — so the money path needs no change here.
+
+The policy condition uses a `stable security definer` helper following the existing `ebuy_*` convention:
+
+```sql
+public.ebuy_account_pending_deletion() returns boolean
+```
+
+returning whether the calling user's own account is pending deletion. `security definer` avoids depending on `UserAccount`'s own RLS from inside another table's policy.
+
+**SELECT stays permitted.** Self-reads are harmless and profile hydration needs them before the app can know its own state.
 
 ### C4 — pending-deletion screen
 
@@ -214,7 +256,9 @@ That is a four-app change to the highest-blast-radius code in the product, bough
 
 Deferring the ban to purge time removes the problem instead of solving it. The gate moves to `getAuthenticatedRequestContext`, which already loads the account record and can therefore return the purge date with its rejection — so the client can state the date and offer restore without a second call, and without any new auth contract.
 
-The cost is that a valid session continues to exist through the grace period. That is acceptable **only because the gate is server-side** (C3): the session is a credential the backend refuses to act on. It is not a window of access. The one action it can still perform is `cancelAccountDeletion`, which is the point.
+The cost is that a valid session continues to exist through the grace period. That is acceptable **only because both gates are server-side** (C3a for the edge functions, C3b for the Data API): the session is a credential the backend refuses to act on, by either route. It is not a window of access. The one action it can still perform is `cancelAccountDeletion`, which is the point.
+
+If either gate were dropped, this design would become unsafe — that is the dependency to keep in mind if the grace period is ever revisited.
 
 An unauthenticated *account-status-by-email* lookup was also considered and rejected outright: it is an email-enumeration oracle, and this project already carries a wildcard-permissive redirect allowlist.
 
@@ -236,10 +280,15 @@ An unauthenticated *account-status-by-email* lookup was also considered and reje
 - purge-eligibility selection: respects `purgeScheduledAt`, skips retry-exhausted rows, honours backoff
 - `getAuthenticatedRequestContext`: rejects when `deletionRequestedAt` is set; allows only with `allowPendingDeletion: true`; rejection carries `.status = 403`, `code`, and `purgeScheduledAt`; unaffected accounts pass through unchanged
 - the `allowPendingDeletion: true` exemption is passed for `cancelAccountDeletion` and no other action
+- `ClientSafeError` round-trip: `code` and `details` survive serialization in both functions; a 5xx never exposes them, per the existing convention
 
 **Integration**
 - delete → the same session calls an arbitrary `app-rpc` action → 403 `ACCOUNT_PENDING_DELETION` (**the security assertion: this must hold with no client cooperation at all**)
 - delete → `notifications` with the same token → rejected
+- delete → the rejection body actually contains `code` and `purgeScheduledAt` (guards against the envelope silently dropping them)
+- **delete → the same session `UPDATE`s its own `UserAccount` row over the Data API to clear `deletionRequestedAt` → rejected** (the self-cancel hole; must be tested against real RLS, not mocked)
+- delete → direct Data API writes to `UserRole`, `UserPolicyAcceptance`, `CustomerFavoriteRestaurant` → rejected
+- delete → direct Data API `SELECT` on `user_profiles` → still permitted
 - delete → `cancelAccountDeletion` on that session → succeeds → previously-blocked action now succeeds
 - delete → cancel via emailed token without a session → restored
 - delete → advance clock past `purgeScheduledAt` → purge → auth user gone
@@ -263,16 +312,18 @@ An unauthenticated *account-status-by-email* lookup was also considered and reje
 | 3 | B2 | customer web/native split; double-send fix |
 | 4 | C1 | migration: deletion + purge columns, partial index, `user_profiles` view replacement |
 | 5 | C2 | `deleteOwnAccount` schedules; both cancel RPCs; cancel email |
-| 6 | C3 | server-side gate in `getAuthenticatedRequestContext` + structured 403 |
-| 7 | C4 | pending-deletion screen + restore (customer, partner, dispatch) |
-| 8 | C5 | `account-purge-runner` + daily cron, shipped disabled |
-| 9 | C6 | admin pending-deletion visibility and restore |
-| 10 | E | per-app `ConfirmDialog` and the five call sites |
+| 6 | C3a | `ClientSafeError` code/details + envelope change in both functions; gate in `getAuthenticatedRequestContext` |
+| 7 | C3b | migration: extend `ebuy_guard_useraccount_sensitive_update`, add `ebuy_account_pending_deletion()`, policy conditions on the other three tables |
+| 8 | C4 | pending-deletion screen + restore (customer, partner, dispatch) |
+| 9 | C5 | `account-purge-runner` + daily cron, shipped disabled |
+| 10 | C6 | admin pending-deletion visibility and restore |
+| 11 | E | per-app `ConfirmDialog` and the five call sites |
 
-C3 must land before or with C4. The gate is the enforcement; the screen is only presentation.
+C3a and C3b must both land before or with C4. The gates are the enforcement; the screen is only presentation. C3a's envelope change must precede the gate itself, or the client cannot read the rejection.
 
 ## Risks
 
 - **Deploy ordering.** `app-rpc` must deploy before the Supabase Site URL changes, or auth emails point at a dead host. Per `docs` and prior incidents, deploy only from a `main`-current worktree — a stale worktree once reverted `app-rpc` to pricing v1 in production.
 - **`app-rpc` is already undeployed relative to `main`.** Partner onboarding stages 1–2 merged but were never deployed, so this branch's `app-rpc` changes will ship those too. That needs to be a deliberate, verified deploy rather than a side effect.
+- **The Data API is a second, easily-forgotten attack surface.** The apps read and write `UserAccount`, `UserRole`, `UserPolicyAcceptance`, and `CustomerFavoriteRestaurant` directly through PostgREST, not only through the edge functions. Any future account-state feature has to consider both paths — an edge-function check alone is not enforcement. The four-table set was verified in production against `pg_policy` and should be re-verified rather than assumed if policies change.
 - **Purge is irreversible by construction.** The runner should ship disabled (cron scheduled but the function short-circuiting on a flag) until at least one grace period has been observed end-to-end in production.
