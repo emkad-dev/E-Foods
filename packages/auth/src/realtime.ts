@@ -4,9 +4,14 @@ export const ORDERS_REALTIME_TOPIC = 'orders';
 export const RIDERS_REALTIME_TOPIC = 'dispatch-riders';
 export const RESTAURANTS_REALTIME_TOPIC = 'restaurants';
 export const PROMOS_REALTIME_TOPIC = 'promos';
+export const SUPPORT_INBOX_TOPIC = 'support-inbox';
 export const REALTIME_CHANGED_EVENT = 'changed';
 
 export const orderRealtimeTopic = (orderId: string) => `order-${orderId}`;
+// Mirrors supabase/functions/_shared/realtime.ts's supportThreadTopic --
+// the broadcaster (edge function) and the subscriber (this client package)
+// must agree on the topic name.
+export const supportThreadTopic = (conversationId: string) => `support-${conversationId}`;
 
 export type RealtimeChangeHandler = (payload: Record<string, unknown>) => void;
 
