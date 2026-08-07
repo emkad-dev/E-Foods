@@ -1,11 +1,25 @@
+import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { partnerTheme } from '../../src/theme/palette';
 
 export default function ApplicationUnderReviewScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { signOut, user } = useAuth();
+  const applicationStatus = (user?.partnerApplicationStatus ?? '').trim().toLowerCase();
+  const isVerificationFailure =
+    applicationStatus === 'rejected' || applicationStatus === 'verification_failed' || applicationStatus === 'verification-failed';
+
+  const statusCopy = useMemo(() => {
+    if (isVerificationFailure) {
+      return 'We reviewed your submission and need you to update a few details before we can approve the restaurant.';
+    }
+
+    return 'We are verifying your business identity, restaurant details, and payout setup. We will email you as soon as the review is complete.';
+  }, [isVerificationFailure]);
 
   return (
     <ScrollView
@@ -17,18 +31,28 @@ export default function ApplicationUnderReviewScreen() {
     >
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
-        <Text style={styles.title}>Your application is under review</Text>
+        <Text style={styles.title}>{isVerificationFailure ? 'Update your onboarding details' : 'Your application is under review'}</Text>
         <Text style={styles.copy}>
-          Thanks for applying. Our team is checking your details. We will email
-          {user?.email ? ` ${user.email}` : ' you'} as soon as your restaurant is approved.
+          {statusCopy}
+          {user?.email ? ` We will email ${user.email} when the next step is ready.` : ''}
         </Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>What happens next</Text>
-        <Text style={styles.cardLine}>1. We verify your identity and restaurant details.</Text>
-        <Text style={styles.cardLine}>2. You get an email with the decision.</Text>
-        <Text style={styles.cardLine}>3. Once approved, sign in to set up your menu and go live.</Text>
+        <Text style={styles.cardTitle}>{isVerificationFailure ? 'What needs to happen next' : 'What happens next'}</Text>
+        <Text style={styles.cardLine}>
+          1. We verify your identity, restaurant details, and payout information.
+        </Text>
+        <Text style={styles.cardLine}>
+          2. Once verification passes, the restaurant is approved and the payout subaccount is created.
+        </Text>
+        <Text style={styles.cardLine}>3. After approval, you go straight into the menu builder.</Text>
+
+        {isVerificationFailure ? (
+          <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/complete-restaurant-details')}>
+            <Text style={styles.primaryButtonText}>Update details</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()}>
           <Text style={styles.secondaryButtonText}>Sign out</Text>
@@ -66,6 +90,14 @@ const styles = StyleSheet.create({
   },
   cardTitle: { color: partnerTheme.text, fontSize: 16, fontWeight: '800', marginBottom: 12 },
   cardLine: { color: partnerTheme.textMuted, fontSize: 14, lineHeight: 22 },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.accent,
+    borderRadius: 18,
+    marginTop: 20,
+    paddingVertical: 14,
+  },
+  primaryButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.cream,

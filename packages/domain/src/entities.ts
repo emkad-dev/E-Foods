@@ -23,7 +23,7 @@ export interface UserDocument extends DocumentData {
   emailVerified: boolean;
   displayName?: string;
   phoneNumber?: string;
-  partnerApplicationStatus?: 'pending' | 'approved' | 'rejected' | string;
+  partnerApplicationStatus?: 'pending' | 'pending_verification' | 'verification_failed' | 'approved' | 'rejected' | string;
   partnerApplicationReviewedAt?: string | null;
   partnerApplicationRejectionReason?: string | null;
   dispatchApplicationStatus?: 'pending' | 'approved' | 'rejected' | string;
