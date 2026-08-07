@@ -58,7 +58,18 @@ export const createRealtimeResourceController = (
   debounceMs = 400,
   timers: RealtimeResourceTimers = realTimers
 ): RealtimeResourceController => {
-  let status: RealtimeChannelStatus = 'DISCONNECTED';
+  // null distinguishes "never told" from an observed 'DISCONNECTED'. Every
+  // subscribe() implementation replays the channel's current status into
+  // onStatusChange on join (see subscribeToRealtimeChanges), so the very
+  // first status a fresh controller ever receives -- whether it's an
+  // already-live shared topic reporting SUBSCRIBED synchronously, or a
+  // first-time join reporting it moments later -- is not a reconnect, it's
+  // the initial connection settling. Seeding status as 'DISCONNECTED' made
+  // that first report look identical to a real DISCONNECTED->SUBSCRIBED
+  // transition and fired a second, redundant onRefetch() right after the
+  // mount-time load() already covered it. Only a transition away from a
+  // *previously observed* non-null status counts as a genuine reconnect.
+  let status: RealtimeChannelStatus | null = null;
   // null distinguishes "never told" from an explicit hidden/visible value, so
   // the first setVisible(true) call (mount) does not get treated as a
   // hidden -> visible resume and double-fire a catch-up refetch.
@@ -80,10 +91,12 @@ export const createRealtimeResourceController = (
     }
   };
 
-  // Starts the fallback interval only when both conditions hold: nobody is
-  // watching a confirmed-live channel (status !== SUBSCRIBED) and the app is
-  // actually in the foreground. Safe to call repeatedly -- a live interval is
-  // left alone.
+  // Starts the fallback interval only when all three hold: a real status
+  // report has arrived (status !== null -- otherwise this would fire before
+  // subscribe() has told us anything, guessing disconnected by default),
+  // nobody is watching a confirmed-live channel (status !== SUBSCRIBED), and
+  // the app is actually in the foreground. Safe to call repeatedly -- a live
+  // interval is left alone.
   const ensureInterval = () => {
     if (visible !== true || status !== 'DISCONNECTED' || intervalHandle !== null) {
       return;
@@ -98,6 +111,7 @@ export const createRealtimeResourceController = (
         return;
       }
 
+      const previousStatus = status;
       status = next;
 
       if (status === 'SUBSCRIBED') {
@@ -106,12 +120,17 @@ export const createRealtimeResourceController = (
         // A reconnect can straddle a broadcast nobody was joined to receive
         // (e.g. an order placed during a 15s Wi-Fi blip) -- the fallback
         // interval alone can't catch that, it only guards against staying
-        // disconnected. One refetch per transition-to-SUBSCRIBED closes that
-        // gap, matching what the pre-B1 `.subscribe(status => status ===
-        // 'SUBSCRIBED' && loadOrder())` code already did. Skipped while
-        // hidden -- nothing to refresh for; the foreground catch-up in
-        // `setVisible` covers it once someone is actually looking again.
-        if (visible === true) {
+        // disconnected. One refetch per genuine transition-to-SUBSCRIBED
+        // closes that gap, matching what the pre-B1 `.subscribe(status =>
+        // status === 'SUBSCRIBED' && loadOrder())` code already did.
+        // `previousStatus !== null` is what makes this a *genuine* reconnect
+        // rather than the first-ever status report (see the `status` seed
+        // comment above) -- without it, an ordinary cold mount that settles
+        // straight to SUBSCRIBED would double-fetch: once from the caller's
+        // own mount-time load(), once from here. Also skipped while hidden --
+        // nothing to refresh for; the foreground catch-up in `setVisible`
+        // covers it once someone is actually looking again.
+        if (previousStatus !== null && visible === true) {
           onRefetch();
         }
       } else {

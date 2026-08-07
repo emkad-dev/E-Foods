@@ -127,6 +127,35 @@ test('reconnecting to SUBSCRIBED clears the fallback interval', () => {
   assert.equal(fake.liveIntervalCount, 0);
 });
 
+test('the very first status report ever (cold start straight to SUBSCRIBED) does not refetch -- only a genuine reconnect does', () => {
+  const { fake, controller, refetchCount } = setup();
+
+  controller.setVisible(true);
+  // A fresh controller's first-ever status report -- e.g. an already-live
+  // shared topic replaying SUBSCRIBED synchronously on join -- is not a
+  // reconnect. The caller's own mount-time load() already covers it; a
+  // second onRefetch() here would double-fetch on every ordinary mount.
+  controller.setChannelStatus('SUBSCRIBED');
+  assert.equal(refetchCount(), 0);
+  assert.equal(fake.liveIntervalCount, 0);
+
+  // A *later*, genuine disconnect -> reconnect still refetches exactly once.
+  controller.setChannelStatus('DISCONNECTED');
+  assert.equal(refetchCount(), 0);
+  controller.setChannelStatus('SUBSCRIBED');
+  assert.equal(refetchCount(), 1);
+});
+
+test('the very first status report ever (cold start straight to DISCONNECTED) starts the fallback but does not refetch', () => {
+  const { fake, controller, refetchCount } = setup();
+
+  controller.setVisible(true);
+  controller.setChannelStatus('DISCONNECTED');
+
+  assert.equal(refetchCount(), 0);
+  assert.equal(fake.liveIntervalCount, 1);
+});
+
 test('DISCONNECTED to SUBSCRIBED while visible triggers exactly one refetch', () => {
   const { fake, controller, refetchCount } = setup();
 
