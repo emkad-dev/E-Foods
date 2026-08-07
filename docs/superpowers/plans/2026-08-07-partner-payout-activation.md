@@ -256,6 +256,14 @@ git commit -m "feat(backend): add pure payout activation rule"
 - Consumes: the existing private `fetchPaystackJson({ method, path, body })` in the same file, and `sanitizeText` already imported there.
 - Produces: `resolveBankAccount({ accountNumber, bankCode })` → `Promise<{ accountName: string }>`; `createPaystackSubaccount({ accountNumber, bankCode, businessName })` → `Promise<{ subaccountCode: string }>`. Task 5 calls both.
 
+**Critical — what `fetchPaystackJson` returns.** Verified at `supabase/functions/_shared/paystack.ts:122`, its final statement is:
+
+```ts
+return (payload?.data ?? null) as JsonObject | null;
+```
+
+It returns Paystack's **`data` object already unwrapped**, not the full envelope. So read fields directly off the return value (`result.account_name`), never `result.data.account_name` — the latter is always `undefined`. Do **not** change this function's return value; `initializePaystackTransaction` and the other existing callers depend on it exactly as-is.
+
 - [ ] **Step 1: Append the two functions**
 
 ```ts
@@ -269,11 +277,12 @@ export const resolveBankAccount = async ({
   accountNumber: string;
   bankCode: string;
 }): Promise<{ accountName: string }> => {
-  const payload = await fetchPaystackJson({
+  // fetchPaystackJson already unwraps `data` — this IS the data object.
+  const data = await fetchPaystackJson({
     path: `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
   });
 
-  return { accountName: sanitizeText((payload?.data as { account_name?: string } | null)?.account_name) };
+  return { accountName: sanitizeText((data as { account_name?: string } | null)?.account_name) };
 };
 
 // percentage_charge is 0 on purpose: the platform's revenue is the embedded
@@ -288,7 +297,7 @@ export const createPaystackSubaccount = async ({
   bankCode: string;
   businessName: string;
 }): Promise<{ subaccountCode: string }> => {
-  const payload = await fetchPaystackJson({
+  const data = await fetchPaystackJson({
     method: 'POST',
     path: '/subaccount',
     body: {
@@ -299,7 +308,7 @@ export const createPaystackSubaccount = async ({
     },
   });
 
-  const subaccountCode = sanitizeText((payload?.data as { subaccount_code?: string } | null)?.subaccount_code);
+  const subaccountCode = sanitizeText((data as { subaccount_code?: string } | null)?.subaccount_code);
   if (!subaccountCode) {
     fail(500, 'Paystack created the subaccount but returned no subaccount code.');
   }
@@ -308,12 +317,10 @@ export const createPaystackSubaccount = async ({
 };
 ```
 
-- [ ] **Step 2: Confirm `fetchPaystackJson` returns its payload**
-
-Read `supabase/functions/_shared/paystack.ts` lines 109-125. If `fetchPaystackJson` does not `return payload`, add `return payload;` as its final statement — the existing callers ignore the return value, so this is additive and safe.
+- [ ] **Step 2: Confirm the existing callers still compile**
 
 Run: `npx deno check supabase/functions/_shared/paystack.ts`
-Expected: no new errors beyond the repo's known baseline.
+Expected: no new errors beyond the repo's known baseline. `fetchPaystackJson` must be unchanged.
 
 - [ ] **Step 3: Verify the type baseline is unchanged**
 
@@ -347,9 +354,21 @@ import { resolvePayoutActivationPlan } from '../partnerPayoutActivation.ts';
 import { createPaystackSubaccount, resolveBankAccount } from '../paystack.ts';
 ```
 
-- [ ] **Step 2: Insert payout activation at the top of the approve branch**
+- [ ] **Step 2: Insert payout activation between `restaurantId` assignment and the role grant**
 
-Place this immediately inside `if (decision === 'approve') {`, **before** the existing `RestaurantRecord` upsert, so a payout failure aborts before anything goes live:
+**Exact insertion point — this matters more than anything else in this task.** The approve branch currently reads:
+
+```
+508  if (decision === 'approve') {
+509    restaurantId = sanitizeText(application.restaurantId) || crypto.randomUUID();
+510    await syncUserRoleState(applicationId, 'restaurant', context.uid, {   <-- grants the restaurant role
+520    await updateUserAccount(applicationId, {                              <-- sets status APPROVED
+529    const { error: restaurantError } = await serviceClient.from('RestaurantRecord').upsert(
+```
+
+Insert the block below **after line 509 and before line 510**.
+
+Not at the top of the branch: `restaurantId` is not assigned until 509, so inserting above it reads `null`. Not after 510/520 either: `syncUserRoleState` grants the restaurant role and `updateUserAccount` writes `partnerApplicationStatus: APPROVED`, and neither is rolled back when a later `throw` unwinds. Activating after them would leave a partner approved and role-bearing with a failed payout — exactly the posture this plan's Global Constraints forbid and the reason parity Task 7 [C1]'s failure bullet was amended. Activation must be the first thing that can fail in this branch.
 
 ```ts
   const { data: payoutRow } = await serviceClient
@@ -364,6 +383,8 @@ Place this immediately inside `if (decision === 'approve') {`, **before** the ex
   }
 
   let subaccountCode: string;
+  let resolvedAccountName: string | null = null;
+
   if (activationPlan.action === 'reuse') {
     subaccountCode = activationPlan.subaccountCode;
   } else {
@@ -379,21 +400,11 @@ Place this immediately inside `if (decision === 'approve') {`, **before** the ex
         businessName: sanitizeText(application.restaurantName, 'FEASTY partner'),
       });
       subaccountCode = created.subaccountCode;
-
-      await serviceClient
-        .from('RestaurantPayout')
-        .update({
-          paystackSubaccountCode: subaccountCode,
-          resolvedAccountName: resolved.accountName,
-          status: 'active',
-          lastError: null,
-          updatedAt: reviewedAt,
-        })
-        .eq('id', payoutRow!.id);
+      resolvedAccountName = resolved.accountName;
     } catch (error) {
-      // Record the failure and leave the application unapproved. clientErrorMessage
-      // keeps the raw Paystack error server-side; never log payoutRow itself, it
-      // carries the full account number.
+      // Record the failure and let the throw unwind before the role grant.
+      // clientErrorMessage keeps the raw Paystack error server-side; never log
+      // payoutRow itself, it carries the full account number.
       await serviceClient
         .from('RestaurantPayout')
         .update({ status: 'failed', lastError: clientErrorMessage(error), updatedAt: reviewedAt })
@@ -402,12 +413,19 @@ Place this immediately inside `if (decision === 'approve') {`, **before** the ex
     }
   }
 
-  if (activationPlan.action === 'reuse') {
-    await serviceClient
-      .from('RestaurantPayout')
-      .update({ status: 'active', lastError: null, updatedAt: reviewedAt })
-      .eq('id', payoutRow!.id);
-  }
+  // One activation write serves both paths — a reused code re-asserts 'active'
+  // (a prior run may have left the row 'failed' after minting the code), and a
+  // freshly created one is persisted here rather than inside the try block.
+  await serviceClient
+    .from('RestaurantPayout')
+    .update({
+      paystackSubaccountCode: subaccountCode,
+      status: 'active',
+      lastError: null,
+      updatedAt: reviewedAt,
+      ...(resolvedAccountName ? { resolvedAccountName } : {}),
+    })
+    .eq('id', payoutRow!.id);
 ```
 
 Then add `paystackSubaccountCode: subaccountCode,` to the existing `RestaurantRecord` upsert object.
