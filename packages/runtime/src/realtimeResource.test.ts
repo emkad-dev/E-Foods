@@ -127,6 +127,35 @@ test('reconnecting to SUBSCRIBED clears the fallback interval', () => {
   assert.equal(fake.liveIntervalCount, 0);
 });
 
+test('DISCONNECTED to SUBSCRIBED while visible triggers exactly one refetch', () => {
+  const { fake, controller, refetchCount } = setup();
+
+  controller.setVisible(true);
+  controller.setChannelStatus('DISCONNECTED');
+  assert.equal(refetchCount(), 0);
+
+  controller.setChannelStatus('SUBSCRIBED');
+  assert.equal(refetchCount(), 1);
+  assert.equal(fake.liveIntervalCount, 0);
+
+  // A second, redundant SUBSCRIBED report (setChannelStatus is idempotent on
+  // an unchanged value) must not refetch again.
+  controller.setChannelStatus('SUBSCRIBED');
+  assert.equal(refetchCount(), 1);
+});
+
+test('DISCONNECTED to SUBSCRIBED while hidden does not refetch -- the foreground catch-up covers it', () => {
+  const { controller, refetchCount } = setup();
+
+  controller.setVisible(false);
+  controller.setChannelStatus('DISCONNECTED');
+  controller.setChannelStatus('SUBSCRIBED');
+  assert.equal(refetchCount(), 0);
+
+  controller.setVisible(true);
+  assert.equal(refetchCount(), 1);
+});
+
 test('two changed events inside the debounce window produce exactly one refetch', () => {
   const { fake, controller, refetchCount } = setup(120_000, 400);
 
@@ -138,6 +167,32 @@ test('two changed events inside the debounce window produce exactly one refetch'
 
   fake.advance(200); // now 400ms since the second (and last) event
   assert.equal(refetchCount(), 1);
+});
+
+test('notifyChanged while hidden does not arm a debounce timer or refetch', () => {
+  const { fake, controller, refetchCount } = setup();
+
+  controller.setVisible(false);
+  controller.notifyChanged();
+
+  assert.equal(fake.liveTimeoutCount, 0);
+
+  fake.advance(10_000);
+  assert.equal(refetchCount(), 0);
+});
+
+test('notifyChanged that armed a debounce while visible is silenced by backgrounding, and does not fire once hidden', () => {
+  const { fake, controller, refetchCount } = setup();
+
+  controller.setVisible(true);
+  controller.notifyChanged();
+  assert.equal(fake.liveTimeoutCount, 1);
+
+  controller.setVisible(false);
+  assert.equal(fake.liveTimeoutCount, 0);
+
+  fake.advance(10_000);
+  assert.equal(refetchCount(), 0);
 });
 
 test('changed events outside the debounce window each produce their own refetch', () => {

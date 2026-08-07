@@ -23,9 +23,11 @@ export type UseRealtimeResourceOptions = {
    */
   subscribe: RealtimeResourceSubscribe;
   /**
-   * Refetches the resource. Called once on mount, on every `changed`
-   * broadcast (debounced), on foreground/tab-focus resume, and by the
-   * fallback poll. Same stability requirement as `subscribe`.
+   * Refetches the resource. Called once on mount (skipped if `isVisible` is
+   * already false at that point -- the foreground-resume call covers it once
+   * visible), on every `changed` broadcast while visible (debounced), on a
+   * reconnect to `SUBSCRIBED` while visible, on foreground/tab-focus resume,
+   * and by the fallback poll. Same stability requirement as `subscribe`.
    */
   load: () => void | Promise<void>;
   /**
@@ -82,7 +84,14 @@ export const useRealtimeResource = ({
     controllerRef.current = controller;
     controller.setVisible(isVisibleRef.current);
 
-    void load();
+    // Skip the mount fetch while hidden -- nothing to paint for a backgrounded
+    // app or hidden tab. The foreground-resume effect below already fires a
+    // catch-up load the moment isVisible flips true, and `setVisible` above
+    // makes sure a reconnect or `changed` broadcast that arrives before then
+    // doesn't fetch for nobody either (see realtimeResource.ts).
+    if (isVisibleRef.current) {
+      void load();
+    }
 
     const unsubscribe = subscribe(
       () => controller.notifyChanged(),

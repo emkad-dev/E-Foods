@@ -102,12 +102,35 @@ export const createRealtimeResourceController = (
 
       if (status === 'SUBSCRIBED') {
         stopInterval();
+
+        // A reconnect can straddle a broadcast nobody was joined to receive
+        // (e.g. an order placed during a 15s Wi-Fi blip) -- the fallback
+        // interval alone can't catch that, it only guards against staying
+        // disconnected. One refetch per transition-to-SUBSCRIBED closes that
+        // gap, matching what the pre-B1 `.subscribe(status => status ===
+        // 'SUBSCRIBED' && loadOrder())` code already did. Skipped while
+        // hidden -- nothing to refresh for; the foreground catch-up in
+        // `setVisible` covers it once someone is actually looking again.
+        if (visible === true) {
+          onRefetch();
+        }
       } else {
         ensureInterval();
       }
     },
 
     notifyChanged: () => {
+      // A hidden screen can still be subscribed (the socket and JS keep
+      // running in a backgrounded tab/app) and keep receiving `changed`
+      // broadcasts. Arming a new debounce timer for each one would refetch
+      // indefinitely for a tab nobody is looking at -- worse than the poll
+      // this hook replaced, which at least stopped needing a foreground
+      // check. The foreground-resume catch-up already covers whatever was
+      // missed once someone returns.
+      if (visible === false) {
+        return;
+      }
+
       clearDebounce();
       debounceHandle = timers.setTimeout(() => {
         debounceHandle = null;
