@@ -25,7 +25,7 @@ import {
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
-import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
+import { shouldHydrateCachedUserProfile, shouldShowSignInLoading } from '../../../../packages/auth/src';
 import { buildPartnerActionCodeSettings } from '../utils/authActionUrls';
 import {
   resolvePartnerAccessState,
@@ -257,7 +257,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // sign-in returns to the full-screen spinner — on web, refocusing the tab
       // re-fires SIGNED_IN for an already-signed-in partner, and that must
       // reconcile silently in the background instead of flashing the spinner.
-      if (event === 'SIGNED_IN' && !hasUserRef.current) {
+      if (shouldShowSignInLoading({ event, hasUser: hasUserRef.current })) {
         setLoading(true);
       }
 

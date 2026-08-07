@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 import type { UserDocument } from '../domain/entities';
@@ -31,7 +31,7 @@ import {
 } from '../services/session';
 import { getUserDocument, createUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { supabase } from '../services/supabase/config';
-import { shouldHydrateCachedUserProfile } from '../../../../packages/auth/src';
+import { shouldHydrateCachedUserProfile, shouldShowSignInLoading } from '../../../../packages/auth/src';
 import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
 import {
   getCustomerPolicyAcceptance,
@@ -130,6 +130,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [policyAccepted, setPolicyAccepted] = useState(false);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tracks whether a customer is already signed in, without re-subscribing the
+  // auth listener. Used to avoid re-showing the full-screen spinner when the
+  // browser re-fires SIGNED_IN on tab/app refocus.
+  const hasUserRef = useRef(false);
+
+  useEffect(() => {
+    hasUserRef.current = Boolean(user);
+  }, [user]);
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile(), clearStoredPolicyAccepted()]);
@@ -340,9 +348,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
-      // re-block the UI once the first paint has resolved. Only an explicit
-      // sign-in returns to the full-screen spinner.
-      const isInteractiveSignIn = event === 'SIGNED_IN';
+      // re-block the UI once the first paint has resolved. Only a *fresh*
+      // sign-in returns to the full-screen spinner -- on web, refocusing the
+      // tab re-fires SIGNED_IN for an already-signed-in customer, and that
+      // must reconcile silently in the background instead of flashing the
+      // spinner (or the policy-acceptance gate below).
+      const isInteractiveSignIn = shouldShowSignInLoading({ event, hasUser: hasUserRef.current });
 
       if (isInteractiveSignIn) {
         setLoading(true);

@@ -1,3 +1,4 @@
+export * from './authLoadingGuard';
 export * from './backendRpc';
 export * from './claims';
 export * from './client';
