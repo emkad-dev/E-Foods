@@ -161,3 +161,52 @@ export const verifyPaystackTransaction = async (reference: string) =>
     method: 'GET',
     path: `/transaction/verify/${encodeURIComponent(reference)}`,
   })) as JsonObject;
+
+// Confirms a bank account exists and returns the name the bank has on file.
+// Called before subaccount creation so a typo'd account number fails review
+// with a clear message instead of minting a subaccount that can never settle.
+export const resolveBankAccount = async ({
+  accountNumber,
+  bankCode,
+}: {
+  accountNumber: string;
+  bankCode: string;
+}): Promise<{ accountName: string }> => {
+  // fetchPaystackJson already unwraps `data` — this IS the data object.
+  const data = await fetchPaystackJson({
+    path: `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
+  });
+
+  return { accountName: sanitizeText((data as { account_name?: string } | null)?.account_name) };
+};
+
+// percentage_charge is 0 on purpose: the platform's revenue is the embedded
+// menu markup (pricing v2), not a Paystack commission. Setting anything else
+// here would double-charge the restaurant.
+export const createPaystackSubaccount = async ({
+  accountNumber,
+  bankCode,
+  businessName,
+}: {
+  accountNumber: string;
+  bankCode: string;
+  businessName: string;
+}): Promise<{ subaccountCode: string }> => {
+  const data = await fetchPaystackJson({
+    method: 'POST',
+    path: '/subaccount',
+    body: {
+      account_number: accountNumber,
+      bank_code: bankCode,
+      business_name: businessName,
+      percentage_charge: 0,
+    },
+  });
+
+  const subaccountCode = sanitizeText((data as { subaccount_code?: string } | null)?.subaccount_code);
+  if (!subaccountCode) {
+    fail(500, 'Paystack created the subaccount but returned no subaccount code.');
+  }
+
+  return { subaccountCode };
+};
