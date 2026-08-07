@@ -4,9 +4,14 @@ import { useDocumentVisibility } from '../lib/useDocumentVisibility';
 import { getAdminDashboardSnapshot, type AdminDashboardSnapshot } from '../services/platformReads';
 
 // The snapshot aggregates orders, restaurants, dispatch profiles, and users.
-// Orders and restaurants have broadcast topics; dispatch-profile creation
-// (via application approval) and user/role changes do not broadcast
-// anything today, so this stays a slow, visibility-gated safety-net poll
+// Orders and restaurants have broadcast topics. Dispatch-profile creation
+// also broadcasts today -- ensureDispatchRiderRecord (called from partner
+// application approval in admin.ts, and from role assignment/deletion/restore
+// in account.ts) calls broadcastRidersChanged() on `dispatch-riders` -- but
+// this hook has no subscription wired to any of those three topics, only
+// user/role changes genuinely have no broadcast at all. Composing a
+// multi-topic subscription for one aggregate snapshot is new scope this task
+// doesn't cover, so this stays a slow, visibility-gated safety-net poll
 // rather than a realtime-driven fallback like the other B1 hooks. Raised
 // from 20s to 120s and now pauses while the tab is hidden.
 const POLL_INTERVAL_MS = 120000;
