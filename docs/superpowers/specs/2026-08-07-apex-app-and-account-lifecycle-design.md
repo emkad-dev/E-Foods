@@ -105,6 +105,8 @@ New columns on `UserAccount`:
 
 Partial index on `purgeScheduledAt` where `deletionRequestedAt is not null`, so the daily purge scan stays cheap.
 
+**The `user_profiles` view must be replaced in the same migration.** It is a `security_invoker` view over `UserAccount` defined in `20260712_phone_otp.sql:28` and is what the server-side gate reads. If it is not extended with `deletionRequestedAt` and `purgeScheduledAt`, the gate is blind and C3 silently does nothing.
+
 ### C2 — request and cancel
 
 `deleteOwnAccount` stops destroying data. It now:
@@ -113,22 +115,41 @@ Partial index on `purgeScheduledAt` where `deletionRequestedAt is not null`, so 
 2. Writes an audit entry.
 3. Sets `deletionRequestedAt = now()`, `purgeScheduledAt = now() + interval '30 days'`.
 4. Mints a random cancel token, stores only its SHA-256, and emails the user the purge date and a cancel link — reusing the existing `_shared/email.ts` helpers (`loadUserEmailRecipient`, `buildTransactionalEmailHtml`, `sendTransactionalEmail`). No new mail infrastructure.
-5. Signs the user out.
 
-**The auth user is not banned at request time.** Banning is deferred to purge. This is the pivotal decision in this design; the rationale is in [Why not ban at request time](#why-not-ban-at-request-time).
+**The session is left intact.** The user is not signed out, and the auth user is not banned. Banning is deferred to purge; access is denied by the server-side gate in C3, not by destroying the session. This is the pivotal decision in this design — rationale in [Why not ban at request time](#why-not-ban-at-request-time).
 
 Two cancel paths, both restoring by clearing `deletionRequestedAt`, `purgeScheduledAt`, and `deletionCancelTokenHash`:
 
-- `cancelAccountDeletion` — authenticated RPC, called from the in-app restore screen.
-- `cancelAccountDeletionByToken` — unauthenticated, takes the emailed token, compares against the stored hash in constant time. Safe without a session because the token is itself the secret; it is not keyed by anything guessable.
+- `cancelAccountDeletion` — authenticated RPC, called by the **Restore my account** button on the pending-deletion screen. Works because the session was never torn down.
+- `cancelAccountDeletionByToken` — unauthenticated, takes the emailed token, compares against the stored hash in constant time. Safe without a session because the token is itself the secret; it is not keyed by anything guessable. This is the path for someone who has lost device access.
 
-### C3 — the pending-deletion gate
+### C3 — server-side gate (authoritative)
 
-Sign-in succeeds at the Supabase level. The app already loads the user account immediately afterwards; when `deletionRequestedAt` is set it tears the session down and renders a blocked screen showing the purge date and an explicit **Restore my account** action.
+**Access denial is enforced on the backend, not by the client.** A client-side sign-out would leave a live session window and make the protection depend on app behaviour — a stale client, an in-flight background request, or any non-app caller holding a valid JWT could keep operating.
 
-An accidental sign-in does not cancel anything. Only a deliberate tap on *Restore* reverses the deletion. Implemented in customer, partner, and dispatch.
+The gate lives in `getAuthenticatedRequestContext` (`supabase/functions/_shared/request-context.ts:22`), immediately after the existing `accountDisabled` check at line 46. It is the single chokepoint for every authenticated backend request: `app-rpc` (`index.ts:3533`) and `notifications` (`index.ts:32`) both resolve their context through it, so one change covers both, and any future function using it inherits the gate.
 
-### C4 — purge runner
+Signature becomes:
+
+```ts
+getAuthenticatedRequestContext(request, options?: { allowPendingDeletion?: boolean })
+```
+
+Default is `false` — a request from an account with `deletionRequestedAt != null` is rejected. `action` is already known before the context is resolved at `index.ts:3533` (anon actions like `promoTrack` are handled above it), so `app-rpc` passes `allowPendingDeletion: true` for exactly one action: `cancelAccountDeletion`. Everything else, including all of `notifications`, is refused.
+
+The rejection is a **structured 403**, not a bare `Error`. It carries `code: 'ACCOUNT_PENDING_DELETION'` and `purgeScheduledAt` in the body. The client therefore renders the pending-deletion screen from the rejection itself and needs no separate profile read — which is why the exemption list stays at exactly one action rather than growing to cover profile hydration.
+
+Note this differs from the existing `accountDisabled` throw, which is a bare `Error` with no `.status` (see the comment at `index.ts:7142`). The new rejection needs `.status = 403` so it is not surfaced as a 500.
+
+### C4 — pending-deletion screen
+
+With the session intact and the backend refusing everything else, the client's job is presentation only. On receiving `ACCOUNT_PENDING_DELETION` the app routes to a blocked screen showing the purge date and an explicit **Restore my account** button, which calls the authenticated `cancelAccountDeletion` RPC.
+
+Normal app navigation is blocked while in this state. An accidental sign-in cancels nothing — only a deliberate tap on *Restore* reverses the deletion. Implemented in customer, partner, and dispatch.
+
+Because the gate is server-side, a client that fails to route correctly still cannot do anything: every request it makes is refused.
+
+### C5 — purge runner
 
 A new `account-purge-runner` edge function on a daily `pg_cron` schedule, following the pattern in `supabase/migrations/20260708_broadcast_runner_schedule.sql` (vault `project_url` + `queue_worker_token`, exception-guarded so the migration applies cleanly where the extensions are unavailable).
 
@@ -136,14 +157,29 @@ It does **not** reuse `offboardUserAccount`. That function is correct for an int
 
 Purge semantics:
 
-- **Never unbans.** Once past `purgeScheduledAt`, the ban is terminal.
+- **Bans first, and never reverses it.** The auth-user ban happens here, as the runner's first step, not at request time. Once the runner has banned an account past its `purgeScheduledAt`, no failure path un-bans it — that is the specific behaviour of `offboardUserAccount` that makes it unsafe to reuse.
 - **Per-leg idempotency.** Each delete re-runs safely, so a partial purge resumes rather than restarts.
 - **Auth user deleted last**, so any crash leaves a re-runnable state rather than an orphaned record with no `UserAccount` row to find it by.
-- **Bounded retries.** Increment `purgeAttemptCount`, record `purgeLastError`, back off exponentially on `purgeLastAttemptAt`. After 5 attempts stop retrying and leave the row for an operator rather than grinding daily forever. Retry-exhausted rows surface in the admin view (C5) — deliberately *not* the support inbox, which is customer-facing (`SupportConversation`/`SupportMessage`) and the wrong channel for a system alert.
+- **Bounded retries.** Increment `purgeAttemptCount`, record `purgeLastError`, back off exponentially on `purgeLastAttemptAt`. After 5 attempts stop retrying and leave the row for an operator rather than grinding daily forever. Retry-exhausted rows surface in the admin view (C6) — deliberately *not* the support inbox, which is customer-facing (`SupportConversation`/`SupportMessage`) and the wrong channel for a system alert.
 
-### C5 — admin visibility
+### C6 — admin visibility
 
 `admin-web` user list shows a pending-deletion state with the purge date, and an admin restore action. Also surfaces accounts that exhausted their purge retries.
+
+### Purge activation
+
+The runner ships **disabled**: the cron job is scheduled, but the function short-circuits on a `PURGE_ENABLED` edge-function secret that is absent on first deploy. Scheduling it dormant rather than omitting the cron means activation is a one-line secret change, not a migration.
+
+Purge is irreversible by construction, so it stays off until all of the following hold:
+
+1. At least one full 30-day grace period has elapsed in production since C2 shipped, so there is real data in the pending state.
+2. At least one account has completed request → pending screen → restore, verified in prod.
+3. The admin pending-deletion view (C6) is live, so there is a way to see what is queued *before* anything is destroyed.
+4. A dry-run has been executed: the runner logs the accounts it would purge, with counts reconciled by hand against the admin view.
+
+**Who flips it:** the operator (repo owner), by setting the `PURGE_ENABLED` secret — not CI, and not as a side effect of any deploy. Note the existing footgun that the deploy script syncs `functions/.env` to secrets on every run, so the flag must be managed deliberately rather than left to that sync.
+
+Until it is flipped, accounts accumulate in the pending state indefinitely. That is the intended failure mode: over-retention is recoverable, premature destruction is not.
 
 ---
 
@@ -176,9 +212,9 @@ Making that distinction visible would require routing password sign-in through `
 
 That is a four-app change to the highest-blast-radius code in the product, bought for one error message.
 
-Deferring the ban to purge time removes the problem instead of solving it: the gate moves into the app, which already has the account record and can therefore state the purge date and offer restore directly.
+Deferring the ban to purge time removes the problem instead of solving it. The gate moves to `getAuthenticatedRequestContext`, which already loads the account record and can therefore return the purge date with its rejection — so the client can state the date and offer restore without a second call, and without any new auth contract.
 
-The cost is that a session exists for a few hundred milliseconds before the app tears it down. RLS already restricts customers to self-read on `CustomerOrder` and `DeliveryAssignment`, so the exposure is the user's own data. (Those policies are applied in production, but the accompanying `docs/rls-posture.md` lives on the unmerged `fix/customer-order-rls-policies` branch and is not in `main` — verify the live policies directly rather than relying on that doc.)
+The cost is that a valid session continues to exist through the grace period. That is acceptable **only because the gate is server-side** (C3): the session is a credential the backend refuses to act on. It is not a window of access. The one action it can still perform is `cancelAccountDeletion`, which is the point.
 
 An unauthenticated *account-status-by-email* lookup was also considered and rejected outright: it is an email-enumeration oracle, and this project already carries a wildcard-permissive redirect allowlist.
 
@@ -198,12 +234,19 @@ An unauthenticated *account-status-by-email* lookup was also considered and reje
 - `buildAuthActionUrl` — web vs native, origin override, path normalisation, empty-path rejection
 - cancel-token hashing and constant-time comparison
 - purge-eligibility selection: respects `purgeScheduledAt`, skips retry-exhausted rows, honours backoff
-- pending-deletion gate: sets blocked state, does not auto-cancel
+- `getAuthenticatedRequestContext`: rejects when `deletionRequestedAt` is set; allows only with `allowPendingDeletion: true`; rejection carries `.status = 403`, `code`, and `purgeScheduledAt`; unaffected accounts pass through unchanged
+- the `allowPendingDeletion: true` exemption is passed for `cancelAccountDeletion` and no other action
 
 **Integration**
-- delete → sign in → blocked screen → restore → sign in succeeds
+- delete → the same session calls an arbitrary `app-rpc` action → 403 `ACCOUNT_PENDING_DELETION` (**the security assertion: this must hold with no client cooperation at all**)
+- delete → `notifications` with the same token → rejected
+- delete → `cancelAccountDeletion` on that session → succeeds → previously-blocked action now succeeds
+- delete → cancel via emailed token without a session → restored
 - delete → advance clock past `purgeScheduledAt` → purge → auth user gone
 - purge with an injected mid-sequence failure → re-run completes, account never unbanned
+- purge with `PURGE_ENABLED` unset → no rows touched
+
+**Regression:** an account with `accountDisabled = true` and no `deletionRequestedAt` still gets the existing disabled behaviour, not the new one.
 
 **Per app:** `typecheck`, `lint`, Metro export.
 
@@ -218,12 +261,15 @@ An unauthenticated *account-status-by-email* lookup was also considered and reje
 | 1 | A | retire `web-landing`, apex domain, all four hard-coded host sites |
 | 2 | B1 | shared `buildAuthActionUrl`; partner + dispatch migrated |
 | 3 | B2 | customer web/native split; double-send fix |
-| 4 | C1 | migration: deletion + purge columns, partial index |
+| 4 | C1 | migration: deletion + purge columns, partial index, `user_profiles` view replacement |
 | 5 | C2 | `deleteOwnAccount` schedules; both cancel RPCs; cancel email |
-| 6 | C3 | pending-deletion gate + restore screen (customer, partner, dispatch) |
-| 7 | C4 | `account-purge-runner` + daily cron |
-| 8 | C5 | admin pending-deletion visibility and restore |
-| 9 | E | per-app `ConfirmDialog` and the five call sites |
+| 6 | C3 | server-side gate in `getAuthenticatedRequestContext` + structured 403 |
+| 7 | C4 | pending-deletion screen + restore (customer, partner, dispatch) |
+| 8 | C5 | `account-purge-runner` + daily cron, shipped disabled |
+| 9 | C6 | admin pending-deletion visibility and restore |
+| 10 | E | per-app `ConfirmDialog` and the five call sites |
+
+C3 must land before or with C4. The gate is the enforcement; the screen is only presentation.
 
 ## Risks
 
