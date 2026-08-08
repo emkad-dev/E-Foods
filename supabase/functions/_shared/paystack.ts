@@ -177,7 +177,12 @@ export const resolveBankAccount = async ({
     path: `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
   });
 
-  return { accountName: sanitizeText((data as { account_name?: string } | null)?.account_name) };
+  const accountName = sanitizeText((data as { account_name?: string } | null)?.account_name);
+  if (!accountName) {
+    fail(500, 'Paystack resolved the bank account but returned no account name.');
+  }
+
+  return { accountName };
 };
 
 // percentage_charge is 0 on purpose: the platform's revenue is the embedded
@@ -197,7 +202,7 @@ export const createPaystackSubaccount = async ({
     path: '/subaccount',
     body: {
       account_number: accountNumber,
-      bank_code: bankCode,
+      settlement_bank: bankCode,
       business_name: businessName,
       percentage_charge: 0,
     },
