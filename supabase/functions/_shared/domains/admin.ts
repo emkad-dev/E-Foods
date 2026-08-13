@@ -40,6 +40,7 @@ import {
   notifyUsers,
   sendPushNotificationsToUsers,
 } from '../notifications.ts';
+import { clientErrorMessage } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
   isOrderCleanForReporting,
@@ -48,6 +49,8 @@ import {
   toOrderSnapshotResponse,
   type CustomerOrderRow,
 } from '../orders.ts';
+import { resolvePayoutActivationPlan } from '../partnerPayoutActivation.ts';
+import { createPaystackSubaccount, resolveBankAccount } from '../paystack.ts';
 import {
   broadcastPromosChanged,
   broadcastRestaurantsChanged,
@@ -507,6 +510,63 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
   let restaurantId: string | null = null;
   if (decision === 'approve') {
     restaurantId = sanitizeText(application.restaurantId) || crypto.randomUUID();
+
+    const { data: payoutRow } = await serviceClient
+      .from('RestaurantPayout')
+      .select('id,restaurantId,bankCode,accountNumber,paystackSubaccountCode,status')
+      .eq('restaurantId', restaurantId)
+      .maybeSingle();
+
+    const activationPlan = resolvePayoutActivationPlan(payoutRow);
+    if (activationPlan.action === 'blocked') {
+      fail(activationPlan.httpStatus, activationPlan.message);
+    }
+
+    let subaccountCode: string;
+    let resolvedAccountName: string | null = null;
+
+    if (activationPlan.action === 'reuse') {
+      subaccountCode = activationPlan.subaccountCode;
+    } else {
+      try {
+        // Resolve first: a bad account number must fail before a subaccount exists.
+        const resolved = await resolveBankAccount({
+          accountNumber: payoutRow!.accountNumber,
+          bankCode: payoutRow!.bankCode,
+        });
+        const created = await createPaystackSubaccount({
+          accountNumber: payoutRow!.accountNumber,
+          bankCode: payoutRow!.bankCode,
+          businessName: sanitizeText(application?.restaurantName, 'FEASTY partner'),
+        });
+        subaccountCode = created.subaccountCode;
+        resolvedAccountName = resolved.accountName;
+      } catch (error) {
+        // Record the failure and let the throw unwind before the role grant.
+        // clientErrorMessage keeps the raw Paystack error server-side; never log
+        // payoutRow itself, it carries the full account number.
+        await serviceClient
+          .from('RestaurantPayout')
+          .update({ status: 'failed', lastError: clientErrorMessage(error), updatedAt: reviewedAt })
+          .eq('id', payoutRow!.id);
+        throw error;
+      }
+    }
+
+    // One activation write serves both paths — a reused code re-asserts 'active'
+    // (a prior run may have left the row 'failed' after minting the code), and a
+    // freshly created one is persisted here rather than inside the try block.
+    await serviceClient
+      .from('RestaurantPayout')
+      .update({
+        paystackSubaccountCode: subaccountCode,
+        status: 'active',
+        lastError: null,
+        updatedAt: reviewedAt,
+        ...(resolvedAccountName ? { resolvedAccountName } : {}),
+      })
+      .eq('id', payoutRow!.id);
+
     await syncUserRoleState(applicationId, 'restaurant', context.uid, {
       accountDisabled: false,
       disabledAt: null,
@@ -549,6 +609,7 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
         supportsPickup: true,
         isOpen: true,
         isPublished: false,
+        paystackSubaccountCode: subaccountCode,
         updatedAt: reviewedAt,
       },
       { onConflict: 'id' }
