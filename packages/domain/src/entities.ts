@@ -16,6 +16,27 @@ export interface AddressRecord extends DocumentData {
   isDefault?: boolean;
 }
 
+export type PartnerPayoutStatus = 'pending' | 'resolved' | 'active' | 'failed' | string;
+
+/** Non-sensitive payout state for partner/admin reads. Never carries the full
+ *  account number — only the resolved name and last four. */
+export interface RestaurantPayoutSummary {
+  status?: PartnerPayoutStatus;
+  bankName?: string | null;
+  accountLast4?: string | null;
+  resolvedAccountName?: string | null;
+  paystackSubaccountCode?: string | null;
+}
+
+/** Non-sensitive KYC state for partner/admin reads. Never carries the raw
+ *  document number — only its last four and verification state. */
+export interface RestaurantKycSummary {
+  status?: 'pending' | 'manual' | 'verified' | 'rejected' | string;
+  legalName?: string | null;
+  documentLast4?: string | null;
+  verifiedAt?: string | null;
+}
+
 export interface UserDocument extends DocumentData {
   uid: string;
   email: string;
@@ -26,6 +47,9 @@ export interface UserDocument extends DocumentData {
   partnerApplicationStatus?: 'pending' | 'pending_verification' | 'verification_failed' | 'approved' | 'rejected' | string;
   partnerApplicationReviewedAt?: string | null;
   partnerApplicationRejectionReason?: string | null;
+  /** Populated for partner/admin onboarding reads; absent for other roles. */
+  partnerPayout?: RestaurantPayoutSummary | null;
+  partnerKyc?: RestaurantKycSummary | null;
   dispatchApplicationStatus?: 'pending' | 'approved' | 'rejected' | string;
   dispatchApplicationReviewedAt?: string | null;
   dispatchApplicationRejectionReason?: string | null;
@@ -88,6 +112,8 @@ export interface RestaurantDocument extends DocumentData {
   approvalStatus?: 'pending' | 'approved' | 'unpublished' | string;
   approvedAt?: string | null;
   approvedByUid?: string | null;
+  /** Paystack subaccount that receives this restaurant's settlement split. */
+  paystackSubaccountCode?: string | null;
   menu?: MenuCategoryDocument[] | null;
   createdAt?: string;
   updatedAt?: string;

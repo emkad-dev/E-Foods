@@ -279,3 +279,148 @@ export const validatePartnerOnboardingSubmission = (
     restaurantName,
   };
 };
+
+// ---------------------------------------------------------------------------
+// Payout activation helpers (Task 4)
+//
+// These are deliberately pure and split-agnostic so they can be unit-tested
+// without touching Paystack, and so the eventual money-split decision (see the
+// note in app-rpc/index.ts) lives entirely at the call site, not baked in here.
+// ---------------------------------------------------------------------------
+
+export const PARTNER_PAYOUT_STATUS = {
+  PENDING: 'pending',
+  RESOLVED: 'resolved',
+  ACTIVE: 'active',
+  FAILED: 'failed',
+} as const;
+
+export type PartnerPayoutStatus = (typeof PARTNER_PAYOUT_STATUS)[keyof typeof PARTNER_PAYOUT_STATUS];
+
+export type PartnerPayoutSubaccountState = {
+  paystackSubaccountCode?: string | null;
+  status?: string | null;
+};
+
+/**
+ * A restaurant's subaccount may only be attached to a live customer payment when
+ * its payout profile is fully active AND a subaccount code has actually been
+ * stored. Anything short of that must route the payment through the platform
+ * account alone rather than silently mis-splitting or failing.
+ */
+export const shouldAttachPartnerSubaccount = (
+  payout: PartnerPayoutSubaccountState | null | undefined
+): boolean => {
+  if (!payout) {
+    return false;
+  }
+
+  const status = normalizeLowerText(payout.status);
+  const code = normalizeText(payout.paystackSubaccountCode);
+
+  return status === PARTNER_PAYOUT_STATUS.ACTIVE && code.length > 0;
+};
+
+export type PaystackSubaccountCreatePayload = {
+  account_number: string;
+  business_name: string;
+  /** Bank code as Paystack expects it under `settlement_bank`. */
+  settlement_bank: string;
+  /**
+   * Paystack requires this at creation. The actual per-order routing is done
+   * with a transaction-level split (pricing v2 is flat + percentage, so the
+   * restaurant's cut varies per order), which overrides this value — hence it
+   * is passed in explicitly by the caller rather than assumed here.
+   */
+  percentage_charge: number;
+};
+
+export type BuildPaystackSubaccountPayloadInput = {
+  accountNumber: string;
+  bankCode: string;
+  businessName: string;
+  percentageCharge: number;
+};
+
+export const buildPaystackSubaccountPayload = ({
+  accountNumber,
+  bankCode,
+  businessName,
+  percentageCharge,
+}: BuildPaystackSubaccountPayloadInput): PaystackSubaccountCreatePayload => {
+  const account_number = normalizeText(accountNumber).replace(/\s+/g, '');
+  const settlement_bank = normalizeText(bankCode);
+  const business_name = normalizeText(businessName);
+
+  if (!business_name) {
+    throw new Error('A business name is required to create a payout subaccount.');
+  }
+  if (!settlement_bank) {
+    throw new Error('A settlement bank code is required to create a payout subaccount.');
+  }
+  if (!account_number) {
+    throw new Error('An account number is required to create a payout subaccount.');
+  }
+  if (!Number.isFinite(percentageCharge) || percentageCharge < 0 || percentageCharge > 100) {
+    throw new Error('percentageCharge must be a number between 0 and 100.');
+  }
+
+  return { account_number, business_name, settlement_bank, percentage_charge: percentageCharge };
+};
+
+export type FinalizePartnerApprovalInput = {
+  accountNumber: string;
+  /** When present, the existing subaccount is reused and no creation happens. */
+  existingSubaccountCode?: string | null;
+  paystackBankCode: string;
+  paystackBankName: string;
+  resolvedAccountName: string;
+  /**
+   * Injected so the pure helper stays testable and Paystack-free. Only invoked
+   * when there is no existing code to reuse. Must return the new subaccount code.
+   */
+  createSubaccount?: (payload: PaystackSubaccountCreatePayload) => Promise<string>;
+  /** Passed straight through to `buildPaystackSubaccountPayload` on the create path. */
+  percentageCharge?: number;
+};
+
+export type FinalizePartnerApprovalResult = {
+  paystackSubaccountCode: string;
+  /** True only when a new subaccount was created on this call. */
+  created: boolean;
+  status: PartnerPayoutStatus;
+};
+
+/**
+ * Idempotent subaccount resolution for the approval boundary.
+ *
+ * If a subaccount code is already stored it is reused verbatim — a retried
+ * approval must never create a second Paystack subaccount for the same
+ * restaurant. Only when nothing is stored does it call the injected creator.
+ */
+export const finalizePartnerApproval = async (
+  input: FinalizePartnerApprovalInput
+): Promise<FinalizePartnerApprovalResult> => {
+  const existing = normalizeText(input.existingSubaccountCode);
+  if (existing) {
+    return { paystackSubaccountCode: existing, created: false, status: PARTNER_PAYOUT_STATUS.ACTIVE };
+  }
+
+  if (typeof input.createSubaccount !== 'function') {
+    throw new Error('A subaccount creator is required when no subaccount code exists yet.');
+  }
+
+  const payload = buildPaystackSubaccountPayload({
+    accountNumber: input.accountNumber,
+    bankCode: input.paystackBankCode,
+    businessName: input.resolvedAccountName,
+    percentageCharge: input.percentageCharge ?? 0,
+  });
+
+  const created = normalizeText(await input.createSubaccount(payload));
+  if (!created) {
+    throw new Error('Paystack did not return a subaccount code.');
+  }
+
+  return { paystackSubaccountCode: created, created: true, status: PARTNER_PAYOUT_STATUS.ACTIVE };
+};

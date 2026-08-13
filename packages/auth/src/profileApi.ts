@@ -14,6 +14,10 @@ const mapProfile = (record: Record<string, any>): UserDocument => ({
   partnerApplicationStatus: record.partnerApplicationStatus ?? undefined,
   partnerApplicationReviewedAt: record.partnerApplicationReviewedAt ?? null,
   partnerApplicationRejectionReason: record.partnerApplicationRejectionReason ?? null,
+  // Payout/KYC live in dedicated service-role tables; carried through when a
+  // read model has already attached them, otherwise null.
+  partnerPayout: record.partnerPayout ?? null,
+  partnerKyc: record.partnerKyc ?? null,
   dispatchApplicationStatus: record.dispatchApplicationStatus ?? undefined,
   dispatchApplicationReviewedAt: record.dispatchApplicationReviewedAt ?? null,
   dispatchApplicationRejectionReason: record.dispatchApplicationRejectionReason ?? null,
