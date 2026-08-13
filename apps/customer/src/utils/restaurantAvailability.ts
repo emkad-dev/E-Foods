@@ -181,6 +181,16 @@ export const isRestaurantVisibleToCustomers = (restaurant: DiscoveryRestaurant) 
     return false;
   }
 
+  // A card from customerGetRestaurantList never carries a `menu` key at all
+  // (undefined, not `[]`) — the edge function already excludes restaurants
+  // with zero available items from that action, so there is nothing left to
+  // check here. A full catalog entry (menu present, even `[]`, from the
+  // deprecated getPublishedRestaurants or a single getRestaurantDetail) still
+  // needs the real count, since neither of those pre-filters on it.
+  if (restaurant.menu === undefined) {
+    return true;
+  }
+
   return getPublishedMenuItemCount(restaurant) > 0;
 };
 

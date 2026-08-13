@@ -23,7 +23,7 @@ import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skele
 import { useCart } from '../../../../src/contexts/CartContext';
 import { useCoverage } from '../../../../src/contexts/CoverageContext';
 import { customerTheme } from '../../../../src/theme/palette';
-import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
+import { getRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../../src/services/supabase/config';
 import {
   COVERAGE_COMING_SOON_COPY,
@@ -100,7 +100,7 @@ export default function RestaurantDetail() {
     }
 
     try {
-      const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(id);
+      const { restaurant: nextRestaurant } = await getRestaurantDetail(id);
 
       if (!activeRef.current) {
         return;

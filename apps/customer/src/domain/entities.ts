@@ -42,7 +42,16 @@ export interface RestaurantDocument extends DocumentData {
   image?: string;
   logoImage?: string | null;
   cuisine?: string;
+  /** Only present on cards from customerGetRestaurantList. */
+  cuisines?: string[];
   rating?: number;
+  /**
+   * Forward-compat placeholders on cards (Task 12/E1 will populate them from
+   * a real RestaurantRecord column). Always null/0 until then — never on the
+   * detail shape today.
+   */
+  ratingAverage?: number | null;
+  ratingCount?: number;
   deliveryTime?: string | number;
   openingTime?: string | null;
   closingTime?: string | null;
@@ -57,6 +66,14 @@ export interface RestaurantDocument extends DocumentData {
   isPublished?: boolean;
   latitude?: number | null;
   longitude?: number | null;
+  /**
+   * Present (possibly empty) on a full catalog entry or a single detail
+   * fetch; entirely absent — not even `[]` — on a card from
+   * customerGetRestaurantList. isRestaurantVisibleToCustomers in
+   * restaurantAvailability.ts relies on this distinction: `undefined` means
+   * "the server already applied the has-available-item filter", `[]`/present
+   * means "check it here."
+   */
   menu?: MenuCategoryDocument[];
   createdAt?: string;
   updatedAt?: string;

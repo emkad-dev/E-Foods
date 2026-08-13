@@ -21,7 +21,7 @@ import {
   initializeCustomerPayment,
 } from '../../src/services/customerOrderActions';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
-import { getPublishedRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
+import { getRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
@@ -158,7 +158,7 @@ export default function CartScreen() {
     }
 
     try {
-      const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(restaurantId);
+      const { restaurant: nextRestaurant } = await getRestaurantDetail(restaurantId);
       if (!activeRef.current) {
         return;
       }

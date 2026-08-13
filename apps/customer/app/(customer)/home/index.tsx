@@ -23,7 +23,7 @@ import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
-import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
+import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../src/services/supabase/config';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
 import {
@@ -121,7 +121,12 @@ export default function HomeScreen() {
       }
 
       try {
-        const { restaurants: catalog } = await getPublishedRestaurants();
+        // No coords passed: this screen also needs restaurants outside the
+        // customer's delivery radius (the "outside your delivery zone"
+        // section below), and the server's coords filter is a hard exclude,
+        // not just a sort key — so this stays the default updatedAt-DESC
+        // page, filtered client-side by getRestaurantAvailability instead.
+        const { restaurants: catalog } = await getRestaurantList();
         setRestaurants(catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as Restaurant[]);
         setCatalogError(null);
         trackAnalyticsEvent('customer_catalog_loaded', {
