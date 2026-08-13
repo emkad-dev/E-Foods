@@ -584,6 +584,40 @@ button {
   margin-top: 2px;
 }
 
+/* ---------- Partner onboarding review ---------- */
+.onboarding-review {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 8px;
+}
+.onboarding-review-empty {
+  margin-top: 8px;
+  font-style: italic;
+}
+.onboarding-review-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.onboarding-review-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.onboarding-review-docs {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+.onboarding-review-doc-link {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* ---------- Support inbox ---------- */
 .inbox-page {
   display: grid;

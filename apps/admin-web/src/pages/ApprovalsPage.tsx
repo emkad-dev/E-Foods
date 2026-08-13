@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
+import PartnerOnboardingReview from '../components/PartnerOnboardingReview';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { usePolledRpc } from '../lib/usePolledRpc';
@@ -83,6 +84,7 @@ export default function ApprovalsPage() {
                   {application.contactName} · {application.email} · {application.cuisine}
                 </div>
                 <div className="list-row-sub">{application.address}</div>
+                <PartnerOnboardingReview review={application.onboarding} />
               </div>
               <div className="row-actions">
                 <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />

@@ -846,7 +846,33 @@ const buildUserAccountResponse = (account: UserAccountRow, roles: UserRoleRow[])
   updatedAt: account.updatedAt ?? null,
 });
 
-const buildPartnerApplicationResponse = (application: PartnerApplicationRow) => ({
+// Non-sensitive onboarding review block for the admin queue. Carries KYC/payout
+// summaries (never the raw NIN or full account number) plus short-lived signed URLs
+// for the private verification documents.
+type PartnerOnboardingReviewResponse = {
+  kyc: {
+    status: string;
+    legalName: string | null;
+    documentLast4: string | null;
+    verifiedAt: string | null;
+  } | null;
+  payout: {
+    status: string;
+    bankName: string | null;
+    accountLast4: string | null;
+    resolvedAccountName: string | null;
+    paystackSubaccountCode: string | null;
+  } | null;
+  documents: {
+    frontUrl: string | null;
+    backUrl: string | null;
+  };
+};
+
+const buildPartnerApplicationResponse = (
+  application: PartnerApplicationRow,
+  onboarding: PartnerOnboardingReviewResponse | null = null
+) => ({
   address: sanitizeText(application.address),
   approvedByUid: sanitizeOptionalText(application.approvedByUid),
   contactName: sanitizeText(application.contactName),
@@ -865,7 +891,106 @@ const buildPartnerApplicationResponse = (application: PartnerApplicationRow) => 
   status: sanitizeText(application.status, PARTNER_APPLICATION_STATUS.PENDING),
   submittedAt: application.submittedAt,
   uid: application.uid,
+  onboarding,
 });
+
+const PARTNER_VERIFICATION_BUCKET = 'partner-verification-documents';
+const PARTNER_DOC_SIGNED_URL_TTL_SECONDS = 300;
+
+const toVerificationObjectPath = (path: unknown) => {
+  const trimmed = sanitizeText(path);
+  return trimmed.startsWith(`${PARTNER_VERIFICATION_BUCKET}/`)
+    ? trimmed.slice(PARTNER_VERIFICATION_BUCKET.length + 1)
+    : trimmed;
+};
+
+const signVerificationDoc = async (path: unknown): Promise<string | null> => {
+  const objectPath = toVerificationObjectPath(path);
+  if (!objectPath) {
+    return null;
+  }
+  const { data: signed, error } = await serviceClient.storage
+    .from(PARTNER_VERIFICATION_BUCKET)
+    .createSignedUrl(objectPath, PARTNER_DOC_SIGNED_URL_TTL_SECONDS);
+  if (error || !signed) {
+    return null;
+  }
+  return signed.signedUrl;
+};
+
+// Loads KYC + payout state for a set of applicant uids and mints short-lived signed
+// URLs for the private verification documents. Applications with no onboarding rows
+// (legacy submissions) simply have no entry.
+const loadPartnerOnboardingReviews = async (
+  uids: string[]
+): Promise<Map<string, PartnerOnboardingReviewResponse>> => {
+  const reviews = new Map<string, PartnerOnboardingReviewResponse>();
+  if (uids.length === 0) {
+    return reviews;
+  }
+
+  const [{ data: kycRows, error: kycError }, { data: payoutRows, error: payoutRowsError }] =
+    await Promise.all([
+      serviceClient
+        .from('RestaurantKyc')
+        .select('uid,legalName,ninLast4,ninFrontPath,ninBackPath,verification,verifiedAt')
+        .in('uid', uids),
+      serviceClient
+        .from('RestaurantPayout')
+        .select('uid,bankName,accountLast4,resolvedAccountName,paystackSubaccountCode,status')
+        .in('uid', uids),
+    ]);
+  if (kycError) {
+    throw new Error(kycError.message);
+  }
+  if (payoutRowsError) {
+    throw new Error(payoutRowsError.message);
+  }
+
+  const kycByUid = new Map(
+    ((kycRows ?? []) as Record<string, unknown>[]).map((row) => [sanitizeText(row.uid), row])
+  );
+  const payoutByUid = new Map(
+    ((payoutRows ?? []) as Record<string, unknown>[]).map((row) => [sanitizeText(row.uid), row])
+  );
+
+  await Promise.all(
+    uids.map(async (uid) => {
+      const kyc = kycByUid.get(uid) ?? null;
+      const payout = payoutByUid.get(uid) ?? null;
+      if (!kyc && !payout) {
+        return;
+      }
+
+      const [frontUrl, backUrl] = kyc
+        ? await Promise.all([signVerificationDoc(kyc.ninFrontPath), signVerificationDoc(kyc.ninBackPath)])
+        : [null, null];
+
+      reviews.set(uid, {
+        kyc: kyc
+          ? {
+              status: sanitizeText(kyc.verification, 'manual'),
+              legalName: sanitizeOptionalText(kyc.legalName) ?? null,
+              documentLast4: sanitizeOptionalText(kyc.ninLast4) ?? null,
+              verifiedAt: (kyc.verifiedAt as string | null) ?? null,
+            }
+          : null,
+        payout: payout
+          ? {
+              status: sanitizeText(payout.status, 'pending'),
+              bankName: sanitizeOptionalText(payout.bankName) ?? null,
+              accountLast4: sanitizeOptionalText(payout.accountLast4) ?? null,
+              resolvedAccountName: sanitizeOptionalText(payout.resolvedAccountName) ?? null,
+              paystackSubaccountCode: sanitizeOptionalText(payout.paystackSubaccountCode) ?? null,
+            }
+          : null,
+        documents: { frontUrl, backUrl },
+      });
+    })
+  );
+
+  return reviews;
+};
 
 const buildDispatchApplicationResponse = (application: DispatchApplicationRow) => ({
   approvedByUid: sanitizeOptionalText(application.approvedByUid),
@@ -4794,13 +4919,18 @@ const handleNativeAction = async (
       ((approvals ?? []) as RestaurantApprovalRow[]).map((approval) => [approval.restaurantId, approval])
     );
 
+    const pendingPartnerApplications = (partnerApplications ?? []) as PartnerApplicationRow[];
+    const onboardingByUid = await loadPartnerOnboardingReviews(
+      pendingPartnerApplications.map((application) => sanitizeText(application.uid))
+    );
+
     return json(200, {
       data: {
         dispatchApplications: ((dispatchApplications ?? []) as DispatchApplicationRow[]).map(
           buildDispatchApplicationResponse
         ),
-        partnerApplications: ((partnerApplications ?? []) as PartnerApplicationRow[]).map(
-          buildPartnerApplicationResponse
+        partnerApplications: pendingPartnerApplications.map((application) =>
+          buildPartnerApplicationResponse(application, onboardingByUid.get(sanitizeText(application.uid)) ?? null)
         ),
         restaurants: ((restaurants ?? []) as RestaurantRecordRow[]).map((restaurant) =>
           buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)

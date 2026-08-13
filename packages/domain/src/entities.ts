@@ -233,6 +233,29 @@ export interface RestaurantApprovalRecord {
   approvedByUid?: string | null;
 }
 
+/** Admin review block for a partner application: KYC/payout summaries plus short-lived
+ *  signed URLs for the private verification documents. Never carries raw NIN or the full
+ *  account number. Absent for legacy applications submitted before the onboarding flow. */
+export interface PartnerOnboardingReview {
+  kyc: {
+    status: string;
+    legalName: string | null;
+    documentLast4: string | null;
+    verifiedAt: string | null;
+  } | null;
+  payout: {
+    status: PartnerPayoutStatus;
+    bankName: string | null;
+    accountLast4: string | null;
+    resolvedAccountName: string | null;
+    paystackSubaccountCode: string | null;
+  } | null;
+  documents: {
+    frontUrl: string | null;
+    backUrl: string | null;
+  };
+}
+
 export interface PartnerApplicationDocument extends DocumentData {
   id: string;
   uid: string;
@@ -252,6 +275,7 @@ export interface PartnerApplicationDocument extends DocumentData {
   reviewedAt?: string | null;
   approvedByUid?: string | null;
   rejectionReason?: string | null;
+  onboarding?: PartnerOnboardingReview | null;
 }
 
 export interface DispatchApplicationDocument extends DocumentData {
