@@ -6,14 +6,7 @@ import {
 } from '@supabase/supabase-js';
 import { supabase } from './supabase/config';
 import { appEnv, supabaseEnv } from '../config/env';
-
-type CacheEntry<T> = {
-  // Younger than freshUntil: serve straight from memory, no network at all.
-  freshUntil: number;
-  // Younger than staleUntil: serve ONLY as last-known-good when the network fails.
-  staleUntil: number;
-  value: T;
-};
+import { callWithCache, createCatalogCacheStore, type CatalogCacheTtl } from './catalogCache';
 
 // Serve without touching the network for this long.
 const PUBLIC_CATALOG_FRESH_TTL_MS = 30_000;
@@ -21,6 +14,10 @@ const PUBLIC_CATALOG_FRESH_TTL_MS = 30_000;
 // seeing slightly stale restaurants is strictly better than an error card —
 // this is what keeps a transient edge/CORS/network blip off the home screen.
 const PUBLIC_CATALOG_STALE_TTL_MS = 6 * 60 * 60_000;
+const CATALOG_CACHE_TTL: CatalogCacheTtl = {
+  freshMs: PUBLIC_CATALOG_FRESH_TTL_MS,
+  staleMs: PUBLIC_CATALOG_STALE_TTL_MS,
+};
 // A hung request is worse than a failed one: mobile networks can hold a socket
 // open indefinitely, and without this the home screen spins forever.
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -31,48 +28,9 @@ const UNREACHABLE_MESSAGE =
   'We could not reach our restaurants right now. Check your connection and try again.';
 const GENERIC_FAILURE_MESSAGE = 'Something went wrong loading restaurants. Please try again.';
 
-const publicCatalogCache = new Map<string, CacheEntry<unknown>>();
-// Collapses concurrent callers (home shelf, favorites, restaurant detail) onto a
-// single network round-trip instead of one request per screen.
-const inFlightRequests = new Map<string, Promise<unknown>>();
-
-const readFresh = <T>(key: string): T | null => {
-  const entry = publicCatalogCache.get(key);
-  if (!entry) {
-    return null;
-  }
-
-  if (entry.freshUntil <= Date.now()) {
-    return null;
-  }
-
-  return entry.value as T;
-};
-
-// Deliberately does NOT evict: an expired entry is still the best thing we can
-// show if the network is down.
-const readStale = <T>(key: string): T | null => {
-  const entry = publicCatalogCache.get(key);
-  if (!entry) {
-    return null;
-  }
-
-  if (entry.staleUntil <= Date.now()) {
-    publicCatalogCache.delete(key);
-    return null;
-  }
-
-  return entry.value as T;
-};
-
-const writeCache = <T>(key: string, value: T) => {
-  const now = Date.now();
-  publicCatalogCache.set(key, {
-    freshUntil: now + PUBLIC_CATALOG_FRESH_TTL_MS,
-    staleUntil: now + PUBLIC_CATALOG_STALE_TTL_MS,
-    value,
-  });
-};
+// Keyed per `${action}:${JSON.stringify(data)}` (see callPublicCatalog below),
+// so the card list and each restaurant's detail live under distinct entries.
+const catalogCacheStore = createCatalogCacheStore();
 
 class CatalogRequestError extends Error {
   readonly retryable: boolean;
@@ -218,47 +176,48 @@ const requestWithRetries = async <T>(
 const callPublicCatalog = async <T>(action: string, data?: Record<string, unknown>) => {
   const cacheKey = `${action}:${JSON.stringify(data ?? {})}`;
 
-  const fresh = readFresh<T>(cacheKey);
-  if (fresh) {
-    return fresh;
-  }
-
-  const existing = inFlightRequests.get(cacheKey) as Promise<T> | undefined;
-  if (existing) {
-    return existing;
-  }
-
-  const request = (async () => {
-    try {
-      const value = await requestWithRetries<T>(action, data);
-      writeCache(cacheKey, value);
-      return value;
-    } catch (error) {
-      // Last-known-good beats a dead end. Only when we have nothing cached at
-      // all does the caller get an error to render.
-      const stale = readStale<T>(cacheKey);
-      if (stale) {
-        return stale;
-      }
-
-      if (error instanceof Error && error.message.includes('Missing Supabase configuration value')) {
-        throw new Error('Missing public catalog configuration. Check your Supabase runtime env and try again.');
-      }
-
-      throw error instanceof Error ? error : new Error(UNREACHABLE_MESSAGE);
-    } finally {
-      inFlightRequests.delete(cacheKey);
+  try {
+    // callWithCache already falls back to a stale cached value on failure
+    // (last-known-good beats a dead end); only when there is nothing cached
+    // at all does its rejection reach this catch.
+    return await callWithCache<T>(catalogCacheStore, cacheKey, () => requestWithRetries<T>(action, data), CATALOG_CACHE_TTL);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Missing Supabase configuration value')) {
+      throw new Error('Missing public catalog configuration. Check your Supabase runtime env and try again.');
     }
-  })();
 
-  inFlightRequests.set(cacheKey, request);
-  return request;
+    throw error instanceof Error ? error : new Error(UNREACHABLE_MESSAGE);
+  }
 };
 
+// Deprecated: full catalog incl. every restaurant's menu, one request. Kept
+// only for apps/customer/app/(customer)/search.tsx's meal search, which
+// genuinely needs every menu to search across restaurants — there is no
+// server-side meal search yet, so this stays the one caller. Do not add new
+// callers; use getRestaurantList (cards) + getRestaurantDetail (by id)
+// instead, which is what the home feed, cart, and restaurant screen now do.
 export const getPublishedRestaurants = async () =>
   callPublicCatalog<{ restaurants: RestaurantDocument[] }>('customerGetPublishedRestaurants');
 
-export const getPublishedRestaurantDetail = async (restaurantId: string) =>
-  callPublicCatalog<{ restaurant: RestaurantDocument | null }>('customerGetPublishedRestaurantDetail', {
+/**
+ * Restaurant cards for discovery: id/name/cuisine/pricing/location fields,
+ * no `menu`. Pass `coords` to filter to restaurants whose delivery radius
+ * covers that point, nearest-first; omit it for the default updatedAt-DESC
+ * order. Paginated (`cursor` in, `nextCursor` out); callers that want the
+ * whole list page through it themselves.
+ */
+export const getRestaurantList = async (params?: {
+  latitude?: number;
+  longitude?: number;
+  cursor?: string;
+}) =>
+  callPublicCatalog<{ restaurants: RestaurantDocument[]; nextCursor: string | null }>(
+    'customerGetRestaurantList',
+    params as Record<string, unknown> | undefined
+  );
+
+/** One restaurant (incl. priced menu), fetched by id — never a full-catalog scan. */
+export const getRestaurantDetail = async (restaurantId: string) =>
+  callPublicCatalog<{ restaurant: RestaurantDocument | null }>('customerGetRestaurantDetail', {
     restaurantId,
   });
