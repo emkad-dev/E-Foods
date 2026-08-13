@@ -1,5 +1,19 @@
 import { callAdminRpc } from '../lib/rpc';
 
+type SetRestaurantPublishedInput = {
+  restaurantId: string;
+  isPublished: boolean;
+};
+
+type SetRestaurantPublishedResult = {
+  id: string;
+  isPublished: boolean;
+  name: string;
+};
+
+export const setRestaurantPublished = (input: SetRestaurantPublishedInput) =>
+  callAdminRpc<SetRestaurantPublishedResult>('adminSetRestaurantPublished', input);
+
 type ReviewDispatchApplicationResult = {
   applicationId: string;
   approvedByUid: string | null;

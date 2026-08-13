@@ -1167,6 +1167,70 @@ const promoSetActive: Handler = async ({ context, data }) => {
   return json(200, { data: { promo } });
 };
 
+/**
+ * Publishes or unpublishes an already-approved restaurant without routing it
+ * back through the application flow. Unpublishing only removes the
+ * restaurant from discovery and blocks new order placement — it does not
+ * touch any in-flight order. `placeCustomerOrder` (via
+ * `prepareCustomerOrderDraft` in `_shared/domains/orders.ts`) already refuses
+ * to accept a new order for an unpublished restaurant, so that guard is not
+ * duplicated here.
+ */
+const adminSetRestaurantPublished: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+  const restaurantId = sanitizeText(data.restaurantId);
+  if (!restaurantId) {
+    fail(400, 'A restaurant id is required.');
+  }
+  if (typeof data.isPublished !== 'boolean') {
+    fail(400, 'An isPublished flag is required.');
+  }
+  const isPublished = data.isPublished === true;
+  const updatedAt = nowIso();
+
+  const { data: updatedRestaurant, error } = await serviceClient
+    .from('RestaurantRecord')
+    .update({ isPublished, updatedAt })
+    .eq('id', restaurantId)
+    .select('id,name,isPublished')
+    .maybeSingle<{ id: string; isPublished: boolean; name: string }>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!updatedRestaurant) {
+    fail(404, 'The selected restaurant could not be found.');
+  }
+
+  await createAuditEntry(
+    context.uid,
+    isPublished ? 'restaurant_published' : 'restaurant_unpublished',
+    'restaurant',
+    restaurantId,
+    { isPublished }
+  );
+
+  // Task 5 made every client realtime-driven — this is what makes the
+  // publish/unpublish state appear on open customer apps without a poll.
+  await broadcastRestaurantsChanged({ restaurantId });
+
+  // `restaurantId` and `isPublished` mirror exactly what the update above
+  // just persisted (the `!updatedRestaurant` check already ruled out "no
+  // such row"), so the response is built from those already-validated
+  // locals rather than by re-reading the nullable query result — `deno
+  // check` does not narrow `updatedRestaurant` past the `fail()` call above
+  // (a known, tracked gap — see scripts/deno-check-baseline.txt — shared by
+  // every other `fail(404, ...)`-then-use pattern in this file), so reading
+  // its fields here would reintroduce that same class of error.
+  return json(200, {
+    data: {
+      id: restaurantId,
+      isPublished,
+      name: updatedRestaurant?.name ?? null,
+    },
+  });
+};
+
 export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: ADMIN_ACTIONS,
   name: 'admin',
@@ -1179,6 +1243,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetDashboardSnapshot,
     adminReviewDispatchApplication,
     adminReviewPartnerApplication,
+    adminSetRestaurantPublished,
     broadcastCancel,
     broadcastCreate,
     broadcastGet,

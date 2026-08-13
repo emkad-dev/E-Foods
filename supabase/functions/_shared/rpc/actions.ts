@@ -47,6 +47,7 @@ export const ADMIN_ACTIONS = [
   'adminGetApprovalQueue',
   'adminReviewDispatchApplication',
   'adminReviewPartnerApplication',
+  'adminSetRestaurantPublished',
   'adminGetDashboardSnapshot',
   'adminGetAccessOverview',
   'supportGetInbox',

@@ -4,7 +4,11 @@ import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { usePolledRpc } from '../lib/usePolledRpc';
-import { reviewDispatchApplication, reviewPartnerApplication } from '../services/approvalActions';
+import {
+  reviewDispatchApplication,
+  reviewPartnerApplication,
+  setRestaurantPublished,
+} from '../services/approvalActions';
 import { getAdminApprovalQueue } from '../services/platformReads';
 import { getApplicationTone, getApprovalTone } from '../theme/tones';
 
@@ -181,6 +185,33 @@ export default function ApprovalsPage() {
                   label={restaurant.approvalStatus ?? (restaurant.isPublished === true ? 'approved' : 'pending')}
                   tone={getApprovalTone(restaurant.approvalStatus, restaurant.isPublished)}
                 />
+                {restaurant.isPublished === true ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={pendingId === restaurant.id}
+                    onClick={() =>
+                      void runAction(restaurant.id, () =>
+                        setRestaurantPublished({ restaurantId: restaurant.id, isPublished: false })
+                      )
+                    }
+                  >
+                    Unpublish
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm"
+                    disabled={pendingId === restaurant.id}
+                    onClick={() =>
+                      void runAction(restaurant.id, () =>
+                        setRestaurantPublished({ restaurantId: restaurant.id, isPublished: true })
+                      )
+                    }
+                  >
+                    Publish
+                  </button>
+                )}
               </div>
             </div>
           ))

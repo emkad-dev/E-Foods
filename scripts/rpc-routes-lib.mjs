@@ -52,11 +52,11 @@ export const EXPECTED_DOMAIN_ACTION_COUNTS = {
   ORDER_ACTIONS: 10,
   DISPATCH_ACTIONS: 9,
   PARTNER_ACTIONS: 8,
-  ADMIN_ACTIONS: 20,
+  ADMIN_ACTIONS: 21,
   ACCOUNT_ACTIONS: 12,
 };
 
-export const EXPECTED_TOTAL_ACTION_COUNT = 59;
+export const EXPECTED_TOTAL_ACTION_COUNT = 60;
 
 /**
  * Extracts a `export const NAME = ['a', 'b'] as const;` string-literal array
@@ -175,7 +175,7 @@ export type RpcTarget = RpcFunction | typeof LEGACY_RPC_FUNCTION;
  */
 export const KNOWN_RPC_TARGETS: readonly RpcTarget[] = [${knownTargetEntries}];
 
-/** The authoritative action -> split-mode Edge Function map. Covers exactly the 59 actions in actions.ts. */
+/** The authoritative action -> split-mode Edge Function map. Covers exactly the 60 actions in actions.ts. */
 export const RPC_ROUTES: Record<string, RpcFunction> = {
 ${routeEntries}
 };
