@@ -51,6 +51,17 @@ export type RestaurantCard = {
   supportsDelivery: boolean;
   supportsPickup: boolean;
   isOpen: boolean;
+  // Always `true`: loadRestaurantRows filters `isPublished = true` at the DB,
+  // so every card is published by construction. NOT a passthrough of the
+  // row's own field — emitted as a real constant so client-side gates that
+  // check isPublished (isRestaurantVisibleToCustomers, getPlatformCoverage)
+  // see it on a card exactly as they do on a full catalog entry, instead of
+  // reading `undefined` and failing every restaurant out of the feed. See
+  // the incident this fixes: a card with no isPublished field made
+  // isRestaurantVisibleToCustomers reject every restaurant, emptying the
+  // home feed and, via getPlatformCoverage's fail-open path, silently
+  // reporting every location as covered.
+  isPublished: true;
   updatedAt: string | null;
   // RestaurantRecord has no rating columns yet (Task 12/E1 adds ratingAverage/
   // ratingCount). Emitting the field now, always null/0, means the shape
@@ -118,6 +129,7 @@ export const toRestaurantCard = (restaurant: RestaurantRow): RestaurantCard => (
   supportsDelivery: restaurant.supportsDelivery !== false,
   supportsPickup: restaurant.supportsPickup !== false,
   isOpen: restaurant.isOpen !== false,
+  isPublished: true,
   updatedAt: restaurant.updatedAt ?? null,
   ratingAverage: null,
   ratingCount: 0,

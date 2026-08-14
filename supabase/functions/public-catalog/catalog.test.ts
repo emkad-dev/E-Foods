@@ -44,6 +44,19 @@ Deno.test('toRestaurantCard carries the documented card fields including forward
   assertEquals(card.ratingCount, 0);
 });
 
+// Regression: a card with no isPublished field made
+// apps/customer/src/utils/restaurantAvailability.ts's
+// isRestaurantVisibleToCustomers reject every restaurant (isPublished !==
+// true on `undefined`), emptying the home feed and — via
+// getPlatformCoverage's zero-eligible-candidates fail-open path — silently
+// reporting every location as covered. loadRestaurantRows only ever selects
+// isPublished = true rows, so this must always be the literal `true`, never
+// a passthrough of a possibly-absent row field.
+Deno.test('toRestaurantCard always emits isPublished: true (every card comes from an isPublished=true row)', () => {
+  const card = toRestaurantCard(baseRow());
+  assertEquals(card.isPublished, true);
+});
+
 // --- hasAvailableMenuItem ---
 
 Deno.test('hasAvailableMenuItem: true when at least one item is available', () => {

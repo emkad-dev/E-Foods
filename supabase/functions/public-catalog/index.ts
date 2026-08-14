@@ -22,6 +22,19 @@ import {
   type RestaurantRow,
 } from './catalog.ts';
 
+// `menu` is selected here even though customerGetRestaurantList's response
+// never includes it (toRestaurantCard drops it) — it exists solely to run
+// hasAvailableMenuItem below before being stripped. That means this query's
+// Postgres read volume and PostgREST-to-function transfer size are the SAME
+// as the pre-B2 full-catalog query for the same restaurant count; only the
+// function-to-client wire payload shrinks (see catalog.ts's toRestaurantCard
+// and this task's report, section 2). The trade: preserving the pre-existing
+// "don't show a restaurant with zero orderable items" UX invariant without a
+// schema change. Removing this pre-filter (and `menu` from this select)
+// would recover the DB-read savings but change customer-visible behavior —
+// deliberately not done without a product decision. A `hasAvailableItem`
+// column maintained on write would let this select drop `menu` entirely; out
+// of scope here.
 const CARD_COLUMNS =
   'id,name,cuisine,cuisines,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt';
 
