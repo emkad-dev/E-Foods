@@ -8,7 +8,9 @@ import {
 } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { serviceClient } from '../client.ts';
+import { runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
 import { buildNotificationData, notifyAdmins, notifyUsers } from '../notifications.ts';
+import { logEdgeEvent } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
   PAYMENT_PROVIDER_CASH,
@@ -34,6 +36,7 @@ import {
   resolvePartnerRestaurantScope,
 } from '../partnerRestaurantScope.ts';
 import { validatePolicyAcceptancePayload, recordPolicyAcceptance } from '../policyAcceptance.ts';
+import { loadDispatchWeights } from '../platformSettings.ts';
 import { broadcastRestaurantsChanged } from '../realtime.ts';
 import {
   DEFAULT_DELIVERY_TIME,
@@ -755,9 +758,8 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
 
   const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
 
-  // Restaurant self-provisions delivery/pickup: when it completes the order,
-  // a cash order is collected on handoff. Platform dispatch is shelved, so no
-  // rider assignment happens here.
+  // Restaurant self-provisions delivery: when it completes the order, a cash
+  // order is collected on handoff.
   if (nextState.status === ORDER_STATUS.DELIVERED && sanitizeText(payment.method, 'cash') === 'cash') {
     payment.capturedAmount = roundCurrency(parseNumber((bundle.order.pricing ?? {}).total, 0));
     payment.lastEvent = 'cash_collected_on_delivery';
@@ -793,6 +795,34 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
       type: 'order_update',
     }),
   });
+
+  // Automatic dispatch assignment: this is the call site (Task 9 / D1) - the
+  // moment a delivery order becomes actionable for a rider is exactly when
+  // the restaurant commits an accepted/preparing/ready_for_pickup
+  // transition, which only ever happens here. Calling it after every
+  // transition (not just 'accept') doubles as the retry the brief asks for:
+  // an order that hit an empty pool on accept gets another automatic attempt
+  // for free on preparing/ready, with no separate poller needed.
+  //
+  // Deliberately non-fatal: the restaurant's status transition has already
+  // been committed above. A selection failure must never unwind that - the
+  // order stays accepted and a human can assign a courier manually via
+  // dispatchAssignOrderCourier.
+  // `bundle`/`nextState` are already validated non-null above (the `!bundle`
+  // and switch-exhaustive `fail()` guards) - the `!` assertions here match
+  // the pre-existing pattern throughout this file, where deno check cannot
+  // prove that a `fail()` (typed `never`) narrows away a `const` across the
+  // subsequent `await`s (tracked as baseline debt, not something this task
+  // takes on for the whole file).
+  try {
+    await runAutomaticDispatchAssignment(bundle!.order, bundle!.assignment, context.uid, nextState!.status, loadDispatchWeights);
+  } catch (error) {
+    logEdgeEvent('error', 'automatic dispatch assignment failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+      status: nextState!.status,
+    });
+  }
 
   return json(200, {
     data: {

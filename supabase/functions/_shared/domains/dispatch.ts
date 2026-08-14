@@ -659,13 +659,21 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
     updatedAt: assignedAt,
   });
 
+  // dispatchAssignOrderCourier is the manual override of automatic dispatch
+  // assignment (see runAutomaticDispatchAssignment in dispatchSelection.ts):
+  // it always logs courier_reassigned with reason: 'manual_override', even
+  // on a first-ever assignment for this order, so the event log can always
+  // distinguish "a human picked this rider" from the automatic path's
+  // dispatch_assigned events by eventType/reason alone.
   await insertDeliveryEvent({
     orderId,
-    eventType: wasReassigned ? 'courier_reassigned' : 'courier_assigned',
+    eventType: 'courier_reassigned',
     actorUid: context.uid,
     details: {
       courierId: courier.id,
       courierName,
+      previousCourierId: previousCourierId || null,
+      reason: 'manual_override',
     },
   });
   await notifyUsers([bundle.order.customerId], {
