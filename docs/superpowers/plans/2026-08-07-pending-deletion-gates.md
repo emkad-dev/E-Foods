@@ -355,13 +355,31 @@ Add `clientErrorExtras` to the existing import from `../_shared/observability.ts
 
 - [ ] **Step 3: Typecheck both functions**
 
-Run: `deno check supabase/functions/app-rpc/index.ts supabase/functions/notifications/index.ts`
-Expected: no errors.
+Run from the `supabase/` directory, not the repo root — the root `package.json` makes Deno demand a `node_modules` that is not installed in this worktree:
 
-- [ ] **Step 4: Confirm no other string-compare on that message survives**
+```bash
+cd supabase && deno check functions/app-rpc/index.ts functions/notifications/index.ts
+```
+
+**Expected: `Found 210 errors.` — and exit code 1.** This repo does not typecheck clean under `deno check`; 210 pre-existing strictness errors (mostly `TS18047 'x' is possibly null`) are the baseline on `main`. The bar for this task is **no NEW errors**, not zero errors.
+
+To verify that, measure the baseline and compare:
+
+```bash
+git checkout <base-commit> -- supabase/functions/app-rpc/index.ts supabase/functions/notifications/index.ts
+cd supabase && deno check functions/app-rpc/index.ts functions/notifications/index.ts
+cd .. && git checkout HEAD -- supabase/functions/app-rpc/index.ts supabase/functions/notifications/index.ts
+```
+
+Both runs must report the same count. Confirm `git status` is clean afterwards.
+
+- [ ] **Step 4: Confirm the string-compare is gone from the code path**
 
 Run: `grep -rn "This account is disabled" supabase/functions/`
-Expected: exactly one hit, in `_shared/request-context.ts` (the throw site itself). If `app-rpc/index.ts` still appears, Step 1 was not applied.
+
+**Expected: exactly two hits, both harmless** — `app-rpc/index.ts` (inside the explanatory *comment* introduced in Step 1, which quotes the old string) and `_shared/request-context.ts` (the throw site itself, which Task 4 replaces).
+
+What must NOT appear is a hit on a line performing a comparison — i.e. any surviving `error.message === 'This account is disabled.'`. Check the two hits are a comment and a `throw`, not a conditional.
 
 - [ ] **Step 5: Commit**
 
@@ -583,8 +601,13 @@ Expected: exactly one hit, in `app-rpc/index.ts`. If `notifications/index.ts` ap
 
 - [ ] **Step 8: Typecheck**
 
-Run: `deno check supabase/functions/app-rpc/index.ts supabase/functions/notifications/index.ts supabase/functions/_shared/request-context.ts`
-Expected: no errors.
+Run from the `supabase/` directory, not the repo root:
+
+```bash
+cd supabase && deno check functions/app-rpc/index.ts functions/notifications/index.ts functions/_shared/request-context.ts
+```
+
+**Expected: a non-zero error count and exit code 1.** This repo carries 210 pre-existing `deno check` errors on `main` (mostly `TS18047 'x' is possibly null`); that is the baseline, not a regression. The bar is **no NEW errors** — compare against the same command run on this task's base commit, as described in Task 3 Step 3.
 
 - [ ] **Step 9: Commit**
 
@@ -895,8 +918,13 @@ Expected: `test:node` and `test:deno` both pass, including the two new Deno test
 
 - [ ] **Step 2: Typecheck the edge functions**
 
-Run: `deno check supabase/functions/app-rpc/index.ts supabase/functions/notifications/index.ts supabase/functions/_shared/request-context.ts supabase/functions/_shared/observability.ts`
-Expected: no errors.
+Run from the `supabase/` directory:
+
+```bash
+cd supabase && deno check functions/app-rpc/index.ts functions/notifications/index.ts functions/_shared/request-context.ts functions/_shared/observability.ts
+```
+
+**Expected: a non-zero error count and exit code 1** — 210 pre-existing errors is the `main` baseline for this repo. The bar is no NEW errors versus `origin/main`, not zero errors. Do not attempt to fix the pre-existing ones; they are out of scope for this branch.
 
 - [ ] **Step 3: Confirm the branch state**
 
