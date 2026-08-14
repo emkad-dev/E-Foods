@@ -5,7 +5,7 @@ import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteBut
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
-import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
+import { getRestaurantList } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
 import type { DiscoveryRestaurant } from '../../src/utils/restaurantAvailability';
 
@@ -68,7 +68,9 @@ export default function CustomerFavoritesScreen() {
     let cancelled = false;
     setLoadingCatalog(true);
 
-    getPublishedRestaurants()
+    // Cards only — this screen renders image/logoImage/name/cuisine/deliveryTime/
+    // isOpen, all of which are on the card; it never needed the full menu.
+    getRestaurantList()
       .then(({ restaurants: catalog }) => {
         if (!cancelled) {
           setRestaurants(catalog as FavoriteRestaurant[]);
