@@ -28,6 +28,7 @@ import {
   shortOrderCode,
 } from '../_shared/email.ts';
 import {
+  clientErrorExtras,
   createEdgeObservation,
   finishEdgeObservation,
   getErrorStatus,
@@ -7136,15 +7137,11 @@ Deno.serve(async (request) => {
     return response;
   } catch (error) {
     capturedError = error;
-    // RpcError and EdgeBackpressureError both carry a numeric `.status` in the
-    // 400-599 range, so getErrorStatus() resolves them the same way the old
-    // per-type checks did. "This account is disabled." is thrown as a plain
-    // Error with no `.status` (see _shared/request-context.ts), so it still
-    // needs an explicit mapping or it would fall through to 500.
-    const status =
-      error instanceof Error && error.message === 'This account is disabled.'
-        ? 403
-        : getErrorStatus(error);
+    // ClientSafeError and RpcError both carry a numeric `.status`, so
+    // getErrorStatus resolves them directly. The old string comparison against
+    // "This account is disabled." is gone: request-context.ts now throws a
+    // ClientSafeError(403), so there is nothing left to special-case.
+    const status = getErrorStatus(error);
 
     response = json(
       status,
@@ -7152,6 +7149,7 @@ Deno.serve(async (request) => {
         error: {
           message:
             error instanceof Error ? error.message : 'Unexpected Edge RPC failure.',
+          ...clientErrorExtras(error),
         },
       },
       error instanceof Error && 'retryAfterSeconds' in error

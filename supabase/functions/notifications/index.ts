@@ -4,6 +4,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { getAuthenticatedRequestContext } from '../_shared/request-context.ts';
 import { sendPushNotificationsToRoles, sendPushNotificationsToUsers } from '../_shared/notifications.ts';
 import {
+  clientErrorExtras,
   createEdgeObservation,
   finishEdgeObservation,
   getErrorStatus,
@@ -127,6 +128,7 @@ Deno.serve(async (request) => {
     const response = jsonResponse(status, {
       error: {
         message: error instanceof Error ? error.message : 'Unexpected notification failure.',
+        ...clientErrorExtras(error),
       },
     }, corsHeaders);
     finishEdgeObservation(observation, { status: response.status, error });
