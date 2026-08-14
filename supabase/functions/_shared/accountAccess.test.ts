@@ -1,4 +1,4 @@
-import { assertAccountAccessible } from './request-context.ts';
+import { assertAccountAccessible } from './accountAccess.ts';
 
 const base = { uid: 'u1', email: 'a@b.co', role: 'customer' };
 
