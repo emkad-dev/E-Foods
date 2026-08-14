@@ -407,12 +407,17 @@ Not at the top of the branch: `restaurantId` is not assigned until 509, so inser
       subaccountCode = created.subaccountCode;
       resolvedAccountName = resolved.accountName;
     } catch (error) {
-      // Record the failure and let the throw unwind before the role grant.
-      // clientErrorMessage keeps the raw Paystack error server-side; never log
-      // payoutRow itself, it carries the full account number.
+      // Record the real failure reason on the payout row so the admin
+      // reviewer can see why activation failed, then let the throw unwind
+      // before the role grant. Never log payoutRow itself — it carries the
+      // full account number.
       await serviceClient
         .from('RestaurantPayout')
-        .update({ status: 'failed', lastError: clientErrorMessage(error), updatedAt: reviewedAt })
+        .update({
+          status: 'failed',
+          lastError: error instanceof Error ? error.message : String(error),
+          updatedAt: reviewedAt,
+        })
         .eq('id', payoutRow!.id);
       throw error;
     }
