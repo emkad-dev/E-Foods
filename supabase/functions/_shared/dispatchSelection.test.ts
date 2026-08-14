@@ -17,6 +17,8 @@ Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
 const {
+  NEUTRAL_DISTANCE_KM,
+  releaseDispatchAssignmentLoad,
   runAutomaticDispatchAssignment,
   scoreDispatchCandidate,
   selectLowestScoreCandidate,
@@ -36,20 +38,80 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
 
 const origin = { latitude: 6.5244, longitude: 3.3792 }; // Lagos
 
-Deno.test('scoreDispatchCandidate: missing coordinates on either side degrade to load-only', () => {
+// Review finding (round 2): degrading a missing candidate coordinate to
+// distanceKm=0 made "no location on file yet" the *best possible* score,
+// not a neutral one - a newly onboarded rider (coordinates are only
+// populated once their app calls syncDispatchRiderLocation) would beat
+// every located rider at equal load until they first sync. The fix
+// distinguishes the two "missing coordinates" cases: the origin (restaurant)
+// being unknown affects every candidate identically, so it stays 0; a
+// specific candidate lacking coordinates while the origin IS known gets
+// NEUTRAL_DISTANCE_KM instead - treated as an average distance away, not
+// the closest possible one.
+Deno.test('scoreDispatchCandidate: a candidate missing coordinates gets a neutral distance, not a free win', () => {
   const noCandidateCoords = scoreDispatchCandidate(
     { activeLoad: 3, id: 'a', latitude: null, longitude: null },
     origin,
     DEFAULT_DISPATCH_WEIGHTS
   );
-  expectEqual(noCandidateCoords, DEFAULT_DISPATCH_WEIGHTS.load * 3, 'no candidate coordinates: distance term is 0');
+  expectEqual(
+    noCandidateCoords,
+    DEFAULT_DISPATCH_WEIGHTS.load * 3 + DEFAULT_DISPATCH_WEIGHTS.distance * NEUTRAL_DISTANCE_KM,
+    'no candidate coordinates (origin known): distance term is the neutral default, not 0'
+  );
+});
 
+Deno.test('scoreDispatchCandidate: an unknown origin degrades every candidate to load-only uniformly', () => {
   const noOriginCoords = scoreDispatchCandidate(
     { activeLoad: 3, id: 'a', latitude: 6.6, longitude: 3.4 },
     null,
     DEFAULT_DISPATCH_WEIGHTS
   );
-  expectEqual(noOriginCoords, DEFAULT_DISPATCH_WEIGHTS.load * 3, 'no origin coordinates: distance term is 0');
+  expectEqual(
+    noOriginCoords,
+    DEFAULT_DISPATCH_WEIGHTS.load * 3,
+    'no origin coordinates: distance term is 0 - fair, since it affects every candidate equally'
+  );
+});
+
+Deno.test('selectLowestScoreCandidate: an un-synced candidate no longer beats a truly nearby located candidate for free', () => {
+  const unsynced = { activeLoad: 0, id: 'unsynced', latitude: null, longitude: null };
+  const veryClose = { activeLoad: 0, id: 'very-close', latitude: 6.5245, longitude: 3.3793 }; // ~15m from origin
+
+  const winner = selectLowestScoreCandidate([unsynced, veryClose], origin, DEFAULT_DISPATCH_WEIGHTS);
+  expectEqual(
+    winner?.id,
+    'very-close',
+    'a genuinely nearby located candidate beats an un-synced one - the previous 0-distance freebie would have picked "unsynced" instead'
+  );
+});
+
+// Review finding (round 2): activeLoad comes straight from the database with
+// no coercion, unlike the admin-controlled weights (which parseDispatchWeights
+// already bounds-checks). A corrupt value there produces a NaN score, and
+// NaN compares as neither greater than, less than, nor equal to anything -
+// selection would then depend on iteration order, silently reintroducing the
+// unexplainable ordering this task exists to remove.
+Deno.test('scoreDispatchCandidate: a non-numeric activeLoad is coerced rather than propagating NaN', () => {
+  const score = scoreDispatchCandidate(
+    { activeLoad: Number.NaN, id: 'a', latitude: null, longitude: null },
+    null,
+    DEFAULT_DISPATCH_WEIGHTS
+  );
+  expectEqual(score, 0, 'a NaN activeLoad is coerced to 0 (parseInteger fallback), not propagated as NaN');
+});
+
+Deno.test('selectLowestScoreCandidate: a corrupt activeLoad does not make selection input-order-dependent', () => {
+  const candidates = [
+    { activeLoad: Number.NaN, id: 'corrupt', latitude: null, longitude: null },
+    { activeLoad: 2, id: 'normal', latitude: null, longitude: null },
+  ];
+
+  const forward = selectLowestScoreCandidate(candidates, null, DEFAULT_DISPATCH_WEIGHTS)?.id;
+  const reversed = selectLowestScoreCandidate([...candidates].reverse(), null, DEFAULT_DISPATCH_WEIGHTS)?.id;
+
+  expectEqual(forward, reversed, 'the winner does not depend on input order even with a corrupt activeLoad value');
+  expectEqual(forward, 'corrupt', 'NaN coerces to 0, the lowest possible load, so it deterministically (if surprisingly) wins');
 });
 
 Deno.test('selectLowestScoreCandidate: nearest wins at equal load', () => {
@@ -318,4 +380,185 @@ Deno.test('runAutomaticDispatchAssignment: skips non-delivery and non-eligible-s
   expectEqual(deliveredOutcome.outcome, 'skipped', 'terminal-adjacent statuses outside the gate are skipped');
 
   expectEqual(state.deliveryEvents.length, 0, 'no DeliveryEvent written for skipped attempts');
+});
+
+// ---------------------------------------------------------------------------
+// releaseDispatchAssignmentLoad: the other end of the lifecycle (review
+// finding, round 2 - activeLoad was incremented on auto-assign but never
+// released on DELIVERED/REJECTED). The fake rpc below mirrors
+// ebuy_release_dispatch_assignment_load's `loadReleasedAt is null` guard,
+// symmetric with the claim guard above.
+// ---------------------------------------------------------------------------
+
+const installReleaseMocks = () => {
+  const state = { loadReleasedAt: null as string | null, riderLoad: 1 };
+
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = async (fn: string, params: Record<string, unknown>) => {
+    if (fn !== 'ebuy_release_dispatch_assignment_load') {
+      throw new Error(`dispatchSelection.test.ts: unexpected rpc "${fn}"`);
+    }
+    if (params.p_courier_id !== RIDER_ID || params.p_order_id !== ORDER_ID) {
+      throw new Error('dispatchSelection.test.ts: unexpected release rpc arguments');
+    }
+
+    if (state.loadReleasedAt) {
+      return { data: [{ released: false }], error: null };
+    }
+
+    state.loadReleasedAt = new Date().toISOString();
+    state.riderLoad -= 1;
+    return { data: [{ released: true }], error: null };
+  };
+
+  return state;
+};
+
+Deno.test('releaseDispatchAssignmentLoad: releases exactly once, and a second call for the same order+courier is a no-op', async () => {
+  const state = installReleaseMocks();
+
+  const first = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
+  const second = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
+
+  expectEqual(first, true, 'first release succeeds');
+  expectEqual(second, false, 'second release for the same order+courier is guarded off, not a double-decrement');
+  expectEqual(state.riderLoad, 0, 'activeLoad decremented exactly once across both calls');
+});
+
+// ---------------------------------------------------------------------------
+// Empty pool: recordDispatchPoolEmpty, reached through
+// runAutomaticDispatchAssignment (it is a private helper, not exported -
+// tested the same black-box way every other case in this file is). Per the
+// brief, this path had never executed before this task; per review, it
+// needed its own coverage rather than relying on the assignment tests above
+// to exercise it incidentally.
+// ---------------------------------------------------------------------------
+
+type EmptyPoolMockState = {
+  adminRoleLookups: number;
+  deliveryEvents: Array<Record<string, unknown>>;
+  poolEmptyEventLookups: number;
+};
+
+/**
+ * Every dispatch-role query (restaurant-scoped and global) returns no
+ * candidates, so the scorer always comes back empty and
+ * runAutomaticDispatchAssignment always falls into recordDispatchPoolEmpty.
+ * `rpc` throws if called at all - the claim function must never run for an
+ * order with nothing to claim against.
+ */
+const installEmptyPoolMocks = (): EmptyPoolMockState => {
+  const state: EmptyPoolMockState = {
+    adminRoleLookups: 0,
+    deliveryEvents: [],
+    poolEmptyEventLookups: 0,
+  };
+
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = (table: string) => {
+    if (table === 'UserRole') {
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: async () => ({ data: [], error: null }),
+            is: async () => ({ data: [], error: null }),
+          }),
+          // loadUserIdsByRoles (notifyAdmins' push lookup) queries
+          // .select('userId,role').in('role', ['admin']) - a different
+          // chain shape than the dispatch-candidate loader above.
+          in: async () => {
+            state.adminRoleLookups += 1;
+            return { data: [], error: null };
+          },
+        }),
+      };
+    }
+
+    if (table === 'RestaurantRecord') {
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: { latitude: null, longitude: null }, error: null }),
+          }),
+        }),
+      };
+    }
+
+    if (table === 'DeliveryEvent') {
+      return {
+        insert: async (payload: Record<string, unknown>) => {
+          state.deliveryEvents.push(payload);
+          return { error: null };
+        },
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => {
+                state.poolEmptyEventLookups += 1;
+                const alreadyRecorded = state.deliveryEvents.some(
+                  (event) => event.eventType === 'dispatch_pool_empty'
+                );
+                return { data: alreadyRecorded ? { id: 'pool-empty-event-1' } : null, error: null };
+              },
+            }),
+          }),
+        }),
+      };
+    }
+
+    throw new Error(`dispatchSelection.test.ts: unexpected table "${table}" in the empty-pool scenario`);
+  };
+
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = async (fn: string) => {
+    throw new Error(`dispatchSelection.test.ts: rpc "${fn}" must not run against an empty pool`);
+  };
+
+  return state;
+};
+
+Deno.test('runAutomaticDispatchAssignment: an empty pool records one dispatch_pool_empty event and notifies admins', async () => {
+  const state = installEmptyPoolMocks();
+
+  const outcome = await runAutomaticDispatchAssignment(
+    buildOrder() as never,
+    null,
+    'restaurant-owner-uid',
+    'accepted',
+    weightsLoader
+  );
+
+  expectEqual(outcome.outcome, 'pool_empty', 'no eligible courier in either pool');
+  expectEqual(state.deliveryEvents.length, 1, 'exactly one DeliveryEvent written');
+  expectEqual(state.deliveryEvents[0]?.eventType, 'dispatch_pool_empty', 'event type');
+  expectEqual(
+    (state.deliveryEvents[0]?.details as Record<string, unknown> | undefined)?.restaurantId,
+    RESTAURANT_ID,
+    'event details record which restaurant hit the empty pool'
+  );
+  expectEqual(state.adminRoleLookups, 1, 'notifyAdmins looked up admin recipients exactly once');
+});
+
+Deno.test('runAutomaticDispatchAssignment: a second attempt against the same still-empty pool does not re-notify', async () => {
+  const state = installEmptyPoolMocks();
+
+  const first = await runAutomaticDispatchAssignment(
+    buildOrder() as never,
+    null,
+    'restaurant-owner-uid',
+    'accepted',
+    weightsLoader
+  );
+  const second = await runAutomaticDispatchAssignment(
+    buildOrder() as never,
+    null,
+    'restaurant-owner-uid',
+    'preparing',
+    weightsLoader
+  );
+
+  expectEqual(first.outcome, 'pool_empty', 'first attempt: pool empty');
+  expectEqual(second.outcome, 'pool_empty', 'retry on the next status change: pool still empty');
+  expectEqual(state.deliveryEvents.length, 1, 'still exactly one DeliveryEvent - the once-per-order guard held');
+  expectEqual(state.adminRoleLookups, 1, 'admins were notified once, not once per retry');
 });
