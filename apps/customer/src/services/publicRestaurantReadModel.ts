@@ -7,6 +7,7 @@ import {
 import { supabase } from './supabase/config';
 import { appEnv, supabaseEnv } from '../config/env';
 import { callWithCache, createCatalogCacheStore, type CatalogCacheTtl } from './catalogCache';
+import { fetchAllPages } from './pagination';
 
 // Serve without touching the network for this long.
 const PUBLIC_CATALOG_FRESH_TTL_MS = 30_000;
@@ -195,7 +196,18 @@ const callPublicCatalog = async <T>(action: string, data?: Record<string, unknow
 // genuinely needs every menu to search across restaurants — there is no
 // server-side meal search yet, so this stays the one caller. Do not add new
 // callers; use getRestaurantList (cards) + getRestaurantDetail (by id)
-// instead, which is what the home feed, cart, and restaurant screen now do.
+// instead, which is what the home feed, coverage, favorites, cart, and
+// restaurant screens all do now.
+//
+// Cost tradeoff to know before adding a second caller: this and
+// getRestaurantList are cached under different keys
+// (customerGetPublishedRestaurants:{} vs customerGetRestaurantList:{}), so
+// they no longer share one network round trip the way every screen used to
+// before this action split. Opening the app (home -> getRestaurantList) and
+// then tapping Search (-> this) now costs list + full catalog, strictly more
+// than the single full-catalog fetch that journey cost pre-split. That is an
+// accepted, disclosed regression on that one path — see this task's report —
+// not an oversight; fixing it needs a server-side meal-search endpoint.
 export const getPublishedRestaurants = async () =>
   callPublicCatalog<{ restaurants: RestaurantDocument[] }>('customerGetPublishedRestaurants');
 
@@ -203,18 +215,25 @@ export const getPublishedRestaurants = async () =>
  * Restaurant cards for discovery: id/name/cuisine/pricing/location fields,
  * no `menu`. Pass `coords` to filter to restaurants whose delivery radius
  * covers that point, nearest-first; omit it for the default updatedAt-DESC
- * order. Paginated (`cursor` in, `nextCursor` out); callers that want the
- * whole list page through it themselves.
+ * order.
+ *
+ * Follows the server's cursor internally (customerGetRestaurantList pages at
+ * 50) until exhausted and returns the complete set — 50 is a transfer chunk
+ * size, not a cap callers need to know about or paginate through themselves.
+ * Each page is still cached/deduped individually by callPublicCatalog, so
+ * concurrent callers (e.g. home + CoverageContext mounting together) share
+ * the same underlying page requests.
  */
-export const getRestaurantList = async (params?: {
-  latitude?: number;
-  longitude?: number;
-  cursor?: string;
-}) =>
-  callPublicCatalog<{ restaurants: RestaurantDocument[]; nextCursor: string | null }>(
-    'customerGetRestaurantList',
-    params as Record<string, unknown> | undefined
+export const getRestaurantList = async (params?: { latitude?: number; longitude?: number }) => {
+  const restaurants = await fetchAllPages<RestaurantDocument>((cursor) =>
+    callPublicCatalog<{ restaurants: RestaurantDocument[]; nextCursor: string | null }>(
+      'customerGetRestaurantList',
+      { ...params, cursor } as Record<string, unknown>
+    )
   );
+
+  return { restaurants };
+};
 
 /** One restaurant (incl. priced menu), fetched by id — never a full-catalog scan. */
 export const getRestaurantDetail = async (restaurantId: string) =>
