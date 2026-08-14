@@ -3531,7 +3531,11 @@ const handleNativeAction = async (
     return json(200, { data: { ok: true } });
   }
 
-  const context = await getAuthenticatedRequestContext(request);
+  // Restoring an account is the one thing a pending-deletion user may still do.
+  // Every other action, and all of the notifications function, is refused.
+  const context = await getAuthenticatedRequestContext(request, {
+    allowPendingDeletion: action === 'cancelAccountDeletion',
+  });
 
   if (action === 'getPolicyAcceptance') {
     const app = normalizePolicyApp(data.app);
