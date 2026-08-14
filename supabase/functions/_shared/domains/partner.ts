@@ -8,7 +8,7 @@ import {
 } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { serviceClient } from '../client.ts';
-import { runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
+import { releaseDispatchAssignmentLoad, runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
 import { buildNotificationData, notifyAdmins, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import {
@@ -822,6 +822,36 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
       orderId,
       status: nextState!.status,
     });
+  }
+
+  // Release the assigned rider's load on the two terminal transitions this
+  // handler can produce. This is the platform's default flow for a
+  // self-delivering restaurant: accept -> auto-assign increments a rider's
+  // activeLoad -> the restaurant marks the order delivered from the partner
+  // app, never touching the dispatch app at all. Nothing else releases that
+  // load on this path (dispatchUpdateOrderStatus's own decrement only fires
+  // when a *dispatcher* marks delivered/failed), so without this the load
+  // climbs without bound on every order a self-delivering restaurant
+  // completes, and the scorer - which weights activeLoad at 1.0 against
+  // distance's 0.15 - ends up steering every future order away from a rider
+  // who has actually gone idle. Same for a reject that happens after an
+  // accept already triggered auto-assignment.
+  //
+  // Guarded on courierId being present: a reject from PLACED (the other
+  // reachable prior state) never had an auto-assignment run against it, so
+  // there is nothing to release. Non-fatal for the same reason the
+  // assignment call above is - the status transition has already committed.
+  const isReleaseEligibleStatus: readonly string[] = [ORDER_STATUS.DELIVERED, ORDER_STATUS.REJECTED];
+  if (isReleaseEligibleStatus.includes(nextState!.status) && sanitizeText(bundle!.assignment?.courierId)) {
+    try {
+      await releaseDispatchAssignmentLoad(orderId, sanitizeText(bundle!.assignment?.courierId));
+    } catch (error) {
+      logEdgeEvent('error', 'dispatch load release failed', {
+        error: error instanceof Error ? error.message : String(error),
+        orderId,
+        status: nextState!.status,
+      });
+    }
   }
 
   return json(200, {

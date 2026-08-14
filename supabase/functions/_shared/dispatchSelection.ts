@@ -41,7 +41,7 @@ import {
   type DeliveryAssignmentRow,
 } from './orders.ts';
 import { broadcastOrderChanged } from './realtime.ts';
-import { sanitizeText, unique } from './rpc/coercion.ts';
+import { parseInteger, sanitizeText, unique } from './rpc/coercion.ts';
 
 // ---------------------------------------------------------------------------
 // The scorer: pure functions, no I/O. Exported so tests can exercise them
@@ -62,20 +62,49 @@ const hasCoordinates = (
   typeof point.latitude === 'number' && Number.isFinite(point.latitude) &&
   typeof point.longitude === 'number' && Number.isFinite(point.longitude);
 
+// Used only when the origin (restaurant) coordinate is known but a specific
+// candidate's is not. Not the delivery-radius concept in
+// deliveryCoverage.ts (that's "will we deliver this far", a different
+// question) - this is a plain middle-of-the-pool distance estimate so an
+// un-synced candidate scores like an average rider, not like the closest
+// possible one. A rider's coordinates are only populated once their app
+// calls syncDispatchRiderLocation, so treating "no coordinates yet" as
+// distanceKm=0 (the previous behaviour) made that the *best* possible
+// score, not a neutral one - a newly onboarded, never-synced rider would
+// beat every located rider at equal load until they first sync, which
+// inverts the distance term exactly for the riders the platform knows
+// least about. 6km sits at the midpoint of the platform's own 12km default
+// delivery radius (DEFAULT_DELIVERY_RADIUS_KM in deliveryCoverage.ts) -
+// a principled "typical" distance rather than an arbitrary one.
+export const NEUTRAL_DISTANCE_KM = 6;
+
 /**
  * `score = w_load × activeLoad + w_distance × distanceKm`, lowest wins.
- * When either side is missing coordinates the distance term drops to 0, so
- * the score degrades to load-only rather than penalising (or crashing on)
- * absent location data.
+ * `activeLoad` is coerced through `parseInteger` (matching
+ * adjustDispatchRiderLoad's own coercion) so a corrupt DB value can't
+ * produce `NaN`: a NaN score compares as neither greater than, less than,
+ * nor equal to anything, which would make selection depend on iteration
+ * order - silently reintroducing the unexplainable ordering this task
+ * exists to remove.
+ *
+ * The distance term is 0 only when the origin itself is unknown (the
+ * restaurant has no coordinates) - that affects every candidate in the pool
+ * identically, so it can't favour one candidate over another. When the
+ * origin is known but a specific candidate's coordinates are not, the
+ * candidate gets NEUTRAL_DISTANCE_KM rather than 0, so an un-synced
+ * candidate is treated as an average distance away, not the closest
+ * possible one.
  */
 export const scoreDispatchCandidate = (
   candidate: DispatchScoreCandidate,
   origin: GeoPoint | null,
   weights: DispatchWeights
 ): number => {
-  const activeLoad = Math.max(0, candidate.activeLoad ?? 0);
-  const distanceKm = origin && hasCoordinates(candidate)
-    ? calculateDistanceKm(origin, { latitude: candidate.latitude as number, longitude: candidate.longitude as number })
+  const activeLoad = Math.max(0, parseInteger(candidate.activeLoad, 0));
+  const distanceKm = origin
+    ? hasCoordinates(candidate)
+      ? calculateDistanceKm(origin, { latitude: candidate.latitude as number, longitude: candidate.longitude as number })
+      : NEUTRAL_DISTANCE_KM
     : 0;
   return weights.load * activeLoad + weights.distance * distanceKm;
 };
@@ -96,7 +125,7 @@ const compareCandidates = (
     return scoreA - scoreB;
   }
 
-  const loadDelta = Math.max(0, a.activeLoad ?? 0) - Math.max(0, b.activeLoad ?? 0);
+  const loadDelta = Math.max(0, parseInteger(a.activeLoad, 0)) - Math.max(0, parseInteger(b.activeLoad, 0));
   if (loadDelta !== 0) {
     return loadDelta;
   }
@@ -260,6 +289,30 @@ const claimDispatchAssignment = async (
 
   const row = (Array.isArray(data) ? data[0] : data) as { claimed?: boolean } | null | undefined;
   return row?.claimed === true;
+};
+
+/**
+ * The other end of the assignment lifecycle: releases a claimed rider's
+ * load back when their order reaches a state where they are no longer
+ * carrying it (delivered, or the restaurant rejects after an auto-assign
+ * already happened). Symmetric with claimDispatchAssignment - guarded by
+ * ebuy_release_dispatch_assignment_load's `loadReleasedAt is null` check so
+ * two near-simultaneous calls for the same order (the same double-fire
+ * shape assignment itself has to guard against) release the load exactly
+ * once, never twice.
+ */
+export const releaseDispatchAssignmentLoad = async (orderId: string, courierId: string): Promise<boolean> => {
+  const { data, error } = await serviceClient.rpc('ebuy_release_dispatch_assignment_load', {
+    p_courier_id: courierId,
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as { released?: boolean } | null | undefined;
+  return row?.released === true;
 };
 
 const recordDispatchPoolEmpty = async (order: CustomerOrderRow, actorUid: string) => {

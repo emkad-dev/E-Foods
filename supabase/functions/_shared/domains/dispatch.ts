@@ -631,13 +631,24 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
     previousCourierId && previousCourierId !== courier.id
   );
 
+  // dispatchOwnerId = courier.id, not the previous owner: there is one
+  // `dispatch` role with no separate coordinator type, so the rider working
+  // an order and the account whose queue it appears in
+  // (dispatchGetDeliveryQueue's ownership filter, and every 403 check on the
+  // dispatch status/detail actions) must be the same account. Writing the
+  // old owner here (as this used to) left a newly assigned rider unable to
+  // ever mark the order picked_up/on_the_way/delivered - the order never
+  // entered their queue and every dispatch action on it 403'd them - while
+  // the previous rider retained full control of an order they were no
+  // longer carrying. Matches what the automatic path already does
+  // (runAutomaticDispatchAssignment sets dispatchOwnerId = courierId).
   const { error: assignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
     {
       assignedAt,
       courierId: courier.id,
       courierName,
       dispatchId: context.uid,
-      dispatchOwnerId: dispatchOwnerId ?? null,
+      dispatchOwnerId: courier.id,
       orderId,
       updatedAt: assignedAt,
     },

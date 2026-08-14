@@ -4,7 +4,7 @@
 import { serviceClient } from './client.ts';
 import { DEFAULT_NIGERIA_COORDINATE } from './nigeriaGeography.ts';
 import { broadcastRidersChanged } from './realtime.ts';
-import { nowIso, parseInteger, parseNumber, sanitizeOptionalText, sanitizeText } from './rpc/coercion.ts';
+import { nowIso, parseNumber, sanitizeOptionalText, sanitizeText } from './rpc/coercion.ts';
 
 export type DispatchRiderRow = {
   acceptanceRate?: number | null;
@@ -98,38 +98,38 @@ export const loadDispatchRiderSnapshot = async (riderId: string | null | undefin
   };
 };
 
-/** Moves a rider's live workload. Clamped at zero so a double-decrement cannot go negative. */
+/**
+ * Moves a rider's live workload by a relative delta. Clamped at zero so a
+ * double-decrement cannot go negative.
+ *
+ * This used to be a select-then-update (read the current activeLoad, then
+ * write activeLoad + delta) - safe only as long as every write was
+ * human-triggered, so a collision needed two humans acting on the same
+ * rider in the same second. Automatic dispatch assignment
+ * (_shared/dispatchSelection.ts) now writes to the same column on every
+ * accept/preparing/ready transition, concurrently with manual dispatch
+ * activity by construction, so a read-then-write here can lose an update:
+ * two deltas that both read the same starting value each compute their own
+ * "next" value independently, and the second write clobbers the first
+ * instead of compounding with it. ebuy_adjust_dispatch_rider_load
+ * (20260814_dispatch_load_lifecycle.sql) is a single atomic
+ * `activeLoad = greatest(0, activeLoad + delta)` UPDATE, so two concurrent
+ * deltas against the same rider always both land, in the order Postgres's
+ * own row locking serializes them.
+ */
 export const adjustDispatchRiderLoad = async (riderId: string | null | undefined, delta: number) => {
   const safeRiderId = sanitizeText(riderId);
   if (!safeRiderId || !Number.isFinite(delta) || delta === 0) {
     return;
   }
 
-  const { data: rider, error } = await serviceClient
-    .from('DispatchRiderRecord')
-    .select('id,activeLoad')
-    .eq('id', safeRiderId)
-    .maybeSingle<Pick<DispatchRiderRow, 'id' | 'activeLoad'>>();
+  const { error } = await serviceClient.rpc('ebuy_adjust_dispatch_rider_load', {
+    p_delta: Math.trunc(delta),
+    p_id: safeRiderId,
+  });
 
   if (error) {
     throw new Error(error.message);
-  }
-
-  if (!rider) {
-    return;
-  }
-
-  const nextLoad = Math.max(0, Math.floor(parseInteger(rider.activeLoad, 0) + delta));
-  const { error: updateError } = await serviceClient
-    .from('DispatchRiderRecord')
-    .update({
-      activeLoad: nextLoad,
-      updatedAt: nowIso(),
-    })
-    .eq('id', safeRiderId);
-
-  if (updateError) {
-    throw new Error(updateError.message);
   }
 };
 
