@@ -510,11 +510,15 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
   if (decision === 'approve') {
     restaurantId = sanitizeText(application.restaurantId) || crypto.randomUUID();
 
-    const { data: payoutRow } = await serviceClient
+    const { data: payoutRow, error: payoutLookupError } = await serviceClient
       .from('RestaurantPayout')
       .select('id,restaurantId,bankCode,accountNumber,paystackSubaccountCode,status')
-      .eq('restaurantId', restaurantId)
+      .eq('uid', applicationId)
       .maybeSingle();
+
+    if (payoutLookupError) {
+      throw new Error(payoutLookupError.message);
+    }
 
     const activationPlan = resolvePayoutActivationPlan(payoutRow);
     if (activationPlan.action === 'blocked') {
@@ -536,7 +540,7 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
         const created = await createPaystackSubaccount({
           accountNumber: payoutRow!.accountNumber,
           bankCode: payoutRow!.bankCode,
-          businessName: sanitizeText(application?.restaurantName, 'FEASTY partner'),
+          businessName: sanitizeText(application.restaurantName, 'FEASTY partner'),
         });
         subaccountCode = created.subaccountCode;
         resolvedAccountName = resolved.accountName;
@@ -545,7 +549,7 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
         // reviewer can see why activation failed, then let the throw unwind
         // before the role grant. Never log payoutRow itself — it carries the
         // full account number.
-        await serviceClient
+        const { error: payoutFailureError } = await serviceClient
           .from('RestaurantPayout')
           .update({
             status: 'failed',
@@ -553,6 +557,11 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
             updatedAt: reviewedAt,
           })
           .eq('id', payoutRow!.id);
+        if (payoutFailureError) {
+          // Don't let a failed DB write mask the original Paystack error —
+          // log it separately and still throw the original below.
+          console.error('Failed to record payout activation failure.', payoutFailureError);
+        }
         throw error;
       }
     }
@@ -560,16 +569,24 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
     // One activation write serves both paths — a reused code re-asserts 'active'
     // (a prior run may have left the row 'failed' after minting the code), and a
     // freshly created one is persisted here rather than inside the try block.
-    await serviceClient
+    // restaurantId is set here too — the KYC spec defines it as "set on
+    // approval", and this row is no longer looked up by restaurantId, so this
+    // write is the only place it lands on RestaurantPayout.
+    const { error: payoutActivationError } = await serviceClient
       .from('RestaurantPayout')
       .update({
         paystackSubaccountCode: subaccountCode,
         status: 'active',
         lastError: null,
+        restaurantId,
         updatedAt: reviewedAt,
         ...(resolvedAccountName ? { resolvedAccountName } : {}),
       })
       .eq('id', payoutRow!.id);
+
+    if (payoutActivationError) {
+      throw new Error(payoutActivationError.message);
+    }
 
     await syncUserRoleState(applicationId, 'restaurant', context.uid, {
       accountDisabled: false,

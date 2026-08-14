@@ -88,6 +88,13 @@ const fetchPaystackJson = async ({
 }) => {
   assertPaystackConfigured();
 
+  // Some callers (resolveBankAccount) put the account number in the query
+  // string. `path` must never appear whole in a message that can reach a
+  // client, the DB, or the logs — strip the query string once, here, so no
+  // current or future caller of fetchPaystackJson can leak it. Do not
+  // "restore" the query string for debuggability.
+  const safePath = path.split('?')[0];
+
   let response: Response;
   try {
     response = await fetch(`https://api.paystack.co${path}`, {
@@ -101,7 +108,7 @@ const fetchPaystackJson = async ({
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      fail(504, `Paystack request to ${path} timed out after ${PAYSTACK_REQUEST_TIMEOUT_MS}ms.`);
+      fail(504, `Paystack request to ${safePath} timed out after ${PAYSTACK_REQUEST_TIMEOUT_MS}ms.`);
     }
     throw error;
   }
@@ -115,7 +122,7 @@ const fetchPaystackJson = async ({
     | null;
 
   if (!response.ok || payload?.status !== true) {
-    fail(500, sanitizeText(payload?.message, `Paystack request to ${path} failed.`));
+    fail(500, sanitizeText(payload?.message, `Paystack request to ${safePath} failed.`));
   }
 
   return (payload?.data ?? null) as JsonObject | null;
