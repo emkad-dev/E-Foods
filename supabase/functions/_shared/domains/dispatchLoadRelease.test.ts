@@ -106,6 +106,18 @@ type TableHooks = {
 const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
   const rows: Row[] = [...initialRows];
 
+  // Reads return COPIES, the way a real round trip does. This is not a
+  // detail: every bug in rounds 1-4 lives in the gap between "what the
+  // handler read" and "what is committed now", and a mock that hands back
+  // live row references closes that gap for free - the handler's `bundle`
+  // would silently update itself when an interleaved handler wrote, so a
+  // stale-snapshot check like assertNonTerminalOrder would appear to catch
+  // races it cannot actually see in production. Verified by mutation: with
+  // live references, reverting the compare-and-swap left the round-4
+  // ordering-1 test green, because the pre-flight guard was reading
+  // post-write state.
+  const snapshot = (row: Row) => ({ ...row });
+
   const query = () => {
     let filtered = [...rows];
     let orderCol: string | null = null;
@@ -137,11 +149,11 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
       },
       async maybeSingle() {
         if (hooks.beforeRead) await hooks.beforeRead();
-        return { data: filtered[0] ?? null, error: null };
+        return { data: filtered[0] ? snapshot(filtered[0]) : null, error: null };
       },
       async single() {
         if (hooks.beforeRead) await hooks.beforeRead();
-        return { data: filtered[0] ?? null, error: null };
+        return { data: filtered[0] ? snapshot(filtered[0]) : null, error: null };
       },
       then(resolve: (value: { data: Row[]; error: null }) => unknown, reject?: (reason: unknown) => unknown) {
         let result = filtered;
@@ -159,7 +171,7 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
         if (limitN !== null) {
           result = result.slice(0, limitN);
         }
-        return Promise.resolve({ data: result, error: null }).then(resolve, reject);
+        return Promise.resolve({ data: result.map(snapshot), error: null }).then(resolve, reject);
       },
     };
     return builder;
