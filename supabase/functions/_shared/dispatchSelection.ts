@@ -294,16 +294,34 @@ const claimDispatchAssignment = async (
 /**
  * The other end of the assignment lifecycle: releases a claimed rider's
  * load back when their order reaches a state where they are no longer
- * carrying it (delivered, or the restaurant rejects after an auto-assign
- * already happened). Symmetric with claimDispatchAssignment - guarded by
+ * carrying it (delivered, failed, cancelled, or the restaurant rejects
+ * after an auto-assign already happened). Symmetric with
+ * claimDispatchAssignment - guarded by
  * ebuy_release_dispatch_assignment_load's `loadReleasedAt is null` check so
  * two near-simultaneous calls for the same order (the same double-fire
  * shape assignment itself has to guard against) release the load exactly
  * once, never twice.
+ *
+ * Keyed on the order alone (review round 4). The rider whose load is
+ * decremented is whoever the assignment row names at the moment the release
+ * commits, NOT whoever the caller believed it named: every caller reads its
+ * order bundle once at request start and only gets here several awaits
+ * later, so a courier id taken from that bundle is by construction a stale
+ * read. Passing one meant a release landing just after a manual
+ * reassignment matched zero rows (`where "courierId" = <the old rider>`)
+ * and silently decremented nothing, stranding the new rider's claim on an
+ * order that would never transition again.
+ *
+ * For the same reason it is safe - and required - to call this
+ * unconditionally on a terminal transition rather than gating on the
+ * caller's snapshot having a courier: an order the snapshot showed as
+ * unassigned may have been claimed by automatic assignment in between, and
+ * a release skipped on that basis leaks the claim permanently. With no live
+ * claim the statement matches no rows and returns false, one cheap indexed
+ * no-op.
  */
-export const releaseDispatchAssignmentLoad = async (orderId: string, courierId: string): Promise<boolean> => {
+export const releaseDispatchAssignmentLoad = async (orderId: string): Promise<boolean> => {
   const { data, error } = await serviceClient.rpc('ebuy_release_dispatch_assignment_load', {
-    p_courier_id: courierId,
     p_order_id: orderId,
   });
 
@@ -313,6 +331,58 @@ export const releaseDispatchAssignmentLoad = async (orderId: string, courierId: 
 
   const row = (Array.isArray(data) ? data[0] : data) as { released?: boolean } | null | undefined;
   return row?.released === true;
+};
+
+export type DispatchReassignmentResult = {
+  /** Normalized committed status the swap was evaluated against; null if the order is gone. */
+  orderStatus: string | null;
+  /** The courier the row named before the swap, straight from the locked row. */
+  previousCourierId: string | null;
+  reassigned: boolean;
+};
+
+/**
+ * Manual (re)assignment of an order's courier, as one compare-and-swap.
+ *
+ * The row update, the previous courier's decrement and the new courier's
+ * increment all happen inside ebuy_reassign_dispatch_assignment_courier
+ * (see 20260815_dispatch_reassignment_cas.sql), conditioned on the order's
+ * *currently committed* status and on the assignment's claim not having
+ * already been released - not on the bundle the handler read at request
+ * start. `reassigned: false` means the swap did not happen and nothing was
+ * written: no row change, no decrement, no increment. Callers must surface
+ * that as a failed precondition rather than reporting success, because
+ * every downstream side effect (the event log, the "rider assigned" pushes,
+ * the response body) would otherwise describe an assignment that does not
+ * exist.
+ */
+export const reassignDispatchAssignmentCourier = async (
+  orderId: string,
+  courierId: string,
+  courierName: string,
+  dispatchId: string
+): Promise<DispatchReassignmentResult> => {
+  const { data, error } = await serviceClient.rpc('ebuy_reassign_dispatch_assignment_courier', {
+    p_courier_id: courierId,
+    p_courier_name: courierName,
+    p_dispatch_id: dispatchId,
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { orderStatus?: string | null; previousCourierId?: string | null; reassigned?: boolean }
+    | null
+    | undefined;
+
+  return {
+    orderStatus: sanitizeText(row?.orderStatus) || null,
+    previousCourierId: sanitizeText(row?.previousCourierId) || null,
+    reassigned: row?.reassigned === true,
+  };
 };
 
 const recordDispatchPoolEmpty = async (order: CustomerOrderRow, actorUid: string) => {
@@ -438,10 +508,15 @@ export const runAutomaticDispatchAssignment = async (
   const claimed = await claimDispatchAssignment(order.id, winner.id, courierName, winner.id);
 
   if (!claimed) {
-    // A concurrent call (another retry, or a manual override landing at the
-    // same moment) already claimed this order. The order has a courier
-    // either way - this is success, not failure, and it must not log a
-    // second dispatch_assigned event or increment load a second time.
+    // Either a concurrent call (another retry, or a manual override landing
+    // at the same moment) already claimed this order, or - since review
+    // round 4 - the order left the auto-eligible window while this call was
+    // scoring the pool (a cancel or reject committing in between). Both are
+    // "there is nothing for this caller to do", not failures, and both must
+    // avoid logging a second dispatch_assigned event, notifying a rider who
+    // was not assigned, or incrementing load a second time. No production
+    // caller branches on the outcome value, so the two share one label
+    // rather than warranting a return-type change to the SQL function.
     return { outcome: 'already_assigned', ownerId: null };
   }
 

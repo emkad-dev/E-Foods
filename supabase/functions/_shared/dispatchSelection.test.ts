@@ -398,7 +398,10 @@ const installReleaseMocks = (startingLoad = 1) => {
     if (fn !== 'ebuy_release_dispatch_assignment_load') {
       throw new Error(`dispatchSelection.test.ts: unexpected rpc "${fn}"`);
     }
-    if (params.p_courier_id !== RIDER_ID || params.p_order_id !== ORDER_ID) {
+    // Order-keyed only (review round 4): the row decides which rider holds
+    // the claim, so passing a courier id at all is what let a release
+    // silently no-op against a legitimately reassigned row.
+    if (params.p_order_id !== ORDER_ID || 'p_courier_id' in params) {
       throw new Error('dispatchSelection.test.ts: unexpected release rpc arguments');
     }
 
@@ -414,11 +417,11 @@ const installReleaseMocks = (startingLoad = 1) => {
   return state;
 };
 
-Deno.test('releaseDispatchAssignmentLoad: releases exactly once, and a second call for the same order+courier is a no-op', async () => {
+Deno.test('releaseDispatchAssignmentLoad: releases exactly once, and a second call for the same order is a no-op', async () => {
   const state = installReleaseMocks();
 
-  const first = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
-  const second = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
+  const first = await releaseDispatchAssignmentLoad(ORDER_ID);
+  const second = await releaseDispatchAssignmentLoad(ORDER_ID);
 
   expectEqual(first, true, 'first release succeeds');
   expectEqual(second, false, 'second release for the same order+courier is guarded off, not a double-decrement');
@@ -443,12 +446,12 @@ Deno.test('releaseDispatchAssignmentLoad: a dispatcher release followed by a sta
   // claim under test, matching the review's numeric example.
   const state = installReleaseMocks(3);
 
-  const dispatcherRelease = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
+  const dispatcherRelease = await releaseDispatchAssignmentLoad(ORDER_ID);
   expectEqual(dispatcherRelease, true, "the dispatcher's release (first to complete) wins the claim");
   expectEqual(state.riderLoad, 2, 'one decrement after the dispatcher path releases');
 
-  const stalePartnerRelease = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
-  expectEqual(stalePartnerRelease, false, "the stale partner release for the same order+courier is a guarded no-op");
+  const stalePartnerRelease = await releaseDispatchAssignmentLoad(ORDER_ID);
+  expectEqual(stalePartnerRelease, false, "the stale partner release for the same order is a guarded no-op");
   expectEqual(state.riderLoad, 2, 'still 2, not 1 - the stale release must not land a second decrement for the same claim');
 });
 

@@ -837,14 +837,23 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   // who has actually gone idle. Same for a reject that happens after an
   // accept already triggered auto-assignment.
   //
-  // Guarded on courierId being present: a reject from PLACED (the other
-  // reachable prior state) never had an auto-assignment run against it, so
-  // there is nothing to release. Non-fatal for the same reason the
-  // assignment call above is - the status transition has already committed.
+  // Called with the order id alone, and no longer gated on this handler's
+  // snapshot showing a courier (review round 4). Two reasons, both about
+  // that snapshot being stale by the time this line runs: the rider to
+  // decrement is whoever the assignment row names when the release commits
+  // (a manual reassignment may have moved the claim), and an order that had
+  // no courier when `bundle` was read may have been claimed since - by the
+  // automatic assignment a concurrent transition on this very order
+  // triggered - in which case skipping the release strands that claim on a
+  // now-terminal order forever. With no live claim the SQL matches no rows
+  // and does nothing, so the reject-from-PLACED case the old guard existed
+  // for costs one no-op round trip instead of a correctness hole.
+  // Non-fatal for the same reason the assignment call above is - the status
+  // transition has already committed.
   const isReleaseEligibleStatus: readonly string[] = [ORDER_STATUS.DELIVERED, ORDER_STATUS.REJECTED];
-  if (isReleaseEligibleStatus.includes(nextState!.status) && sanitizeText(bundle!.assignment?.courierId)) {
+  if (isReleaseEligibleStatus.includes(nextState!.status)) {
     try {
-      await releaseDispatchAssignmentLoad(orderId, sanitizeText(bundle!.assignment?.courierId));
+      await releaseDispatchAssignmentLoad(orderId);
     } catch (error) {
       logEdgeEvent('error', 'dispatch load release failed', {
         error: error instanceof Error ? error.message : String(error),

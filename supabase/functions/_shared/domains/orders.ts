@@ -1148,16 +1148,21 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   // anyone had already released. Now it shares the same loadReleasedAt
   // guard as every other release path, so only whichever one actually
   // completes first decrements.
-  const releaseCourierId = sanitizeText(bundle.assignment?.courierId);
-  if (releaseCourierId) {
-    try {
-      await releaseDispatchAssignmentLoad(orderId, releaseCourierId);
-    } catch (error) {
-      logEdgeEvent('error', 'dispatch load release failed', {
-        error: error instanceof Error ? error.message : String(error),
-        orderId,
-      });
-    }
+  //
+  // Called with the order id alone and unconditionally (review round 4): the
+  // assignment row decides which rider holds the claim, not this handler's
+  // snapshot of it. The old `if (releaseCourierId)` pre-check skipped the
+  // release whenever `bundle` showed no courier - but this handler's own
+  // ACCEPTED window is precisely when automatic assignment claims one, so a
+  // cancel racing that claim would skip the release and strand the claim on
+  // a cancelled order forever.
+  try {
+    await releaseDispatchAssignmentLoad(orderId);
+  } catch (error) {
+    logEdgeEvent('error', 'dispatch load release failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
   }
 
   await insertDeliveryEvent({

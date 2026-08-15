@@ -14,6 +14,16 @@
 // dynamically. Runs in package.json's second, --no-check `deno test`
 // invocation (the domain modules carry pre-existing `deno check` type
 // errors, tracked separately in scripts/deno-check-baseline.txt).
+//
+// Review round 4 extended this file rather than adding another: the round-4
+// finding (dispatchAssignOrderCourier's manual reassignment had no
+// compare-and-swap and leaked the incoming rider's load permanently when it
+// raced a terminal transition) is a defect in the SAME ledger, and the
+// invariant under test is one invariant - "for each (order, courier) claim,
+// exactly one decrement ever lands" - across all four handlers that touch
+// it. The harness therefore grew per-rider load tracking, mirrors of all
+// three ledger SQL functions, and two interleaving hooks that let a second
+// handler commit mid-flight of the first, deterministically.
 Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
@@ -26,6 +36,11 @@ const { serviceClient } = await import('../client.ts');
 const dispatchUpdateOrderStatus = dispatchDomain.handlers.dispatchUpdateOrderStatus;
 if (typeof dispatchUpdateOrderStatus !== 'function') {
   throw new Error('dispatchDomain.handlers.dispatchUpdateOrderStatus is not registered.');
+}
+
+const dispatchAssignOrderCourier = dispatchDomain.handlers.dispatchAssignOrderCourier;
+if (typeof dispatchAssignOrderCourier !== 'function') {
+  throw new Error('dispatchDomain.handlers.dispatchAssignOrderCourier is not registered.');
 }
 
 const partnerUpdateOrderStatus = partnerDomain.handlers.partnerUpdateOrderStatus;
@@ -54,19 +69,41 @@ const ADMIN_CONTEXT = {
   userProfile: { uid: 'admin-uid-no-account-row', email: 'admin@example.test', role: 'admin', accountDisabled: false },
 };
 
+const CUSTOMER_CONTEXT = {
+  email: 'customer@example.test',
+  role: 'customer',
+  token: 'fake-token',
+  uid: 'customer-release-1',
+  userProfile: { uid: 'customer-release-1', email: 'customer@example.test', role: 'customer', accountDisabled: false },
+};
+
 const ORDER_ID = 'order-release-1';
 const RESTAURANT_ID = 'restaurant-release-1';
 const RIDER_ID = 'rider-release-1';
+const RIDER_B_ID = 'rider-release-2';
 const CUSTOMER_ID = 'customer-release-1';
 
 type Row = Record<string, unknown>;
+
+type TableHooks = {
+  /** Fires (once) inside an async read, before the rows are returned. */
+  beforeRead?: () => Promise<void>;
+  /** Fires (once) inside an awaited update, BEFORE the payload is applied. */
+  beforeUpdate?: () => Promise<void>;
+};
 
 // A minimal in-memory postgrest-shaped table: .eq/.in/.is actually filter,
 // .order/.limit actually apply, .maybeSingle/.single unwrap to one row (or
 // null), and plainly awaiting the builder (no terminal call) resolves to
 // the filtered array - matching however each call site in the real
 // handlers happens to chain, without hand-coding every combination.
-const createTable = (initialRows: Row[]) => {
+//
+// Updates apply when the builder is awaited, not when .eq() is called
+// (postgrest's own semantics, and what makes beforeUpdate a usable
+// interleaving point: a hook can commit another handler's whole transaction
+// in the window between "this handler decided to write" and "the write
+// landed").
+const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
   const rows: Row[] = [...initialRows];
 
   const query = () => {
@@ -99,9 +136,11 @@ const createTable = (initialRows: Row[]) => {
         return builder;
       },
       async maybeSingle() {
+        if (hooks.beforeRead) await hooks.beforeRead();
         return { data: filtered[0] ?? null, error: null };
       },
       async single() {
+        if (hooks.beforeRead) await hooks.beforeRead();
         return { data: filtered[0] ?? null, error: null };
       },
       then(resolve: (value: { data: Row[]; error: null }) => unknown, reject?: (reason: unknown) => unknown) {
@@ -132,16 +171,23 @@ const createTable = (initialRows: Row[]) => {
       return query();
     },
     update(payload: Row) {
+      const filters: Array<[string, unknown]> = [];
+      const apply = async () => {
+        if (hooks.beforeUpdate) await hooks.beforeUpdate();
+        for (const row of rows) {
+          if (filters.every(([col, val]) => row[col] === val)) {
+            Object.assign(row, payload);
+          }
+        }
+      };
       // deno-lint-ignore no-explicit-any
       const builder: any = {
         eq(col: string, val: unknown) {
-          for (const row of rows) {
-            if (row[col] === val) Object.assign(row, payload);
-          }
+          filters.push([col, val]);
           return builder;
         },
         then(resolve: (value: { error: null }) => unknown, reject?: (reason: unknown) => unknown) {
-          return Promise.resolve({ error: null }).then(resolve, reject);
+          return apply().then(() => ({ error: null })).then(resolve, reject);
         },
       };
       return builder;
@@ -180,47 +226,131 @@ const buildOrderRow = (status: string): Row => ({
   updatedAt: new Date().toISOString(),
 });
 
-const buildAssignmentRow = (): Row => ({
+const buildAssignmentRow = (courierId: string | null): Row => ({
   assignedAt: new Date().toISOString(),
-  courierId: RIDER_ID,
-  courierName: 'Ada Rider',
+  courierId,
+  courierName: courierId ? 'Ada Rider' : null,
   dispatchId: null,
-  dispatchOwnerId: RIDER_ID,
+  dispatchOwnerId: courierId,
   loadReleasedAt: null,
   orderId: ORDER_ID,
   updatedAt: new Date().toISOString(),
 });
 
+const buildRiderRow = (id: string, displayName: string): Row => ({
+  activeLoad: 0, // the ledger of record for these tests is state.load, not this column: every production write to activeLoad goes through ebuy_adjust_dispatch_rider_load, which the rpc mock below models.
+  displayName,
+  id,
+  latitude: null,
+  longitude: null,
+  status: 'Available',
+  vehicleType: 'bike',
+});
+
+// Mirrors normalizeOrderStatus (_shared/orders.ts) - and, more to the point,
+// ebuy_lock_order_status, which the two compare-and-swap SQL functions use
+// to decide whether a write is still allowed.
+const normalizeStatus = (value: unknown) => {
+  const status = typeof value === 'string' && value.trim() ? value.trim() : 'draft';
+  if (status === 'pending' || status === 'confirmed') return 'placed';
+  if (status === 'ready') return 'ready_for_pickup';
+  return status;
+};
+
+const ASSIGNABLE_STATUSES = ['accepted', 'preparing', 'ready_for_pickup'];
+
+type MockOptions = {
+  /** Courier on the assignment row at request start. `null` = row exists, unclaimed. */
+  assignmentCourierId?: string | null;
+  /** Runs once, inside dispatchAssignOrderCourier's DispatchRiderRecord lookup. */
+  onCourierLookup?: () => Promise<void>;
+  /** Runs once, inside a CustomerOrder update, before the new status is applied. */
+  beforeOrderUpdate?: () => Promise<void>;
+};
+
 /**
- * Installs a table mock per referenced table plus a strict rpc mock that
- * only recognises ebuy_release_dispatch_assignment_load - mirroring the
- * real ebuy_release_dispatch_assignment_load's `loadReleasedAt is null`
- * guard by mutating the DeliveryAssignment table directly, so a claim can
- * only ever be released once. Any OTHER rpc name (in particular
- * ebuy_adjust_dispatch_rider_load, what the bare adjustDispatchRiderLoad(-1)
- * this fix replaced would call instead) throws - which is what makes this
- * mutation-provable: if a future edit reverts a handler back to the bare
- * decrement, this mock throws inside the release call, the handler's own
- * try/catch swallows it (matching the non-fatal contract), and riderLoad
- * simply never decrements - so the test's assertion on the final counter
- * value goes red, exactly the signal round 2's helper-only test failed to
- * produce.
+ * Installs a table mock per referenced table plus a strict rpc mock
+ * implementing the three ledger functions - claim, reassign, release -
+ * each mirroring its SQL guard:
+ *
+ *   * release: `loadReleasedAt is null`, and (round 4) keyed on the ORDER
+ *     alone, decrementing whichever courier the row currently names. The
+ *     mock rejects a p_courier_id argument outright, because passing one is
+ *     what let a release silently no-op against a legitimately reassigned
+ *     row.
+ *   * reassign: the order's committed status must still be in
+ *     ASSIGNABLE_STATUSES and the claim must not already be released;
+ *     otherwise nothing is written and nothing is adjusted.
+ *   * claim: same status guard, plus `courierId is null`.
+ *
+ * Any OTHER rpc name - in particular ebuy_adjust_dispatch_rider_load, what
+ * a bare adjustDispatchRiderLoad call would use - throws. That is what
+ * makes these tests mutation-provable: reverting a handler to a bare
+ * decrement/increment either throws through the handler or leaves the
+ * counter untouched, and every test asserts the exact counter, not just
+ * that the call did not blow up (both call sites wrap the release in
+ * try/catch, so a thrown error alone is invisible).
+ *
+ * state.load deliberately does NOT clamp at zero the way the production
+ * `greatest(0, ...)` does: an over-decrement must show up as a negative
+ * number rather than being silently absorbed - that absorption is exactly
+ * what hid round 4's double decrement of the outgoing rider.
  */
-const installHandlerMocks = (orderStatus: string, startingRiderLoad: number) => {
+const installHandlerMocks = (orderStatus: string, startingRiderLoad: number, options: MockOptions = {}) => {
   const state = {
-    riderLoad: startingRiderLoad,
+    load: {
+      [RIDER_ID]: startingRiderLoad,
+      [RIDER_B_ID]: 0,
+    } as Record<string, number>,
     rpcCalls: [] as Array<{ fn: string; params: Record<string, unknown> }>,
   };
 
+  let courierLookupHookFired = false;
+  let orderUpdateHookFired = false;
+
+  const assignmentCourierId =
+    options.assignmentCourierId === undefined ? RIDER_ID : options.assignmentCourierId;
+
   const tables = {
-    CustomerOrder: createTable([buildOrderRow(orderStatus)]),
-    DeliveryAssignment: createTable([buildAssignmentRow()]),
+    CustomerOrder: createTable([buildOrderRow(orderStatus)], {
+      beforeUpdate: options.beforeOrderUpdate
+        ? async () => {
+          // Fire-once: the interleaved handler writes to CustomerOrder too,
+          // and an unguarded hook would recurse forever.
+          if (orderUpdateHookFired) return;
+          orderUpdateHookFired = true;
+          await options.beforeOrderUpdate!();
+        }
+        : undefined,
+    }),
+    DeliveryAssignment: createTable([buildAssignmentRow(assignmentCourierId)]),
     DeliveryEvent: createTable([]),
+    DispatchRiderRecord: createTable(
+      [buildRiderRow(RIDER_ID, 'Ada Rider'), buildRiderRow(RIDER_B_ID, 'Bode Rider')],
+      {
+        beforeRead: options.onCourierLookup
+          ? async () => {
+            if (courierLookupHookFired) return;
+            courierLookupHookFired = true;
+            await options.onCourierLookup!();
+          }
+          : undefined,
+      }
+    ),
     OrderItem: createTable([]),
     RestaurantApproval: createTable([]),
     RestaurantRecord: createTable([{ id: RESTAURANT_ID, ownerId: null }]),
     UserAccount: createTable([]), // no row for ADMIN_CONTEXT.uid -> loadUserAccount returns null -> loadManagedRestaurantForUser falls back to the RestaurantRecord query below, and every push-token lookup returns no rows (push sending is skipped, not something these tests assert on).
     UserRole: createTable([]), // no restaurant-role links -> notifyRestaurantUsers falls back to RestaurantRecord.ownerId.
+  };
+
+  const assignmentRow = () => tables.DeliveryAssignment.rows.find((row) => row.orderId === ORDER_ID) ?? null;
+  const orderStatusNow = () => {
+    const order = tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+    return order ? normalizeStatus(order.status) : null;
+  };
+  const adjustLoad = (courierId: string, delta: number) => {
+    state.load[courierId] = (state.load[courierId] ?? 0) + delta;
   };
 
   // deno-lint-ignore no-explicit-any
@@ -236,20 +366,92 @@ const installHandlerMocks = (orderStatus: string, startingRiderLoad: number) => 
   (serviceClient as any).rpc = async (fn: string, params: Record<string, unknown>) => {
     state.rpcCalls.push({ fn, params });
 
-    if (fn !== 'ebuy_release_dispatch_assignment_load') {
-      throw new Error(`dispatchLoadRelease.test.ts: unexpected rpc "${fn}" - the handler must call the guarded release, not adjustDispatchRiderLoad's own rpc`);
+    if (fn === 'ebuy_release_dispatch_assignment_load') {
+      if ('p_courier_id' in params) {
+        throw new Error(
+          'dispatchLoadRelease.test.ts: the release is keyed on the order alone - a caller-supplied courier id is the stale read round 4 removed'
+        );
+      }
+      const assignment = assignmentRow();
+      const courierId = typeof assignment?.courierId === 'string' ? assignment.courierId : '';
+      if (!assignment || !courierId || assignment.loadReleasedAt) {
+        return { data: [{ released: false }], error: null };
+      }
+      assignment.loadReleasedAt = new Date().toISOString();
+      adjustLoad(courierId, -1);
+      return { data: [{ released: true }], error: null };
     }
 
-    const assignment = tables.DeliveryAssignment.rows.find(
-      (row) => row.orderId === params.p_order_id && row.courierId === params.p_courier_id
+    if (fn === 'ebuy_reassign_dispatch_assignment_courier') {
+      const status = orderStatusNow();
+      const assignment = assignmentRow();
+      const previousCourierId = typeof assignment?.courierId === 'string' ? assignment.courierId : null;
+
+      if (!status || !ASSIGNABLE_STATUSES.includes(status)) {
+        return { data: [{ orderStatus: status, previousCourierId: null, reassigned: false }], error: null };
+      }
+      if (assignment?.loadReleasedAt) {
+        return { data: [{ orderStatus: status, previousCourierId, reassigned: false }], error: null };
+      }
+
+      const nextCourierId = params.p_courier_id as string;
+      const patch = {
+        assignedAt: new Date().toISOString(),
+        courierId: nextCourierId,
+        courierName: params.p_courier_name,
+        dispatchId: params.p_dispatch_id,
+        dispatchOwnerId: nextCourierId,
+        loadReleasedAt: null,
+        orderId: params.p_order_id,
+        updatedAt: new Date().toISOString(),
+      };
+      if (assignment) {
+        Object.assign(assignment, patch);
+      } else {
+        tables.DeliveryAssignment.rows.push({ ...patch, createdAt: new Date().toISOString() });
+      }
+
+      if (previousCourierId !== nextCourierId) {
+        if (previousCourierId) {
+          adjustLoad(previousCourierId, -1);
+        }
+        adjustLoad(nextCourierId, 1);
+      }
+
+      return { data: [{ orderStatus: status, previousCourierId, reassigned: true }], error: null };
+    }
+
+    if (fn === 'ebuy_claim_dispatch_assignment') {
+      const status = orderStatusNow();
+      if (!status || !ASSIGNABLE_STATUSES.includes(status)) {
+        return { data: [{ claimed: false }], error: null };
+      }
+      const assignment = assignmentRow();
+      if (assignment?.courierId) {
+        return { data: [{ claimed: false }], error: null };
+      }
+      const nextCourierId = params.p_courier_id as string;
+      const patch = {
+        assignedAt: new Date().toISOString(),
+        courierId: nextCourierId,
+        courierName: params.p_courier_name,
+        dispatchOwnerId: params.p_dispatch_owner_id,
+        loadReleasedAt: null,
+        orderId: params.p_order_id,
+        updatedAt: new Date().toISOString(),
+      };
+      if (assignment) {
+        Object.assign(assignment, patch);
+      } else {
+        tables.DeliveryAssignment.rows.push({ ...patch, createdAt: new Date().toISOString() });
+      }
+      adjustLoad(nextCourierId, 1);
+      return { data: [{ claimed: true }], error: null };
+    }
+
+    throw new Error(
+      `dispatchLoadRelease.test.ts: unexpected rpc "${fn}" - every activeLoad write must go through a guarded ledger function, not adjustDispatchRiderLoad's own rpc`
     );
-    if (!assignment || assignment.loadReleasedAt) {
-      return { data: [{ released: false }], error: null };
-    }
-
-    assignment.loadReleasedAt = new Date().toISOString();
-    state.riderLoad -= 1;
-    return { data: [{ released: true }], error: null };
   };
 
   const originalFetch = globalThis.fetch;
@@ -261,7 +463,21 @@ const installHandlerMocks = (orderStatus: string, startingRiderLoad: number) => 
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
 
-  return state;
+  return { ...state, assignmentRow, tables };
+};
+
+/** Runs a handler expected to reject, returning the RpcError-ish status. */
+const expectHandlerFailure = async (run: () => Promise<unknown>, label: string) => {
+  try {
+    await run();
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (typeof status !== 'number') {
+      throw new Error(`${label}: expected an RpcError with a status, got ${String(error)}`);
+    }
+    return status;
+  }
+  throw new Error(`${label}: expected the handler to fail, but it returned successfully`);
 };
 
 Deno.test('dispatchUpdateOrderStatus: marking delivered releases the assigned rider through releaseDispatchAssignmentLoad', async () => {
@@ -279,7 +495,7 @@ Deno.test('dispatchUpdateOrderStatus: marking delivered releases the assigned ri
     true,
     'the release rpc was called'
   );
-  expectEqual(state.riderLoad, 2, 'activeLoad decremented exactly once via the guarded release');
+  expectEqual(state.load[RIDER_ID], 2, 'activeLoad decremented exactly once via the guarded release');
 });
 
 Deno.test('dispatchUpdateOrderStatus: marking failed_delivery releases the assigned rider through releaseDispatchAssignmentLoad', async () => {
@@ -297,7 +513,7 @@ Deno.test('dispatchUpdateOrderStatus: marking failed_delivery releases the assig
     true,
     'the release rpc was called'
   );
-  expectEqual(state.riderLoad, 4, 'a failed delivery releases capacity exactly the same as a successful one');
+  expectEqual(state.load[RIDER_ID], 4, 'a failed delivery releases capacity exactly the same as a successful one');
 });
 
 Deno.test('partnerUpdateOrderStatus: marking delivered releases the assigned rider through releaseDispatchAssignmentLoad', async () => {
@@ -315,7 +531,7 @@ Deno.test('partnerUpdateOrderStatus: marking delivered releases the assigned rid
     true,
     'the release rpc was called'
   );
-  expectEqual(state.riderLoad, 2, 'the self-delivery flow (restaurant marks delivered) still releases the auto-assigned rider');
+  expectEqual(state.load[RIDER_ID], 2, 'the self-delivery flow (restaurant marks delivered) still releases the auto-assigned rider');
 });
 
 Deno.test('partnerUpdateOrderStatus: rejecting an accepted order releases the assigned rider through releaseDispatchAssignmentLoad', async () => {
@@ -333,7 +549,7 @@ Deno.test('partnerUpdateOrderStatus: rejecting an accepted order releases the as
     true,
     'the release rpc was called'
   );
-  expectEqual(state.riderLoad, 0, 'rejecting an order that was already auto-assigned releases the rider');
+  expectEqual(state.load[RIDER_ID], 0, 'rejecting an order that was already auto-assigned releases the rider');
 });
 
 // cancelCustomerOrder (_shared/domains/orders.ts) is a third decrement
@@ -358,5 +574,167 @@ Deno.test('cancelCustomerOrder: cancelling an already-assigned accepted order re
     true,
     'the release rpc was called'
   );
-  expectEqual(state.riderLoad, 3, 'cancelling an order that was already auto-assigned releases the rider');
+  expectEqual(state.load[RIDER_ID], 3, 'cancelling an order that was already auto-assigned releases the rider');
+});
+
+// ---------------------------------------------------------------------------
+// Review round 4: dispatchAssignOrderCourier's manual reassignment.
+//
+// The handler's every precondition - assertNonTerminalOrder, the
+// ACCEPTED/PREPARING/READY_FOR_PICKUP gate, the ownership check - reads a
+// bundle loaded once at the top of the request, and none of its writes used
+// to be conditioned on the order's committed state. Racing a terminal
+// transition therefore leaked the incoming rider's load PERMANENTLY, in
+// both orderings, because a terminal order is never transitioned again and
+// so nothing ever releases the claim. The three tests below drive both
+// orderings and the happy path through the real handlers, with the
+// interleaved handler committing mid-flight of the first one.
+// ---------------------------------------------------------------------------
+
+Deno.test('dispatchAssignOrderCourier: a live A->B reassignment moves the claim, and the later terminal release follows the ROW to B', async () => {
+  const state = installHandlerMocks('accepted', 2);
+
+  const assigned = await dispatchAssignOrderCourier({
+    context: ADMIN_CONTEXT,
+    data: { courierId: RIDER_B_ID, orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(assigned.status, 200, 'the reassignment succeeds on a live order');
+  expectEqual(state.load[RIDER_ID], 1, 'the outgoing rider is decremented exactly once');
+  expectEqual(state.load[RIDER_B_ID], 1, 'the incoming rider is incremented exactly once');
+  expectEqual(state.assignmentRow()?.courierId, RIDER_B_ID, 'the row now names the incoming rider');
+  expectEqual(state.assignmentRow()?.loadReleasedAt, null, "the incoming rider's claim is live");
+
+  // The terminal transition that follows must release B, not A - it reads
+  // the row, and the row is the authority on who holds the claim.
+  const cancelled = await cancelCustomerOrder({
+    context: CUSTOMER_CONTEXT,
+    data: { orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(cancelled.status, 200, 'the cancel succeeds');
+  expectEqual(state.load[RIDER_B_ID], 0, "the incoming rider's claim is released exactly once");
+  expectEqual(state.load[RIDER_ID], 1, 'the outgoing rider is not decremented a second time');
+});
+
+// Ordering 1: the terminal transition commits FIRST, and the reassignment
+// carries on against its stale snapshot.
+//
+// Pre-fix: the unconditional upsert wrote courierId=B and cleared
+// loadReleasedAt back to null (making a cancelled order look live), then
+// decremented A a second time (production's greatest(0,...) clamp absorbs
+// it silently; this mock does not clamp, so it shows) and incremented B on
+// an order that will never transition again - B up by one forever.
+Deno.test('dispatchAssignOrderCourier: a reassignment racing a cancel that commits first is refused, and does not strand the incoming rider', async () => {
+  let cancelStatus = 0;
+  const state = installHandlerMocks('accepted', 1, {
+    // Fires inside the handler's DispatchRiderRecord lookup - after it has
+    // loaded (and validated) its order bundle, before it writes anything.
+    onCourierLookup: async () => {
+      const cancelled = await cancelCustomerOrder({
+        context: CUSTOMER_CONTEXT,
+        data: { orderId: ORDER_ID },
+        request: fakeRequest(),
+      });
+      cancelStatus = cancelled.status;
+    },
+  });
+
+  const status = await expectHandlerFailure(
+    () =>
+      dispatchAssignOrderCourier({
+        context: ADMIN_CONTEXT,
+        data: { courierId: RIDER_B_ID, orderId: ORDER_ID },
+        request: fakeRequest(),
+      }),
+    'reassignment onto an order that went terminal mid-flight'
+  );
+
+  expectEqual(cancelStatus, 200, 'the interleaved cancel committed');
+  expectEqual(status, 412, 'the reassignment fails the precondition at write time, exactly as it would have at read time');
+  expectEqual(state.load[RIDER_ID], 0, "the outgoing rider's claim is released exactly once - not decremented again by the refused reassignment");
+  expectEqual(state.load[RIDER_B_ID], 0, 'the incoming rider is never incremented, so nothing is stranded on a terminal order');
+  expectEqual(state.assignmentRow()?.courierId, RIDER_ID, 'the refused reassignment wrote nothing');
+  expectEqual(
+    typeof state.assignmentRow()?.loadReleasedAt,
+    'string',
+    'the release marker is intact - the refused reassignment did not clear it back to null'
+  );
+});
+
+// Ordering 2: the reassignment commits FIRST, and the terminal transition
+// carries on against ITS stale snapshot (its in-memory bundle still names
+// A).
+//
+// Pre-fix: the release was keyed on the caller's courier id, so
+// `where "courierId" = A` matched zero rows once the row said B - a silent
+// no-op, leaving B up by one forever. Now the release names no courier at
+// all and decrements whoever the row holds.
+Deno.test('dispatchAssignOrderCourier: a reassignment committing mid-delivery-transition still leaves exactly one decrement per claim', async () => {
+  let reassignStatus = 0;
+  const state = installHandlerMocks('ready_for_pickup', 1, {
+    // Fires inside partnerUpdateOrderStatus's own status write, after that
+    // handler loaded its bundle (courier A) and before 'delivered' lands -
+    // so the partner handler runs the rest of its work, including the
+    // release, believing the courier is still A.
+    beforeOrderUpdate: async () => {
+      const reassigned = await dispatchAssignOrderCourier({
+        context: ADMIN_CONTEXT,
+        data: { courierId: RIDER_B_ID, orderId: ORDER_ID },
+        request: fakeRequest(),
+      });
+      reassignStatus = reassigned.status;
+    },
+  });
+
+  const response = await partnerUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'delivered', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(reassignStatus, 200, 'the interleaved reassignment committed while the order was still live');
+  expectEqual(response.status, 200, 'the delivery transition succeeds');
+  expectEqual(state.load[RIDER_ID], 0, "the outgoing rider's claim is decremented exactly once, by the reassignment");
+  expectEqual(state.load[RIDER_B_ID], 0, "the incoming rider's claim is decremented exactly once, by the stale terminal release");
+  expectEqual(state.assignmentRow()?.courierId, RIDER_B_ID, 'the row still names the rider who actually carried the order');
+});
+
+// The same stale-snapshot shape on the release side alone: an order that
+// had NO courier when the terminal handler read its bundle can be claimed
+// by automatic assignment moments later. The old `if (courierId)` pre-check
+// skipped the release on that basis and stranded the claim; the release is
+// now called unconditionally and is a no-op only when the ROW has no live
+// claim.
+Deno.test('partnerUpdateOrderStatus: a claim landing mid-transition is still released, even though the handler read an unassigned order', async () => {
+  const state = installHandlerMocks('ready_for_pickup', 0, {
+    assignmentCourierId: null,
+    beforeOrderUpdate: async () => {
+      // What runAutomaticDispatchAssignment does at the end of a concurrent
+      // transition on this same order: the guarded claim, nothing else.
+      // deno-lint-ignore no-explicit-any
+      await (serviceClient as any).rpc('ebuy_claim_dispatch_assignment', {
+        p_courier_id: RIDER_B_ID,
+        p_courier_name: 'Bode Rider',
+        p_dispatch_owner_id: RIDER_B_ID,
+        p_order_id: ORDER_ID,
+      });
+    },
+  });
+
+  const response = await partnerUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'delivered', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'the delivery transition succeeds');
+  expectEqual(state.load[RIDER_B_ID], 0, 'the courier claimed mid-transition is released, not stranded');
+  expectEqual(
+    typeof state.assignmentRow()?.loadReleasedAt,
+    'string',
+    'the claim is marked released'
+  );
 });

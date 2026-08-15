@@ -10,12 +10,11 @@ import {
   DEFAULT_DISPATCH_STATUS,
   DEFAULT_DISPATCH_VEHICLE,
   DISPATCH_RIDER_COLUMNS,
-  adjustDispatchRiderLoad,
   buildDispatchRiderResponse,
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
-import { releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
+import { reassignDispatchAssignmentCourier, releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
 import { getNigeriaAreaCoordinate } from '../nigeriaGeography.ts';
 import { buildNotificationData, notifyAdmins, notifyRestaurantUsers, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
@@ -628,55 +627,51 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
 
   const assignedAt = nowIso();
   const courierName = sanitizeText(courier.displayName, `Rider ${courier.id.slice(-4)}`);
-  const previousCourierId = sanitizeText(bundle.assignment?.courierId);
+
+  // One compare-and-swap, not an upsert followed by two load adjustments
+  // (review round 4). Every check above this line - assertNonTerminalOrder,
+  // the ACCEPTED/PREPARING/READY_FOR_PICKUP gate, the ownership check - reads
+  // `bundle`, a snapshot taken at the top of this handler, and none of the
+  // writes underneath used to be conditioned on the order's committed state.
+  // A reassignment A->B racing a terminal transition therefore leaked B's
+  // load permanently in BOTH orderings: with the terminal transition first,
+  // the upsert cleared loadReleasedAt back to null and incremented B on an
+  // order that will never transition again; with the reassignment first, the
+  // terminal transition's release passed its own stale courier id A, matched
+  // no row, and decremented nothing. Neither is recoverable - a terminal
+  // order gets no further transitions - which made it worse than the
+  // over/under-counts of rounds 1-3.
+  //
+  // ebuy_reassign_dispatch_assignment_courier does the row swap, A's
+  // decrement and B's increment in one transaction, conditioned on the
+  // order's *currently committed* status (locked, same normalization as
+  // normalizeOrderStatus) and on the claim not having already been released.
+  // dispatchOwnerId is set to the new courier for the reason it always was:
+  // one `dispatch` role, no separate coordinator type, so the rider working
+  // an order and the account whose queue it appears in
+  // (dispatchGetDeliveryQueue's ownership filter, and every 403 check on the
+  // dispatch status/detail actions) must be the same account.
+  const reassignment = await reassignDispatchAssignmentCourier(orderId, courier.id, courierName, context.uid);
+
+  // Fail, never no-op. This is a synchronous human action, and every side
+  // effect below assumes the swap happened: a 200 would tell the dispatcher
+  // their rider is on the order, push "Rider assigned" to that rider and the
+  // customer, and log a courier_reassigned event, for an assignment the
+  // database refused. Failing also keeps one behaviour for one precondition -
+  // the client sees the same 412 class whether the order went terminal
+  // before the handler's snapshot (assertNonTerminalOrder / the status gate
+  // above) or between that snapshot and this write.
+  if (!reassignment.reassigned) {
+    fail(412, 'This order changed while the rider was being assigned. Reload the delivery and try again.');
+  }
+
+  // The authoritative previous courier, read under the same lock that
+  // performed the swap - not sanitizeText(bundle.assignment?.courierId),
+  // which is the stale value this round's bug was built on.
+  const previousCourierId = sanitizeText(reassignment.previousCourierId);
   const wasReassigned = Boolean(
     previousCourierId && previousCourierId !== courier.id
   );
-
-  // dispatchOwnerId = courier.id, not the previous owner: there is one
-  // `dispatch` role with no separate coordinator type, so the rider working
-  // an order and the account whose queue it appears in
-  // (dispatchGetDeliveryQueue's ownership filter, and every 403 check on the
-  // dispatch status/detail actions) must be the same account. Writing the
-  // old owner here (as this used to) left a newly assigned rider unable to
-  // ever mark the order picked_up/on_the_way/delivered - the order never
-  // entered their queue and every dispatch action on it 403'd them - while
-  // the previous rider retained full control of an order they were no
-  // longer carrying. Matches what the automatic path already does
-  // (runAutomaticDispatchAssignment sets dispatchOwnerId = courierId).
-  // loadReleasedAt reset to null: this row's claim is live for whichever
-  // courier it names. Not reachable today (assertNonTerminalOrder above
-  // already blocks reassigning a terminal order, and loadReleasedAt is only
-  // ever set on a terminal transition - see releaseDispatchAssignmentLoad),
-  // but explicit rather than implicit: an upsert that omits a column leaves
-  // it unchanged, so without this a hypothetical future path that reassigns
-  // after a release could leave the new courier's own eventual release
-  // permanently guarded off by the previous courier's loadReleasedAt,
-  // silently re-creating the round-1 leak for that one order.
-  const { error: assignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
-    {
-      assignedAt,
-      courierId: courier.id,
-      courierName,
-      dispatchId: context.uid,
-      dispatchOwnerId: courier.id,
-      loadReleasedAt: null,
-      orderId,
-      updatedAt: assignedAt,
-    },
-    { onConflict: 'orderId' }
-  );
-
-  if (assignmentError) {
-    throw new Error(assignmentError.message);
-  }
-
-  if (previousCourierId && previousCourierId !== courier.id) {
-    await adjustDispatchRiderLoad(previousCourierId, -1);
-  }
-  if (!previousCourierId || previousCourierId !== courier.id) {
-    await adjustDispatchRiderLoad(courier.id, 1);
-  }
 
   await updateOrderRecord(orderId, {
     updatedAt: assignedAt,
@@ -798,19 +793,25 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   // A failed delivery releases the same as a successful one: the rider is
   // no longer carrying this order either way, so their capacity should be
   // freed for a new assignment.
+  //
+  // Called with the order id alone, unconditionally on those two statuses
+  // (review round 4): the assignment row - not this handler's snapshot -
+  // decides which rider holds the claim, so a release landing just after a
+  // manual reassignment now decrements the rider who actually has the order.
+  // The old `if (releaseCourierId)` pre-check was the same stale read in
+  // guard form: an order whose snapshot showed no courier may have been
+  // claimed by automatic assignment in the meantime, and skipping the
+  // release on that basis stranded the claim forever.
   const dispatchReleaseEligibleStatuses: readonly string[] = [ORDER_STATUS.DELIVERED, ORDER_STATUS.FAILED_DELIVERY];
   if (dispatchReleaseEligibleStatuses.includes(nextState.status)) {
-    const releaseCourierId = sanitizeText(bundle.assignment?.courierId);
-    if (releaseCourierId) {
-      try {
-        await releaseDispatchAssignmentLoad(orderId, releaseCourierId);
-      } catch (error) {
-        logEdgeEvent('error', 'dispatch load release failed', {
-          error: error instanceof Error ? error.message : String(error),
-          orderId,
-          status: nextState.status,
-        });
-      }
+    try {
+      await releaseDispatchAssignmentLoad(orderId);
+    } catch (error) {
+      logEdgeEvent('error', 'dispatch load release failed', {
+        error: error instanceof Error ? error.message : String(error),
+        orderId,
+        status: nextState.status,
+      });
     }
   }
 
