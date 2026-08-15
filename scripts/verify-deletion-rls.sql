@@ -34,6 +34,16 @@ insert into public."UserAccount" (uid, email, "displayName", "emailVerified", "r
 values ('00000000-0000-0000-0000-0000000000aa', 'rls-probe@example.test', 'RLS Probe', true, 'customer',
         now(), now(), now(), now() + interval '30 days');
 
+-- Seed a disposable restaurant while still acting as the migration/owner role.
+-- Check 3 inserts a favorite pointing at this row, so that its foreign key is
+-- satisfied and ONLY the RLS policy decides the outcome. This must happen
+-- BEFORE the role switch below: `authenticated` has no insert policy on
+-- RestaurantRecord, so seeding it after the switch would fail with
+-- insufficient_privilege outside any exception block and abort the whole
+-- transaction.
+insert into public."RestaurantRecord" (id, name, "updatedAt")
+values ('rls-probe-restaurant', 'RLS Probe Restaurant', now());
+
 -- Impersonate that user over the Data API.
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000aa","role":"authenticated","app_metadata":{}}';
@@ -67,10 +77,7 @@ exception
 end $$;
 
 -- 3. Writes to the other client-writable tables must be refused.
--- Seed a disposable restaurant so the FK is satisfied and only RLS decides the outcome.
-insert into public."RestaurantRecord" (id, name, "updatedAt")
-values ('rls-probe-restaurant', 'RLS Probe Restaurant', now());
-
+-- The restaurant this references was seeded above, before the role switch.
 do $$
 begin
   insert into public."CustomerFavoriteRestaurant" ("customerId", "restaurantId")
