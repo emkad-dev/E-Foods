@@ -9,7 +9,8 @@
 
 import { serviceClient } from '../client.ts';
 import { isDeliveryOutOfRange } from '../deliveryCoverage.ts';
-import { adjustDispatchRiderLoad, loadDispatchRiderSnapshot } from '../dispatchRiders.ts';
+import { loadDispatchRiderSnapshot } from '../dispatchRiders.ts';
+import { releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -17,6 +18,7 @@ import {
   shortOrderCode,
 } from '../email.ts';
 import { buildNotificationData, notifyRestaurantUsers, notifySafely, notifyUsers } from '../notifications.ts';
+import { logEdgeEvent } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
   DEFAULT_CURRENCY,
@@ -1131,7 +1133,32 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
     updatedAt: nowIso(),
   });
 
-  await adjustDispatchRiderLoad(bundle.assignment?.courierId, -1);
+  // Routed through releaseDispatchAssignmentLoad, not the plain
+  // adjustDispatchRiderLoad(-1) this used to call (review round 3): this is
+  // a THIRD path that can decrement the same (order, courier) claim the
+  // automatic-assignment and partner/dispatcher release paths already
+  // guard. Concretely reachable - AUTO_DISPATCH_ELIGIBLE_STATUSES includes
+  // ACCEPTED, so a courier is claimed the moment a restaurant accepts, and
+  // this handler permits cancellation from exactly [PLACED, ACCEPTED] - the
+  // same states partnerUpdateOrderStatus's `reject` action permits. A
+  // customer cancelling while the restaurant rejects the same accepted
+  // order (or a single cancel request simply retried) would otherwise land
+  // two decrements for one claimed unit: the guarded reject release
+  // succeeds first, and this bare call would fire regardless of whether
+  // anyone had already released. Now it shares the same loadReleasedAt
+  // guard as every other release path, so only whichever one actually
+  // completes first decrements.
+  const releaseCourierId = sanitizeText(bundle.assignment?.courierId);
+  if (releaseCourierId) {
+    try {
+      await releaseDispatchAssignmentLoad(orderId, releaseCourierId);
+    } catch (error) {
+      logEdgeEvent('error', 'dispatch load release failed', {
+        error: error instanceof Error ? error.message : String(error),
+        orderId,
+      });
+    }
+  }
 
   await insertDeliveryEvent({
     orderId,
