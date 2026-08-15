@@ -14,7 +14,12 @@ import {
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
-import { reassignDispatchAssignmentCourier, releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
+import { acceptDispatchOffer, declineDispatchOffer } from '../dispatchOffers.ts';
+import {
+  reassignDispatchAssignmentCourier,
+  releaseDispatchAssignmentLoad,
+  reofferDispatchOrder,
+} from '../dispatchSelection.ts';
 import { getNigeriaAreaCoordinate } from '../nigeriaGeography.ts';
 import { buildNotificationData, notifyAdmins, notifyRestaurantUsers, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
@@ -40,8 +45,9 @@ import {
   type CustomerOrderRow,
   type DeliveryAssignmentRow,
 } from '../orders.ts';
+import { loadDispatchWeights } from '../platformSettings.ts';
 import { recordPolicyAcceptance, validatePolicyAcceptancePayload } from '../policyAcceptance.ts';
-import { broadcastRidersChanged } from '../realtime.ts';
+import { broadcastOrderChanged, broadcastRidersChanged } from '../realtime.ts';
 import { DISPATCH_ACTIONS } from '../rpc/actions.ts';
 import type { JsonObject } from '../rpc/coercion.ts';
 import {
@@ -985,11 +991,204 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   });
 };
 
+// ---------------------------------------------------------------------------
+// Offer response (Task 10 / D2).
+//
+// Both handlers are deliberately THIN. Every guard that matters - is this
+// offer still live, is it yours, has the order gone terminal, has somebody
+// else already won it, does a claim land - is inside the SQL function, under
+// the CustomerOrder row lock. Task 9's four review rounds all found the same
+// shape of bug: a check performed in TypeScript against a snapshot, with a
+// write underneath it that was not conditioned on the same fact. So there is
+// no pre-flight loadOrderBundle here, and no "is it still pending" read
+// before the call. Adding one would not make the handler safer; it would
+// only add a second, staler opinion about state the SQL is about to
+// re-evaluate under a lock.
+//
+// In particular NOTE THE ABSENCE of assertNonTerminalOrder /
+// assertOrderPaymentReadyForOperations calls. That is not a weakening of
+// those gates - ebuy_accept_dispatch_offer enforces the terminal check via
+// ebuy_claim_dispatch_assignment's own locked status guard, which is strictly
+// stronger than the snapshot-based assert (it cannot be raced). The asserts
+// remain untouched on every path that already used them.
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a SQL refusal reason onto an HTTP status and a client-safe message.
+ * The raw reason is never surfaced verbatim beyond these known values, and
+ * an unrecognised one degrades to a generic 409 rather than leaking whatever
+ * the database said.
+ */
+const failOfferResponse = (reason: string, action: 'accept' | 'decline'): never => {
+  switch (reason) {
+    case 'offer_not_found':
+      // Also the answer for another rider's offer id: "not yours" and "does
+      // not exist" are deliberately indistinguishable so the handler cannot
+      // be used to probe for offer ids.
+      fail(404, 'This delivery offer is no longer available.');
+      break;
+    case 'offer_expired':
+      fail(410, 'This offer expired. It has been passed to another rider.');
+      break;
+    case 'offer_accepted':
+      fail(409, 'This offer has already been accepted.');
+      break;
+    case 'offer_declined':
+      fail(409, 'You have already declined this offer.');
+      break;
+    case 'offer_superseded':
+      fail(409, 'This offer was passed to another rider.');
+      break;
+    case 'claim_refused':
+      fail(409, 'Another rider took this delivery first.');
+      break;
+    default:
+      fail(
+        409,
+        action === 'accept'
+          ? 'This delivery offer could not be accepted.'
+          : 'This delivery offer could not be declined.'
+      );
+  }
+
+  // `fail` is typed to return never, but TypeScript does not carry that
+  // through a switch with a default, so this is unreachable belt-and-braces.
+  throw new Error('unreachable');
+};
+
+const dispatchAcceptOffer: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch']);
+
+  const offerId = sanitizeText(data.offerId);
+  if (!offerId) {
+    fail(400, 'Offer id is required.');
+  }
+
+  // The rider record supplies the display name stamped onto the assignment.
+  // Looked up rather than taken from the request so a client cannot choose
+  // the name that will appear on somebody else's order.
+  const { data: rider, error: riderError } = await serviceClient
+    .from('DispatchRiderRecord')
+    .select(DISPATCH_RIDER_COLUMNS)
+    .eq('id', context.uid)
+    .maybeSingle<DispatchRiderRow>();
+
+  if (riderError) {
+    throw new Error(riderError.message);
+  }
+
+  const courierName = sanitizeText(rider?.displayName, `Rider ${context.uid.slice(-4)}`);
+
+  // The single point at which activeLoad is incremented in the offer model.
+  // acceptDispatchOffer -> ebuy_accept_dispatch_offer ->
+  // ebuy_claim_dispatch_assignment (Task 9, unmodified).
+  const result = await acceptDispatchOffer(offerId, context.uid, courierName);
+
+  if (!result.ok) {
+    logEdgeEvent('info', 'dispatch offer accept refused', {
+      action: 'dispatchAcceptOffer',
+      offerId,
+      orderId: result.orderId,
+      reason: result.reason,
+      uid: context.uid,
+    });
+    failOfferResponse(result.reason, 'accept');
+  }
+
+  const orderId = sanitizeText(result.orderId);
+
+  await insertDeliveryEvent({
+    actorUid: context.uid,
+    details: {
+      courierId: context.uid,
+      courierName,
+      offerId,
+    },
+    eventType: 'dispatch_offer_accepted',
+    orderId,
+  });
+
+  await broadcastOrderChanged(orderId);
+
+  return json(200, {
+    data: {
+      accepted: true,
+      offerId,
+      orderId,
+    },
+  });
+};
+
+const dispatchDeclineOffer: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch']);
+
+  const offerId = sanitizeText(data.offerId);
+  if (!offerId) {
+    fail(400, 'Offer id is required.');
+  }
+
+  // Touches no counter: a decline was never a claim, so there is nothing to
+  // release. This is the whole reason the claim was moved to accept.
+  const result = await declineDispatchOffer(offerId, context.uid);
+
+  if (!result.ok) {
+    logEdgeEvent('info', 'dispatch offer decline refused', {
+      action: 'dispatchDeclineOffer',
+      offerId,
+      orderId: result.orderId,
+      reason: result.reason,
+      uid: context.uid,
+    });
+    failOfferResponse(result.reason, 'decline');
+  }
+
+  const orderId = sanitizeText(result.orderId);
+
+  await insertDeliveryEvent({
+    actorUid: context.uid,
+    details: {
+      courierId: context.uid,
+      offerId,
+    },
+    eventType: 'dispatch_offer_declined',
+    orderId,
+  });
+
+  // Re-offer immediately to the next-best courier, excluding everyone who has
+  // already seen this order (the decliner is now in that set). Non-fatal and
+  // logged, never re-thrown: the decline itself has already committed, and
+  // the rider's action must not fail because the re-offer did. If this throws
+  // or finds nobody right now, the queue-drainer sweep picks the order up on
+  // its next pass - ebuy_list_dispatch_reoffer_candidates finds it precisely
+  // because it has offers, no pending one, and no courier.
+  try {
+    await reofferDispatchOrder(orderId, context.uid, loadDispatchWeights);
+  } catch (error) {
+    logEdgeEvent('error', 'dispatch re-offer after decline failed', {
+      action: 'dispatchDeclineOffer',
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+
+  await broadcastOrderChanged(orderId);
+
+  return json(200, {
+    data: {
+      declined: true,
+      offerId,
+      orderId,
+    },
+  });
+};
+
 export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: DISPATCH_ACTIONS,
   name: 'dispatch',
   handlers: {
+    dispatchAcceptOffer,
     dispatchAssignOrderCourier,
+    dispatchDeclineOffer,
     dispatchGetDeliveryQueue,
     dispatchGetOrderDetail,
     dispatchGetRiders,
