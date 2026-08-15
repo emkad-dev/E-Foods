@@ -2,6 +2,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
@@ -285,8 +286,26 @@ Deno.serve(async (request) => {
       }
     );
 
+    // Delivery-offer expiry sweep (Task 10 / D2). Rides on this function's
+    // existing every-minute pg_cron schedule
+    // (20260624_queue_drainer_schedule.sql already posts {"queue":"all"}), so
+    // there is no second cron entry, no second secret, and no second schedule
+    // that can silently stop working.
+    //
+    // Only on the 'all' selection - a targeted single-queue drain (a manual
+    // retry of one queue, a test) should do exactly what was asked and
+    // nothing else.
+    //
+    // Outside runWithBackpressure on purpose: the sweep is bounded (50 offers,
+    // 50 orders) and must still run on a minute when the queue drain itself
+    // is shed for backpressure, otherwise a busy period would stall every
+    // offer's expiry for as long as it lasted. It never throws - see
+    // sweepDispatchOffers - so it cannot turn a successful drain into a 500.
+    const offerSweep = queueSelection === 'all' ? await sweepDispatchOffers() : null;
+
     const response = json(200, {
       data: {
+        offerSweep,
         results,
       },
     });

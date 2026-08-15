@@ -12,8 +12,27 @@ type DispatchOrderDetail = OrderDocument & {
   }[];
 };
 
+/**
+ * A live delivery offer (Task 10 / D2). Carried alongside `orders` rather than
+ * inside it: an offered order has no assignment yet, so it is nobody's order
+ * until somebody accepts and is invisible to the queue's ownership filter.
+ */
+export type DispatchDeliveryOffer = {
+  courierId: string;
+  id: string;
+  offeredAt: string | null;
+  order: OrderDocument;
+  orderId: string;
+  respondedAt: string | null;
+  respondsBy: string;
+  sequence: number | null;
+  status: string;
+};
+
 export const getDispatchDeliveryQueue = async () =>
-  callDispatchBackendRpc<{ orders: OrderDocument[] }>('dispatchGetDeliveryQueue');
+  callDispatchBackendRpc<{ offers?: DispatchDeliveryOffer[]; orders: OrderDocument[] }>(
+    'dispatchGetDeliveryQueue'
+  );
 
 export const getDispatchRiders = async () =>
   callDispatchBackendRpc<{ riders: DispatchProfileDocument[] }>('dispatchGetRiders');

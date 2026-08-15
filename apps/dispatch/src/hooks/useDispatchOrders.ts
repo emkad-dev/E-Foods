@@ -5,7 +5,7 @@ import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
-import { getDispatchDeliveryQueue } from '../services/dispatchReadModel';
+import { getDispatchDeliveryQueue, type DispatchDeliveryOffer } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
 import { sortDispatchHistoryOrders } from '../utils/dispatchQueue';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +17,7 @@ const FALLBACK_MS = 120000;
 export const useDispatchOrders = () => {
   const { loading: authLoading, user } = useAuth();
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
+  const [offers, setOffers] = useState<DispatchDeliveryOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +38,7 @@ export const useDispatchOrders = () => {
         }
 
         setOrders(nextData.orders as DispatchOrder[]);
+        setOffers((nextData.offers ?? []) as DispatchDeliveryOffer[]);
         setError(null);
       } catch (nextError: any) {
         if (!activeRef.current) {
@@ -67,6 +69,7 @@ export const useDispatchOrders = () => {
 
     if (!user) {
       setOrders([]);
+      setOffers([]);
       setError(null);
       setLoading(false);
       setRefreshing(false);
@@ -144,6 +147,7 @@ export const useDispatchOrders = () => {
     deliveredCount,
     error,
     loading,
+    offers,
     onTheWayCount,
     orders,
     refreshing,

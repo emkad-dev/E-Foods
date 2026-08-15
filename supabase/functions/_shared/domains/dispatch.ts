@@ -14,7 +14,12 @@ import {
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
-import { acceptDispatchOffer, declineDispatchOffer } from '../dispatchOffers.ts';
+import {
+  acceptDispatchOffer,
+  buildDispatchOfferResponse,
+  declineDispatchOffer,
+  loadPendingOffersForCourier,
+} from '../dispatchOffers.ts';
 import {
   reassignDispatchAssignmentCourier,
   releaseDispatchAssignmentLoad,
@@ -312,8 +317,55 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
           (order) => getDispatchAssignmentOwnerId(assignmentsByOrderId.get(order.id) ?? null) === context.uid
         );
 
+  // Live offers for THIS rider (Task 10 / D2). Carried alongside `orders`
+  // rather than inside it because an offered order has no DeliveryAssignment
+  // yet - it is nobody's order until somebody accepts - so it is invisible to
+  // the ownership filter above by construction. Admins get no offers array
+  // content for the same reason: offers belong to a specific rider.
+  //
+  // Each entry embeds the order snapshot so the offer screen can render a
+  // summary and a distance without a second round trip inside a 45s window.
+  const pendingOffers = context.role === 'admin' ? [] : await loadPendingOffersForCourier(context.uid);
+  const offerOrderIds = pendingOffers.map((offer) => offer.orderId).filter(Boolean);
+
+  let offerOrdersById = new Map<string, CustomerOrderRow>();
+  let offerRelations: Awaited<ReturnType<typeof loadOrderRelations>> | null = null;
+
+  if (offerOrderIds.length > 0) {
+    const { data: offerOrders, error: offerOrdersError } = await serviceClient
+      .from('CustomerOrder')
+      .select(CUSTOMER_ORDER_COLUMNS)
+      .in('id', offerOrderIds);
+
+    if (offerOrdersError) {
+      throw new Error(offerOrdersError.message);
+    }
+
+    offerOrdersById = new Map(((offerOrders ?? []) as CustomerOrderRow[]).map((order) => [order.id, order]));
+    offerRelations = await loadOrderRelations([...offerOrdersById.keys()]);
+  }
+
   return json(200, {
     data: {
+      offers: pendingOffers
+        .map((offer) => {
+          const order = offerOrdersById.get(offer.orderId);
+          // An offer whose order vanished (hard-deleted in a support action)
+          // is dropped rather than rendered as an empty card.
+          if (!order) {
+            return null;
+          }
+
+          return {
+            ...buildDispatchOfferResponse(offer),
+            order: toOrderSnapshotResponse(
+              order,
+              offerRelations?.itemsByOrderId.get(order.id) ?? [],
+              offerRelations?.assignmentsByOrderId.get(order.id) ?? null
+            ),
+          };
+        })
+        .filter((offer) => offer !== null),
       orders: scopedOrderList.map((order) =>
         toOrderSnapshotResponse(
           order,
