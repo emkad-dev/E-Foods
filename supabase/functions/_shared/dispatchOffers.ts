@@ -216,31 +216,51 @@ export const listDispatchReofferCandidates = async (
   return unique(((data ?? []) as { orderId?: string | null }[]).map((row) => sanitizeText(row?.orderId)));
 };
 
+export type OrderOfferSummary = {
+  /** THE EXCLUSION SET: every courier who has seen this order, in any state. */
+  courierIds: string[];
+  /** How many offers are still live. Non-zero means somebody has the clock. */
+  pendingCount: number;
+  /** Total offers made, against which MAX_DISPATCH_OFFERS is measured. */
+  total: number;
+};
+
 /**
- * THE EXCLUSION SET: every courier who has already seen this order, in any
- * offer state. Read once per selection attempt and used to filter the
- * candidate pool, so a declined or expired rider is never asked again about
- * the same order.
+ * One read that answers all three questions selection needs before it scores
+ * a pool: who is excluded, is an offer still live, and have we hit the cap.
  *
- * This read is only half the mechanism, and knowingly the weaker half - it is
- * a snapshot, so two concurrent re-offers could compute the same "next best"
- * rider from it. The half that actually holds is the
+ * Statuses are read, not just courier ids, because "no candidate left after
+ * exclusion" means two completely different things depending on whether an
+ * offer is outstanding. With a single rider on the platform, the rider we
+ * just offered to is themselves excluded, so the filtered pool is empty while
+ * the order is being perfectly well handled - concluding exhaustion there
+ * would page an admin about an order a rider is actively looking at.
+ *
+ * This read is only half the exclusion mechanism, and knowingly the weaker
+ * half - it is a snapshot, so two concurrent re-offers could compute the same
+ * "next best" rider from it. The half that actually holds is the
  * `("orderId", "courierId")` unique index: the second insert raises
  * unique_violation, which ebuy_offer_dispatch_assignment converts into an
  * `already_offered` refusal. Same division of labour as everywhere else in
  * this subsystem - the filter is an optimisation, the constraint is the truth.
  */
-export const loadOfferedCourierIds = async (orderId: string): Promise<string[]> => {
+export const loadOrderOfferSummary = async (orderId: string): Promise<OrderOfferSummary> => {
   const { data, error } = await serviceClient
     .from('DeliveryOffer')
-    .select('courierId')
+    .select('courierId,status')
     .eq('orderId', orderId);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return unique(((data ?? []) as { courierId?: string | null }[]).map((row) => sanitizeText(row?.courierId)));
+  const rows = (data ?? []) as { courierId?: string | null; status?: string | null }[];
+
+  return {
+    courierIds: unique(rows.map((row) => sanitizeText(row?.courierId))),
+    pendingCount: rows.filter((row) => sanitizeText(row?.status) === DISPATCH_OFFER_STATUS.PENDING).length,
+    total: rows.length,
+  };
 };
 
 /** The rider's live offer inbox, newest first. Powers dispatchGetDeliveryQueue's `offers` array. */

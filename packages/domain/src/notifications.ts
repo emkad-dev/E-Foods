@@ -18,6 +18,7 @@ export const NOTIFICATION_ROUTE_KEYS = [
   'dispatch_profile',
   'dispatch_deliveries',
   'dispatch_delivery_detail',
+  'dispatch_delivery_offer',
   'dispatch_fleet',
   'dispatch_login',
   'admin_access',
@@ -146,6 +147,8 @@ const resolveRouteKeyPath = (routeKey: NotificationRouteKey, data: AppNotificati
       return '/deliveries';
     case 'dispatch_delivery_detail':
       return data.orderId ? `/delivery/${data.orderId}` : null;
+    case 'dispatch_delivery_offer':
+      return data.orderId ? `/offer/${data.orderId}` : null;
     case 'dispatch_fleet':
       return '/fleet';
     case 'dispatch_login':

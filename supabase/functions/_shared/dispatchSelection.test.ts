@@ -169,22 +169,47 @@ Deno.test('selectLowestScoreCandidate: a lower activeLoad beats a lower id when 
 });
 
 // ---------------------------------------------------------------------------
-// Idempotency: runAutomaticDispatchAssignment against a fake serviceClient.
-// The fake RPC below mirrors ebuy_claim_dispatch_assignment's contract
-// (20260814_dispatch_auto_assignment.sql): claim only succeeds while
-// courierId is still null, and only a successful claim increments load.
+// runAutomaticDispatchAssignment against a fake serviceClient.
+//
+// TASK 10 CHANGED WHAT THIS SECTION PROVES. Selection no longer claims a
+// courier; it creates a `pending` DeliveryOffer and touches NO ledger state.
+// So the fake rpc below mirrors ebuy_offer_dispatch_assignment
+// (20260816_dispatch_delivery_offers.sql) instead of the claim, and every
+// test here asserts `riderLoad` is still 0 afterwards - selection incrementing
+// anything is now itself the regression.
+//
+// The rpc mock is deliberately STRICT about the function name: it throws on
+// ebuy_claim_dispatch_assignment. A regression that goes back to claiming at
+// selection time fails loudly here rather than passing with a silently
+// leaked +1.
+//
+// Every read returns a structuredClone, never a live row. Task 9's round-4
+// harness handed out live references, so a handler's "snapshot" mutated
+// itself and a race test passed with the fix fully reverted.
 // ---------------------------------------------------------------------------
 
+type MockOffer = {
+  courierId: string;
+  id: string;
+  orderId: string;
+  respondsBy: string;
+  sequence: number;
+  status: string;
+};
+
 type MockState = {
+  adminRoleLookups: number;
   assignment: { courierId: string | null } | null;
   broadcastCount: number;
   deliveryEvents: Array<Record<string, unknown>>;
+  offers: MockOffer[];
   riderLoad: Record<string, number>;
 };
 
 const RESTAURANT_ID = 'restaurant-1';
 const RIDER_ID = 'rider-1';
 const ORDER_ID = 'order-1';
+const MAX_OFFERS = 3;
 
 const buildOrder = () => ({
   customerId: 'customer-1',
@@ -194,12 +219,16 @@ const buildOrder = () => ({
   restaurantName: 'Test Kitchen',
 });
 
-const installMocks = (): MockState => {
+const snapshot = <T>(value: T): T => structuredClone(value);
+
+const installMocks = (riderIds: string[] = [RIDER_ID]): MockState => {
   const state: MockState = {
+    adminRoleLookups: 0,
     assignment: null,
     broadcastCount: 0,
     deliveryEvents: [],
-    riderLoad: { [RIDER_ID]: 0 },
+    offers: [],
+    riderLoad: Object.fromEntries(riderIds.map((id) => [id, 0])),
   };
 
   // deno-lint-ignore no-explicit-any
@@ -209,11 +238,18 @@ const installMocks = (): MockState => {
         select: () => ({
           eq: (_col: string, _val: string) => ({
             eq: async (_c2: string, _v2: string) => ({
-              data: [{ restaurantId: RESTAURANT_ID, userId: RIDER_ID }],
+              data: snapshot(riderIds.map((id) => ({ restaurantId: RESTAURANT_ID, userId: id }))),
               error: null,
             }),
             is: async (_c2: string, _v2: null) => ({ data: [], error: null }),
           }),
+          // notifyAdmins' own role lookup - a different chain shape
+          // (.select('userId,role').in('role', ['admin'])) than the
+          // dispatch-candidate loader above.
+          in: async () => {
+            state.adminRoleLookups += 1;
+            return { data: [], error: null };
+          },
         }),
       };
     }
@@ -222,7 +258,7 @@ const installMocks = (): MockState => {
       return {
         select: () => ({
           in: async (_col: string, _ids: string[]) => ({
-            data: [{ accountDisabled: false, expoPushToken: null, uid: RIDER_ID }],
+            data: snapshot(riderIds.map((id) => ({ accountDisabled: false, expoPushToken: null, uid: id }))),
             error: null,
           }),
         }),
@@ -233,16 +269,18 @@ const installMocks = (): MockState => {
       return {
         select: () => ({
           in: async (_col: string, _ids: string[]) => ({
-            data: [
-              {
-                activeLoad: state.riderLoad[RIDER_ID],
-                displayName: 'Ada Rider',
-                id: RIDER_ID,
+            data: snapshot(
+              riderIds.map((id, index) => ({
+                activeLoad: state.riderLoad[id] ?? 0,
+                // Ordered so the scorer's id tiebreak is deterministic and the
+                // walk down the pool on each re-offer is predictable.
+                displayName: `Rider ${index + 1}`,
+                id,
                 latitude: null,
                 longitude: null,
                 status: 'Available',
-              },
-            ],
+              }))
+            ),
             error: null,
           }),
         }),
@@ -259,19 +297,39 @@ const installMocks = (): MockState => {
       };
     }
 
+    if (table === 'DeliveryOffer') {
+      return {
+        select: () => ({
+          eq: async (_col: string, orderId: string) => ({
+            data: snapshot(
+              state.offers
+                .filter((offer) => offer.orderId === orderId)
+                .map((offer) => ({ courierId: offer.courierId, status: offer.status }))
+            ),
+            error: null,
+          }),
+        }),
+      };
+    }
+
     if (table === 'DeliveryEvent') {
       return {
         eq: () => {
           throw new Error('unexpected DeliveryEvent chain');
         },
         insert: async (payload: Record<string, unknown>) => {
-          state.deliveryEvents.push(payload);
+          state.deliveryEvents.push(snapshot(payload));
           return { error: null };
         },
         select: () => ({
-          eq: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({ data: null, error: null }),
+          eq: (_c1: string, orderId: string) => ({
+            eq: (_c2: string, eventType: string) => ({
+              maybeSingle: async () => {
+                const existing = state.deliveryEvents.find(
+                  (event) => event.orderId === orderId && event.eventType === eventType
+                );
+                return { data: existing ? { id: 'event-1' } : null, error: null };
+              },
             }),
           }),
         }),
@@ -283,18 +341,48 @@ const installMocks = (): MockState => {
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).rpc = async (fn: string, params: Record<string, unknown>) => {
-    if (fn !== 'ebuy_claim_dispatch_assignment') {
+    // Selection must never reach the claim any more. If it does, that is the
+    // exact regression this task exists to prevent.
+    if (fn !== 'ebuy_offer_dispatch_assignment') {
       throw new Error(`dispatchSelection.test.ts: unexpected rpc "${fn}"`);
     }
 
-    // Mirrors the migration's guard: only claim while courierId is null.
+    const orderId = params.p_order_id as string;
+    const courierId = params.p_courier_id as string;
+    const maxOffers = (params.p_max_offers as number) ?? MAX_OFFERS;
+
+    // Mirrors the migration's guard order exactly.
     if (state.assignment?.courierId) {
-      return { data: [{ claimed: false }], error: null };
+      return { data: [{ offerId: null, offered: false, reason: 'already_assigned', sequence: null }], error: null };
     }
 
-    state.assignment = { courierId: params.p_courier_id as string };
-    state.riderLoad[params.p_courier_id as string] = (state.riderLoad[params.p_courier_id as string] ?? 0) + 1;
-    return { data: [{ claimed: true }], error: null };
+    const forOrder = state.offers.filter((offer) => offer.orderId === orderId);
+
+    if (forOrder.some((offer) => offer.status === 'pending')) {
+      return { data: [{ offerId: null, offered: false, reason: 'offer_outstanding', sequence: null }], error: null };
+    }
+
+    if (forOrder.length >= maxOffers) {
+      return { data: [{ offerId: null, offered: false, reason: 'exhausted', sequence: null }], error: null };
+    }
+
+    // The unique (orderId, courierId) index.
+    if (forOrder.some((offer) => offer.courierId === courierId)) {
+      return { data: [{ offerId: null, offered: false, reason: 'already_offered', sequence: null }], error: null };
+    }
+
+    const sequence = forOrder.length + 1;
+    const offerId = `offer-${orderId}-${sequence}`;
+    state.offers.push({
+      courierId,
+      id: offerId,
+      orderId,
+      respondsBy: new Date(Date.now() + 45_000).toISOString(),
+      sequence,
+      status: 'pending',
+    });
+
+    return { data: [{ offerId, offered: true, reason: 'offered', sequence }], error: null };
   };
 
   const originalFetch = globalThis.fetch;
@@ -312,50 +400,123 @@ const installMocks = (): MockState => {
 
 const weightsLoader = async () => DEFAULT_DISPATCH_WEIGHTS;
 
-Deno.test('runAutomaticDispatchAssignment: assigns the only eligible rider on accepted', async () => {
-  const state = installMocks();
-
-  const outcome = await runAutomaticDispatchAssignment(
+const runSelection = (state: MockState, status = 'accepted') =>
+  runAutomaticDispatchAssignment(
     buildOrder() as never,
-    null,
+    state.assignment as never,
     'restaurant-owner-uid',
-    'accepted',
+    status,
     weightsLoader
   );
 
-  expectEqual(outcome.outcome, 'assigned', 'first attempt assigns the sole candidate');
-  expectEqual(state.riderLoad[RIDER_ID], 1, 'activeLoad incremented exactly once');
+Deno.test('runAutomaticDispatchAssignment: offers the only eligible rider on accepted, and claims nothing', async () => {
+  const state = installMocks();
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'offered', 'first attempt offers to the sole candidate');
+  expectEqual(state.offers.length, 1, 'exactly one DeliveryOffer row created');
+  expectEqual(state.offers[0]?.status, 'pending', 'the offer is pending, not accepted');
+  expectEqual(state.offers[0]?.courierId, RIDER_ID, 'offered to the scored winner');
+  expectEqual(state.offers[0]?.sequence, 1, 'first offer is sequence 1');
+  // THE CLAIM-TIMING INVARIANT, asserted directly: selection is now a pure
+  // intent-recording step. No assignment row, no load.
+  expectEqual(state.riderLoad[RIDER_ID], 0, 'selection does NOT increment activeLoad');
+  expectEqual(state.assignment, null, 'selection does NOT create a DeliveryAssignment');
   expectEqual(state.deliveryEvents.length, 1, 'exactly one DeliveryEvent written');
-  expectEqual(state.deliveryEvents[0]?.eventType, 'dispatch_assigned', 'automatic path event type');
-  expectEqual(state.broadcastCount, 1, 'order-changed broadcast fired once on success');
+  expectEqual(state.deliveryEvents[0]?.eventType, 'dispatch_offered', 'offer path event type');
+  expectEqual(state.broadcastCount, 1, 'order-changed broadcast fired once');
 });
 
-Deno.test('runAutomaticDispatchAssignment: a second concurrent attempt does not double-assign or double-increment load', async () => {
+Deno.test('runAutomaticDispatchAssignment: a second attempt while an offer is live does not create a second offer', async () => {
   const state = installMocks();
 
-  // Two callers that both believe no courier is assigned yet - the exact
-  // shape of a re-delivered status change or two rapid `accepted`
-  // transitions racing each other, since neither has seen the other's write.
-  const first = await runAutomaticDispatchAssignment(
-    buildOrder() as never,
-    null,
-    'restaurant-owner-uid',
-    'accepted',
-    weightsLoader
-  );
-  const second = await runAutomaticDispatchAssignment(
-    buildOrder() as never,
-    null,
-    'restaurant-owner-uid',
-    'accepted',
-    weightsLoader
-  );
+  // Two callers that both believe nothing is outstanding - a re-delivered
+  // status change, or the accepted -> preparing retry arriving while the
+  // rider still has time on the clock.
+  const first = await runSelection(state);
+  const second = await runSelection(state, 'preparing');
 
-  expectEqual(first.outcome, 'assigned', 'first attempt wins the claim');
-  expectEqual(second.outcome, 'already_assigned', 'second attempt loses the claim, not an error');
-  expectEqual(state.riderLoad[RIDER_ID], 1, 'activeLoad incremented exactly once across both attempts');
+  expectEqual(first.outcome, 'offered', 'first attempt creates the offer');
+  expectEqual(second.outcome, 'offer_outstanding', 'second attempt is refused, not an error');
+  expectEqual(state.offers.length, 1, 'exactly one offer across both attempts');
+  expectEqual(state.riderLoad[RIDER_ID], 0, 'no activeLoad movement across either attempt');
   expectEqual(state.deliveryEvents.length, 1, 'exactly one DeliveryEvent across both attempts');
   expectEqual(state.broadcastCount, 1, 'exactly one broadcast across both attempts');
+});
+
+Deno.test('runAutomaticDispatchAssignment: a declined offer is re-offered to the next rider, never the same one', async () => {
+  const state = installMocks(['rider-1', 'rider-2']);
+
+  const first = await runSelection(state);
+  expectEqual(first.outcome, 'offered', 'first rider is offered');
+  const firstCourier = state.offers[0]?.courierId;
+
+  // The rider declines - exactly what ebuy_decline_dispatch_offer does to the
+  // row, and nothing else. No counter anywhere moves.
+  state.offers[0].status = 'declined';
+
+  const second = await runSelection(state, 'preparing');
+
+  expectEqual(second.outcome, 'offered', 'a decline frees the order to be re-offered');
+  expectEqual(state.offers.length, 2, 'a second offer row exists');
+  const secondCourier = state.offers[1]?.courierId;
+  expectEqual(secondCourier === firstCourier, false, 'the decliner is EXCLUDED from the re-offer');
+  expectEqual(state.offers[1]?.sequence, 2, 'the re-offer is sequence 2');
+  expectEqual(state.riderLoad[firstCourier ?? ''], 0, 'the decliner was never incremented, so nothing to release');
+  expectEqual(state.riderLoad[secondCourier ?? ''], 0, 'the new offeree is not incremented either');
+});
+
+Deno.test('runAutomaticDispatchAssignment: exhausting the pool of riders falls back to the manual queue once', async () => {
+  const state = installMocks(['rider-1', 'rider-2']);
+
+  // Offer and decline through both available riders.
+  await runSelection(state);
+  state.offers[0].status = 'declined';
+  await runSelection(state, 'preparing');
+  state.offers[1].status = 'declined';
+
+  // Nobody left to ask: every eligible rider is already excluded.
+  const exhausted = await runSelection(state, 'ready_for_pickup');
+  expectEqual(exhausted.outcome, 'exhausted', 'running out of riders is exhaustion, not pool_empty');
+  expectEqual(state.offers.length, 2, 'no third offer was created');
+
+  const exhaustionEvents = state.deliveryEvents.filter(
+    (event) => event.eventType === 'dispatch_offers_exhausted'
+  );
+  expectEqual(exhaustionEvents.length, 1, 'exactly one dispatch_offers_exhausted event');
+  expectEqual(state.adminRoleLookups, 1, 'admin was notified exactly once');
+
+  // The retry on a later status transition must not page admin again.
+  const again = await runSelection(state, 'ready_for_pickup');
+  expectEqual(again.outcome, 'exhausted', 'still exhausted on retry');
+  expectEqual(
+    state.deliveryEvents.filter((event) => event.eventType === 'dispatch_offers_exhausted').length,
+    1,
+    'exhaustion is recorded once per order, not once per retry'
+  );
+  expectEqual(state.adminRoleLookups, 1, 'admin is NOT re-paged on the retry');
+  expectEqual(state.riderLoad['rider-1'], 0, 'exhaustion touches no counter (rider-1)');
+  expectEqual(state.riderLoad['rider-2'], 0, 'exhaustion touches no counter (rider-2)');
+});
+
+Deno.test('runAutomaticDispatchAssignment: stops after MAX_DISPATCH_OFFERS even when riders remain', async () => {
+  const state = installMocks(['rider-1', 'rider-2', 'rider-3', 'rider-4']);
+
+  for (let index = 0; index < 3; index += 1) {
+    const outcome = await runSelection(state, 'preparing');
+    expectEqual(outcome.outcome, 'offered', `offer ${index + 1} created`);
+    state.offers[index].status = 'declined';
+  }
+
+  expectEqual(state.offers.length, 3, 'three offers made');
+
+  // rider-4 has never been offered this order and is still eligible - the cap
+  // is what stops here, not the exclusion set.
+  const fourth = await runSelection(state, 'preparing');
+  expectEqual(fourth.outcome, 'exhausted', 'the offer cap is enforced with candidates still available');
+  expectEqual(state.offers.length, 3, 'no fourth offer row');
+  expectEqual(state.riderLoad['rider-4'], 0, 'the untouched rider is unaffected');
 });
 
 Deno.test('runAutomaticDispatchAssignment: skips non-delivery and non-eligible-status orders', async () => {
@@ -510,6 +671,18 @@ const installEmptyPoolMocks = (): EmptyPoolMockState => {
           eq: () => ({
             maybeSingle: async () => ({ data: { latitude: null, longitude: null }, error: null }),
           }),
+        }),
+      };
+    }
+
+    // Nobody has ever been offered this order, so the exclusion set is empty -
+    // which is exactly what makes an empty pool `pool_empty` (retryable, a
+    // rider coming online fixes it) rather than `exhausted` (we walked the
+    // whole pool and ran out of people to ask).
+    if (table === 'DeliveryOffer') {
+      return {
+        select: () => ({
+          eq: async () => ({ data: [], error: null }),
         }),
       };
     }

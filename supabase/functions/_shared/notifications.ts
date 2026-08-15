@@ -18,6 +18,7 @@ type NotificationRouteKey =
   | 'dispatch_profile'
   | 'dispatch_deliveries'
   | 'dispatch_delivery_detail'
+  | 'dispatch_delivery_offer'
   | 'dispatch_fleet'
   | 'dispatch_login'
   | 'admin_access'
@@ -98,6 +99,11 @@ const buildNotificationPath = (
       return '/deliveries';
     case 'dispatch_delivery_detail':
       return data.orderId ? `/delivery/${data.orderId}` : '/deliveries';
+    case 'dispatch_delivery_offer':
+      // Falls back to the deliveries list rather than a bare offer screen: an
+      // offer push that arrives after the 45s window closed should land the
+      // rider somewhere useful, not on a dead countdown.
+      return data.orderId ? `/offer/${data.orderId}` : '/deliveries';
     case 'dispatch_fleet':
       return '/fleet';
     case 'dispatch_login':
