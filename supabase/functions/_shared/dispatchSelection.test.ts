@@ -390,8 +390,8 @@ Deno.test('runAutomaticDispatchAssignment: skips non-delivery and non-eligible-s
 // symmetric with the claim guard above.
 // ---------------------------------------------------------------------------
 
-const installReleaseMocks = () => {
-  const state = { loadReleasedAt: null as string | null, riderLoad: 1 };
+const installReleaseMocks = (startingLoad = 1) => {
+  const state = { loadReleasedAt: null as string | null, riderLoad: startingLoad };
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).rpc = async (fn: string, params: Record<string, unknown>) => {
@@ -423,6 +423,33 @@ Deno.test('releaseDispatchAssignmentLoad: releases exactly once, and a second ca
   expectEqual(first, true, 'first release succeeds');
   expectEqual(second, false, 'second release for the same order+courier is guarded off, not a double-decrement');
   expectEqual(state.riderLoad, 0, 'activeLoad decremented exactly once across both calls');
+});
+
+// Review round 2's regression: dispatchUpdateOrderStatus (the
+// dispatcher-driven DELIVERED/FAILED_DELIVERY path) used to call the plain
+// adjustDispatchRiderLoad(-1) directly instead of
+// releaseDispatchAssignmentLoad, so it couldn't see partnerUpdateOrderStatus's
+// (the partner-driven DELIVERED/REJECTED path) release and vice versa - two
+// uncoordinated decrements could land for one claimed unit. Both call sites
+// now call this exact function, so this test exercises the invariant "for
+// each (order, courier) claim, exactly one decrement ever lands" the way it
+// actually happens in production: a dispatcher's release completing first
+// (rider genuinely no longer carrying the order), followed by a "stale"
+// partner request that read its order/assignment snapshot before the
+// dispatcher's write landed and is only now getting around to calling
+// release for the same, already-terminal order.
+Deno.test('releaseDispatchAssignmentLoad: a dispatcher release followed by a stale partner release for the same claim decrements exactly once', async () => {
+  // activeLoad starts at 3: two other genuinely active orders plus the one
+  // claim under test, matching the review's numeric example.
+  const state = installReleaseMocks(3);
+
+  const dispatcherRelease = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
+  expectEqual(dispatcherRelease, true, "the dispatcher's release (first to complete) wins the claim");
+  expectEqual(state.riderLoad, 2, 'one decrement after the dispatcher path releases');
+
+  const stalePartnerRelease = await releaseDispatchAssignmentLoad(ORDER_ID, RIDER_ID);
+  expectEqual(stalePartnerRelease, false, "the stale partner release for the same order+courier is a guarded no-op");
+  expectEqual(state.riderLoad, 2, 'still 2, not 1 - the stale release must not land a second decrement for the same claim');
 });
 
 // ---------------------------------------------------------------------------

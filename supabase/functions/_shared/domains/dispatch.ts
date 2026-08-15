@@ -15,8 +15,10 @@ import {
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
+import { releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
 import { getNigeriaAreaCoordinate } from '../nigeriaGeography.ts';
 import { buildNotificationData, notifyAdmins, notifyRestaurantUsers, notifyUsers } from '../notifications.ts';
+import { logEdgeEvent } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
   DEFAULT_CURRENCY,
@@ -642,6 +644,15 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
   // the previous rider retained full control of an order they were no
   // longer carrying. Matches what the automatic path already does
   // (runAutomaticDispatchAssignment sets dispatchOwnerId = courierId).
+  // loadReleasedAt reset to null: this row's claim is live for whichever
+  // courier it names. Not reachable today (assertNonTerminalOrder above
+  // already blocks reassigning a terminal order, and loadReleasedAt is only
+  // ever set on a terminal transition - see releaseDispatchAssignmentLoad),
+  // but explicit rather than implicit: an upsert that omits a column leaves
+  // it unchanged, so without this a hypothetical future path that reassigns
+  // after a release could leave the new courier's own eventual release
+  // permanently guarded off by the previous courier's loadReleasedAt,
+  // silently re-creating the round-1 leak for that one order.
   const { error: assignmentError } = await serviceClient.from('DeliveryAssignment').upsert(
     {
       assignedAt,
@@ -649,6 +660,7 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
       courierName,
       dispatchId: context.uid,
       dispatchOwnerId: courier.id,
+      loadReleasedAt: null,
       orderId,
       updatedAt: assignedAt,
     },
@@ -767,8 +779,39 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     updatedAt: nowIso(),
   });
 
-  if ([ORDER_STATUS.DELIVERED, ORDER_STATUS.FAILED_DELIVERY].includes(nextState.status)) {
-    await adjustDispatchRiderLoad(bundle.assignment?.courierId, -1);
+  // Routed through releaseDispatchAssignmentLoad, not the plain
+  // adjustDispatchRiderLoad(-1) this used to call: this is the
+  // dispatcher-driven half of the same release the partner-driven
+  // DELIVERED/REJECTED transition in partnerUpdateOrderStatus makes
+  // (review round 2). The two paths have disjoint FSM guards (this one only
+  // reaches DELIVERED/FAILED_DELIVERY from PICKED_UP/ON_THE_WAY; the
+  // partner one only reaches DELIVERED/REJECTED from
+  // PREPARING/READY_FOR_PICKUP/PLACED/ACCEPTED), but partnerUpdateOrderStatus
+  // reads its order/assignment snapshot once at request start with no
+  // compare-and-swap on the eventual write, so a slow partner request that
+  // read a pre-pickup status can still land its own release after a
+  // dispatcher has already taken the same order to delivered. Both paths
+  // calling the same loadReleasedAt-guarded function means only whichever
+  // one actually flips it from null to non-null gets to decrement - the
+  // other's call is a safe no-op, regardless of which one runs first.
+  //
+  // A failed delivery releases the same as a successful one: the rider is
+  // no longer carrying this order either way, so their capacity should be
+  // freed for a new assignment.
+  const dispatchReleaseEligibleStatuses: readonly string[] = [ORDER_STATUS.DELIVERED, ORDER_STATUS.FAILED_DELIVERY];
+  if (dispatchReleaseEligibleStatuses.includes(nextState.status)) {
+    const releaseCourierId = sanitizeText(bundle.assignment?.courierId);
+    if (releaseCourierId) {
+      try {
+        await releaseDispatchAssignmentLoad(orderId, releaseCourierId);
+      } catch (error) {
+        logEdgeEvent('error', 'dispatch load release failed', {
+          error: error instanceof Error ? error.message : String(error),
+          orderId,
+          status: nextState.status,
+        });
+      }
+    }
   }
 
   await insertDeliveryEvent({
