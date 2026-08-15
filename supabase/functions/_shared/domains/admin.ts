@@ -368,7 +368,6 @@ const adminReviewDispatchApplication: Handler = async ({ context, data }) => {
     });
     await ensureDispatchRiderRecord(applicationId, {
       acceptanceRate: 100,
-      activeLoad: 0,
       completedTrips: 0,
       currentAddress: application.currentAddress,
       displayName: sanitizeText(application.displayName, 'Dispatch rider'),

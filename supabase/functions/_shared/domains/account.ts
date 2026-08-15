@@ -318,7 +318,6 @@ const provisionStaffAccount: Handler = async ({ context, data }) => {
   });
   if (role === 'dispatch') {
     await ensureDispatchRiderRecord(targetUid, {
-      activeLoad: 0,
       completedTrips: 0,
       displayName:
         displayName ?? sanitizeOptionalText(authUser.user_metadata?.full_name) ?? existingAccount?.displayName ?? email.split('@')[0],
@@ -406,7 +405,6 @@ const assignUserRole: Handler = async ({ context, data }) => {
   });
   if (nextRole === 'dispatch') {
     await ensureDispatchRiderRecord(targetUid, {
-      activeLoad: 0,
       completedTrips: 0,
       displayName: sanitizeText(account.displayName, account.email.split('@')[0]),
       phoneNumber: sanitizeOptionalText(account.phoneNumber),
@@ -628,7 +626,6 @@ const enableUserAccess: Handler = async ({ context, data }) => {
   });
   if (restoreRole === 'dispatch') {
     await ensureDispatchRiderRecord(targetUid, {
-      activeLoad: 0,
       completedTrips: 0,
       displayName: sanitizeText(account.displayName, account.email.split('@')[0]),
       phoneNumber: sanitizeOptionalText(account.phoneNumber),

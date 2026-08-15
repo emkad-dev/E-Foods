@@ -133,11 +133,34 @@ export const adjustDispatchRiderLoad = async (riderId: string | null | undefined
   }
 };
 
+/**
+ * Creates a rider record if there isn't one, and refreshes the profile
+ * fields if there is.
+ *
+ * It deliberately does NOT carry `activeLoad`: this is an upsert
+ * (`on conflict (id) do update`), and PostgREST only updates the columns
+ * present in the payload, so writing the column here would reset a live
+ * counter to 0 every time an existing dispatcher is re-provisioned
+ * (assignUserRole, restoreUserRole, an admin approving a dispatch
+ * application for an id that already has a record, or a rider
+ * re-submitting their own onboarding). Every call site passed a literal
+ * `activeLoad: 0`, so nothing ever used it to set a value - it only ever
+ * clobbered one, dropping that rider's in-flight claims out of the ledger
+ * and making the scorer (which weights activeLoad at 1.0) send them more
+ * work. The column is `INTEGER NOT NULL DEFAULT 0`
+ * (functions/prisma/migrations/20260426_ops_read_models), so omitting it
+ * still gives a brand-new record exactly the 0 it used to be given
+ * explicitly - and unlike reading the current value and writing it back,
+ * omitting it cannot lose an update to a concurrent claim.
+ *
+ * acceptanceRate/completedTrips have the same overwrite shape and are left
+ * as they are: they are display statistics with no code reading them for a
+ * decision, so they are not part of the load ledger this guard protects.
+ */
 export const ensureDispatchRiderRecord = async (
   riderId: string,
   riderData: {
     acceptanceRate?: number | null;
-    activeLoad?: number;
     completedTrips?: number;
     currentAddress?: string | null;
     displayName: string;
@@ -160,7 +183,6 @@ export const ensureDispatchRiderRecord = async (
       zone: sanitizeText(riderData.zone, 'Unassigned coverage area'),
       vehicleType: sanitizeText(riderData.vehicleType, DEFAULT_DISPATCH_VEHICLE),
       acceptanceRate: riderData.acceptanceRate ?? null,
-      activeLoad: Math.max(0, Math.floor(riderData.activeLoad ?? 0)),
       completedTrips: Math.max(0, Math.floor(riderData.completedTrips ?? 0)),
       latitude:
         riderData.latitude === null || riderData.latitude === undefined

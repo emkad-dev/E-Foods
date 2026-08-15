@@ -932,7 +932,6 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   });
   await ensureDispatchRiderRecord(context.uid, {
     acceptanceRate: 100,
-    activeLoad: 0,
     completedTrips: 0,
     currentAddress,
     displayName,
