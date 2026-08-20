@@ -1263,6 +1263,137 @@ const customerSendSupportMessage: Handler = async ({ context, data }) => {
   return json(200, { data: { conversation, message } });
 };
 
+// Delivered orders for this customer with no OrderRating row yet — what
+// prompts the "rate your order" nudge. A plain anti-join (two selects + a Set
+// filter) rather than a SQL function: this is an ordinary read, nothing here
+// needs the atomicity ebuy_submit_order_rating exists for.
+const customerGetPendingRatings: Handler = async ({ context }) => {
+  ensureRole(context.role, ['customer']);
+
+  const { data: orders, error: ordersError } = await serviceClient
+    .from('CustomerOrder')
+    .select('id,restaurantId,restaurantName,updatedAt,createdAt')
+    .eq('customerId', context.uid)
+    .eq('status', ORDER_STATUS.DELIVERED)
+    .order('updatedAt', { ascending: false });
+
+  if (ordersError) {
+    throw new Error(ordersError.message);
+  }
+
+  const deliveredOrders = (orders ?? []) as Array<{
+    createdAt?: string | null;
+    id: string;
+    restaurantId: string;
+    restaurantName: string;
+    updatedAt?: string | null;
+  }>;
+
+  if (deliveredOrders.length === 0) {
+    return json(200, { data: { orders: [] } });
+  }
+
+  const { data: ratings, error: ratingsError } = await serviceClient
+    .from('OrderRating')
+    .select('orderId')
+    .in(
+      'orderId',
+      deliveredOrders.map((order) => order.id)
+    );
+
+  if (ratingsError) {
+    throw new Error(ratingsError.message);
+  }
+
+  const ratedOrderIds = new Set(((ratings ?? []) as Array<{ orderId: string }>).map((rating) => rating.orderId));
+
+  const pendingOrders = deliveredOrders
+    .filter((order) => !ratedOrderIds.has(order.id))
+    .map((order) => ({
+      deliveredAt: order.updatedAt ?? order.createdAt ?? null,
+      orderId: order.id,
+      restaurantId: order.restaurantId,
+      restaurantName: sanitizeText(order.restaurantName, 'Restaurant'),
+    }));
+
+  return json(200, { data: { orders: pendingOrders } });
+};
+
+// Only on a `delivered` order the customer owns, only once — enforced in
+// ebuy_submit_order_rating (20260820_order_ratings.sql): the UNIQUE on
+// OrderRating.orderId is the "only once" guard, not a read-then-write check
+// here, and the incremental restaurant/courier average update runs inside the
+// SAME function call as the insert so a partial failure can't land one
+// without the other. See that migration's header for the full race-safety
+// argument.
+const customerSubmitOrderRating: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['customer']);
+
+  const orderId = sanitizeText(data.orderId);
+  if (!orderId) {
+    fail(400, 'An order id is required.');
+  }
+
+  const restaurantScore = parseInteger(data.restaurantScore, Number.NaN);
+  if (!Number.isInteger(restaurantScore) || restaurantScore < 1 || restaurantScore > 5) {
+    fail(400, 'A restaurant rating between 1 and 5 is required.');
+  }
+
+  let courierScore: number | null = null;
+  if (data.courierScore !== undefined && data.courierScore !== null && data.courierScore !== '') {
+    const parsedCourierScore = parseInteger(data.courierScore, Number.NaN);
+    if (!Number.isInteger(parsedCourierScore) || parsedCourierScore < 1 || parsedCourierScore > 5) {
+      fail(400, 'A courier rating between 1 and 5 is required.');
+    }
+    courierScore = parsedCourierScore;
+  }
+
+  const comment = sanitizeOptionalText(data.comment);
+
+  const { data: rpcRows, error: rpcError } = await serviceClient.rpc('ebuy_submit_order_rating', {
+    p_order_id: orderId,
+    p_customer_id: context.uid,
+    p_restaurant_score: restaurantScore,
+    p_courier_score: courierScore,
+    p_comment: comment,
+  });
+
+  if (rpcError) {
+    throw new Error(rpcError.message);
+  }
+
+  const result = (Array.isArray(rpcRows) ? rpcRows[0] : rpcRows) as
+    | { ratingId?: string | null; reason?: string | null; restaurantId?: string | null; submitted?: boolean }
+    | undefined;
+
+  if (!result?.submitted) {
+    const reason = sanitizeText(result?.reason, 'rating_failed');
+
+    if (reason === 'order_not_found') {
+      fail(404, 'The selected order could not be found.');
+    }
+    if (reason === 'not_owner') {
+      fail(403, 'You can only rate your own orders.');
+    }
+    if (reason === 'not_delivered') {
+      fail(412, 'Only a delivered order can be rated.');
+    }
+    if (reason === 'already_rated') {
+      fail(409, 'This order has already been rated.');
+    }
+
+    fail(400, 'This order could not be rated.');
+  }
+
+  return json(200, {
+    data: {
+      orderId,
+      ratingId: sanitizeOptionalText(result?.ratingId),
+      restaurantId: sanitizeOptionalText(result?.restaurantId),
+    },
+  });
+};
+
 const customerGetSupportThread: Handler = async ({ context }) => {
   const { data: conversation, error: convError } = await serviceClient
     .from('SupportConversation')
@@ -1295,9 +1426,11 @@ export const ordersDomain = defineRpcDomain<AuthenticatedRequestContext>({
     cancelCustomerOrder,
     customerGetOrderDetail,
     customerGetOrders,
+    customerGetPendingRatings,
     customerGetSupportThread,
     customerListFavoriteRestaurants,
     customerSendSupportMessage,
+    customerSubmitOrderRating,
     customerToggleFavoriteRestaurant,
     initializeCustomerPayment,
     placeCustomerOrder,

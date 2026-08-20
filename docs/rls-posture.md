@@ -24,6 +24,7 @@ no policies" as an unfinished migration and adds policies to `fix` it.
 |---|---|---|---|
 | **DeliveryOffer** | `supabase/migrations/20260816_dispatch_delivery_offers.sql` (Task 10 / D2) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **DispatchRiderPing** | `supabase/migrations/20260820_dispatch_rider_ping.sql` (Task 11 / D3) | ❌ | **service-role-only** (RLS enabled, no policies) |
+| **OrderRating** | `supabase/migrations/20260820_order_ratings.sql` (Task 12 / E1) | ❌ | **service-role-only** (RLS enabled, no policies) |
 
 ### `DeliveryOffer`
 
@@ -85,6 +86,32 @@ Reasons the policy-less posture is correct rather than provisional:
 direct client read, or `postgres_changes` - revisit BOTH the RLS posture here
 AND the UNLOGGED decision above from scratch; they were evaluated together and
 the UNLOGGED rejection specifically depends on nothing subscribing that way.
+
+### `OrderRating`
+
+One row per rated order (`orderId` UNIQUE — the idempotency guard; see the
+migration's own header for why that's a constraint rather than a read-then-
+write check). Reasons the policy-less posture is correct rather than
+provisional:
+
+- **No client touches it through the Data API.** A customer submits a rating
+  only through `customerSubmitOrderRating`, and lists what still needs rating
+  only through `customerGetPendingRatings` — both `feasty-orders` Edge
+  Function actions running under the service role. The aggregate columns it
+  feeds (`RestaurantRecord.ratingAverage`/`ratingCount`,
+  `DispatchRiderRecord.ratingAverage`/`ratingCount`) are what the customer app
+  actually reads, via `customerGetRestaurantList` / `customerGetRestaurantDetail`
+  — never this table directly.
+- **The insert and both aggregate updates are one function call.**
+  `ebuy_submit_order_rating` does the ownership check, the delivered-status
+  check, the insert, and the incremental average update(s) as a single
+  transaction. A write policy here would let a client bypass that function and
+  insert a rating (or worse, only half of the ledger effect) directly.
+- **A self-read policy would still be wrong today.** Even a narrow
+  `customerId = auth.uid()` SELECT buys nothing while
+  `customerGetPendingRatings` — an Edge Function action — is the only reader,
+  and would expose `courierId`/`restaurantId`/`comment` on rows with no client
+  code path that needs them read directly.
 
 ## Rules for future changes
 

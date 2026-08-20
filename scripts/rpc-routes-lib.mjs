@@ -49,14 +49,14 @@ export const LEGACY_RPC_FUNCTION = 'app-rpc';
 // numbers fails generation loudly instead of writing a quietly-wrong route
 // table.
 export const EXPECTED_DOMAIN_ACTION_COUNTS = {
-  ORDER_ACTIONS: 10,
+  ORDER_ACTIONS: 12,
   DISPATCH_ACTIONS: 11,
   PARTNER_ACTIONS: 8,
   ADMIN_ACTIONS: 21,
   ACCOUNT_ACTIONS: 12,
 };
 
-export const EXPECTED_TOTAL_ACTION_COUNT = 62;
+export const EXPECTED_TOTAL_ACTION_COUNT = 64;
 
 /**
  * Extracts a `export const NAME = ['a', 'b'] as const;` string-literal array
@@ -175,7 +175,7 @@ export type RpcTarget = RpcFunction | typeof LEGACY_RPC_FUNCTION;
  */
 export const KNOWN_RPC_TARGETS: readonly RpcTarget[] = [${knownTargetEntries}];
 
-/** The authoritative action -> split-mode Edge Function map. Covers exactly the 62 actions in actions.ts. */
+/** The authoritative action -> split-mode Edge Function map. Covers exactly the ${EXPECTED_TOTAL_ACTION_COUNT} actions in actions.ts. */
 export const RPC_ROUTES: Record<string, RpcFunction> = {
 ${routeEntries}
 };

@@ -29,6 +29,8 @@ export type RestaurantRow = {
   minOrder?: number | null;
   name: string;
   openingTime?: string | null;
+  ratingAverage?: number | null;
+  ratingCount?: number | null;
   supportsDelivery?: boolean | null;
   supportsPickup?: boolean | null;
   updatedAt?: string | null;
@@ -63,9 +65,11 @@ export type RestaurantCard = {
   // reporting every location as covered.
   isPublished: true;
   updatedAt: string | null;
-  // RestaurantRecord has no rating columns yet (Task 12/E1 adds ratingAverage/
-  // ratingCount). Emitting the field now, always null/0, means the shape
-  // never has to change again once that column lands — only these two lines do.
+  // From RestaurantRecord.ratingAverage/ratingCount (Task 12/E1), maintained
+  // incrementally in ebuy_submit_order_rating — never recomputed here. `null`/
+  // `0` for a restaurant with no ratings yet. The client's "New" threshold
+  // (fewer than 5 ratings shows "New" instead of the average) is a display
+  // rule, not a server-side suppression — the raw values always flow.
   ratingAverage: number | null;
   ratingCount: number;
 };
@@ -131,8 +135,8 @@ export const toRestaurantCard = (restaurant: RestaurantRow): RestaurantCard => (
   isOpen: restaurant.isOpen !== false,
   isPublished: true,
   updatedAt: restaurant.updatedAt ?? null,
-  ratingAverage: null,
-  ratingCount: 0,
+  ratingAverage: restaurant.ratingAverage ?? null,
+  ratingCount: restaurant.ratingCount ?? 0,
 });
 
 // Customers only ever see final prices; the restaurant's own price never
@@ -187,6 +191,8 @@ export const toRestaurantDetail = (restaurant: RestaurantRow, pricingConfig: Pri
   minOrder: restaurant.minOrder ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
+  ratingAverage: restaurant.ratingAverage ?? null,
+  ratingCount: restaurant.ratingCount ?? 0,
   supportsDelivery: restaurant.supportsDelivery !== false,
   supportsPickup: restaurant.supportsPickup !== false,
   updatedAt: restaurant.updatedAt ?? null,

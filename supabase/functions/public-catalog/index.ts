@@ -36,10 +36,10 @@ import {
 // column maintained on write would let this select drop `menu` entirely; out
 // of scope here.
 const CARD_COLUMNS =
-  'id,name,cuisine,cuisines,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt';
+  'id,name,cuisine,cuisines,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt,ratingAverage,ratingCount';
 
 const DETAIL_COLUMNS =
-  'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt';
+  'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt,ratingAverage,ratingCount';
 
 const LIST_CACHE_HEADERS = { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300' };
 const DETAIL_CACHE_HEADERS = { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=120' };

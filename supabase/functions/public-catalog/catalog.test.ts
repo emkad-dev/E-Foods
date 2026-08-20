@@ -1,9 +1,11 @@
 import { assert, assertEquals, assertFalse } from 'jsr:@std/assert';
+import { DEFAULT_PRICING_CONFIG } from '../_shared/pricing.ts';
 import {
   hasAvailableMenuItem,
   paginateRestaurants,
   sortRestaurantsByLocation,
   toRestaurantCard,
+  toRestaurantDetail,
   type RestaurantRow,
 } from './catalog.ts';
 
@@ -26,6 +28,8 @@ const baseRow = (overrides: Partial<RestaurantRow> = {}): RestaurantRow => ({
   isPublished: true,
   updatedAt: '2026-08-01T00:00:00.000Z',
   menu: [{ category: 'Mains', items: [{ id: 'i1', name: 'Jollof', price: 2000, isAvailable: true }] }],
+  ratingAverage: null,
+  ratingCount: 0,
   ...overrides,
 });
 
@@ -36,12 +40,28 @@ Deno.test('toRestaurantCard response has no menu key', () => {
   assertFalse('menu' in card, 'card must not carry a menu field');
 });
 
-Deno.test('toRestaurantCard carries the documented card fields including forward-compat rating placeholders', () => {
+Deno.test('toRestaurantCard carries the documented card fields, rating defaults included', () => {
   const card = toRestaurantCard(baseRow());
   assertEquals(card.id, 'rest-1');
   assertEquals(card.cuisines, ['nigerian', 'grill']);
   assertEquals(card.ratingAverage, null);
   assertEquals(card.ratingCount, 0);
+});
+
+Deno.test('toRestaurantCard passes through a real ratingAverage/ratingCount from the row', () => {
+  const card = toRestaurantCard(baseRow({ ratingAverage: 4.25, ratingCount: 12 }));
+  assertEquals(card.ratingAverage, 4.25);
+  assertEquals(card.ratingCount, 12);
+});
+
+Deno.test('toRestaurantDetail carries ratingAverage/ratingCount, defaulting to null/0', () => {
+  const detail = toRestaurantDetail(baseRow(), DEFAULT_PRICING_CONFIG);
+  assertEquals(detail.ratingAverage, null);
+  assertEquals(detail.ratingCount, 0);
+
+  const rated = toRestaurantDetail(baseRow({ ratingAverage: 3.6, ratingCount: 9 }), DEFAULT_PRICING_CONFIG);
+  assertEquals(rated.ratingAverage, 3.6);
+  assertEquals(rated.ratingCount, 9);
 });
 
 // Regression: a card with no isPublished field made

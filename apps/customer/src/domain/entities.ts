@@ -46,9 +46,12 @@ export interface RestaurantDocument extends DocumentData {
   cuisines?: string[];
   rating?: number;
   /**
-   * Forward-compat placeholders on cards (Task 12/E1 will populate them from
-   * a real RestaurantRecord column). Always null/0 until then — never on the
-   * detail shape today.
+   * From RestaurantRecord.ratingAverage/ratingCount (Task 12/E1), maintained
+   * incrementally server-side on every customerSubmitOrderRating. Present on
+   * both a card and a detail fetch. `ratingCount < 5` means "too few ratings
+   * to trust the average" — apps/customer/src/utils/restaurantAvailability.ts's
+   * getRestaurantRatingLabel is where that "New" display threshold lives; the
+   * raw values here are never suppressed server-side.
    */
   ratingAverage?: number | null;
   ratingCount?: number;

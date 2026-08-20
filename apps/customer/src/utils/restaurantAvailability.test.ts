@@ -4,7 +4,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getPlatformCoverage, isRestaurantVisibleToCustomers, type DiscoveryRestaurant } from './restaurantAvailability.ts';
+import {
+  getPlatformCoverage,
+  getRestaurantRatingLabel,
+  isRestaurantVisibleToCustomers,
+  NEW_RESTAURANT_RATING_THRESHOLD,
+  type DiscoveryRestaurant,
+} from './restaurantAvailability.ts';
 import type { AddressRecord } from '../domain/entities.ts';
 
 // Lagos Island. Distances below are measured from here.
@@ -222,6 +228,30 @@ test('getPlatformCoverage: a card (no menu key) outside every radius is correctl
   const coverage = getPlatformCoverage([far], PINNED);
   assert.equal(coverage.isCovered, false);
   assert.ok(coverage.nearestOrderableKm !== null && coverage.nearestOrderableKm > 400);
+});
+
+// --- getRestaurantRatingLabel: the "New" threshold flips at ratingCount === 5 ---
+
+test('getRestaurantRatingLabel: ratingCount 0 (no ratings at all) shows New', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: null, ratingCount: 0 }), 'New');
+});
+
+test('getRestaurantRatingLabel: one below the threshold (ratingCount 4) still shows New', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: 5, ratingCount: NEW_RESTAURANT_RATING_THRESHOLD - 1 }), 'New');
+});
+
+test('getRestaurantRatingLabel: exactly the threshold (ratingCount 5) shows the average, not New — the flip point', () => {
+  const label = getRestaurantRatingLabel({ ratingAverage: 4.2, ratingCount: NEW_RESTAURANT_RATING_THRESHOLD });
+  assert.notEqual(label, 'New');
+  assert.equal(label, '4.2 ★ (5)');
+});
+
+test('getRestaurantRatingLabel: well above the threshold formats the average to one decimal with the count', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: 3.6667, ratingCount: 42 }), '3.7 ★ (42)');
+});
+
+test('getRestaurantRatingLabel: missing ratingAverage/ratingCount defaults to New (undefined count treated as 0)', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: undefined, ratingCount: undefined }), 'New');
 });
 
 test('zero eligible candidates because no restaurant has coordinates, but the catalogue is non-empty -> covered (live production scenario)', () => {

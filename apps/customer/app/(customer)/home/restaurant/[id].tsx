@@ -34,6 +34,7 @@ import {
   getRestaurantAvailability,
   getRestaurantAvailabilityBadge,
   getRestaurantOperatingHoursLabel,
+  getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
 } from '../../../../src/utils/restaurantAvailability';
 
@@ -317,7 +318,7 @@ export default function RestaurantDetail() {
                 </View>
 
                 <View style={styles.factsRow}>
-                  <Text style={styles.factPill}>{restaurant.rating ? `Rated ${restaurant.rating}` : 'New'}</Text>
+                  <Text style={styles.factPill}>{getRestaurantRatingLabel(restaurant)}</Text>
                   <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
                   <Text
                     style={[

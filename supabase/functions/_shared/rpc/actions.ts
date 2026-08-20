@@ -18,6 +18,8 @@ export const ORDER_ACTIONS = [
   'cancelCustomerOrder',
   'customerSendSupportMessage',
   'customerGetSupportThread',
+  'customerSubmitOrderRating',
+  'customerGetPendingRatings',
 ] as const;
 
 export const DISPATCH_ACTIONS = [
