@@ -1293,24 +1293,37 @@ const customerGetPendingRatings: Handler = async ({ context }) => {
     return json(200, { data: { orders: [] } });
   }
 
-  const { data: ratings, error: ratingsError } = await serviceClient
-    .from('OrderRating')
-    .select('orderId')
-    .in(
-      'orderId',
-      deliveredOrders.map((order) => order.id)
-    );
+  const orderIds = deliveredOrders.map((order) => order.id);
+
+  const [{ data: ratings, error: ratingsError }, { data: assignments, error: assignmentsError }] = await Promise.all([
+    serviceClient.from('OrderRating').select('orderId').in('orderId', orderIds),
+    // Drives the client's "only show a courier score field when this order
+    // actually had a rider" rule — customerSubmitOrderRating enforces the
+    // same fact server-side (it only updates DispatchRiderRecord when a
+    // courierId exists on the assignment), so this just surfaces the same
+    // signal to the prompt before submit.
+    serviceClient.from('DeliveryAssignment').select('orderId,courierId').in('orderId', orderIds),
+  ]);
 
   if (ratingsError) {
     throw new Error(ratingsError.message);
   }
+  if (assignmentsError) {
+    throw new Error(assignmentsError.message);
+  }
 
   const ratedOrderIds = new Set(((ratings ?? []) as Array<{ orderId: string }>).map((rating) => rating.orderId));
+  const courierOrderIds = new Set(
+    ((assignments ?? []) as Array<{ orderId: string; courierId?: string | null }>)
+      .filter((assignment) => sanitizeOptionalText(assignment.courierId))
+      .map((assignment) => assignment.orderId)
+  );
 
   const pendingOrders = deliveredOrders
     .filter((order) => !ratedOrderIds.has(order.id))
     .map((order) => ({
       deliveredAt: order.updatedAt ?? order.createdAt ?? null,
+      hasCourier: courierOrderIds.has(order.id),
       orderId: order.id,
       restaurantId: order.restaurantId,
       restaurantName: sanitizeText(order.restaurantName, 'Restaurant'),

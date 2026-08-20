@@ -6,6 +6,7 @@ import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import PromoBanner from '../../src/components/PromoBanner';
+import RatingPromptCard from '../../src/components/RatingPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { CoverageProvider } from '../../src/contexts/CoverageContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
@@ -63,6 +64,7 @@ export default function CustomerLayout() {
     <FavoritesProvider>
       <CoverageProvider>
         <PromoBanner />
+        <RatingPromptCard />
         <Tabs
           screenOptions={{
             tabBarActiveTintColor: customerTheme.accentStrong,

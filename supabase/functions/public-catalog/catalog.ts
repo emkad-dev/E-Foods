@@ -205,6 +205,7 @@ type Locatable = {
   latitude?: number | null;
   longitude?: number | null;
   deliveryRadiusKm?: number | null;
+  ratingAverage?: number | null;
 };
 
 /**
@@ -213,7 +214,14 @@ type Locatable = {
  * With coords: keeps only rows with coordinates AND whose deliveryRadiusKm
  * (resolveDeliveryRadiusKm's 12km fallback for a non-positive radius — same
  * default order-time enforcement uses, see deliveryCoverage.ts) covers the
- * point, sorted nearest-first (id as a stable tie-break).
+ * point, sorted nearest-first. Distance stays strictly PRIMARY — Task 12/E1's
+ * brief calls for rating only as a TIE-BREAK behind it, so a nearer low-rated
+ * restaurant always beats a farther high-rated one; `ratingAverage` only
+ * decides between two rows at the SAME distance (higher first — `?? 0` puts
+ * an unrated restaurant, whose real minimum possible average is 1, behind any
+ * restaurant with an actual rating, without needing the client's separate
+ * "New below 5 ratings" display threshold here — this is ranking, not
+ * suppression). id is the final, fully-deterministic fallback.
  */
 export const sortRestaurantsByLocation = <T extends Locatable>(rows: T[], coords: GeoCoords | null): T[] => {
   if (!coords) {
@@ -230,7 +238,12 @@ export const sortRestaurantsByLocation = <T extends Locatable>(rows: T[], coords
       }),
     }))
     .filter(({ row, distanceKm }) => distanceKm <= resolveDeliveryRadiusKm(row.deliveryRadiusKm))
-    .sort((a, b) => a.distanceKm - b.distanceKm || a.row.id.localeCompare(b.row.id))
+    .sort(
+      (a, b) =>
+        a.distanceKm - b.distanceKm ||
+        (b.row.ratingAverage ?? 0) - (a.row.ratingAverage ?? 0) ||
+        a.row.id.localeCompare(b.row.id)
+    )
     .map(({ row }) => row);
 };
 

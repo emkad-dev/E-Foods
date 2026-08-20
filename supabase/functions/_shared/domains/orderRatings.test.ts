@@ -455,8 +455,11 @@ Deno.test('customerSubmitOrderRating: a successful submission returns the orderI
 
 const callPending = async (uid: string) => {
   const response = await customerGetPendingRatings({ context: customerContext(uid), data: {}, request: fakeRequest() });
-  const body = (await response.json()) as { data?: { orders?: Array<{ orderId?: string }> } };
-  return { response, orderIds: (body.data?.orders ?? []).map((order) => order.orderId) };
+  const body = (await response.json()) as {
+    data?: { orders?: Array<{ orderId?: string; hasCourier?: boolean }> };
+  };
+  const orders = body.data?.orders ?? [];
+  return { response, orderIds: orders.map((order) => order.orderId), orders };
 };
 
 Deno.test('customerGetPendingRatings: a delivered order with no rating yet is pending', async () => {
@@ -486,4 +489,20 @@ Deno.test('customerGetPendingRatings: only the calling customer\'s own orders ar
 
   const { orderIds } = await callPending(CUSTOMER_ID);
   expectEqual(orderIds.includes(ORDER_ID), false, 'another customer\'s delivered order is not returned');
+});
+
+Deno.test('customerGetPendingRatings: hasCourier is true when the order has an assigned courier', async () => {
+  installMocks({ assignments: [{ orderId: ORDER_ID, courierId: COURIER_ID }] });
+
+  const { orders } = await callPending(CUSTOMER_ID);
+  const order = orders.find((entry) => entry.orderId === ORDER_ID);
+  expectEqual(order?.hasCourier, true, 'a delivery order with an assigned courier reports hasCourier: true');
+});
+
+Deno.test('customerGetPendingRatings: hasCourier is false for a pickup order with no assignment row', async () => {
+  installMocks({ assignments: [] });
+
+  const { orders } = await callPending(CUSTOMER_ID);
+  const order = orders.find((entry) => entry.orderId === ORDER_ID);
+  expectEqual(order?.hasCourier, false, 'a pickup order (no assignment row) reports hasCourier: false');
 });

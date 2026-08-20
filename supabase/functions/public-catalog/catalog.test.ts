@@ -137,6 +137,51 @@ Deno.test('radius filter: a non-positive radius falls back to the 12km default r
   assertEquals(result.map((r) => r.id), ['zero-radius']);
 });
 
+// --- rating tie-break (Task 12/E1): distance stays PRIMARY, rating only
+// breaks a tie at equal distance ---
+
+Deno.test('rating tie-break: at equal distance, the higher-rated restaurant sorts first', () => {
+  const coords = { latitude: 6.46, longitude: 3.39 };
+  // Same coordinates -> identical distanceKm from `coords`. Ids are chosen
+  // so alphabetical order is the OPPOSITE of rating order — a mutation that
+  // drops the rating comparator and falls back to id-only would otherwise
+  // pass this test by coincidence.
+  const lowRated = { id: 'a-low-rated', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: 3.2 };
+  const highRated = { id: 'z-high-rated', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: 4.8 };
+
+  const result = sortRestaurantsByLocation([lowRated, highRated], coords);
+  assertEquals(result.map((r) => r.id), ['z-high-rated', 'a-low-rated']);
+});
+
+Deno.test('rating tie-break: distance strictly wins — a nearer low-rated restaurant beats a farther high-rated one', () => {
+  const coords = { latitude: 6.46, longitude: 3.39 };
+  const nearLowRated = { id: 'near-low', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: 1.0 };
+  const farHighRated = { id: 'far-high', latitude: 6.55, longitude: 3.5, deliveryRadiusKm: 50, ratingAverage: 5.0 };
+
+  const result = sortRestaurantsByLocation([farHighRated, nearLowRated], coords);
+  assertEquals(result.map((r) => r.id), ['near-low', 'far-high']);
+});
+
+Deno.test('rating tie-break: an unrated restaurant (ratingAverage null) sorts behind any actually-rated restaurant at equal distance', () => {
+  const coords = { latitude: 6.46, longitude: 3.39 };
+  // Ids again chosen opposite of rating order, for the same reason as above.
+  const unrated = { id: 'a-unrated', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: null };
+  // Lowest possible real average (min score is 1) still outranks "no ratings".
+  const barelyRated = { id: 'z-barely-rated', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: 1.0 };
+
+  const result = sortRestaurantsByLocation([unrated, barelyRated], coords);
+  assertEquals(result.map((r) => r.id), ['z-barely-rated', 'a-unrated']);
+});
+
+Deno.test('rating tie-break: two equally-rated (or both unrated) restaurants at equal distance fall back to id, deterministically', () => {
+  const coords = { latitude: 6.46, longitude: 3.39 };
+  const b = { id: 'b-restaurant', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: 4.0 };
+  const a = { id: 'a-restaurant', latitude: 6.46, longitude: 3.39, deliveryRadiusKm: 5, ratingAverage: 4.0 };
+
+  const result = sortRestaurantsByLocation([b, a], coords);
+  assertEquals(result.map((r) => r.id), ['a-restaurant', 'b-restaurant']);
+});
+
 // --- cursor pagination ---
 
 const buildRows = (count: number) =>
