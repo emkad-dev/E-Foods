@@ -203,6 +203,12 @@ type MockOptions = {
   offers?: Row[];
   /** Courier already holding the assignment. `null` = unclaimed row absent. */
   assignmentCourierId?: string | null;
+  /** Extra orders (id + status) seeded alongside ORDER_ID, for sweep batching tests. */
+  extraOrders?: Array<{ id: string; status: string }>;
+  /** Offers belonging to the extra orders. */
+  extraOffers?: Row[];
+  /** Pre-existing DeliveryEvent rows, e.g. a dispatch_offers_exhausted marker. */
+  events?: Row[];
 };
 
 /**
@@ -224,7 +230,13 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
   };
 
   const tables: Record<string, ReturnType<typeof createTable>> = {
-    CustomerOrder: createTable([buildOrderRow(orderStatus)]),
+    CustomerOrder: createTable([
+      buildOrderRow(orderStatus),
+      ...(options.extraOrders ?? []).map((entry) => ({
+        ...buildOrderRow(entry.status),
+        id: entry.id,
+      })),
+    ]),
     DeliveryAssignment: createTable(
       options.assignmentCourierId === undefined
         ? []
@@ -240,8 +252,10 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
           },
         ]
     ),
-    DeliveryEvent: createTable([]),
-    DeliveryOffer: createTable(options.offers ?? []),
+    DeliveryEvent: createTable(options.events ?? []),
+    OrderItem: createTable([]),
+    RestaurantUser: createTable([]),
+    DeliveryOffer: createTable([...(options.offers ?? []), ...(options.extraOffers ?? [])]),
     DispatchRiderRecord: createTable(
       riders.map((id, index) => ({
         activeLoad: 0,
@@ -274,8 +288,10 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
   };
 
   const offerRows = () => tables.DeliveryOffer.rows;
-  const orderRow = () => tables.CustomerOrder.rows[0];
-  const assignmentRow = () => tables.DeliveryAssignment.rows.find((row) => row.orderId === ORDER_ID) ?? null;
+  const orderRow = (id: string = ORDER_ID) =>
+    tables.CustomerOrder.rows.find((row) => row.id === id) ?? null;
+  const assignmentRow = (id: string = ORDER_ID) =>
+    tables.DeliveryAssignment.rows.find((row) => row.orderId === id) ?? null;
 
   /** Mirrors ebuy_claim_dispatch_assignment: locked status guard + courierId is null. */
   const claim = (courierId: string, courierName: string) => {
@@ -376,7 +392,8 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
 
     if (fn === 'ebuy_offer_dispatch_assignment') {
       const courierId = params.p_courier_id as string;
-      const status = normalizeStatus(orderRow()?.status);
+      const targetOrderId = (params.p_order_id as string) ?? ORDER_ID;
+      const status = normalizeStatus(orderRow(targetOrderId)?.status);
 
       if (!OFFERABLE_STATUSES.includes(status)) {
         return {
@@ -385,14 +402,14 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
         };
       }
 
-      if (assignmentRow()?.courierId) {
+      if (assignmentRow(targetOrderId)?.courierId) {
         return {
           data: [{ offerId: null, offered: false, reason: 'already_assigned', sequence: null }],
           error: null,
         };
       }
 
-      const forOrder = offerRows().filter((row) => row.orderId === ORDER_ID);
+      const forOrder = offerRows().filter((row) => row.orderId === targetOrderId);
       if (forOrder.some((row) => row.status === 'pending')) {
         return {
           data: [{ offerId: null, offered: false, reason: 'offer_outstanding', sequence: null }],
@@ -410,12 +427,12 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
       }
 
       const sequence = forOrder.length + 1;
-      const offerId = `offer-${sequence}`;
+      const offerId = `offer-${targetOrderId}-${sequence}`;
       offerRows().push({
         courierId,
         id: offerId,
         offeredAt: now,
-        orderId: ORDER_ID,
+        orderId: targetOrderId,
         respondedAt: null,
         respondsBy: new Date(Date.now() + 45_000).toISOString(),
         sequence,
@@ -440,15 +457,94 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
     }
 
     if (fn === 'ebuy_list_dispatch_reoffer_candidates') {
-      const status = normalizeStatus(orderRow()?.status);
-      const forOrder = offerRows().filter((row) => row.orderId === ORDER_ID);
-      const eligible =
-        OFFERABLE_STATUSES.includes(status) &&
-        !assignmentRow()?.courierId &&
-        forOrder.length > 0 &&
-        !forOrder.some((row) => row.status === 'pending') &&
-        forOrder.length < MAX_OFFERS;
-      return { data: eligible ? [{ orderId: ORDER_ID }] : [], error: null };
+      // Mirrors ebuy_list_dispatch_reoffer_candidates including the two
+      // properties that make starvation observable at all: it is ordered by
+      // min("offeredAt") and capped at p_limit. Modelling only the predicate
+      // (the previous version) made a permanently-eligible candidate
+      // indistinguishable from a healthy one - the exact blind spot that let
+      // the starvation defect through review-clean.
+      const limit = Math.max(1, (params.p_limit as number) ?? 50);
+      const maxOffers = Math.max(1, (params.p_max_offers as number) ?? MAX_OFFERS);
+
+      const candidates = tables.CustomerOrder.rows
+        .filter((order) => {
+          const id = order.id as string;
+          const forOrder = offerRows().filter((row) => row.orderId === id);
+          return (
+            OFFERABLE_STATUSES.includes(normalizeStatus(order.status)) &&
+            !assignmentRow(id)?.courierId &&
+            forOrder.length > 0 &&
+            !forOrder.some((row) => row.status === 'pending') &&
+            forOrder.length < maxOffers &&
+            // THE STARVATION GUARD: an order already handed to the manual
+            // queue stops being swept.
+            !tables.DeliveryEvent.rows.some(
+              (event) => event.orderId === id && event.eventType === 'dispatch_offers_exhausted'
+            )
+          );
+        })
+        .map((order) => {
+          const id = order.id as string;
+          const earliest = offerRows()
+            .filter((row) => row.orderId === id)
+            .reduce(
+              (min, row) => Math.min(min, Date.parse(row.offeredAt as string) || 0),
+              Number.POSITIVE_INFINITY
+            );
+          return { earliest, orderId: id };
+        })
+        .sort((a, b) => a.earliest - b.earliest)
+        .slice(0, limit)
+        .map((entry) => ({ orderId: entry.orderId }));
+
+      return { data: candidates, error: null };
+    }
+
+    if (fn === 'ebuy_reassign_dispatch_assignment_courier') {
+      // Task 9's compare-and-swap, unmodified by Task 10. Mirrored here so the
+      // manual-assignment path can be driven end to end.
+      const targetOrderId = params.p_order_id as string;
+      const courierId = params.p_courier_id as string;
+      const status = normalizeStatus(orderRow(targetOrderId)?.status);
+
+      if (!OFFERABLE_STATUSES.includes(status)) {
+        return { data: [{ orderStatus: status, previousCourierId: null, reassigned: false }], error: null };
+      }
+
+      const existing = assignmentRow(targetOrderId);
+      const previous = (existing?.courierId as string | null) ?? null;
+
+      if (existing?.loadReleasedAt) {
+        return { data: [{ orderStatus: status, previousCourierId: previous, reassigned: false }], error: null };
+      }
+
+      if (existing) {
+        Object.assign(existing, {
+          courierId,
+          courierName: params.p_courier_name,
+          dispatchOwnerId: courierId,
+          loadReleasedAt: null,
+        });
+      } else {
+        tables.DeliveryAssignment.rows.push({
+          assignedAt: now,
+          courierId,
+          courierName: params.p_courier_name,
+          dispatchId: params.p_dispatch_id ?? null,
+          dispatchOwnerId: courierId,
+          loadReleasedAt: null,
+          orderId: targetOrderId,
+        });
+      }
+
+      if (previous !== courierId) {
+        if (previous) {
+          state.load[previous] = (state.load[previous] ?? 0) - 1;
+        }
+        state.load[courierId] = (state.load[courierId] ?? 0) + 1;
+      }
+
+      return { data: [{ orderStatus: status, previousCourierId: previous, reassigned: true }], error: null };
     }
 
     // In particular ebuy_adjust_dispatch_rider_load: a handler reaching for a
@@ -741,7 +837,8 @@ Deno.test('dispatchDeclineOffer: after the pool is walked out the order falls ba
   await callHandler(dispatchDeclineOffer, RIDER_A, { offerId: 'offer-1' });
   expectEqual(state.offers().length, 2, 're-offered to the second rider');
 
-  await callHandler(dispatchDeclineOffer, RIDER_B, { offerId: 'offer-2' });
+  // The re-offer's id comes from the mock's generic (orderId, sequence) form.
+  await callHandler(dispatchDeclineOffer, RIDER_B, { offerId: `offer-${ORDER_ID}-2` });
 
   expectEqual(state.offers().length, 2, 'no third offer - there is nobody left to ask');
   expectEqual(state.offers()[0]?.status, 'declined', 'first offer declined');
@@ -757,4 +854,176 @@ Deno.test('dispatchDeclineOffer: after the pool is walked out the order falls ba
   expectEqual(state.assignment(), null, 'no assignment was ever created');
   expectEqual(state.load[RIDER_A], 0, 'rider A carries no claim');
   expectEqual(state.load[RIDER_B], 0, 'rider B carries no claim');
+});
+
+// ---------------------------------------------------------------------------
+// 8. REVIEW FIXES.
+// ---------------------------------------------------------------------------
+
+// I-2: an order that exhausted EARLY (every rider excluded, fewer than
+// MAX_DISPATCH_OFFERS offers made) used to satisfy the candidate predicate
+// forever. Combined with oldest-first ordering and the batch limit, enough of
+// them starve the sweep: they occupy the whole batch every minute and no
+// newly-expired offer is ever re-offered again.
+Deno.test('sweepDispatchOffers: an exhausted order stops being a re-offer candidate', async () => {
+  const state = installMocks('accepted', {
+    offers: [{ ...pendingOffer(RIDER_A, 'offer-1'), status: 'declined' }],
+    riders: [RIDER_A],
+    // The exhaustion marker recordDispatchOffersExhausted writes once per order.
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  const first = await sweepDispatchOffers();
+  const second = await sweepDispatchOffers();
+
+  expectEqual(first.reoffered, 0, 'an exhausted order is not re-offered');
+  expectEqual(first.skipped, 0, 'and is not even a candidate - not merely skipped');
+  expectEqual(second.reoffered, 0, 'still not a candidate on a later sweep');
+  expectEqual(state.offers().length, 1, 'no new offer row was created');
+});
+
+Deno.test('sweepDispatchOffers: exhausted orders do not crowd a live order out of the batch', async () => {
+  // Two exhausted orders with the OLDEST offeredAt timestamps, plus one
+  // genuinely live order whose offer just lapsed. Under the old predicate the
+  // two exhausted ones were permanent candidates sorted ahead of the live one;
+  // this test pins that they are excluded so the live order is reached.
+  const old1 = new Date(Date.now() - 3_600_000).toISOString();
+  const old2 = new Date(Date.now() - 3_000_000).toISOString();
+
+  const state = installMocks('accepted', {
+    // ORDER_ID is the live one: its offer lapsed and should be re-offered.
+    offers: [{ ...pendingOffer(RIDER_A, 'offer-1', -1000), offeredAt: new Date().toISOString() }],
+    riders: [RIDER_A, RIDER_B],
+    extraOrders: [
+      { id: 'order-stuck-1', status: 'accepted' },
+      { id: 'order-stuck-2', status: 'accepted' },
+    ],
+    extraOffers: [
+      { courierId: RIDER_A, id: 'stuck-1-a', offeredAt: old1, orderId: 'order-stuck-1', respondedAt: old1, respondsBy: old1, sequence: 1, status: 'declined' },
+      { courierId: RIDER_B, id: 'stuck-1-b', offeredAt: old1, orderId: 'order-stuck-1', respondedAt: old1, respondsBy: old1, sequence: 2, status: 'declined' },
+      { courierId: RIDER_A, id: 'stuck-2-a', offeredAt: old2, orderId: 'order-stuck-2', respondedAt: old2, respondsBy: old2, sequence: 1, status: 'declined' },
+      { courierId: RIDER_B, id: 'stuck-2-b', offeredAt: old2, orderId: 'order-stuck-2', respondedAt: old2, respondsBy: old2, sequence: 2, status: 'declined' },
+    ],
+    events: [
+      { eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: 'order-stuck-1' },
+      { eventType: 'dispatch_offers_exhausted', id: 'ev-2', orderId: 'order-stuck-2' },
+    ],
+  });
+
+  const result = await sweepDispatchOffers();
+
+  expectEqual(result.expired, 1, "only the live order's offer was due");
+  expectEqual(result.reoffered, 1, 'the live order WAS reached and re-offered');
+
+  const reoffers = state.offers().filter((row) => row.orderId === ORDER_ID && row.status === 'pending');
+  expectEqual(reoffers.length, 1, 'the live order has a fresh pending offer');
+  expectEqual(reoffers[0]?.courierId, RIDER_B, 'the re-offer excluded the rider who let it lapse');
+
+  // The stuck orders were left entirely alone.
+  expectEqual(state.offers().filter((row) => row.orderId === 'order-stuck-1').length, 2, 'stuck order 1 untouched');
+  expectEqual(state.offers().filter((row) => row.orderId === 'order-stuck-2').length, 2, 'stuck order 2 untouched');
+  expectEqual(state.load[RIDER_A], 0, 'no counter movement');
+  expectEqual(state.load[RIDER_B], 0, 'no counter movement');
+});
+
+// M-1: loadOrderOfferSummary counted `status = 'pending'` without consulting
+// respondsBy, so a lapsed-but-unswept offer made selection return
+// offer_outstanding and never reach the SQL whose lazy expiry exists precisely
+// to unblock it. The order then waited a whole sweep interval.
+Deno.test('a lapsed but unswept offer does not block the next offer', async () => {
+  const state = installMocks('accepted', { offers: [pendingOffer(RIDER_A, 'offer-1', -1000)] });
+
+  // Rider B declining is not what unblocks this - there is no offer for B.
+  // Drive selection directly through the decline path of the LAPSED rider's
+  // order by running the sweep's re-offer entry point.
+  const result = await sweepDispatchOffers();
+
+  expectEqual(result.reoffered, 1, 'the lapsed offer did not block the re-offer');
+  expectEqual(state.offers()[0]?.status, 'expired', 'the lapsed offer was expired');
+  expectEqual(state.offers()[1]?.courierId, RIDER_B, 'a fresh offer went to the next rider');
+  expectEqual(state.load[RIDER_A], 0, 'no counter movement');
+});
+
+// I-1: an exhausted order has NO dispatch owner by definition, and
+// getDispatchAssignmentOwnerId returns '' for a missing assignment row, which
+// matches no uid. Before isUnownedDispatchableOrder existed, that meant an
+// exhausted order was visible to admins only and every dispatcher was 403'd
+// from assigning it - so with no admin on shift, nobody holding the dispatch
+// role could see or act on it at all.
+
+const dispatchGetDeliveryQueue = dispatchDomain.handlers.dispatchGetDeliveryQueue;
+if (typeof dispatchGetDeliveryQueue !== 'function') {
+  throw new Error('dispatchDomain.handlers.dispatchGetDeliveryQueue is not registered.');
+}
+
+const dispatchAssignOrderCourier = dispatchDomain.handlers.dispatchAssignOrderCourier;
+if (typeof dispatchAssignOrderCourier !== 'function') {
+  throw new Error('dispatchDomain.handlers.dispatchAssignOrderCourier is not registered.');
+}
+
+const readJson = async (response: Response) => (await response.json()) as {
+  data?: { orders?: Array<{ id?: string }>; offers?: unknown[] };
+};
+
+Deno.test('dispatchGetDeliveryQueue: an exhausted, owner-less order is visible to a plain dispatcher', async () => {
+  const state = installMocks('accepted', {
+    offers: [
+      { ...pendingOffer(RIDER_A, 'offer-1'), status: 'declined' },
+      { ...pendingOffer(RIDER_B, 'offer-2'), sequence: 2, status: 'declined' },
+    ],
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  // No DeliveryAssignment row at all - the defining shape of exhaustion.
+  expectEqual(state.assignment(), null, 'precondition: the order has no assignment');
+
+  const response = await dispatchGetDeliveryQueue({
+    context: riderContext(RIDER_A),
+    data: {},
+    request: fakeRequest(),
+  });
+
+  const body = await readJson(response);
+  const ids = (body.data?.orders ?? []).map((order) => order.id);
+  expectEqual(ids.includes(ORDER_ID), true, 'the exhausted order appears in a dispatcher queue');
+});
+
+Deno.test('dispatchAssignOrderCourier: a plain dispatcher can manually place a rider on an exhausted order', async () => {
+  const state = installMocks('accepted', {
+    offers: [
+      { ...pendingOffer(RIDER_A, 'offer-1'), status: 'declined' },
+      { ...pendingOffer(RIDER_B, 'offer-2'), sequence: 2, status: 'declined' },
+    ],
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  const response = await dispatchAssignOrderCourier({
+    context: riderContext(RIDER_A),
+    data: { courierId: RIDER_A, orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'the manual assignment is permitted, not 403d');
+  expectEqual(state.assignment()?.courierId, RIDER_A, 'the rider is now on the order');
+  expectEqual(state.load[RIDER_A], 1, 'the manual path claims exactly once');
+});
+
+// M-3: a manual assignment used to leave an outstanding pending offer alone,
+// so the offered rider kept a live-looking countdown for work already given
+// to somebody else. Ledger-safe (a pending offer carries no claim) but wrong.
+Deno.test('dispatchAssignOrderCourier: a manual assignment supersedes any still-pending offer', async () => {
+  const state = installMocks('accepted', { offers: [pendingOffer(RIDER_B, 'offer-1')] });
+
+  const response = await dispatchAssignOrderCourier({
+    context: riderContext(RIDER_A),
+    data: { courierId: RIDER_A, orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'the manual assignment succeeds');
+  expectEqual(state.offers()[0]?.status, 'superseded', "the other rider's live offer is closed out");
+  expectEqual(state.assignment()?.courierId, RIDER_A, 'the manually assigned rider holds the order');
+  expectEqual(state.load[RIDER_A], 1, 'the assigned rider is incremented exactly once');
+  // The superseded rider never had a claim, so nothing to release.
+  expectEqual(state.load[RIDER_B], 0, 'the superseded rider carries no claim');
 });

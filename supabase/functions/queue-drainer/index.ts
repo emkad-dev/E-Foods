@@ -271,6 +271,30 @@ Deno.serve(async (request) => {
         ? ['order-placement', 'payment-verification', 'notifications']
         : [queueSelection];
 
+    // Delivery-offer expiry sweep (Task 10 / D2). Rides on this function's
+    // existing every-minute pg_cron schedule
+    // (20260624_queue_drainer_schedule.sql already posts {"queue":"all"}), so
+    // there is no second cron entry, no second secret, and no second schedule
+    // that can silently stop working.
+    //
+    // Only on the 'all' selection - a targeted single-queue drain (a manual
+    // retry of one queue, a test) should do exactly what was asked.
+    //
+    // Runs BEFORE the queue drain, and that ordering is load-bearing rather
+    // than incidental. runWithBackpressure THROWS EdgeBackpressureError when
+    // it sheds (_shared/observability.ts), so anything sequenced after it
+    // inside this try block is skipped entirely on a shed minute. A previous
+    // version of this code sat below the drain while its comment claimed the
+    // sweep must survive shedding - the comment was right and the placement
+    // was wrong, which meant offers stopped expiring during exactly the busy
+    // periods that cause shedding, and every offer in flight stalled for as
+    // long as the load lasted.
+    //
+    // Hoisting is safe: the sweep is bounded (50 offers, 50 orders) and never
+    // throws - see sweepDispatchOffers - so it can neither delay the drain
+    // materially nor turn a successful drain into a 500.
+    const offerSweep = queueSelection === 'all' ? await sweepDispatchOffers() : null;
+
     const results = await runWithBackpressure(
       'queue-drainer',
       {
@@ -285,23 +309,6 @@ Deno.serve(async (request) => {
         return settled;
       }
     );
-
-    // Delivery-offer expiry sweep (Task 10 / D2). Rides on this function's
-    // existing every-minute pg_cron schedule
-    // (20260624_queue_drainer_schedule.sql already posts {"queue":"all"}), so
-    // there is no second cron entry, no second secret, and no second schedule
-    // that can silently stop working.
-    //
-    // Only on the 'all' selection - a targeted single-queue drain (a manual
-    // retry of one queue, a test) should do exactly what was asked and
-    // nothing else.
-    //
-    // Outside runWithBackpressure on purpose: the sweep is bounded (50 offers,
-    // 50 orders) and must still run on a minute when the queue drain itself
-    // is shed for backpressure, otherwise a busy period would stall every
-    // offer's expiry for as long as it lasted. It never throws - see
-    // sweepDispatchOffers - so it cannot turn a successful drain into a 500.
-    const offerSweep = queueSelection === 'all' ? await sweepDispatchOffers() : null;
 
     const response = json(200, {
       data: {

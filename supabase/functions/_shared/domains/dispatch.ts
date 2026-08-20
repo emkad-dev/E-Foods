@@ -19,6 +19,7 @@ import {
   buildDispatchOfferResponse,
   declineDispatchOffer,
   loadPendingOffersForCourier,
+  supersedePendingOffersForOrder,
 } from '../dispatchOffers.ts';
 import {
   reassignDispatchAssignmentCourier,
@@ -69,6 +70,58 @@ import { defineRpcDomain, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
 
 type Handler = RpcHandler<AuthenticatedRequestContext>;
+
+// Widened to readonly string[] so `.includes(normalizeOrderStatus(...))`
+// type-checks - the same widening AUTO_DISPATCH_ELIGIBLE_STATUSES uses in
+// dispatchSelection.ts. Without it TS infers a literal union and rejects
+// the general string.
+const UNOWNED_DISPATCHABLE_STATUSES: readonly string[] = [
+  ORDER_STATUS.ACCEPTED,
+  ORDER_STATUS.PREPARING,
+  ORDER_STATUS.READY_FOR_PICKUP,
+];
+
+/**
+ * An order that no dispatcher owns and no rider holds, sitting in a status
+ * where a courier could still be placed on it.
+ *
+ * This exists because of how exhaustion actually terminates (Task 10 / D2).
+ * When every offer is declined or lapses, there is BY DEFINITION no dispatch
+ * owner - an owner is only ever stamped by a claim or a manual assignment, and
+ * exhaustion is the state where neither happened. The brief calls for such an
+ * order to "fall back to the dispatch owner's manual queue", which cannot mean
+ * a specific owner's queue; the only coherent reading is that it becomes
+ * unowned work any dispatcher can pick up.
+ *
+ * Without this predicate the ownership filter below silently swallows those
+ * orders: `getDispatchAssignmentOwnerId` returns '' for a missing assignment
+ * row (sanitizeText never yields null), and '' never equals a uid - so an
+ * exhausted order would be visible to admins only, and every dispatcher would
+ * be 403'd from assigning it by hand. A restaurant could accept an order,
+ * every rider decline it, and with no admin on shift nobody holding the
+ * dispatch role could even see it.
+ *
+ * Deliberately narrow: it widens an OWNERSHIP check only, and only for orders
+ * with no owner and no courier at all. Every status and payment gate
+ * (assertNonTerminalOrder, assertOrderPaymentReadyForOperations, the
+ * ACCEPTED/PREPARING/READY_FOR_PICKUP window) is untouched and still applies.
+ * It also incidentally rescues `pool_empty` orders, which were invisible to
+ * dispatchers in exactly the same way before this task.
+ */
+const isUnownedDispatchableOrder = (
+  order: CustomerOrderRow,
+  assignment: DeliveryAssignmentRow | null
+) => {
+  if (sanitizeText(assignment?.courierId) || getDispatchAssignmentOwnerId(assignment)) {
+    return false;
+  }
+
+  if (sanitizeText(order.fulfillmentType, 'delivery') !== 'delivery') {
+    return false;
+  }
+
+  return UNOWNED_DISPATCHABLE_STATUSES.includes(normalizeOrderStatus(order.status));
+};
 
 const getDispatchQueuePriority = (order: CustomerOrderRow, assignment: DeliveryAssignmentRow | null) => {
   const status = normalizeOrderStatus(order.status);
@@ -313,9 +366,15 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
   const scopedOrderList =
     context.role === 'admin'
       ? sortedOrderList
-      : sortedOrderList.filter(
-          (order) => getDispatchAssignmentOwnerId(assignmentsByOrderId.get(order.id) ?? null) === context.uid
-        );
+      : sortedOrderList.filter((order) => {
+          const assignment = assignmentsByOrderId.get(order.id) ?? null;
+          // Their own queue, plus unowned work nobody has picked up - see
+          // isUnownedDispatchableOrder for why exhaustion produces the latter.
+          return (
+            getDispatchAssignmentOwnerId(assignment) === context.uid ||
+            isUnownedDispatchableOrder(order, assignment)
+          );
+        });
 
   // Live offers for THIS rider (Task 10 / D2). Carried alongside `orders`
   // rather than inside it because an offered order has no DeliveryAssignment
@@ -485,7 +544,14 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
 
   assertOrderPaymentReadyForOperations(bundle.order);
   const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
-  if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+  if (
+    context.role !== 'admin' &&
+    dispatchOwnerId !== context.uid &&
+    // bundle! : narrowed non-null by the fail() guard above (fail returns never),
+    // a narrowing deno check does not carry across the awaits in between - the
+    // file's pre-existing, already-baselined pattern.
+    !isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null)
+  ) {
     fail(403, 'This delivery is not assigned to your dispatcher queue.');
   }
 
@@ -653,7 +719,19 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
   }
 
   const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
-  if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+  // Unowned work is assignable by any dispatcher - that is what makes the
+  // exhaustion fallback reachable without an admin on shift. See
+  // isUnownedDispatchableOrder. Deliberately NOT applied to
+  // dispatchUpdateOrderStatus: those transitions (picked_up, delivered)
+  // require an actual courier, which an unowned order by definition lacks.
+  if (
+    context.role !== 'admin' &&
+    dispatchOwnerId !== context.uid &&
+    // bundle! : narrowed non-null by the fail() guard above (fail returns never),
+    // a narrowing deno check does not carry across the awaits in between - the
+    // file's pre-existing, already-baselined pattern.
+    !isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null)
+  ) {
     fail(403, 'This delivery is not assigned to your dispatcher queue.');
   }
 
@@ -721,6 +799,21 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
   // above) or between that snapshot and this write.
   if (!reassignment.reassigned) {
     fail(412, 'This order changed while the rider was being assigned. Reload the delivery and try again.');
+  }
+
+  // This order now has a rider by human decision, so any offer still sitting
+  // on somebody's screen is dead - close it out rather than leaving a rider
+  // running a countdown for work that is already assigned. Ledger-neutral (a
+  // pending offer never carried a claim) and non-fatal: the assignment has
+  // already committed, and a cosmetic tidy-up must not fail it.
+  try {
+    await supersedePendingOffersForOrder(orderId);
+  } catch (error) {
+    logEdgeEvent('error', 'superseding pending offers after manual assignment failed', {
+      action: 'dispatchAssignOrderCourier',
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
   }
 
   // The authoritative previous courier, read under the same lock that

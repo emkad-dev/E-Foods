@@ -444,9 +444,19 @@ const recordDispatchPoolEmpty = async (order: CustomerOrderRow, actorUid: string
 /**
  * Exhaustion: MAX_DISPATCH_OFFERS riders were asked and none took it (or we
  * ran out of riders to ask before reaching that many). The order stops being
- * offered and becomes an ordinary manual-queue order - it stays visible to
- * every dispatcher and to admin, and `dispatchAssignOrderCourier` can still
- * place it by hand, exactly as an order with no automatic dispatch at all.
+ * offered and becomes unowned manual work.
+ *
+ * "Unowned" is the whole subtlety, and an earlier version of this comment got
+ * it wrong. Exhaustion is BY DEFINITION the state in which no dispatch owner
+ * exists - an owner is only stamped by a claim or a manual assignment, and
+ * neither happened. A missing DeliveryAssignment row makes
+ * getDispatchAssignmentOwnerId return '' (sanitizeText never yields null),
+ * which matches no uid, so an exhausted order is NOT automatically visible to
+ * dispatchers; it takes the explicit `isUnownedDispatchableOrder` predicate in
+ * domains/dispatch.ts to surface it in their queue and to let
+ * dispatchAssignOrderCourier place a rider on it by hand. Without that
+ * predicate this path reaches admins only. Do not weaken it without also
+ * rethinking what happens to an exhausted order when no admin is on shift.
  *
  * Guarded once-per-order the same way `recordDispatchPoolEmpty` is, and for
  * the same reason: automatic selection is re-run on every subsequent

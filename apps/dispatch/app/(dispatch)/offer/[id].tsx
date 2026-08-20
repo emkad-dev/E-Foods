@@ -1,7 +1,10 @@
 // The rider-facing delivery offer screen (Task 10 / D2).
 //
-// Reached from the offer push (routeKey `dispatch_delivery_offer` ->
-// /offer/<orderId>) and from the offer banner on the deliveries list. The
+// Reached two ways, and it needs both: the offer push (routeKey
+// `dispatch_delivery_offer` -> /offer/<orderId>), and the offer banner on the
+// deliveries list. Push alone is not sufficient - a rider with notifications
+// denied, a stale Expo token, or the app already foregrounded would never
+// learn the offer exists and would watch the window lapse. The
 // route param is the ORDER id, not the offer id: a push is addressed to an
 // order, and the rider's live offer for it is looked up from the queue.
 //

@@ -24,6 +24,7 @@ export default function DeliveriesScreen() {
     deliveredCount,
     error,
     loading,
+    offers,
     refreshing,
     reload,
   } = useDispatchOrders();
@@ -65,6 +66,42 @@ export default function DeliveriesScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
       <Text style={styles.title}>Delivery queue</Text>
+
+      {/*
+        THE IN-APP ENTRY POINT to the offer screen. Until this existed, `offers`
+        was fetched on every queue load and thrown away: the only route to
+        /offer/<id> was the push deep-link, so a rider with notifications
+        denied, a stale Expo token, or the app already foregrounded on this tab
+        never learned an offer existed. The 45s window would lapse with the
+        rider sitting right here, idle, looking at the screen the offer should
+        have appeared on.
+
+        The data is already on the client, so this costs no extra round trip.
+      */}
+      {offers.length > 0 ? (
+        <View style={styles.offerBanner}>
+          <Text style={styles.offerBannerTitle}>
+            {offers.length === 1 ? 'New delivery offer' : `${offers.length} delivery offers`}
+          </Text>
+          {offers.map((offer) => (
+            <TouchableOpacity
+              key={offer.id}
+              style={styles.offerRow}
+              onPress={() => router.push(`/offer/${offer.orderId}`)}
+            >
+              <View style={styles.offerRowText}>
+                <Text style={styles.offerRestaurant}>
+                  {offer.order?.restaurantName ?? 'Restaurant'}
+                </Text>
+                <Text style={styles.offerMeta}>
+                  Order #{String(offer.orderId).slice(-6).toUpperCase()} - tap to respond
+                </Text>
+              </View>
+              <Text style={styles.offerAction}>View</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
       <Text style={styles.copy}>
         Dispatch orders are now prioritized by rider risk, pickup pressure, and delivery stage instead of simple recency.
       </Text>
@@ -202,6 +239,48 @@ export default function DeliveriesScreen() {
 }
 
 const styles = StyleSheet.create({
+  offerAction: {
+    color: dispatchTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  offerBanner: {
+    backgroundColor: dispatchTheme.accentTint,
+    borderColor: dispatchTheme.accentSoft,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 14,
+  },
+  offerBannerTitle: {
+    color: dispatchTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  offerMeta: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  offerRestaurant: {
+    color: dispatchTheme.text,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  offerRow: {
+    alignItems: 'center',
+    backgroundColor: dispatchTheme.surface,
+    borderRadius: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  offerRowText: {
+    flex: 1,
+  },
   screen: {
     backgroundColor: dispatchTheme.background,
     flex: 1,

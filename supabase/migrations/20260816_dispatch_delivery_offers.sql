@@ -596,6 +596,30 @@ as $$
   left join public."DeliveryAssignment" a on a."orderId" = o."orderId"
   where btrim(coalesce(c."status", '')) in ('accepted', 'preparing', 'ready', 'ready_for_pickup')
     and (a."courierId" is null or btrim(a."courierId") = '')
+    -- THE STARVATION GUARD. Without it, an order that exhausted EARLY - every
+    -- eligible rider already excluded, but fewer than p_max_offers offers
+    -- actually made - satisfies every other condition here forever: it has
+    -- offers, none pending, no courier, and count(*) < p_max_offers. Nothing
+    -- would ever remove it from the candidate set.
+    --
+    -- That is not merely wasteful, it starves the sweep. Candidates are
+    -- ordered by min("offeredAt") and capped at p_limit, so on a small
+    -- platform (two riders, every order declined by both) these permanent
+    -- candidates accumulate with the OLDEST timestamps and, once p_limit of
+    -- them exist, occupy the entire batch every minute - and no newly-expired
+    -- offer is ever re-offered again. The inline decline path would still
+    -- work, so the damage lands precisely on the case the 45s timer exists
+    -- for: a rider who ignores the notification.
+    --
+    -- dispatch_offers_exhausted is written exactly once per order (guarded by
+    -- recordDispatchOffersExhausted's own lookup), which makes it the right
+    -- terminal marker to filter on: it means "this order was handed to the
+    -- manual queue; stop sweeping it".
+    and not exists (
+      select 1 from public."DeliveryEvent" e
+      where e."orderId" = o."orderId"
+        and e."eventType" = 'dispatch_offers_exhausted'
+    )
   group by o."orderId"
   having count(*) filter (where o."status" = 'pending') = 0
      and count(*) < greatest(1, coalesce(p_max_offers, 3))

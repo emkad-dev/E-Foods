@@ -247,20 +247,71 @@ export type OrderOfferSummary = {
 export const loadOrderOfferSummary = async (orderId: string): Promise<OrderOfferSummary> => {
   const { data, error } = await serviceClient
     .from('DeliveryOffer')
-    .select('courierId,status')
+    .select('courierId,status,respondsBy')
     .eq('orderId', orderId);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  const rows = (data ?? []) as { courierId?: string | null; status?: string | null }[];
+  const rows = (data ?? []) as { courierId?: string | null; respondsBy?: string | null; status?: string | null }[];
+
+  // `pendingCount` counts offers that are BOTH pending and still inside their
+  // window. Counting `status = 'pending'` alone made the migration's lazy
+  // expiry unreachable: selection would see a lapsed-but-not-yet-swept offer,
+  // return `offer_outstanding` before ever calling
+  // ebuy_offer_dispatch_assignment, and so never reach the `respondsBy <= now`
+  // UPDATE that exists precisely to stop a dead offer blocking the next one.
+  // The order would then wait up to a full sweep interval for a re-offer -
+  // exactly the delay the lazy expiry was written to avoid.
+  //
+  // Reading `respondsBy` here uses the edge function's clock, which is only
+  // safe because this is a HINT that decides whether to attempt an offer.
+  // Whether an offer may actually be created is re-decided in SQL under the
+  // order row lock against the database clock, and a wrong guess here costs
+  // one refused call and nothing else.
+  const now = Date.now();
+  const stillLive = (row: { respondsBy?: string | null; status?: string | null }) => {
+    if (sanitizeText(row?.status) !== DISPATCH_OFFER_STATUS.PENDING) {
+      return false;
+    }
+    const deadline = Date.parse(sanitizeText(row?.respondsBy));
+    return !Number.isFinite(deadline) || deadline > now;
+  };
 
   return {
     courierIds: unique(rows.map((row) => sanitizeText(row?.courierId))),
-    pendingCount: rows.filter((row) => sanitizeText(row?.status) === DISPATCH_OFFER_STATUS.PENDING).length,
+    pendingCount: rows.filter(stillLive).length,
     total: rows.length,
   };
+};
+
+/**
+ * Closes out any still-live offer for an order that has just been claimed by
+ * another route - today, a dispatcher's manual assignment.
+ *
+ * Purely cosmetic to the ledger and deliberately so: it moves rows from
+ * `pending` to `superseded` and touches no counter, because a pending offer
+ * never carried a claim. Without it, a rider who was mid-decision when an
+ * admin assigned the order by hand keeps a live-looking countdown for a
+ * delivery that is already someone else's; accepting it is correctly refused
+ * (ebuy_claim_dispatch_assignment finds a courier already set), but only
+ * after they have watched the clock and tapped Accept.
+ *
+ * Never throws: it is called after the assignment has already committed, and
+ * a tidy-up failure must not fail the assignment. Idempotent - the predicate
+ * is `status = 'pending'`, so a second call matches nothing.
+ */
+export const supersedePendingOffersForOrder = async (orderId: string): Promise<void> => {
+  const { error } = await serviceClient
+    .from('DeliveryOffer')
+    .update({ respondedAt: new Date().toISOString(), status: DISPATCH_OFFER_STATUS.SUPERSEDED })
+    .eq('orderId', orderId)
+    .eq('status', DISPATCH_OFFER_STATUS.PENDING);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 };
 
 /** The rider's live offer inbox, newest first. Powers dispatchGetDeliveryQueue's `offers` array. */
