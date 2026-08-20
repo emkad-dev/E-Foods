@@ -304,7 +304,13 @@ const installMocks = (riderIds: string[] = [RIDER_ID]): MockState => {
             data: snapshot(
               state.offers
                 .filter((offer) => offer.orderId === orderId)
-                .map((offer) => ({ courierId: offer.courierId, status: offer.status }))
+                // respondsBy is part of the real select - loadOrderOfferSummary
+                // needs it to tell a live offer from a lapsed-but-unswept one.
+                .map((offer) => ({
+                  courierId: offer.courierId,
+                  respondsBy: offer.respondsBy,
+                  status: offer.status,
+                }))
             ),
             error: null,
           }),
@@ -357,6 +363,16 @@ const installMocks = (riderIds: string[] = [RIDER_ID]): MockState => {
     }
 
     const forOrder = state.offers.filter((offer) => offer.orderId === orderId);
+
+    // Lazy expiry, mirroring the migration's `respondsBy <= now` UPDATE under
+    // the order lock. The mock did not model this, which made the M-1 fix
+    // untestable: selection's own pendingCount check would short-circuit
+    // before ever reaching here, so nothing observed whether this ran.
+    for (const offer of forOrder) {
+      if (offer.status === 'pending' && Date.parse(offer.respondsBy) <= Date.now()) {
+        offer.status = 'expired';
+      }
+    }
 
     if (forOrder.some((offer) => offer.status === 'pending')) {
       return { data: [{ offerId: null, offered: false, reason: 'offer_outstanding', sequence: null }], error: null };
@@ -764,4 +780,34 @@ Deno.test('runAutomaticDispatchAssignment: a second attempt against the same sti
   expectEqual(second.outcome, 'pool_empty', 'retry on the next status change: pool still empty');
   expectEqual(state.deliveryEvents.length, 1, 'still exactly one DeliveryEvent - the once-per-order guard held');
   expectEqual(state.adminRoleLookups, 1, 'admins were notified once, not once per retry');
+});
+
+// M-1: loadOrderOfferSummary counted `status = 'pending'` without consulting
+// respondsBy. A lapsed-but-unswept offer therefore made selection return
+// `offer_outstanding` and short-circuit BEFORE calling
+// ebuy_offer_dispatch_assignment - so the lazy expiry inside that function,
+// which exists precisely to stop a dead offer blocking the next one, could
+// never run. The order waited up to a full sweep interval for a re-offer.
+//
+// Driven through a status transition rather than the sweep on purpose: the
+// sweep's pass 1 expires the row first, so it never exercises the
+// lapsed-while-still-pending state this fix is about.
+Deno.test('runAutomaticDispatchAssignment: a lapsed but unswept offer does not block the next offer', async () => {
+  const state = installMocks(['rider-1', 'rider-2']);
+
+  const first = await runSelection(state);
+  expectEqual(first.outcome, 'offered', 'the first rider is offered');
+
+  // The 45s window closes, but the cron sweep has not run yet - the row is
+  // still `pending`.
+  state.offers[0].respondsBy = new Date(Date.now() - 1000).toISOString();
+
+  const second = await runSelection(state, 'preparing');
+
+  expectEqual(second.outcome, 'offered', 'the lapsed offer does NOT block the next one');
+  expectEqual(state.offers[0]?.status, 'expired', 'the lapsed offer was expired on the way through');
+  expectEqual(state.offers.length, 2, 'a second offer exists');
+  expectEqual(state.offers[1]?.courierId, 'rider-2', 'it went to the next rider');
+  expectEqual(state.riderLoad['rider-1'], 0, 'no counter movement');
+  expectEqual(state.riderLoad['rider-2'], 0, 'no counter movement');
 });

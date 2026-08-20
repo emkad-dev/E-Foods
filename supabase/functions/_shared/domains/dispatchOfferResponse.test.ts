@@ -926,11 +926,15 @@ Deno.test('sweepDispatchOffers: exhausted orders do not crowd a live order out o
   expectEqual(state.load[RIDER_B], 0, 'no counter movement');
 });
 
-// M-1: loadOrderOfferSummary counted `status = 'pending'` without consulting
-// respondsBy, so a lapsed-but-unswept offer made selection return
-// offer_outstanding and never reach the SQL whose lazy expiry exists precisely
-// to unblock it. The order then waited a whole sweep interval.
-Deno.test('a lapsed but unswept offer does not block the next offer', async () => {
+// The sweep's end-to-end path for a lapsed offer.
+//
+// NOT the M-1 regression test, despite an earlier version of this comment
+// claiming so: the sweep's pass 1 expires the row before any re-offer is
+// attempted, so this never exercises the lapsed-while-still-PENDING state
+// M-1 is about. A mutation check proved it - reverting the M-1 fix left this
+// green. The real M-1 test drives a status transition instead and lives in
+// dispatchSelection.test.ts.
+Deno.test('sweepDispatchOffers: a lapsed offer is expired and re-offered in one pass', async () => {
   const state = installMocks('accepted', { offers: [pendingOffer(RIDER_A, 'offer-1', -1000)] });
 
   // Rider B declining is not what unblocks this - there is no offer for B.
