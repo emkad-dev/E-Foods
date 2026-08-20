@@ -23,6 +23,7 @@ no policies" as an unfinished migration and adds policies to `fix` it.
 | Table | Added by | Live direct/Realtime reader? | Posture |
 |---|---|---|---|
 | **DeliveryOffer** | `supabase/migrations/20260816_dispatch_delivery_offers.sql` (Task 10 / D2) | ❌ | **service-role-only** (RLS enabled, no policies) |
+| **DispatchRiderPing** | `supabase/migrations/20260820_dispatch_rider_ping.sql` (Task 11 / D3) | ❌ | **service-role-only** (RLS enabled, no policies) |
 
 ### `DeliveryOffer`
 
@@ -49,6 +50,41 @@ riders. Reasons the policy-less posture is correct rather than provisional:
   `courierId = auth.uid()` SELECT would expose `respondsBy` and `sequence` for
   rows a rider has no route to use, and buys nothing while the only reader is an
   Edge Function.
+
+### `DispatchRiderPing`
+
+The rider position track: one row appended (throttled to at most one every 10
+seconds per rider) each time `syncDispatchRiderLocation` runs, in addition to
+the current-position columns it keeps overwriting on `DispatchRiderRecord`.
+Reasons the policy-less posture is correct rather than provisional:
+
+- **No client touches it through the Data API today, and is not expected to.**
+  Only `syncDispatchRiderLocation` (append) and `queue-drainer`'s 24-hour
+  retention sweep (delete) ever reach this table, both under the service role.
+- **UNLOGGED was considered and explicitly rejected**, not merely left as the
+  default. See `20260820_dispatch_rider_ping.sql`'s own header: the gate the
+  Task 11 brief asks for (no client subscribes via `postgres_changes`) is
+  clear today, but Task 13 (E2, customer live tracking) is planned to read
+  this table from a service-role Edge Function and relay position to the
+  customer over the **existing `order-<id>` Broadcast topic** - never
+  `postgres_changes`, and never direct client access. A plain table costs
+  nothing extra at this write volume (at most one row per rider per 10s) and
+  stays durable across a crash/restart, which UNLOGGED does not guarantee -
+  losing the whole in-shift track to a Postgres restart would land right when
+  Task 13 needs it most.
+- **The throttle and retention are both structural, not advisory.** Recording
+  a ping takes a per-rider `pg_advisory_xact_lock` before its
+  "any recent ping?" check, so two overlapping calls for the same rider cannot
+  both pass the check and both insert - closing the read-then-write race this
+  plan has hit before (see `dispatchLoadRelease.test.ts`'s header for the
+  load-ledger version of the same lesson). A write policy would let a client
+  bypass that lock-guarded function and insert directly, so writes must stay
+  service-role-only in every case, symmetric with `DeliveryOffer`.
+
+**If Task 13 lands and needs this table's data exposed differently** - a
+direct client read, or `postgres_changes` - revisit BOTH the RLS posture here
+AND the UNLOGGED decision above from scratch; they were evaluated together and
+the UNLOGGED rejection specifically depends on nothing subscribing that way.
 
 ## Rules for future changes
 

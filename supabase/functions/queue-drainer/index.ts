@@ -3,6 +3,7 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
 import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
+import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
@@ -295,6 +296,17 @@ Deno.serve(async (request) => {
     // materially nor turn a successful drain into a 500.
     const offerSweep = queueSelection === 'all' ? await sweepDispatchOffers() : null;
 
+    // Rider ping retention (Task 11 / D3), on the SAME safe side of
+    // runWithBackpressure as the offer sweep immediately above, and for the
+    // identical reason: runWithBackpressure throws EdgeBackpressureError when
+    // it sheds, which would skip anything sequenced after it. Pings must keep
+    // expiring during exactly the busy periods that cause shedding, or the
+    // table grows unbounded for as long as the load lasts. Bounded (at most
+    // DISPATCH_RIDER_PING_RETENTION_LIMIT rows) and never throws - see
+    // sweepExpiredDispatchRiderPings - so it cannot meaningfully delay the
+    // drain or turn a successful one into a 500.
+    const riderPingRetention = queueSelection === 'all' ? await sweepExpiredDispatchRiderPings() : null;
+
     const results = await runWithBackpressure(
       'queue-drainer',
       {
@@ -314,6 +326,7 @@ Deno.serve(async (request) => {
       data: {
         offerSweep,
         results,
+        riderPingRetention,
       },
     });
     finishEdgeObservation(observation, { status: response.status });

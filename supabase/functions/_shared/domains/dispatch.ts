@@ -6,6 +6,7 @@ import { loadUserAccount, loadUserPhoneNumber, syncUserRoleState, upsertUserAcco
 import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { serviceClient } from '../client.ts';
+import { recordDispatchRiderPing } from '../dispatchRiderPings.ts';
 import {
   DEFAULT_DISPATCH_STATUS,
   DEFAULT_DISPATCH_VEHICLE,
@@ -725,11 +726,38 @@ const syncDispatchRiderLocation: Handler = async ({ context, data }) => {
     throw new Error(error.message);
   }
 
+  const accuracy = parseNumber(data.accuracy, null);
+
+  // The current-position update above happens on EVERY call, unthrottled -
+  // a rider's last-known location must always be fresh regardless of ping
+  // cadence. The history append below is the throttled part (at most one row
+  // every DISPATCH_RIDER_PING_THROTTLE_SECONDS per rider, enforced in SQL
+  // under a per-rider advisory lock - see 20260820_dispatch_rider_ping.sql).
+  //
+  // Non-fatal and logged, never re-thrown: the position sync above has
+  // already committed, and a client polling every few seconds must not start
+  // seeing errors just because the history append hit a throttle-adjacent
+  // hiccup. `recorded: false` (throttled) is itself the expected, common
+  // outcome and is not an error at all - only a genuine DB failure reaches
+  // this catch.
+  let pingRecorded = false;
+  try {
+    const pingResult = await recordDispatchRiderPing(riderId, latitude, longitude, accuracy);
+    pingRecorded = pingResult.recorded;
+  } catch (pingError) {
+    logEdgeEvent('error', 'dispatch rider ping append failed', {
+      action: 'syncDispatchRiderLocation',
+      error: pingError instanceof Error ? pingError.message : String(pingError),
+      riderId,
+    });
+  }
+
   return json(200, {
     data: {
-      accuracy: parseNumber(data.accuracy, null),
+      accuracy,
       latitude,
       longitude,
+      pingRecorded,
       riderId,
       timestamp,
     },
