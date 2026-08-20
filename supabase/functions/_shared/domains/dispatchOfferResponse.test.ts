@@ -1031,3 +1031,30 @@ Deno.test('dispatchAssignOrderCourier: a manual assignment supersedes any still-
   // The superseded rider never had a claim, so nothing to release.
   expectEqual(state.load[RIDER_B], 0, 'the superseded rider carries no claim');
 });
+
+// The same ownership widening applies to dispatchGetOrderDetail: an order a
+// dispatcher can see in their queue must also open. Covered separately from
+// the assign handler because the two share identical guard text, which is
+// exactly why a mutation aimed at one silently landed on the other.
+const dispatchGetOrderDetail = dispatchDomain.handlers.dispatchGetOrderDetail;
+if (typeof dispatchGetOrderDetail !== 'function') {
+  throw new Error('dispatchDomain.handlers.dispatchGetOrderDetail is not registered.');
+}
+
+Deno.test('dispatchGetOrderDetail: a plain dispatcher can open an exhausted, owner-less order', async () => {
+  installMocks('accepted', {
+    offers: [
+      { ...pendingOffer(RIDER_A, 'offer-1'), status: 'declined' },
+      { ...pendingOffer(RIDER_B, 'offer-2'), sequence: 2, status: 'declined' },
+    ],
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  const response = await dispatchGetOrderDetail({
+    context: riderContext(RIDER_A),
+    data: { orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'the detail view opens rather than 403ing');
+});
