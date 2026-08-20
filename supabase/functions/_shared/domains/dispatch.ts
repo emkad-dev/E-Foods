@@ -18,6 +18,7 @@ import {
   acceptDispatchOffer,
   buildDispatchOfferResponse,
   declineDispatchOffer,
+  loadManualQueueOrderIds,
   loadPendingOffersForCourier,
   supersedePendingOffersForOrder,
 } from '../dispatchOffers.ts';
@@ -82,8 +83,9 @@ const UNOWNED_DISPATCHABLE_STATUSES: readonly string[] = [
 ];
 
 /**
- * An order that no dispatcher owns and no rider holds, sitting in a status
- * where a courier could still be placed on it.
+ * An order that no dispatcher owns and no rider holds, that has genuinely
+ * fallen through to the manual dispatch queue, sitting in a status where a
+ * courier could still be placed on it.
  *
  * This exists because of how exhaustion actually terminates (Task 10 / D2).
  * When every offer is declined or lapses, there is BY DEFINITION no dispatch
@@ -101,17 +103,34 @@ const UNOWNED_DISPATCHABLE_STATUSES: readonly string[] = [
  * every rider decline it, and with no admin on shift nobody holding the
  * dispatch role could even see it.
  *
+ * THE `inManualQueue` GATE IS LOAD-BEARING, and its absence was review round
+ * 2's Defect 1. "No owner, no courier" is NOT enough on its own: an order in
+ * the middle of a live 45s offer to a specific rider ALSO has no assignment
+ * row - the claim is not created until accept - so a predicate keyed only off
+ * ownership matched an actively-offered order, and any other dispatcher could
+ * see it, open it, and self-assign it, superseding the offeree's exclusive
+ * window and bypassing the ranked auto-offer. The caller must pass the result
+ * of loadManualQueueOrderIds for this order: true only when a
+ * `dispatch_offers_exhausted` marker exists AND no live pending offer is
+ * outstanding (see loadManualQueueOrderIds for why both are required). An
+ * order merely "between offers", or one that exhausted early but is now being
+ * offered to a newly-online rider, is deliberately excluded.
+ *
  * Deliberately narrow: it widens an OWNERSHIP check only, and only for orders
- * with no owner and no courier at all. Every status and payment gate
- * (assertNonTerminalOrder, assertOrderPaymentReadyForOperations, the
- * ACCEPTED/PREPARING/READY_FOR_PICKUP window) is untouched and still applies.
- * It also incidentally rescues `pool_empty` orders, which were invisible to
- * dispatchers in exactly the same way before this task.
+ * with no owner and no courier at all that have reached the manual queue. Every
+ * status and payment gate (assertNonTerminalOrder,
+ * assertOrderPaymentReadyForOperations, the ACCEPTED/PREPARING/READY_FOR_PICKUP
+ * window) is untouched and still applies.
  */
 const isUnownedDispatchableOrder = (
   order: CustomerOrderRow,
-  assignment: DeliveryAssignmentRow | null
+  assignment: DeliveryAssignmentRow | null,
+  inManualQueue: boolean
 ) => {
+  if (!inManualQueue) {
+    return false;
+  }
+
   if (sanitizeText(assignment?.courierId) || getDispatchAssignmentOwnerId(assignment)) {
     return false;
   }
@@ -363,24 +382,37 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
 
     return toSortableTimestamp(left.createdAt) - toSortableTimestamp(right.createdAt);
   });
+  // Which of these orders have actually reached the manual queue (exhausted
+  // and not under a live offer). Admins see everything, so they never need it.
+  // Computed in one batched pair of reads rather than per-order - see
+  // loadManualQueueOrderIds. This is the gate that keeps an actively-offered
+  // order OUT of every other dispatcher's queue (review round 2, Defect 1).
+  const manualQueueOrderIds =
+    context.role === 'admin'
+      ? new Set<string>()
+      : await loadManualQueueOrderIds(orderList.map((order) => order.id));
   const scopedOrderList =
     context.role === 'admin'
       ? sortedOrderList
       : sortedOrderList.filter((order) => {
           const assignment = assignmentsByOrderId.get(order.id) ?? null;
-          // Their own queue, plus unowned work nobody has picked up - see
-          // isUnownedDispatchableOrder for why exhaustion produces the latter.
+          // Their own queue, plus unowned work that auto-offer gave up on - see
+          // isUnownedDispatchableOrder for why exhaustion produces the latter,
+          // and why an order still inside a live offer window is NOT here.
           return (
             getDispatchAssignmentOwnerId(assignment) === context.uid ||
-            isUnownedDispatchableOrder(order, assignment)
+            isUnownedDispatchableOrder(order, assignment, manualQueueOrderIds.has(order.id))
           );
         });
 
   // Live offers for THIS rider (Task 10 / D2). Carried alongside `orders`
-  // rather than inside it because an offered order has no DeliveryAssignment
-  // yet - it is nobody's order until somebody accepts - so it is invisible to
-  // the ownership filter above by construction. Admins get no offers array
-  // content for the same reason: offers belong to a specific rider.
+  // rather than inside it because an offered order is deliberately kept OUT of
+  // the `orders` scoped list above: it has no DeliveryAssignment yet, but the
+  // manual-queue gate (loadManualQueueOrderIds requires an exhaustion marker
+  // AND no live offer) excludes an order that is still inside its offer window,
+  // so a live-offered order reaches its offeree only through THIS array and
+  // never as unowned queue work for some other dispatcher to grab. Admins get
+  // no offers array content: offers belong to a specific rider.
   //
   // Each entry embeds the order snapshot so the offer screen can render a
   // summary and a distance without a second round trip inside a 45s window.
@@ -544,15 +576,14 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
 
   assertOrderPaymentReadyForOperations(bundle.order);
   const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
-  if (
-    context.role !== 'admin' &&
-    dispatchOwnerId !== context.uid &&
+  if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+    const inManualQueue = (await loadManualQueueOrderIds([orderId])).has(orderId);
     // bundle! : narrowed non-null by the fail() guard above (fail returns never),
     // a narrowing deno check does not carry across the awaits in between - the
     // file's pre-existing, already-baselined pattern.
-    !isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null)
-  ) {
-    fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    if (!isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null, inManualQueue)) {
+      fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    }
   }
 
   const customerPhone = await loadUserPhoneNumber(bundle.order.customerId);
@@ -719,20 +750,19 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
   }
 
   const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
-  // Unowned work is assignable by any dispatcher - that is what makes the
-  // exhaustion fallback reachable without an admin on shift. See
-  // isUnownedDispatchableOrder. Deliberately NOT applied to
-  // dispatchUpdateOrderStatus: those transitions (picked_up, delivered)
-  // require an actual courier, which an unowned order by definition lacks.
-  if (
-    context.role !== 'admin' &&
-    dispatchOwnerId !== context.uid &&
+  // Unowned MANUAL-QUEUE work is assignable by any dispatcher - that is what
+  // makes the exhaustion fallback reachable without an admin on shift. See
+  // isUnownedDispatchableOrder; the manual-queue gate (exhaustion marker AND no
+  // live offer) is what stops this being a way to grab an order that is
+  // currently offered to a specific rider.
+  if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+    const inManualQueue = (await loadManualQueueOrderIds([orderId])).has(orderId);
     // bundle! : narrowed non-null by the fail() guard above (fail returns never),
     // a narrowing deno check does not carry across the awaits in between - the
     // file's pre-existing, already-baselined pattern.
-    !isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null)
-  ) {
-    fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    if (!isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null, inManualQueue)) {
+      fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    }
   }
 
   const { data: courier, error: courierError } = await serviceClient
@@ -894,7 +924,25 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   assertOrderPaymentReadyForOperations(bundle.order);
   const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
   if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
-    fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    // `escalate` is the ONE transition here that needs no courier (see
+    // buildDispatchStatusUpdate - picked_up/on_the_way/delivered/failed_delivery
+    // all require hasAssignedCourier, escalate does not), so it is the one
+    // action a plain dispatcher may take on an unowned manual-queue order.
+    // Escalation is the most useful action on a rider-less stuck order; without
+    // this, the very orders round-1's fix surfaced (exhausted, owner-less) could
+    // be opened but every action on them 403'd (review round 2, Defect 2). All
+    // courier-requiring transitions stay 403'd - an unowned order has no rider
+    // to have picked anything up - because they fail the `escalate` check here.
+    const canEscalateUnowned =
+      nextAction === 'escalate' &&
+      isUnownedDispatchableOrder(
+        bundle!.order,
+        bundle!.assignment ?? null,
+        (await loadManualQueueOrderIds([orderId])).has(orderId)
+      );
+    if (!canEscalateUnowned) {
+      fail(403, 'This delivery is not assigned to your dispatcher queue.');
+    }
   }
 
   if (sanitizeText(bundle.order.fulfillmentType, 'delivery') !== 'delivery') {

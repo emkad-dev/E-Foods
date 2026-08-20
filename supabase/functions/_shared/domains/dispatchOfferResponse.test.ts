@@ -76,6 +76,14 @@ const riderContext = (uid: string) => ({
   userProfile: { uid, email: `${uid}@example.test`, role: 'dispatch', accountDisabled: false },
 });
 
+const adminContext = (uid: string) => ({
+  email: `${uid}@example.test`,
+  role: 'admin',
+  token: 'fake-token',
+  uid,
+  userProfile: { uid, email: `${uid}@example.test`, role: 'admin', accountDisabled: false },
+});
+
 type Row = Record<string, unknown>;
 
 const snapshot = (row: Row) => ({ ...row });
@@ -1015,11 +1023,18 @@ Deno.test('dispatchAssignOrderCourier: a plain dispatcher can manually place a r
 // M-3: a manual assignment used to leave an outstanding pending offer alone,
 // so the offered rider kept a live-looking countdown for work already given
 // to somebody else. Ledger-safe (a pending offer carries no claim) but wrong.
-Deno.test('dispatchAssignOrderCourier: a manual assignment supersedes any still-pending offer', async () => {
+//
+// Driven as an ADMIN override (review round 2). An order under a LIVE pending
+// offer has no exhaustion marker and is therefore NOT in the manual queue, so
+// a plain dispatcher is now correctly 403'd from grabbing it (that was Defect
+// 1). The only actor who can manually assign over a live offer is an admin, so
+// that is the path this M-3 behaviour is legitimately reachable through - and
+// the supersede must still fire on it.
+Deno.test('dispatchAssignOrderCourier: a manual (admin) assignment supersedes any still-pending offer', async () => {
   const state = installMocks('accepted', { offers: [pendingOffer(RIDER_B, 'offer-1')] });
 
   const response = await dispatchAssignOrderCourier({
-    context: riderContext(RIDER_A),
+    context: adminContext('admin-1'),
     data: { courierId: RIDER_A, orderId: ORDER_ID },
     request: fakeRequest(),
   });
@@ -1057,4 +1072,157 @@ Deno.test('dispatchGetOrderDetail: a plain dispatcher can open an exhausted, own
   });
 
   expectEqual(response.status, 200, 'the detail view opens rather than 403ing');
+});
+
+// ---------------------------------------------------------------------------
+// 9. REVIEW FIX ROUND 2.
+// ---------------------------------------------------------------------------
+
+const dispatchUpdateOrderStatus = dispatchDomain.handlers.dispatchUpdateOrderStatus;
+if (typeof dispatchUpdateOrderStatus !== 'function') {
+  throw new Error('dispatchDomain.handlers.dispatchUpdateOrderStatus is not registered.');
+}
+
+const statusOf = (response: unknown): number => {
+  if (response && typeof response === 'object' && 'status' in response) {
+    return (response as { status: number }).status;
+  }
+  return 0;
+};
+
+const callSafely = async (
+  // deno-lint-ignore no-explicit-any
+  handler: any,
+  ctx: unknown,
+  data: Record<string, unknown>
+): Promise<number> => {
+  try {
+    return statusOf(await handler({ context: ctx, data, request: fakeRequest() }));
+  } catch (error) {
+    return (error as { status?: number }).status ?? 0;
+  }
+};
+
+// Defect 1 (Important): the round-1 exhaustion-visibility fix keyed only off
+// "no assignment row", but an order under a LIVE 45s offer to a specific rider
+// ALSO has no assignment row (the claim is not created until accept). So a
+// plain dispatcher could see, open, and self-assign an order that was live
+// offered to somebody else, superseding the offeree's exclusive window. The
+// narrowed predicate requires the order to be in the manual queue (exhausted,
+// no live offer); mutating that gate reddens the first assertion of each block.
+Deno.test('Defect 1: an order under a live pending offer to another rider is hidden from and unassignable by a plain dispatcher', async () => {
+  const state = installMocks('accepted', { offers: [pendingOffer(RIDER_B, 'offer-1')] });
+  expectEqual(state.assignment(), null, 'precondition: an actively-offered order has no assignment row');
+
+  // Queue: the order is RIDER_B's to answer, so RIDER_A must not see it.
+  const queue = await dispatchGetDeliveryQueue({ context: riderContext(RIDER_A), data: {}, request: fakeRequest() });
+  const ids = (await readJson(queue)).data?.orders?.map((order) => order.id) ?? [];
+  expectEqual(ids.includes(ORDER_ID), false, 'the live-offered order is NOT in RIDER_A\'s queue');
+
+  // Detail: opening it would leak the delivery address and the customer phone.
+  expectEqual(
+    await callSafely(dispatchGetOrderDetail, riderContext(RIDER_A), { orderId: ORDER_ID }),
+    403,
+    'RIDER_A cannot open the live-offered order'
+  );
+
+  // Self-assign: RIDER_A must not be able to supersede RIDER_B's window.
+  expectEqual(
+    await callSafely(dispatchAssignOrderCourier, riderContext(RIDER_A), { courierId: RIDER_A, orderId: ORDER_ID }),
+    403,
+    'RIDER_A cannot self-assign the live-offered order'
+  );
+  expectEqual(state.offers()[0]?.status, 'pending', "RIDER_B's offer is untouched - still live");
+  expectEqual(state.assignment(), null, 'no assignment was created by the refused self-assign');
+  expectEqual(state.load[RIDER_A], 0, 'no claim landed');
+});
+
+Deno.test('Defect 1: the same order becomes visible, openable and assignable once auto-offer is exhausted', async () => {
+  const state = installMocks('accepted', {
+    offers: [{ ...pendingOffer(RIDER_B, 'offer-1'), status: 'declined' }],
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  const queue = await dispatchGetDeliveryQueue({ context: riderContext(RIDER_A), data: {}, request: fakeRequest() });
+  const ids = (await readJson(queue)).data?.orders?.map((order) => order.id) ?? [];
+  expectEqual(ids.includes(ORDER_ID), true, 'the exhausted order appears in RIDER_A\'s queue');
+
+  const detail = await dispatchGetOrderDetail({ context: riderContext(RIDER_A), data: { orderId: ORDER_ID }, request: fakeRequest() });
+  expectEqual(detail.status, 200, 'RIDER_A can open the exhausted order');
+
+  const assign = await dispatchAssignOrderCourier({
+    context: riderContext(RIDER_A),
+    data: { courierId: RIDER_A, orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(assign.status, 200, 'RIDER_A can self-assign the exhausted order');
+  expectEqual(state.assignment()?.courierId, RIDER_A, 'RIDER_A now holds it');
+  expectEqual(state.load[RIDER_A], 1, 'exactly one claim landed');
+});
+
+// Airtightness of the manual-queue gate's second conjunct: an order that
+// exhausted EARLY still gets a fresh offer once a new rider comes online, so a
+// dispatch_offers_exhausted marker and a live offer can coexist. While the
+// offeree owns the clock the order must stay out of the manual queue - the
+// marker alone is not enough. Mutating loadManualQueueOrderIds to drop the
+// no-live-offer filter reddens this.
+Deno.test('Defect 1: a marker plus a live re-offer to a fresh rider is still not grabbable from the manual queue', async () => {
+  const state = installMocks('accepted', {
+    offers: [pendingOffer(RIDER_B, 'offer-1')],
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  const queue = await dispatchGetDeliveryQueue({ context: riderContext(RIDER_A), data: {}, request: fakeRequest() });
+  const ids = (await readJson(queue)).data?.orders?.map((order) => order.id) ?? [];
+  expectEqual(ids.includes(ORDER_ID), false, 'marker + a live offer is still not manual-queue work');
+
+  expectEqual(
+    await callSafely(dispatchAssignOrderCourier, riderContext(RIDER_A), { courierId: RIDER_A, orderId: ORDER_ID }),
+    403,
+    'RIDER_A still cannot grab it while RIDER_B has the clock'
+  );
+});
+
+// Defect 2 (Important): round 1 deliberately did not widen
+// dispatchUpdateOrderStatus, because its transitions need a courier an unowned
+// order lacks - but `escalate` needs no courier, and it is the most useful
+// action on a rider-less stuck order. So the escalate button (enabled on the
+// detail screen from status alone) 403'd on exactly the orders round 1 rescued.
+// Only escalate is widened; every courier-requiring transition stays 403.
+Deno.test('Defect 2: a plain dispatcher can escalate an unowned exhausted order but cannot drive a courier-requiring transition', async () => {
+  const state = installMocks('accepted', {
+    offers: [{ ...pendingOffer(RIDER_B, 'offer-1'), status: 'declined' }],
+    events: [{ eventType: 'dispatch_offers_exhausted', id: 'ev-1', orderId: ORDER_ID }],
+  });
+
+  // picked_up needs a rider the unowned order does not have: still 403,
+  // refused at the ownership gate before the status window is even consulted.
+  expectEqual(
+    await callSafely(dispatchUpdateOrderStatus, riderContext(RIDER_A), { action: 'picked_up', orderId: ORDER_ID }),
+    403,
+    'picked_up on an unowned order is refused - there is no courier to have picked up'
+  );
+  expectEqual(state.order()?.status, 'accepted', 'the refused transition changed nothing');
+
+  // escalate needs no courier, so it is the one action the rescue path allows.
+  const escalate = await dispatchUpdateOrderStatus({
+    context: riderContext(RIDER_A),
+    data: { action: 'escalate', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(escalate.status, 200, 'escalate on the unowned exhausted order is allowed');
+  expectEqual(state.order()?.status, 'escalated', 'the order is now escalated for manual intervention');
+  expectEqual(state.load[RIDER_A], 0, 'escalation touches no counter');
+});
+
+// And escalate is NOT a bypass: an order still inside a live offer window is
+// not in the manual queue, so a plain dispatcher cannot escalate it either.
+Deno.test('Defect 2: escalate is refused on an order still under a live offer', async () => {
+  installMocks('accepted', { offers: [pendingOffer(RIDER_B, 'offer-1')] });
+
+  expectEqual(
+    await callSafely(dispatchUpdateOrderStatus, riderContext(RIDER_A), { action: 'escalate', orderId: ORDER_ID }),
+    403,
+    'escalate is gated on the manual queue too - a live-offered order is off-limits'
+  );
 });

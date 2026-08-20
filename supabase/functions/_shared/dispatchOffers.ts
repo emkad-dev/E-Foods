@@ -314,6 +314,81 @@ export const supersedePendingOffersForOrder = async (orderId: string): Promise<v
   }
 };
 
+/**
+ * Of the given orders, the ones that have genuinely fallen through to the
+ * MANUAL dispatch queue: automatic offering has actually given up on them.
+ *
+ * Two facts must both hold, and the pair is the whole point (Task 10 / D2
+ * review round 2). The original `isUnownedDispatchableOrder` predicate keyed
+ * only off "no DeliveryAssignment row", but an order under an ACTIVE pending
+ * offer has no assignment row by construction - the claim is not created until
+ * accept - so that predicate matched an order in the middle of its exclusive
+ * 45s offer window, letting any dispatcher see and self-assign an order that
+ * was live-offered to a specific rider, superseding their offer. The offer
+ * window has to mean something, so the manual queue is defined as:
+ *
+ *   1. a `dispatch_offers_exhausted` marker exists for the order - auto-offer
+ *      concluded exhaustion and handed it off (written exactly once per order
+ *      by recordDispatchOffersExhausted). "Between offers" - an order whose
+ *      offer just lapsed but has not been re-offered yet - has NO marker and is
+ *      therefore not in the manual queue; it is still auto-offer's to resolve.
+ *
+ *   2. AND no LIVE pending offer is currently outstanding. The marker alone is
+ *      not sufficient: an order that exhausted EARLY (every then-online rider
+ *      excluded, fewer than MAX offers made) still gets a fresh offer if a new
+ *      rider comes online and a later status transition re-runs selection - so
+ *      a marker and a live offer can coexist. In that transient the offeree
+ *      owns the clock, so the order must NOT be grabbable from the manual
+ *      queue. "Live" mirrors loadOrderOfferSummary / loadPendingOffersForCourier:
+ *      pending AND still inside its window (a lapsed-but-unswept row is not
+ *      live). The client clock is only a hint here; it gates visibility, and a
+ *      wrong guess self-corrects on the next poll or sweep.
+ */
+export const loadManualQueueOrderIds = async (orderIds: string[]): Promise<Set<string>> => {
+  const ids = unique(orderIds.map((id) => sanitizeText(id))).filter(Boolean);
+  if (ids.length === 0) {
+    return new Set<string>();
+  }
+
+  const [{ data: events, error: eventsError }, { data: offers, error: offersError }] = await Promise.all([
+    serviceClient
+      .from('DeliveryEvent')
+      .select('orderId')
+      .eq('eventType', 'dispatch_offers_exhausted')
+      .in('orderId', ids),
+    serviceClient
+      .from('DeliveryOffer')
+      .select('orderId,respondsBy')
+      .eq('status', DISPATCH_OFFER_STATUS.PENDING)
+      .in('orderId', ids),
+  ]);
+
+  if (eventsError) {
+    throw new Error(eventsError.message);
+  }
+
+  if (offersError) {
+    throw new Error(offersError.message);
+  }
+
+  const exhausted = new Set(
+    ((events ?? []) as { orderId?: string | null }[]).map((row) => sanitizeText(row?.orderId)).filter(Boolean)
+  );
+
+  const now = Date.now();
+  const liveOfferOrderIds = new Set(
+    ((offers ?? []) as { orderId?: string | null; respondsBy?: string | null }[])
+      .filter((row) => {
+        const deadline = Date.parse(sanitizeText(row?.respondsBy));
+        return !Number.isFinite(deadline) || deadline > now;
+      })
+      .map((row) => sanitizeText(row?.orderId))
+      .filter(Boolean)
+  );
+
+  return new Set([...exhausted].filter((id) => !liveOfferOrderIds.has(id)));
+};
+
 /** The rider's live offer inbox, newest first. Powers dispatchGetDeliveryQueue's `offers` array. */
 export const loadPendingOffersForCourier = async (courierId: string): Promise<DispatchOfferRow[]> => {
   const { data, error } = await serviceClient
