@@ -184,19 +184,30 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
     },
     update(payload: Row) {
       const filters: Array<[string, unknown]> = [];
+      // Returns the rows this update actually touched, so the compare-and-swap
+      // write (updateOrderRecordIfStatus: `.eq('id').eq('status', expected)
+      // .select('id')`) can read `.length` to learn whether its status guard
+      // matched. Filters are honoured, so a `.eq('status', 'placed')` write
+      // against a row a hook has since flipped to 'cancelled' matches nothing.
       const apply = async () => {
         if (hooks.beforeUpdate) await hooks.beforeUpdate();
+        const updated: Row[] = [];
         for (const row of rows) {
           if (filters.every(([col, val]) => row[col] === val)) {
             Object.assign(row, payload);
+            updated.push(row);
           }
         }
+        return updated;
       };
       // deno-lint-ignore no-explicit-any
       const builder: any = {
         eq(col: string, val: unknown) {
           filters.push([col, val]);
           return builder;
+        },
+        select(_columns?: string) {
+          return apply().then((updated) => ({ data: updated.map((row) => ({ ...row })), error: null }));
         },
         then(resolve: (value: { error: null }) => unknown, reject?: (reason: unknown) => unknown) {
           return apply().then(() => ({ error: null })).then(resolve, reject);
@@ -749,4 +760,64 @@ Deno.test('partnerUpdateOrderStatus: a claim landing mid-transition is still rel
     'string',
     'the claim is marked released'
   );
+});
+
+// ---------------------------------------------------------------------------
+// Task 14 (E3) review-fix: partnerUpdateOrderStatus's accept is a stale-
+// snapshot write racing the acceptance-deadline sweep's cancel-and-refund.
+//
+// partnerUpdateOrderStatus reads its order bundle with a plain
+// loadOrderBundle (no FOR UPDATE), validates "only placed can be accepted"
+// against that T0 snapshot, and USED to write status/payment unconditionally
+// with `.eq('id')`. So: T0 partner reads `placed` -> T1 the sweep commits
+// `cancelled` + `payment.status='refunded'` + refundAmount + notifies the
+// customer "fully refunded" -> T2 the partner's unconditional write overwrites
+// `status='accepted'` with the stale T0 PAID payment. Order live in the
+// kitchen, payment shows paid, customer already refunded: real money lost.
+//
+// The fix makes the accept a compare-and-swap on the status it observed
+// (updateOrderRecordIfStatus: `.eq('status', <observed>)`), failing 409 when
+// zero rows match. This test drives that interleaving through the REAL handler:
+// the interleaved cancel+refund commits inside the accept's own write window
+// (beforeOrderUpdate, BEFORE the payload is applied), exactly the T1->T2 gap.
+Deno.test('partnerUpdateOrderStatus: an accept racing the sweep\'s cancel+refund is refused and never resurrects the order', async () => {
+  // deno-lint-ignore prefer-const
+  let mocks: ReturnType<typeof installHandlerMocks>;
+  mocks = installHandlerMocks('placed', 0, {
+    // The acceptance sweep's ebuy_auto_cancel_unaccepted_order committing in
+    // the window between the partner handler's bundle read and its write:
+    // cancelled + fully refunded.
+    beforeOrderUpdate: async () => {
+      const order = mocks.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+      if (order) {
+        order.status = 'cancelled';
+        order.payment = {
+          capturedAmount: 5000,
+          method: 'card',
+          refundAmount: 5000,
+          refundedAt: new Date().toISOString(),
+          status: 'refunded',
+        };
+        order.cancellation = { actor: 'system', reason: 'acceptance_deadline', refundRate: 1 };
+      }
+    },
+  });
+
+  const status = await expectHandlerFailure(
+    () =>
+      partnerUpdateOrderStatus({
+        context: ADMIN_CONTEXT,
+        data: { action: 'accept', orderId: ORDER_ID },
+        request: fakeRequest(),
+      }),
+    'accept onto an order the sweep cancelled mid-flight',
+  );
+
+  expectEqual(status, 409, 'the accept fails the write-time status guard, not silently succeeds');
+
+  const order = mocks.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+  expectEqual(order?.status, 'cancelled', 'the order stays cancelled - the accept wrote nothing');
+  const payment = order?.payment as Record<string, unknown>;
+  expectEqual(payment.status, 'refunded', 'the refund is intact - not overwritten with the stale paid payment');
+  expectEqual(payment.refundAmount, 5000, 'the refund amount is intact');
 });

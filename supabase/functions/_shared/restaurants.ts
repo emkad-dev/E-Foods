@@ -89,9 +89,13 @@ export const buildRestaurantResponse = (
   longitude: restaurant.longitude ?? null,
   menu: Array.isArray(restaurant.menu) ? restaurant.menu : [],
   minOrder: restaurant.minOrder ?? 0,
-  // Surfaced for the admin dashboard snapshot: how many orders this restaurant
-  // let time out unaccepted (Task 14 / E3).
-  missedOrderCount: restaurant.missedOrderCount ?? 0,
+  // NOTE: missedOrderCount (Task 14 / E3) is deliberately NOT emitted here.
+  // This builder is the shared restaurant wire shape reaching partner (own-
+  // restaurant) and potentially customer reads, and a cumulative timeout count
+  // is a private operational/reputational metric. It is attached only in the
+  // admin dashboard snapshot projection (adminGetDashboardSnapshot), where the
+  // brief wants it surfaced. The column stays in RESTAURANT_COLUMNS so that
+  // admin-only projection can read it.
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
   ownerId: sanitizeOptionalText(restaurant.ownerId),

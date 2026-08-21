@@ -263,6 +263,47 @@ export const updateOrderRecord = async (orderId: string, updates: JsonObject) =>
   await broadcastOrderChanged(orderId);
 };
 
+/**
+ * Compare-and-swap variant of updateOrderRecord: applies `updates` only if the
+ * order's stored status still equals `expectedStatus`, and reports whether it
+ * did. This is the write-time guard for handlers that validate a transition
+ * against a status they read earlier in the same request (a stale snapshot) and
+ * would otherwise write unconditionally — the classic read-then-write race.
+ *
+ * `expectedStatus` is the RAW stored value the caller observed (not the
+ * normalized one): PostgREST turns `.eq('id').eq('status', expected)` into
+ * `UPDATE ... WHERE id = ? AND status = ?`, which Postgres re-evaluates against
+ * the latest committed row version when it takes the row lock (EvalPlanQual
+ * under READ COMMITTED). So if a concurrent writer committed a different status
+ * (e.g. the acceptance sweep cancelling + refunding a `placed` order) between
+ * the caller's read and this write, the qual no longer matches, zero rows
+ * update, and the caller learns its snapshot was stale instead of silently
+ * clobbering the committed state. `.select('id')` is what surfaces the affected
+ * count. The broadcast fires only when the row actually changed.
+ */
+export const updateOrderRecordIfStatus = async (
+  orderId: string,
+  expectedStatus: string,
+  updates: JsonObject
+): Promise<boolean> => {
+  const { data, error } = await serviceClient
+    .from('CustomerOrder')
+    .update(updates)
+    .eq('id', orderId)
+    .eq('status', expectedStatus)
+    .select('id');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const applied = Array.isArray(data) && data.length > 0;
+  if (applied) {
+    await broadcastOrderChanged(orderId);
+  }
+  return applied;
+};
+
 export const loadOrderRelations = async (orderIds: string[]) => {
   if (orderIds.length === 0) {
     return {

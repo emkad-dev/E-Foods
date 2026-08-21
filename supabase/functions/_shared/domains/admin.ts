@@ -722,9 +722,12 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
           orderRelations.assignmentsByOrderId.get(order.id) ?? null
         )
       ),
-      restaurants: restaurants.map((restaurant) =>
-        buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)
-      ),
+      restaurants: restaurants.map((restaurant) => ({
+        ...buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null),
+        // Admin-only surface (Task 14 / E3): kept out of the shared wire shape
+        // so it never reaches partner/customer reads.
+        missedOrderCount: restaurant.missedOrderCount ?? 0,
+      })),
       users: users.map((user) => buildUserAccountResponse(user, rolesByUserId.get(user.uid) ?? [])),
     },
   });

@@ -27,6 +27,7 @@ import {
   normalizeOrderStatus,
   toOrderSnapshotResponse,
   updateOrderRecord,
+  updateOrderRecordIfStatus,
   type CustomerOrderRow,
 } from '../orders.ts';
 import { resolvePartnerSubmitOutcome } from '../partnerApplicationTransitions.ts';
@@ -749,7 +750,11 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   assertNonTerminalOrder(bundle.order);
   assertOrderPaymentReadyForOperations(bundle.order);
 
-  const currentStatus = normalizeOrderStatus(bundle.order.status);
+  // The RAW stored status (the compare-and-swap key for the write below) and
+  // the normalized one (what the transition is validated against) both derive
+  // from a single deref of bundle.order.status.
+  const observedStatus = sanitizeText(bundle.order.status);
+  const currentStatus = normalizeOrderStatus(observedStatus);
   const nextState = buildPartnerStatusUpdate(currentStatus, nextAction);
   const timeline = {
     ...(bundle.order.timeline ?? {}),
@@ -769,12 +774,25 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
     payment.status = PAYMENT_STATUS.PAID;
   }
 
-  await updateOrderRecord(orderId, {
+  // Compare-and-swap on the status this transition was computed from. bundle is
+  // a stale snapshot (loadOrderBundle does a plain read, no FOR UPDATE), and the
+  // write below is the money-critical one: `accept` overwrites payment + status,
+  // and the acceptance-deadline sweep (Task 14 / E3) can cancel + refund a
+  // `placed` order concurrently. Without this guard, T0 read `placed` -> T1
+  // sweep commits `cancelled` + refund -> T2 this unconditional write resurrects
+  // the order to `accepted` with the stale paid payment, erasing the refund.
+  // Guarding here covers every partner transition (accept/reject/preparing/
+  // ready/delivered), which all share this one write and the same stale read.
+  const applied = await updateOrderRecordIfStatus(orderId, observedStatus, {
     payment,
     status: nextState.status,
     timeline,
     updatedAt: nowIso(),
   });
+
+  if (!applied) {
+    fail(409, 'This order changed while you were updating it. Reload the order and try again.');
+  }
 
   await insertDeliveryEvent({
     orderId,
