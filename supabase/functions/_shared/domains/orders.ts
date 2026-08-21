@@ -773,14 +773,18 @@ const customerGetOrderDetail: Handler = async ({ context, data }) => {
   // an unreadable settings row must not break order detail, so failures fall
   // back to null/defaults rather than throwing.
   const trackingConfig = await loadDispatchTrackingConfig();
-  const restaurantCoordinates = await loadRestaurantCoordinates(bundle.order.restaurantId);
-  const deliveryCoordinates = readCoordinatePair(bundle.order.deliveryLocation);
+  // bundle! : narrowed non-null by the fail() guard above (fail returns never),
+  // but that narrowing does not carry across the awaits in between under deno
+  // check - the same pre-existing, already-baselined pattern this file uses
+  // for bundle elsewhere (see dispatchAssignOrderCourier's bundle! note).
+  const restaurantCoordinates = await loadRestaurantCoordinates(bundle!.order.restaurantId);
+  const deliveryCoordinates = readCoordinatePair(bundle!.order.deliveryLocation);
   const riderCoordinates = readCoordinatePair({
     latitude: riderSnapshot.courierLatitude,
     longitude: riderSnapshot.courierLongitude,
   });
 
-  const inTransit = RIDER_ACTIVE_DELIVERY_STATUSES.includes(normalizeOrderStatus(bundle.order.status));
+  const inTransit = RIDER_ACTIVE_DELIVERY_STATUSES.includes(normalizeOrderStatus(bundle!.order.status));
   const etaRange =
     inTransit && riderCoordinates && deliveryCoordinates
       ? computeEtaRange(

@@ -184,4 +184,11 @@ export interface OrderDocument extends DocumentData {
     refundRate?: number | null;
   } | null;
   timeline?: OrderTimeline;
+  // Live-tracking extras from customerGetOrderDetail: the restaurant origin
+  // pin, the server's initial straight-line ETA, and the average speed the
+  // client uses to recompute the ETA live from each rider-position broadcast.
+  restaurantLatitude?: number | null;
+  restaurantLongitude?: number | null;
+  eta?: { minMinutes: number; maxMinutes: number } | null;
+  averageSpeedKmh?: number | null;
 }

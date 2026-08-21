@@ -3,8 +3,11 @@ import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } 
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
+import { computeEtaRangeBetween, formatEtaRange, shouldShowLiveMap } from '../../../src/domain/tracking';
+import { useRiderPositionRealtime, type RiderPosition } from '../../../src/hooks/useRiderPositionRealtime';
 import {
   canCustomerCancelOrder,
   formatOrderStatusLabel,
@@ -53,6 +56,13 @@ export default function OrderTracking() {
   const { order, loading, error } = useCustomerOrder(id as string, user?.uid ?? null);
   const [cancelling, setCancelling] = useState(false);
   const [refreshingPayment, setRefreshingPayment] = useState(false);
+  // Live rider position pushed over the order-<id> broadcast. Subscribed only
+  // while the order is out for delivery (picked_up / on_the_way); the hook is
+  // a no-op when passed a null orderId. Called before the early returns below
+  // so hook order stays stable across renders.
+  const [livePosition, setLivePosition] = useState<RiderPosition | null>(null);
+  const liveMapEligible = shouldShowLiveMap(order?.status);
+  useRiderPositionRealtime(liveMapEligible && order ? order.id : null, setLivePosition);
 
   if (!user) {
     return (
@@ -102,6 +112,27 @@ export default function OrderTracking() {
     Number.isFinite(courierLatitude) &&
     typeof courierLongitude === 'number' &&
     Number.isFinite(courierLongitude);
+  // Live map inputs: prefer the just-broadcast rider position, fall back to the
+  // last-known coordinates from the order snapshot. Delivery + restaurant pins
+  // come straight off the snapshot.
+  const riderMapPoint = livePosition
+    ? { latitude: livePosition.latitude, longitude: livePosition.longitude }
+    : hasCourierCoordinates
+      ? { latitude: courierLatitude as number, longitude: courierLongitude as number }
+      : null;
+  const deliveryMapPoint =
+    order.deliveryLocation &&
+    typeof order.deliveryLocation.latitude === 'number' &&
+    typeof order.deliveryLocation.longitude === 'number'
+      ? { latitude: order.deliveryLocation.latitude, longitude: order.deliveryLocation.longitude }
+      : null;
+  const restaurantMapPoint =
+    typeof order.restaurantLatitude === 'number' && typeof order.restaurantLongitude === 'number'
+      ? { latitude: order.restaurantLatitude, longitude: order.restaurantLongitude }
+      : null;
+  const etaRange = computeEtaRangeBetween(riderMapPoint, deliveryMapPoint, order.averageSpeedKmh ?? null);
+  const liveMapVisible = liveMapEligible && !!riderMapPoint && !!deliveryMapPoint;
+  const liveLocationUpdatedAt = formatRelativeAge(livePosition?.updatedAt ?? order.assignment?.courierUpdatedAt);
   const courierLocationUpdatedAt = formatRelativeAge(order.assignment?.courierUpdatedAt);
   const courierLocationStatus = hasCourierCoordinates ? 'Live' : courierPhone ? 'Assigned' : 'Waiting';
   const courierLocationCopy = hasCourierCoordinates
@@ -272,11 +303,22 @@ export default function OrderTracking() {
           <Text style={styles.riderName}>{order.assignment?.courierName ?? 'Your rider'}</Text>
             </View>
             <View style={styles.liveBadge}>
-              <Text style={styles.liveBadgeText}>{courierLocationStatus}</Text>
+              <Text style={styles.liveBadgeText}>{liveMapVisible ? 'Live' : courierLocationStatus}</Text>
             </View>
           </View>
 
-          {hasCourierCoordinates ? (
+          {liveMapVisible ? (
+            <>
+              <View style={styles.etaRow}>
+                <Text style={styles.etaLabel}>Estimated arrival</Text>
+                <Text style={styles.etaValue}>{formatEtaRange(etaRange)}</Text>
+              </View>
+              <CustomerLiveMap rider={riderMapPoint} delivery={deliveryMapPoint} restaurant={restaurantMapPoint} />
+              <Text style={styles.riderMeta}>Live position {liveLocationUpdatedAt}</Text>
+            </>
+          ) : null}
+
+          {!liveMapVisible && hasCourierCoordinates ? (
             <>
               <View style={styles.coordinateGrid}>
                 <View style={styles.coordinateChip}>
@@ -561,6 +603,24 @@ const styles = StyleSheet.create({
     color: customerTheme.textMuted,
     fontSize: 12,
     marginTop: 10,
+  },
+  etaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  etaLabel: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  etaValue: {
+    color: customerTheme.accentStrong,
+    fontSize: 16,
+    fontWeight: '800',
   },
   riderEmptyState: {
     color: customerTheme.textMuted,
