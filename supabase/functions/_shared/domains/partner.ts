@@ -728,6 +728,211 @@ const upsertPartnerRestaurantMenu: Handler = async ({ context, data }) => {
   });
 };
 
+/**
+ * Task 16 (F2): marks a single menu item available/unavailable, indefinitely
+ * (isAvailable=false, no unavailableUntil) or for a bounded window
+ * (unavailableUntil in the future — auto-resumes at read time, see
+ * ../availability.ts). Deliberately a targeted JSONB patch of one item
+ * inside the existing menu, NOT a re-run through upsertPartnerRestaurantMenu
+ * / normalizePartnerMenuInput's full-menu validation — the brief calls for
+ * "two taps", and re-validating (and potentially re-inferring the category
+ * of) every other item on every toggle would be needless blast radius for a
+ * single-field flip.
+ */
+const partnerSetMenuItemAvailability: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['restaurant', 'admin']);
+  const restaurantId = sanitizeText(data.restaurantId);
+  const itemId = sanitizeText(data.itemId);
+
+  if (!restaurantId) {
+    fail(400, 'A restaurant id is required.');
+  }
+  if (!itemId) {
+    fail(400, 'A menu item id is required.');
+  }
+  if (typeof data.isAvailable !== 'boolean') {
+    fail(400, 'An isAvailable flag is required.');
+  }
+
+  const isAvailable = data.isAvailable === true;
+  // The manual, indefinite form clears any stale unavailableUntil so a
+  // previously-timed window can never resurrect itself after a partner
+  // explicitly turns an item back on; the timed form requires a real,
+  // future, parseable timestamp.
+  let unavailableUntil: string | null = null;
+  if (!isAvailable) {
+    const rawUntil = sanitizeOptionalText(data.unavailableUntil);
+    if (rawUntil) {
+      const parsedMs = Date.parse(rawUntil);
+      if (Number.isNaN(parsedMs)) {
+        fail(400, 'unavailableUntil must be a valid date/time.');
+      }
+      if (parsedMs <= Date.now()) {
+        fail(400, 'unavailableUntil must be in the future.');
+      }
+      unavailableUntil = rawUntil;
+    }
+  }
+
+  const existingRestaurant = await loadRestaurantById(restaurantId);
+  if (!existingRestaurant.restaurant) {
+    fail(404, 'The selected restaurant could not be found.');
+  }
+
+  if (
+    context.role !== 'admin' &&
+    sanitizeText(existingRestaurant.restaurant.ownerId) !== context.uid
+  ) {
+    fail(403, 'You are not allowed to update this restaurant\'s menu.');
+  }
+
+  const menu = Array.isArray(existingRestaurant.restaurant.menu) ? existingRestaurant.restaurant.menu : [];
+  let itemName = '';
+  let found = false;
+
+  const nextMenu = menu.map((category) => {
+    const categoryRecord = category as JsonObject;
+    const items = Array.isArray(categoryRecord.items) ? categoryRecord.items : [];
+
+    return {
+      ...categoryRecord,
+      items: items.map((item) => {
+        const itemRecord = item as JsonObject;
+        if (sanitizeText(itemRecord.id) !== itemId) {
+          return item;
+        }
+
+        found = true;
+        itemName = sanitizeText(itemRecord.name, 'This item');
+        return {
+          ...itemRecord,
+          isAvailable,
+          unavailableUntil,
+        };
+      }),
+    };
+  });
+
+  if (!found) {
+    fail(404, 'The selected menu item could not be found.');
+  }
+
+  const { error } = await serviceClient
+    .from('RestaurantRecord')
+    .update({
+      menu: nextMenu,
+      updatedAt: nowIso(),
+    })
+    .eq('id', restaurantId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  // Task 5's realtime — an open customer catalog/detail screen updates
+  // without a poll the instant a kitchen marks an item out of stock.
+  await broadcastRestaurantsChanged({ restaurantId });
+
+  await createAuditEntry(
+    context.uid,
+    isAvailable ? 'partner_menu_item_available' : 'partner_menu_item_unavailable',
+    'restaurant',
+    restaurantId,
+    { itemId, itemName, unavailableUntil }
+  );
+
+  return json(200, {
+    data: {
+      isAvailable,
+      itemId,
+      itemName,
+      restaurantId,
+      unavailableUntil,
+    },
+  });
+};
+
+/**
+ * Task 16 (F2): pauses/unpauses the whole store. Pausing always requires a
+ * future `pausedUntil` — there is no indefinite store-level pause, unlike the
+ * item-level manual-off form, because an entire store silently staying
+ * closed forever with no reminder is a worse failure mode than a kitchen
+ * having to tap "pause" again after their estimate runs out. Unpausing
+ * (paused=false) always clears `pausedUntil` outright, regardless of what a
+ * client sends for it.
+ */
+const partnerSetStorePause: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['restaurant', 'admin']);
+  const restaurantId = sanitizeText(data.restaurantId);
+
+  if (!restaurantId) {
+    fail(400, 'A restaurant id is required.');
+  }
+  if (typeof data.paused !== 'boolean') {
+    fail(400, 'A paused flag is required.');
+  }
+
+  const paused = data.paused === true;
+  let pausedUntil: string | null = null;
+
+  if (paused) {
+    const rawUntil = sanitizeOptionalText(data.pausedUntil);
+    if (!rawUntil) {
+      fail(400, 'A pausedUntil time is required to pause the store.');
+    }
+    const parsedMs = Date.parse(rawUntil);
+    if (Number.isNaN(parsedMs)) {
+      fail(400, 'pausedUntil must be a valid date/time.');
+    }
+    if (parsedMs <= Date.now()) {
+      fail(400, 'pausedUntil must be in the future.');
+    }
+    pausedUntil = rawUntil;
+  }
+
+  const existingRestaurant = await loadRestaurantById(restaurantId);
+  if (!existingRestaurant.restaurant) {
+    fail(404, 'The selected restaurant could not be found.');
+  }
+
+  if (
+    context.role !== 'admin' &&
+    sanitizeText(existingRestaurant.restaurant.ownerId) !== context.uid
+  ) {
+    fail(403, 'You are not allowed to update this restaurant.');
+  }
+
+  const { error } = await serviceClient
+    .from('RestaurantRecord')
+    .update({
+      pausedUntil,
+      updatedAt: nowIso(),
+    })
+    .eq('id', restaurantId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await broadcastRestaurantsChanged({ restaurantId });
+
+  await createAuditEntry(
+    context.uid,
+    paused ? 'partner_store_paused' : 'partner_store_unpaused',
+    'restaurant',
+    restaurantId,
+    { pausedUntil }
+  );
+
+  return json(200, {
+    data: {
+      paused,
+      pausedUntil,
+      restaurantId,
+    },
+  });
+};
+
 const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['restaurant', 'admin']);
   const orderId = sanitizeText(data.orderId);
@@ -1031,6 +1236,8 @@ export const partnerDomain = defineRpcDomain<AuthenticatedRequestContext>({
     partnerGetRestaurantContext,
     partnerGetRestaurantOrder,
     partnerGetRestaurantOrders,
+    partnerSetMenuItemAvailability,
+    partnerSetStorePause,
     partnerUpdateOrderStatus,
     submitPartnerApplication,
     upsertPartnerRestaurantMenu,

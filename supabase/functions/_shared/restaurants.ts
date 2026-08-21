@@ -40,6 +40,11 @@ export type RestaurantRecordRow = {
   nameKey?: string | null;
   openingTime?: string | null;
   ownerId?: string | null;
+  // Task 16 (F2): store-level pause. Set/cleared only by partnerSetStorePause
+  // (or an admin acting for the restaurant). Read via isStorePaused
+  // (_shared/availability.ts) — paused while this is a future timestamp,
+  // auto-resumed (no write) once it is in the past.
+  pausedUntil?: string | null;
   paystackSubaccountCode?: string | null;
   supportsDelivery?: boolean | null;
   supportsPickup?: boolean | null;
@@ -47,7 +52,7 @@ export type RestaurantRecordRow = {
 };
 
 export const RESTAURANT_COLUMNS =
-  'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,missedOrderCount,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt';
+  'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,missedOrderCount,pausedUntil,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt';
 
 export const RESTAURANT_APPROVAL_COLUMNS = 'restaurantId,status,approvedByUid,approvedAt';
 
@@ -99,6 +104,7 @@ export const buildRestaurantResponse = (
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
   ownerId: sanitizeOptionalText(restaurant.ownerId),
+  pausedUntil: restaurant.pausedUntil ?? null,
   paystackSubaccountCode: sanitizeOptionalText(restaurant.paystackSubaccountCode),
   supportsDelivery: restaurant.supportsDelivery !== false,
   supportsPickup: restaurant.supportsPickup !== false,

@@ -2,12 +2,17 @@ import { assert, assertEquals, assertFalse } from 'jsr:@std/assert';
 import { DEFAULT_PRICING_CONFIG } from '../_shared/pricing.ts';
 import {
   hasAvailableMenuItem,
+  isRestaurantRowPaused,
   paginateRestaurants,
   sortRestaurantsByLocation,
   toRestaurantCard,
   toRestaurantDetail,
   type RestaurantRow,
 } from './catalog.ts';
+
+const FIXED_NOW = new Date('2026-08-21T12:00:00.000Z');
+const PAST_ISO = '2026-08-21T11:00:00.000Z';
+const FUTURE_ISO = '2026-08-21T13:00:00.000Z';
 
 const baseRow = (overrides: Partial<RestaurantRow> = {}): RestaurantRow => ({
   id: 'rest-1',
@@ -91,6 +96,70 @@ Deno.test('hasAvailableMenuItem: false when every item is unavailable', () => {
   assertFalse(
     hasAvailableMenuItem([{ category: 'Mains', items: [{ id: 'i1', name: 'Jollof', isAvailable: false }] }])
   );
+});
+
+// Task 16 (F2): timed unavailability, and the drift guard against
+// _shared/domains/orders.ts's item validation — see
+// _shared/domains/placeCustomerOrderAvailability.test.ts's "drift guard" test
+// for the cross-file half of this check (both call sites agreeing on the
+// SAME real menu item, not just the pure predicate in isolation).
+
+Deno.test('hasAvailableMenuItem: false when the only item is timed-unavailable in the FUTURE', () => {
+  assertFalse(
+    hasAvailableMenuItem(
+      [{ category: 'Mains', items: [{ id: 'i1', name: 'Jollof', unavailableUntil: FUTURE_ISO }] }],
+      FIXED_NOW
+    )
+  );
+});
+
+Deno.test('hasAvailableMenuItem: true when the only item\'s unavailableUntil is in the PAST (auto-resumed)', () => {
+  assert(
+    hasAvailableMenuItem(
+      [{ category: 'Mains', items: [{ id: 'i1', name: 'Jollof', unavailableUntil: PAST_ISO }] }],
+      FIXED_NOW
+    )
+  );
+});
+
+Deno.test('hasAvailableMenuItem: manual off is not undone by a past unavailableUntil', () => {
+  assertFalse(
+    hasAvailableMenuItem(
+      [{ category: 'Mains', items: [{ id: 'i1', name: 'Jollof', isAvailable: false, unavailableUntil: PAST_ISO }] }],
+      FIXED_NOW
+    )
+  );
+});
+
+// --- isRestaurantRowPaused / the list-feed pause filter ---
+
+Deno.test('isRestaurantRowPaused: false with no pausedUntil', () => {
+  assertFalse(isRestaurantRowPaused(baseRow(), FIXED_NOW));
+});
+
+Deno.test('isRestaurantRowPaused: true while pausedUntil is in the FUTURE', () => {
+  assert(isRestaurantRowPaused(baseRow({ pausedUntil: FUTURE_ISO }), FIXED_NOW));
+});
+
+Deno.test('isRestaurantRowPaused: false once pausedUntil is in the PAST (auto-resumed)', () => {
+  assertFalse(isRestaurantRowPaused(baseRow({ pausedUntil: PAST_ISO }), FIXED_NOW));
+});
+
+// Mirrors the exact filter public-catalog/index.ts's loadRestaurantRows
+// applies (shared by BOTH customerGetRestaurantList and the deprecated
+// customerGetPublishedRestaurants alias) — a paused row is dropped, a
+// not-currently-paused row (including one whose pause already expired) is
+// kept, proving "the catalog list excludes a paused store" at the row-filter
+// level this module owns.
+Deno.test('the list-feed pause filter drops a currently-paused row and keeps an unpaused/expired-pause row', () => {
+  const rows = [
+    baseRow({ id: 'live', pausedUntil: null }),
+    baseRow({ id: 'paused-now', pausedUntil: FUTURE_ISO }),
+    baseRow({ id: 'pause-expired', pausedUntil: PAST_ISO }),
+  ];
+
+  const kept = rows.filter((row) => !isRestaurantRowPaused(row, FIXED_NOW)).map((row) => row.id);
+  assertEquals(kept, ['live', 'pause-expired']);
 });
 
 // --- radius filtering ---

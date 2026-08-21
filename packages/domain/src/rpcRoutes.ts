@@ -41,7 +41,7 @@ export type RpcTarget = RpcFunction | typeof LEGACY_RPC_FUNCTION;
  */
 export const KNOWN_RPC_TARGETS: readonly RpcTarget[] = ['feasty-orders', 'feasty-dispatch', 'feasty-partner', 'feasty-admin', 'feasty-account', LEGACY_RPC_FUNCTION];
 
-/** The authoritative action -> split-mode Edge Function map. Covers exactly the 64 actions in actions.ts. */
+/** The authoritative action -> split-mode Edge Function map. Covers exactly the 66 actions in actions.ts. */
 export const RPC_ROUTES: Record<string, RpcFunction> = {
   "customerGetOrders": 'feasty-orders',
   "customerGetOrderDetail": 'feasty-orders',
@@ -74,6 +74,8 @@ export const RPC_ROUTES: Record<string, RpcFunction> = {
   "upsertPartnerRestaurantMenu": 'feasty-partner',
   "partnerUpdateOrderStatus": 'feasty-partner',
   "submitPartnerApplication": 'feasty-partner',
+  "partnerSetMenuItemAvailability": 'feasty-partner',
+  "partnerSetStorePause": 'feasty-partner',
   "adminGetApprovalQueue": 'feasty-admin',
   "adminReviewDispatchApplication": 'feasty-admin',
   "adminReviewPartnerApplication": 'feasty-admin',

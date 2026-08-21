@@ -1,0 +1,21 @@
+-- Task 16 (F2): a kitchen that has run out of something can say so in two
+-- taps — an item or the whole store, indefinitely or for a bounded window.
+--
+-- Menu-item availability (`isAvailable` / `unavailableUntil`) lives inside the
+-- existing `RestaurantRecord.menu` JSONB — items already carry `isAvailable`
+-- pre-Task-16, and there is no separate item table to add a column to. Only
+-- the STORE-level pause needs a real column, because it is not scoped to any
+-- one item.
+--
+-- Additive and idempotent: `add column if not exists`. Re-applying is a
+-- no-op. RLS unchanged — this is a plain column on an already-RLS'd table.
+--
+-- No sweep/cron touches this column. Auto-resume is time-based at READ time
+-- (`supabase/functions/_shared/availability.ts`'s `isStorePaused` /
+-- `isMenuItemAvailable`: paused/unavailable while `now <= until`, available
+-- again the instant `now > until`, with no write). A boolean-flip sweep would
+-- need its own compare-and-swap to avoid racing a partner's manual unpause;
+-- comparing a timestamp to `now()` at read time needs none, because nothing
+-- is ever written back on resume.
+alter table public."RestaurantRecord"
+  add column if not exists "pausedUntil" timestamp(3);

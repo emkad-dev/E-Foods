@@ -4,6 +4,7 @@
  * Deno.serve/service-client wiring so it can be unit tested directly (see
  * catalog.test.ts) — the same pattern as payment-verification/invariants.ts.
  */
+import { isMenuItemAvailable, isStorePaused } from '../_shared/availability.ts';
 import { toCdnImageUrl } from '../_shared/media.ts';
 import { calculateDistanceKm, resolveDeliveryRadiusKm } from '../_shared/deliveryCoverage.ts';
 import { toDisplayPrice, type PricingConfig } from '../_shared/pricing.ts';
@@ -29,6 +30,11 @@ export type RestaurantRow = {
   minOrder?: number | null;
   name: string;
   openingTime?: string | null;
+  // Task 16 (F2): filtering-only — used by isRestaurantRowPaused below to
+  // exclude a paused store from index.ts's loadRestaurantRows result before
+  // it ever reaches toRestaurantCard/toRestaurantDetail. Not a display field,
+  // so neither projection emits it.
+  pausedUntil?: string | null;
   ratingAverage?: number | null;
   ratingCount?: number | null;
   supportsDelivery?: boolean | null;
@@ -86,13 +92,17 @@ const sanitizeOptionalText = (value: unknown) => {
 
 /**
  * True when the row's menu has at least one category with at least one
- * available (isAvailable !== false) item. Mirrors
+ * item `isMenuItemAvailable` (../_shared/availability.ts) considers orderable
+ * right now — manual off (`isAvailable: false`) OR a still-in-the-future
+ * `unavailableUntil` both exclude an item. Mirrors
  * apps/customer/src/utils/restaurantAvailability.ts's
  * getPublishedMenuItemCount(...) > 0 — the two MUST agree, or a restaurant
  * hidden from the card list would still show up via the deprecated full-menu
- * alias, or vice versa.
+ * alias, or vice versa. Both this function AND
+ * placeCustomerOrder's item validation (_shared/domains/orders.ts) import the
+ * SAME isMenuItemAvailable — see the drift test in catalog.test.ts.
  */
-export const hasAvailableMenuItem = (menu: unknown): boolean => {
+export const hasAvailableMenuItem = (menu: unknown, now: Date = new Date()): boolean => {
   if (!Array.isArray(menu)) {
     return false;
   }
@@ -112,10 +122,20 @@ export const hasAvailableMenuItem = (menu: unknown): boolean => {
         return false;
       }
 
-      return (item as Record<string, unknown>).isAvailable !== false;
+      return isMenuItemAvailable(item as Record<string, unknown>, now);
     });
   });
 };
+
+/**
+ * True when the restaurant row itself is paused right now. A single
+ * pass-through of the shared `isStorePaused` predicate, kept here (rather
+ * than calling `isStorePaused` directly from index.ts) purely so this
+ * module's row-filtering helpers live in one place alongside
+ * `hasAvailableMenuItem`.
+ */
+export const isRestaurantRowPaused = (restaurant: RestaurantRow, now: Date = new Date()): boolean =>
+  isStorePaused(restaurant, now);
 
 export const toRestaurantCard = (restaurant: RestaurantRow): RestaurantCard => ({
   id: restaurant.id,

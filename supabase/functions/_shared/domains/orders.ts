@@ -7,6 +7,7 @@
 // the client, and the delivery-radius check runs here rather than trusting the
 // app to have done it.
 
+import { isMenuItemAvailable, isStorePaused } from '../availability.ts';
 import { serviceClient } from '../client.ts';
 import { computeEtaRange, haversineKm } from '../deliveryEta.ts';
 import { isDeliveryOutOfRange } from '../deliveryCoverage.ts';
@@ -165,9 +166,13 @@ const flattenRestaurantMenu = (restaurant: RestaurantRecordRow) => {
         const itemRecord = item as JsonObject;
         return {
           id: sanitizeText(itemRecord.id),
-          isAvailable: itemRecord.isAvailable !== false,
+          // Raw passthrough (not pre-coerced to a plain boolean): isMenuItemAvailable
+          // below is what interprets isAvailable together with unavailableUntil, and it
+          // needs the real unavailableUntil value alongside it, not a derived boolean.
+          isAvailable: itemRecord.isAvailable,
           name: sanitizeText(itemRecord.name),
           price: parseNumber(itemRecord.price, Number.NaN),
+          unavailableUntil: itemRecord.unavailableUntil,
         };
       })
       .filter((item) => item.id && item.name && Number.isFinite(item.price));
@@ -178,7 +183,8 @@ const buildOrderItems = (
   requestedItems: unknown,
   restaurantId: string,
   restaurant: RestaurantRecordRow,
-  pricingConfig: PricingConfig
+  pricingConfig: PricingConfig,
+  now: Date
 ) => {
   if (!Array.isArray(requestedItems) || requestedItems.length === 0) {
     fail(400, 'Add at least one item before placing an order.');
@@ -197,8 +203,19 @@ const buildOrderItems = (
     }
 
     const menuItem = menuLookup.get(itemId);
-    if (!menuItem || menuItem.isAvailable === false) {
+    if (!menuItem) {
       fail(412, 'One or more selected menu items are unavailable.');
+    }
+
+    // The named 412: a stale or tampered client must not be able to place an
+    // unavailable item, and the rejection names it so the customer knows
+    // which line to remove. Shares isMenuItemAvailable with
+    // public-catalog/catalog.ts's hasAvailableMenuItem (the list filter) —
+    // see availability.test.ts / catalog.test.ts's drift test — so an item
+    // hidden from discovery is guaranteed to be rejected here too, and one
+    // only timed-unavailable in the past (auto-resumed) is accepted here too.
+    if (!isMenuItemAvailable(menuItem, now)) {
+      fail(412, `"${menuItem.name}" is currently unavailable. Please remove it and try again.`);
     }
 
     // Restaurant's own price — settlement and min-order run on this.
@@ -337,6 +354,17 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This restaurant is not accepting orders right now.');
   }
 
+  // Task 16 (F2): a stale or tampered client must not be able to order from a
+  // paused store — enforced here regardless of what the client last saw.
+  // Shares isStorePaused with public-catalog/catalog.ts's
+  // isRestaurantRowPaused (the list filter), so a store excluded from
+  // discovery is guaranteed to be rejected here too, and one whose pause has
+  // expired (auto-resumed) is accepted here too.
+  const now = new Date();
+  if (isStorePaused(restaurant, now)) {
+    fail(412, 'This restaurant is paused right now. Please check back soon.');
+  }
+
   if (fulfillmentType === 'delivery' && restaurant.supportsDelivery === false) {
     fail(412, 'This restaurant does not support delivery.');
   }
@@ -346,7 +374,7 @@ const prepareCustomerOrderDraft = async (
   }
 
   const pricingConfig = await loadPricingConfig();
-  const items = buildOrderItems(requestData.items, restaurantId, restaurant, pricingConfig);
+  const items = buildOrderItems(requestData.items, restaurantId, restaurant, pricingConfig, now);
   // Min-order and settlement both run on the restaurant's own menu prices,
   // never on the marked-up customer prices.
   const restaurantBasis = items.reduce((sum, item) => sum + item.basePrice * item.quantity, 0);

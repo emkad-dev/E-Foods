@@ -14,6 +14,7 @@ import {
 import {
   DEFAULT_PAGE_SIZE,
   hasAvailableMenuItem,
+  isRestaurantRowPaused,
   paginateRestaurants,
   sortRestaurantsByLocation,
   toRestaurantCard,
@@ -35,11 +36,16 @@ import {
 // deliberately not done without a product decision. A `hasAvailableItem`
 // column maintained on write would let this select drop `menu` entirely; out
 // of scope here.
+// `pausedUntil` is selected for the same reason `menu` is (see the comment
+// above): it exists solely to run isRestaurantRowPaused in loadRestaurantRows
+// below before being stripped — a paused store never reaches
+// toRestaurantCard/toRestaurantDetail, so neither projection carries the
+// field forward.
 const CARD_COLUMNS =
-  'id,name,cuisine,cuisines,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt,ratingAverage,ratingCount';
+  'id,name,cuisine,cuisines,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,pausedUntil,updatedAt,ratingAverage,ratingCount';
 
 const DETAIL_COLUMNS =
-  'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,updatedAt,ratingAverage,ratingCount';
+  'id,name,address,cuisine,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,supportsDelivery,supportsPickup,isOpen,isPublished,pausedUntil,updatedAt,ratingAverage,ratingCount';
 
 const LIST_CACHE_HEADERS = { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300' };
 const DETAIL_CACHE_HEADERS = { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=120' };
@@ -74,6 +80,12 @@ const parseCoords = (data: Record<string, unknown> | undefined): GeoCoords | nul
   return latitude !== null && longitude !== null ? { latitude, longitude } : null;
 };
 
+// Shared by BOTH customerGetRestaurantList and the deprecated
+// customerGetPublishedRestaurants alias below — filtering a paused store out
+// HERE, at the one row-loading function both call, is what guarantees the two
+// can never disagree (the same "MUST agree" lesson hasAvailableMenuItem's
+// comment documents for item-level availability, applied at the row level
+// instead of duplicated per call site).
 const loadRestaurantRows = async (columns: string): Promise<RestaurantRow[]> => {
   const { data: restaurants, error: restaurantError } = await serviceClient
     .from('RestaurantRecord')
@@ -85,7 +97,8 @@ const loadRestaurantRows = async (columns: string): Promise<RestaurantRow[]> => 
     throw new Error(restaurantError.message);
   }
 
-  return (restaurants ?? []) as unknown as RestaurantRow[];
+  const rows = (restaurants ?? []) as unknown as RestaurantRow[];
+  return rows.filter((row) => !isRestaurantRowPaused(row));
 };
 
 const loadRestaurantRowById = async (columns: string, restaurantId: string): Promise<RestaurantRow | null> => {

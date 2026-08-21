@@ -45,6 +45,10 @@ export const PARTNER_ACTIONS = [
   'upsertPartnerRestaurantMenu',
   'partnerUpdateOrderStatus',
   'submitPartnerApplication',
+  // Task 16 (F2): dedicated lightweight actions so marking a single item or
+  // the whole store unavailable is "two taps", not a full-menu re-upload.
+  'partnerSetMenuItemAvailability',
+  'partnerSetStorePause',
 ] as const;
 
 export const ADMIN_ACTIONS = [
