@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KitchenBoard } from '../../src/components/KitchenBoard';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { formatOrderStatusLabel, formatPaymentStatusLabel } from '../../src/domain/orders';
 import { getPartnerStatusColor } from '../../src/theme/statusColors';
@@ -15,9 +16,16 @@ import {
   getKitchenSignalColors,
 } from '../../src/utils/partnerQueue';
 
+// In-store kitchen tablets are the real target here (native Android/iOS, not just
+// web), so this deliberately does NOT gate on Platform.OS the way the desktop
+// admin-style chrome in index.tsx/_layout.tsx does -- width alone decides.
+const KITCHEN_BOARD_BREAKPOINT = 900;
+
 export default function PartnerOrdersScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isBoardLayout = width >= KITCHEN_BOARD_BREAKPOINT;
   const {
     activeOrders,
     completedToday,
@@ -62,6 +70,25 @@ export default function PartnerOrdersScreen() {
         <SkeletonListRow />
         <SkeletonListRow />
       </SkeletonScreen>
+    );
+  }
+
+  if (isBoardLayout) {
+    return (
+      <View style={[styles.boardScreen, { paddingTop: insets.top + 16 }]}>
+        {!restaurant ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Restaurant profile not linked</Text>
+            <Text style={styles.emptyCopy}>We need a matching restaurant record before partner orders can be filtered.</Text>
+          </View>
+        ) : (
+          <KitchenBoard
+            activeOrders={activeOrders}
+            restaurantName={restaurant.name}
+            onSelectOrder={(orderId) => router.push(`/(partner)/order/${orderId}`)}
+          />
+        )}
+      </View>
     );
   }
 
@@ -205,6 +232,12 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: partnerTheme.background,
     flex: 1,
+  },
+  boardScreen: {
+    backgroundColor: partnerTheme.background,
+    flex: 1,
+    paddingBottom: 18,
+    paddingHorizontal: 18,
   },
   content: {
     alignSelf: 'center',

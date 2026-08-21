@@ -12,7 +12,7 @@ import {
   kitchenAlarmReducer,
   orderNeedsAcceptDecision,
   type KitchenAlarmState,
-} from './kitchenAlarm.ts';
+} from './kitchenAlarm.js';
 
 const arrive = (state: KitchenAlarmState, orderId: string) =>
   kitchenAlarmReducer(state, { type: 'order_arrived', orderId });
