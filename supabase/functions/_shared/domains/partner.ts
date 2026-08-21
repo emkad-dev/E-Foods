@@ -267,15 +267,25 @@ const normalizePartnerMenuInput = (menu: unknown) => {
           );
         }
 
+        const itemIsAvailable = itemRecord.isAvailable !== false;
+
         return {
           categoryId,
           categoryLabel,
           description: itemDescription,
           id: itemId,
           image: sanitizeOptionalText(itemRecord.image),
-          isAvailable: itemRecord.isAvailable !== false,
+          isAvailable: itemIsAvailable,
           name: itemName,
           price: itemPrice,
+          // Preserved (not re-derived) so a full-menu save — editing one
+          // item's price, or removing another item, both round-trip the
+          // WHOLE menu through this normalizer — never silently clears a
+          // DIFFERENT item's timed unavailability set via the lightweight
+          // partnerSetMenuItemAvailability action. Forced to null whenever
+          // isAvailable is true, matching that action's own invariant: an
+          // available item never carries a stale unavailableUntil.
+          unavailableUntil: itemIsAvailable ? null : sanitizeOptionalText(itemRecord.unavailableUntil),
         };
       }),
     };

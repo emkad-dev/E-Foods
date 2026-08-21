@@ -56,6 +56,11 @@ export interface MenuItemDocument extends DocumentData {
   categoryLabel?: string;
   category?: string;
   isAvailable?: boolean;
+  // Task 16 (F2): set only via partnerSetMenuItemAvailability. Unavailable
+  // when isAvailable === false (manual, indefinite) OR this is a still-future
+  // timestamp (timed, auto-resumes with no write once it passes — see
+  // supabase/functions/_shared/availability.ts's isMenuItemAvailable).
+  unavailableUntil?: string | null;
 }
 
 export interface MenuCategoryDocument extends DocumentData {
@@ -89,6 +94,11 @@ export interface RestaurantDocument extends DocumentData {
   approvedAt?: string | null;
   approvedByUid?: string | null;
   menu?: MenuCategoryDocument[] | null;
+  // Task 16 (F2): set only via partnerSetStorePause. Paused while this is a
+  // still-future timestamp; auto-resumes with no write once it passes (see
+  // supabase/functions/_shared/availability.ts's isStorePaused). Always
+  // cleared (null) when not paused — there is no indefinite store pause.
+  pausedUntil?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
