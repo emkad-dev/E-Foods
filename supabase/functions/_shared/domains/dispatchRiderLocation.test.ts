@@ -43,6 +43,7 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
 const fakeRequest = () => new Request('https://example.test/rpc', { method: 'POST' });
 
 const RIDER_ID = 'rider-ping-1';
+const ACTIVE_ORDER_ID = 'order-active-1';
 
 const DISPATCH_CONTEXT = {
   email: 'rider@example.test',
@@ -68,35 +69,82 @@ type PingRow = {
  * clock the test advances explicitly rather than relying on real elapsed
  * time between calls.
  */
-const installMocks = () => {
+type BroadcastMessage = { event?: string; payload?: Record<string, unknown>; topic?: string };
+
+const installMocks = (options: { activeOrderIds?: string[] } = {}) => {
+  const activeOrderIds = options.activeOrderIds ?? [ACTIVE_ORDER_ID];
   const state = {
     now: Date.now(),
     pings: [] as PingRow[],
     riderUpdates: [] as Record<string, unknown>[],
+    broadcasts: [] as BroadcastMessage[],
   };
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
-    if (table !== 'DispatchRiderRecord') {
-      throw new Error(`dispatchRiderLocation.test.ts: unexpected table "${table}"`);
+    if (table === 'DispatchRiderRecord') {
+      return {
+        select: (_columns?: string) => ({
+          eq: (_col: string, val: string) => ({
+            maybeSingle: async () => ({
+              data: val === RIDER_ID ? { id: RIDER_ID } : null,
+              error: null,
+            }),
+          }),
+        }),
+        update: (payload: Record<string, unknown>) => ({
+          eq: async (_col: string, _val: string) => {
+            state.riderUpdates.push({ ...payload });
+            return { error: null };
+          },
+        }),
+      };
     }
 
-    return {
-      select: (_columns?: string) => ({
-        eq: (_col: string, val: string) => ({
-          maybeSingle: async () => ({
-            data: val === RIDER_ID ? { id: RIDER_ID } : null,
+    // The rider-position broadcast fan-out (loadRiderActiveOrderIds) reads the
+    // rider's assignments, then the status of those orders. Snapshots, not
+    // live references.
+    if (table === 'DeliveryAssignment') {
+      return {
+        select: (_columns?: string) => ({
+          eq: async (_col: string, _val: string) => ({
+            data: activeOrderIds.map((orderId) => ({ orderId })),
             error: null,
           }),
         }),
-      }),
-      update: (payload: Record<string, unknown>) => ({
-        eq: async (_col: string, _val: string) => {
-          state.riderUpdates.push({ ...payload });
-          return { error: null };
-        },
-      }),
-    };
+      };
+    }
+
+    if (table === 'CustomerOrder') {
+      return {
+        select: (_columns?: string) => ({
+          in: (_col: string, ids: string[]) => ({
+            in: async (_statusCol: string, _statuses: string[]) => ({
+              // Every assigned order is treated as in-transit for this test.
+              data: ids.map((id) => ({ id, status: 'on_the_way' })),
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
+
+    throw new Error(`dispatchRiderLocation.test.ts: unexpected table "${table}"`);
+  };
+
+  // Capture the realtime broadcast POSTs instead of hitting the network, so
+  // the recorded-gate and the on-the-wire payload whitelist are both asserted
+  // against the exact messages emitted.
+  // deno-lint-ignore no-explicit-any
+  (globalThis as any).fetch = async (input: unknown, init?: { body?: string }) => {
+    const url = typeof input === 'string' ? input : String((input as { url?: string })?.url ?? '');
+    if (url.includes('/realtime/v1/api/broadcast') && init?.body) {
+      const parsed = JSON.parse(init.body) as { messages?: BroadcastMessage[] };
+      for (const message of parsed.messages ?? []) {
+        state.broadcasts.push(message);
+      }
+    }
+    return new Response('{}', { status: 202, headers: { 'Content-Type': 'application/json' } });
   };
 
   // deno-lint-ignore no-explicit-any
@@ -192,4 +240,62 @@ Deno.test('syncDispatchRiderLocation: a ping 11 seconds later (outside the 10s w
   expectEqual(state.pings.length, 2, 'a ping 11 seconds later produces a second history row');
   expectEqual(state.pings[1].latitude, 6.52, 'the new row carries the newly reported position');
   expectEqual(state.pings[0].latitude, 6.5, 'the first row is untouched - this is an append, not an overwrite');
+});
+
+Deno.test('syncDispatchRiderLocation: a RECORDED ping broadcasts the rider position to the active order, whitelisted', async () => {
+  const state = installMocks();
+
+  const response = await syncDispatchRiderLocation({
+    context: DISPATCH_CONTEXT,
+    data: { accuracy: 9, latitude: 6.5244, longitude: 3.3792 },
+    request: fakeRequest(),
+  });
+  expectEqual(response.status, 200, 'the sync succeeds');
+
+  expectEqual(state.broadcasts.length, 1, 'exactly one broadcast emitted for the single active order');
+  const message = state.broadcasts[0];
+  expectEqual(message.topic, `order-${ACTIVE_ORDER_ID}`, 'broadcast targets the order-<id> topic of the active order');
+  expectEqual(message.event, 'rider-position', 'the event is the distinct rider-position event, not the generic changed event');
+
+  const payload = message.payload ?? {};
+  const keys = Object.keys(payload).sort();
+  expectEqual(
+    JSON.stringify(keys),
+    JSON.stringify(['latitude', 'longitude', 'updatedAt']),
+    'the on-the-wire payload contains exactly the three whitelisted keys'
+  );
+  expectEqual(payload.latitude, 6.5244, 'latitude carried through to the wire');
+  expectEqual(payload.longitude, 3.3792, 'longitude carried through to the wire');
+  // The rider id must never reach the customer - it identifies the rider and
+  // the ping row it came from.
+  for (const forbidden of ['riderId', 'id', 'phoneNumber', 'courierId', 'accuracy', 'name', 'zone']) {
+    if (forbidden in payload) {
+      throw new Error(`the customer payload leaked a forbidden field: ${forbidden}`);
+    }
+  }
+});
+
+Deno.test('syncDispatchRiderLocation: a THROTTLED ping emits NO position broadcast', async () => {
+  const state = installMocks();
+
+  await syncDispatchRiderLocation({
+    context: DISPATCH_CONTEXT,
+    data: { accuracy: 9, latitude: 6.5, longitude: 3.4 },
+    request: fakeRequest(),
+  });
+  expectEqual(state.broadcasts.length, 1, 'the first, recorded ping broadcast once');
+
+  state.now += 5000; // inside the 10s throttle window - this ping is dropped
+
+  const second = await syncDispatchRiderLocation({
+    context: DISPATCH_CONTEXT,
+    data: { accuracy: 8, latitude: 6.51, longitude: 3.41 },
+    request: fakeRequest(),
+  });
+  expectEqual(second.status, 200, 'the throttled sync still succeeds');
+  expectEqual(
+    state.broadcasts.length,
+    1,
+    'the throttled ping produced NO new broadcast - the broadcast rides the recorded gate, inheriting the 10s throttle'
+  );
 });

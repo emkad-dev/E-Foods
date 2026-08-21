@@ -7,6 +7,7 @@ import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applica
 import { createAuditEntry } from '../auditLog.ts';
 import { serviceClient } from '../client.ts';
 import { recordDispatchRiderPing } from '../dispatchRiderPings.ts';
+import { broadcastRiderPositionToActiveOrders } from '../riderPositionBroadcast.ts';
 import {
   DEFAULT_DISPATCH_STATUS,
   DEFAULT_DISPATCH_VEHICLE,
@@ -750,6 +751,29 @@ const syncDispatchRiderLocation: Handler = async ({ context, data }) => {
       error: pingError instanceof Error ? pingError.message : String(pingError),
       riderId,
     });
+  }
+
+  // Push the new position to the customer(s) waiting on this rider, but ONLY
+  // when a ping was actually recorded - that reuses the SQL 10s-per-rider
+  // throttle so the customer gets one position broadcast per 10s per order,
+  // without a second timer. Best-effort like every _shared/realtime.ts
+  // broadcast: the position sync above has already committed, so a failed
+  // fan-out is logged and swallowed, never re-thrown.
+  if (pingRecorded) {
+    try {
+      await broadcastRiderPositionToActiveOrders({
+        latitude,
+        longitude,
+        riderId,
+        updatedAt: timestamp,
+      });
+    } catch (broadcastError) {
+      logEdgeEvent('error', 'dispatch rider position broadcast failed', {
+        action: 'syncDispatchRiderLocation',
+        error: broadcastError instanceof Error ? broadcastError.message : String(broadcastError),
+        riderId,
+      });
+    }
   }
 
   return json(200, {

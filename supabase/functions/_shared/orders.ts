@@ -83,6 +83,14 @@ export type OrderSnapshotOptions = {
   courierLongitude?: number | null;
   courierUpdatedAt?: string | null;
   customerPhone?: string | null;
+  // Live-tracking extras, populated only by customerGetOrderDetail. The map
+  // pins the restaurant origin; `eta` is the server's initial straight-line
+  // estimate for first paint and `averageSpeedKmh` lets the client recompute
+  // it live from each rider-position broadcast without a round trip.
+  restaurantLatitude?: number | null;
+  restaurantLongitude?: number | null;
+  eta?: { minMinutes: number; maxMinutes: number } | null;
+  averageSpeedKmh?: number | null;
 };
 
 export const CUSTOMER_ORDER_COLUMNS =
@@ -170,6 +178,10 @@ export const toOrderSnapshotResponse = (
   customerPhone: sanitizeOptionalText(options.customerPhone),
   deliveryAddress: sanitizeOptionalText(order.deliveryAddress),
   deliveryLocation: order.deliveryLocation ?? null,
+  restaurantLatitude: options.restaurantLatitude ?? null,
+  restaurantLongitude: options.restaurantLongitude ?? null,
+  eta: options.eta ?? null,
+  averageSpeedKmh: options.averageSpeedKmh ?? null,
   events: events.map((event) => ({
     actorUid: sanitizeOptionalText(event.actorUid),
     createdAt: event.createdAt ?? null,

@@ -8,6 +8,7 @@
 // app to have done it.
 
 import { serviceClient } from '../client.ts';
+import { computeEtaRange, haversineKm } from '../deliveryEta.ts';
 import { isDeliveryOutOfRange } from '../deliveryCoverage.ts';
 import { loadDispatchRiderSnapshot } from '../dispatchRiders.ts';
 import { releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
@@ -49,10 +50,11 @@ import {
   toKoboAmount,
   verifyPaystackTransaction,
 } from '../paystack.ts';
-import { loadPricingConfig } from '../platformSettings.ts';
+import { loadDispatchTrackingConfig, loadPricingConfig } from '../platformSettings.ts';
 import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../pricing.ts';
 import { broadcastOrderChanged, broadcastSupportInboxChanged, broadcastSupportThreadChanged } from '../realtime.ts';
 import { loadRestaurantById, type RestaurantRecordRow } from '../restaurants.ts';
+import { RIDER_ACTIVE_DELIVERY_STATUSES } from '../riderPositionBroadcast.ts';
 import { ORDER_ACTIONS } from '../rpc/actions.ts';
 import type { JsonObject } from '../rpc/coercion.ts';
 import {
@@ -689,6 +691,64 @@ const customerGetOrders: Handler = async ({ context, data }) => {
   );
 };
 
+type CoordinatePair = { latitude: number; longitude: number };
+
+/** Reads a finite {latitude, longitude} pair from an unknown, or null. */
+const readCoordinatePair = (value: unknown): CoordinatePair | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const latitude = record.latitude;
+  const longitude = record.longitude;
+
+  if (
+    typeof latitude === 'number' &&
+    Number.isFinite(latitude) &&
+    typeof longitude === 'number' &&
+    Number.isFinite(longitude)
+  ) {
+    return { latitude, longitude };
+  }
+
+  return null;
+};
+
+/**
+ * Restaurant origin coordinates for the customer tracking map. Best-effort:
+ * a missing row or a read error resolves to null (the map simply omits the
+ * restaurant pin) rather than failing order detail.
+ */
+const loadRestaurantCoordinates = async (
+  restaurantId: string | null | undefined
+): Promise<CoordinatePair | null> => {
+  const safeRestaurantId = sanitizeText(restaurantId);
+  if (!safeRestaurantId) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await serviceClient
+      .from('Restaurant')
+      .select('latitude,longitude')
+      .eq('id', safeRestaurantId)
+      .maybeSingle<{ latitude: number | null; longitude: number | null }>();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return readCoordinatePair(data);
+  } catch (error) {
+    logEdgeEvent('warn', 'Failed to load restaurant coordinates for tracking map', {
+      error: error instanceof Error ? error.message : String(error),
+      restaurantId: safeRestaurantId,
+    });
+    return null;
+  }
+};
+
 const customerGetOrderDetail: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['customer', 'admin']);
   const orderId = sanitizeText(data.orderId);
@@ -707,12 +767,43 @@ const customerGetOrderDetail: Handler = async ({ context, data }) => {
 
   const riderSnapshot = await loadDispatchRiderSnapshot(bundle.assignment?.courierId);
 
+  // Live-tracking extras for the customer map. Restaurant coordinates pin the
+  // origin (public, non-sensitive); the tracking config gives the average
+  // speed for the ETA. Both reads are best-effort: a missing restaurant row or
+  // an unreadable settings row must not break order detail, so failures fall
+  // back to null/defaults rather than throwing.
+  const trackingConfig = await loadDispatchTrackingConfig();
+  const restaurantCoordinates = await loadRestaurantCoordinates(bundle.order.restaurantId);
+  const deliveryCoordinates = readCoordinatePair(bundle.order.deliveryLocation);
+  const riderCoordinates = readCoordinatePair({
+    latitude: riderSnapshot.courierLatitude,
+    longitude: riderSnapshot.courierLongitude,
+  });
+
+  const inTransit = RIDER_ACTIVE_DELIVERY_STATUSES.includes(normalizeOrderStatus(bundle.order.status));
+  const etaRange =
+    inTransit && riderCoordinates && deliveryCoordinates
+      ? computeEtaRange(
+          haversineKm(
+            riderCoordinates.latitude,
+            riderCoordinates.longitude,
+            deliveryCoordinates.latitude,
+            deliveryCoordinates.longitude
+          ),
+          trackingConfig.averageSpeedKmh
+        )
+      : null;
+
   return json(
     200,
     {
       data: {
         order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], {
           ...riderSnapshot,
+          averageSpeedKmh: trackingConfig.averageSpeedKmh,
+          eta: etaRange ? { maxMinutes: etaRange.maxMinutes, minMinutes: etaRange.minMinutes } : null,
+          restaurantLatitude: restaurantCoordinates?.latitude ?? null,
+          restaurantLongitude: restaurantCoordinates?.longitude ?? null,
         }),
       },
     },

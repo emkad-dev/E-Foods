@@ -54,6 +54,39 @@ export const broadcastOrderChanged = (orderId: string, payload: Record<string, u
     { payload: { orderId, ...payload }, topic: ORDERS_REALTIME_TOPIC },
   ]);
 
+// A distinct event on the SAME `order-<id>` topic the order-detail screen
+// already knows about, carrying the rider's live position to the customer.
+// The customer must NOT be able to read DispatchRiderPing (it stays RLS
+// service-role-only, no policy), so this broadcast is the ONLY channel the
+// rider's coordinates reach the customer through - and it carries ONLY the
+// coordinates plus a coarse timestamp. Nothing that identifies the rider
+// (id, phone, name, zone, vehicle), and nothing about any OTHER order.
+export const RIDER_POSITION_EVENT = 'rider-position';
+
+export type RiderPositionPayload = {
+  latitude: number;
+  longitude: number;
+  updatedAt: string | null;
+};
+
+// The payload is built field-by-field from an explicit whitelist here, on
+// purpose - never by spreading a rider row. This is the one place the shape
+// the customer receives is defined, and adding a field here is the only way a
+// field could ever leak; the payload-whitelist test asserts these three and
+// only these three.
+export const broadcastRiderPosition = (orderId: string, position: RiderPositionPayload) =>
+  broadcastRealtimeMessages([
+    {
+      event: RIDER_POSITION_EVENT,
+      payload: {
+        latitude: position.latitude,
+        longitude: position.longitude,
+        updatedAt: position.updatedAt ?? null,
+      },
+      topic: orderRealtimeTopic(orderId),
+    },
+  ]);
+
 export const broadcastRidersChanged = (payload: Record<string, unknown> = {}) =>
   broadcastRealtimeMessages([{ payload, topic: RIDERS_REALTIME_TOPIC }]);
 

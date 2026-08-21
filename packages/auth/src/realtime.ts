@@ -7,6 +7,19 @@ export const PROMOS_REALTIME_TOPIC = 'promos';
 export const SUPPORT_INBOX_TOPIC = 'support-inbox';
 export const REALTIME_CHANGED_EVENT = 'changed';
 
+// A distinct broadcast event on the `order-<id>` topic carrying the rider's
+// live position to the customer. Mirrors RIDER_POSITION_EVENT in
+// supabase/functions/_shared/realtime.ts - broadcaster and subscriber must
+// agree on the event name. The payload is a strict whitelist: latitude,
+// longitude, and a coarse updatedAt, nothing else.
+export const RIDER_POSITION_EVENT = 'rider-position';
+
+export type RiderPositionBroadcast = {
+  latitude: number;
+  longitude: number;
+  updatedAt: string | null;
+};
+
 export const orderRealtimeTopic = (orderId: string) => `order-${orderId}`;
 // Mirrors supabase/functions/_shared/realtime.ts's supportThreadTopic --
 // the broadcaster (edge function) and the subscriber (this client package)
