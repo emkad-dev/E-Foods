@@ -24,6 +24,7 @@ export type CustomerOrderRow = {
   deliveryLocation?: JsonObject | null;
   fulfillmentType?: string | null;
   id: string;
+  needsAttention?: boolean | null;
   payment?: JsonObject | null;
   pricing?: JsonObject | null;
   restaurantId: string;
@@ -94,7 +95,7 @@ export type OrderSnapshotOptions = {
 };
 
 export const CUSTOMER_ORDER_COLUMNS =
-  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,createdAt,updatedAt';
+  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,createdAt,updatedAt';
 
 export const ORDER_STATUS = {
   ACCEPTED: 'accepted',
@@ -192,6 +193,7 @@ export const toOrderSnapshotResponse = (
   })),
   fulfillmentType: sanitizeText(order.fulfillmentType, 'delivery'),
   id: order.id,
+  needsAttention: order.needsAttention === true,
   items: items.map((item) => ({
     id: item.itemId,
     name: item.name,

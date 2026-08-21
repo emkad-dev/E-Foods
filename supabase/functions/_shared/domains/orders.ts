@@ -482,7 +482,12 @@ const createOrderWithItems = async ({
   };
 };
 
-const buildRefundUpdate = ({
+// Exported so the acceptance-deadline sweep (Task 14 / E3) can issue its full
+// refund through the SAME recorded-only mechanism cancelCustomerOrder uses,
+// rather than inventing a second one: it writes the refund into the order's
+// payment ledger (refundAmount / refundedAt / status = 'refunded'); there is no
+// separate Paystack execution step here, and the sweep must not add one.
+export const buildRefundUpdate = ({
   order,
   refundRate,
   reason,

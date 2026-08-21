@@ -1,5 +1,10 @@
 /// <reference path="./edge-runtime.d.ts" />
 
+import {
+  DEFAULT_ACCEPTANCE_DEADLINE,
+  parseAcceptanceDeadline,
+  type AcceptanceDeadlineConfig,
+} from './acceptanceDeadline.ts';
 import { serviceClient } from './client.ts';
 import { DEFAULT_DISPATCH_TRACKING, parseDispatchTracking, type DispatchTrackingConfig } from './dispatchTracking.ts';
 import { DEFAULT_DISPATCH_WEIGHTS, parseDispatchWeights, type DispatchWeights } from './dispatchWeights.ts';
@@ -11,6 +16,7 @@ const CACHE_TTL_MS = 60_000;
 let cached: { config: PricingConfig; expiresAt: number } | null = null;
 let cachedDispatchWeights: { config: DispatchWeights; expiresAt: number } | null = null;
 let cachedDispatchTracking: { config: DispatchTrackingConfig; expiresAt: number } | null = null;
+let cachedAcceptanceDeadline: { config: AcceptanceDeadlineConfig; expiresAt: number } | null = null;
 
 // Never throws: an order must not fail because the settings row is unreadable.
 // The seeded row and DEFAULT_PRICING_CONFIG hold identical values, so the
@@ -113,5 +119,42 @@ export const loadDispatchTrackingConfig = async (): Promise<DispatchTrackingConf
       error: error instanceof Error ? error.message : String(error),
     });
     return DEFAULT_DISPATCH_TRACKING;
+  }
+};
+
+// Never throws: the acceptance-deadline sweep must not fail because the
+// settings row is unreadable, and a mistyped/zero/negative deadline must not
+// make every fresh order instantly overdue (parseAcceptanceDeadline bounds it).
+// The seeded row and DEFAULT_ACCEPTANCE_DEADLINE hold identical values, so the
+// fallback cannot silently change the deadline unless the row was edited.
+// Mirrors loadDispatchTrackingConfig exactly.
+export const loadAcceptanceDeadlineConfig = async (): Promise<AcceptanceDeadlineConfig> => {
+  if (cachedAcceptanceDeadline && cachedAcceptanceDeadline.expiresAt > Date.now()) {
+    return cachedAcceptanceDeadline.config;
+  }
+
+  try {
+    const { data, error } = await serviceClient
+      .from('PlatformSettings')
+      .select('data')
+      .eq('id', 'acceptanceDeadline')
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data) {
+      logEdgeEvent('warn', 'PlatformSettings acceptanceDeadline row missing; using defaults', {});
+    }
+
+    const config = parseAcceptanceDeadline(data?.data);
+    cachedAcceptanceDeadline = { config, expiresAt: Date.now() + CACHE_TTL_MS };
+    return config;
+  } catch (error) {
+    logEdgeEvent('warn', 'Failed to load acceptance deadline config; using defaults', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return DEFAULT_ACCEPTANCE_DEADLINE;
   }
 };

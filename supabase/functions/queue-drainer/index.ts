@@ -2,6 +2,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import { sweepUnacceptedOrders } from '../_shared/acceptanceDeadlineSweep.ts';
 import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
 import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
 import {
@@ -307,6 +308,18 @@ Deno.serve(async (request) => {
     // drain or turn a successful one into a 500.
     const riderPingRetention = queueSelection === 'all' ? await sweepExpiredDispatchRiderPings() : null;
 
+    // Acceptance-deadline sweep (Task 14 / E3), on the SAME safe side of
+    // runWithBackpressure as the two sweeps above, and for the identical
+    // reason: runWithBackpressure THROWS EdgeBackpressureError when it sheds,
+    // which would skip anything sequenced after it. A paid customer waiting on
+    // an unaccepted order must still be escalated and (at 2x the deadline)
+    // auto-cancelled-and-refunded during exactly the busy periods that cause
+    // shedding, not stalled for as long as the load lasts. Bounded
+    // (ACCEPTANCE_SWEEP_LIMIT orders) and never throws - see
+    // sweepUnacceptedOrders - so it cannot meaningfully delay the drain or turn
+    // a successful one into a 500.
+    const acceptanceSweep = queueSelection === 'all' ? await sweepUnacceptedOrders() : null;
+
     const results = await runWithBackpressure(
       'queue-drainer',
       {
@@ -324,6 +337,7 @@ Deno.serve(async (request) => {
 
     const response = json(200, {
       data: {
+        acceptanceSweep,
         offerSweep,
         results,
         riderPingRetention,

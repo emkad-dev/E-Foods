@@ -35,6 +35,7 @@ export type RestaurantRecordRow = {
   longitude?: number | null;
   menu?: unknown[] | null;
   minOrder?: number | null;
+  missedOrderCount?: number | null;
   name: string;
   nameKey?: string | null;
   openingTime?: string | null;
@@ -46,7 +47,7 @@ export type RestaurantRecordRow = {
 };
 
 export const RESTAURANT_COLUMNS =
-  'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt';
+  'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,missedOrderCount,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt';
 
 export const RESTAURANT_APPROVAL_COLUMNS = 'restaurantId,status,approvedByUid,approvedAt';
 
@@ -88,6 +89,9 @@ export const buildRestaurantResponse = (
   longitude: restaurant.longitude ?? null,
   menu: Array.isArray(restaurant.menu) ? restaurant.menu : [],
   minOrder: restaurant.minOrder ?? 0,
+  // Surfaced for the admin dashboard snapshot: how many orders this restaurant
+  // let time out unaccepted (Task 14 / E3).
+  missedOrderCount: restaurant.missedOrderCount ?? 0,
   name: sanitizeText(restaurant.name, 'Restaurant'),
   openingTime: sanitizeOptionalText(restaurant.openingTime),
   ownerId: sanitizeOptionalText(restaurant.ownerId),
