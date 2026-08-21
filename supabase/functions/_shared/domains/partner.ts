@@ -26,7 +26,6 @@ import {
   maybeExpireUnpaidOrder,
   normalizeOrderStatus,
   toOrderSnapshotResponse,
-  updateOrderRecord,
   updateOrderRecordIfStatus,
   type CustomerOrderRow,
 } from '../orders.ts';
