@@ -25,6 +25,8 @@ no policies" as an unfinished migration and adds policies to `fix` it.
 | **DeliveryOffer** | `supabase/migrations/20260816_dispatch_delivery_offers.sql` (Task 10 / D2) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **DispatchRiderPing** | `supabase/migrations/20260820_dispatch_rider_ping.sql` (Task 11 / D3) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **OrderRating** | `supabase/migrations/20260820_order_ratings.sql` (Task 12 / E1) | ❌ | **service-role-only** (RLS enabled, no policies) |
+| **PromoCode** | `supabase/migrations/20260821_promo_codes.sql` (Task 17 / G1) | ❌ | **service-role-only** (RLS enabled, no policies) |
+| **PromoRedemption** | `supabase/migrations/20260821_promo_codes.sql` (Task 17 / G1) | ❌ | **service-role-only** (RLS enabled, no policies) |
 
 ### `DeliveryOffer`
 
@@ -112,6 +114,30 @@ provisional:
   `customerGetPendingRatings` — an Edge Function action — is the only reader,
   and would expose `courierId`/`restaurantId`/`comment` on rows with no client
   code path that needs them read directly.
+
+### `PromoCode` / `PromoRedemption`
+
+The discount-code engine (Task 17 / G1). Reasons the policy-less posture is
+correct rather than provisional:
+
+- **No client touches either table through the Data API.** A customer previews a
+  code via `customerValidatePromoCode` and applies it via `placeCustomerOrder` /
+  `initializeCustomerPayment`; an admin manages codes via
+  `adminListPromoCodes` / `adminCreatePromoCode` / `adminSetPromoCodeActive` —
+  all `feasty-orders` / `feasty-admin` Edge Function actions under the service
+  role.
+- **A read policy on `PromoCode` would leak the code space.** The whole point of
+  the generic "not valid" refusal (`promoRejectionMessage`) is that a client
+  cannot enumerate which codes exist; a `SELECT` policy would hand the client the
+  entire table and defeat that.
+- **`PromoRedemption` is the cap ledger.** Its counts are read only under the
+  `SELECT … FOR UPDATE` row lock inside `ebuy_redeem_promo_code`; a client write
+  policy would let a caller forge or delete a redemption and bust a usage cap
+  directly, bypassing the atomic guard entirely. Reads expose who redeemed what,
+  which no client path needs.
+- **Live updates are not needed.** Activating or exhausting a code does not push
+  to open apps — a stale client simply gets a clean refusal at placement, which
+  re-validates and re-counts server-side. No `postgres_changes`, no Broadcast.
 
 ## Rules for future changes
 

@@ -66,6 +66,7 @@ const EXPECTED_ORDER_ACTIONS = [
   'customerGetSupportThread',
   'customerSubmitOrderRating',
   'customerGetPendingRatings',
+  'customerValidatePromoCode',
 ];
 
 const EXPECTED_DISPATCH_ACTIONS = [
@@ -116,6 +117,9 @@ const EXPECTED_ADMIN_ACTIONS = [
   'promoList',
   'promoCreate',
   'promoSetActive',
+  'adminListPromoCodes',
+  'adminCreatePromoCode',
+  'adminSetPromoCodeActive',
   'bootstrapFirstAdmin',
 ];
 
@@ -162,10 +166,10 @@ const stubDomain = (name: string, actions: readonly string[]): RpcDomain<TestCon
   });
 
 const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
-  ['orders', ORDER_ACTIONS, 12],
+  ['orders', ORDER_ACTIONS, 13],
   ['dispatch', DISPATCH_ACTIONS, 11],
   ['partner', PARTNER_ACTIONS, 10],
-  ['admin', ADMIN_ACTIONS, 21],
+  ['admin', ADMIN_ACTIONS, 24],
   ['account', ACCOUNT_ACTIONS, 12],
 ];
 
@@ -197,7 +201,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 66-action surface', () => {
+Deno.test('the five domains together cover exactly the 70-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -206,14 +210,14 @@ Deno.test('the five domains together cover exactly the 66-action surface', () =>
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 66, 'total action count');
-  expectEqual(new Set(union).size, 66, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 66, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 70, 'total action count');
+  expectEqual(new Set(union).size, 70, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 70, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 66, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 70, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {

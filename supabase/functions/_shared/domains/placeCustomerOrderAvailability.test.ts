@@ -145,6 +145,26 @@ const installMocks = (restaurant: Record<string, unknown> | null) => {
       };
     }
 
+    // Task 17 (G1): placement now resolves promos. With no code supplied and no
+    // automatic offers seeded, PromoCode reads empty and no discount applies —
+    // these availability tests place orders without a code, so this is a no-op.
+    if (table === 'PromoCode' || table === 'PromoRedemption') {
+      // deno-lint-ignore no-explicit-any
+      const builder: any = {
+        select: () => builder,
+        eq: () => builder,
+        or: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        returns: () => builder,
+        maybeSingle: async () => ({ data: null, error: null }),
+        single: async () => ({ data: null, error: null }),
+        then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
+          Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      return builder;
+    }
+
     throw new Error(`placeCustomerOrderAvailability.test.ts: unexpected table "${table}"`);
   };
 

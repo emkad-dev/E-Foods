@@ -3,7 +3,9 @@ import {
   calculateOrderPricing,
   parsePricingConfig,
   roundCurrency,
+  settlementBalanceResidual,
   toDisplayPrice,
+  type ResolvedDiscount,
 } from './pricing.ts';
 
 const expectEqual = (actual: unknown, expected: unknown, label: string) => {
@@ -107,4 +109,129 @@ Deno.test('calculateOrderPricing clamps negative delivery fee and tip to 0', () 
   expectEqual(pricing.deliveryFee, 0, 'deliveryFee clamped');
   expectEqual(pricing.tip, 0, 'tip clamped');
   expectEqual(pricing.total, 1300, 'total');
+});
+
+// ===========================================================================
+// Task 17 (G1): the discount + settlement split. Reference basket throughout:
+//   2 × (base 5000 → display 6100)  ⇒ subtotal 12200, restaurantBasis 10000,
+//   markup/platformFeeBase 2200, restaurantPayableBase 10000, delivery 800.
+//   Base (no discount): netSettlement 10800, platformFee 2200, total 13000.
+// The enforced invariant, to the kobo, for EVERY case:
+//   netSettlement + platformFee + tip === total   (settlementBalanceResidual 0)
+// ===========================================================================
+
+const REF_ITEMS = [{ basePrice: 5000, price: 6100, quantity: 2 }];
+const REF_DELIVERY = 800;
+
+const priceWith = (discount: ResolvedDiscount | null, tip = 0) =>
+  calculateOrderPricing({ config: DEFAULT_PRICING_CONFIG, deliveryFee: REF_DELIVERY, discount, items: REF_ITEMS, tip });
+
+const expectBalanced = (pricing: ReturnType<typeof calculateOrderPricing>, label: string) =>
+  expectEqual(settlementBalanceResidual(pricing), 0, `${label}: settlement balances to the kobo`);
+
+Deno.test('discount: no discount leaves the settlement identical and balanced', () => {
+  const pricing = priceWith(null);
+  expectEqual(pricing.discount, 0, 'discount 0');
+  expectEqual(pricing.netSettlement, 10800, 'netSettlement unchanged');
+  expectEqual(pricing.platformFee, 2200, 'platformFee unchanged');
+  expectEqual(pricing.total, 13000, 'total unchanged');
+  expectBalanced(pricing, 'no discount');
+});
+
+Deno.test('discount: PLATFORM-funded percent leaves netSettlement whole and comes off platformFee', () => {
+  const pricing = priceWith({ type: 'percent', value: 10, fundingSource: 'platform' });
+  expectEqual(pricing.discount, 1220, '10% of 12200');
+  expectEqual(pricing.netSettlement, 10800, 'restaurant + delivery UNCHANGED (platform absorbs)');
+  expectEqual(pricing.platformFee, 980, 'platformFee reduced by the discount');
+  expectEqual(pricing.total, 11780, 'total = 13000 − 1220');
+  expectBalanced(pricing, 'platform percent');
+});
+
+Deno.test('discount: RESTAURANT-funded percent reduces netSettlement and leaves platformFee whole', () => {
+  const pricing = priceWith({ type: 'percent', value: 10, fundingSource: 'restaurant' });
+  expectEqual(pricing.discount, 1220, '10% of 12200');
+  expectEqual(pricing.restaurantPayable, 8780, 'restaurant dish payable reduced by the discount');
+  expectEqual(pricing.netSettlement, 9580, 'netSettlement reduced (8780 + 800 delivery)');
+  expectEqual(pricing.platformFee, 2200, 'platform take UNCHANGED');
+  expectEqual(pricing.total, 11780, 'total = 13000 − 1220');
+  expectBalanced(pricing, 'restaurant percent');
+});
+
+Deno.test('discount: a fixed discount never exceeds the subtotal, and a platform-funded one never drives platformFee net-negative', () => {
+  // Fixed 20000 ≫ subtotal 12200 AND ≫ platform take 2200. Clamped to the
+  // platform's take so the platform floors at 0 and the restaurant is paid full.
+  const pricing = priceWith({ type: 'fixed', value: 20000, fundingSource: 'platform' });
+  expectEqual(pricing.discount, 2200, 'clamped to the platform take (never > subtotal, never net-negative)');
+  if (pricing.discount > pricing.subtotal) {
+    throw new Error('discount must never exceed subtotal');
+  }
+  expectEqual(pricing.platformFee, 0, 'platformFee floors at 0');
+  expectEqual(pricing.netSettlement, 10800, 'restaurant paid in full');
+  expectEqual(pricing.total, 10800, 'total = 13000 − 2200');
+  expectBalanced(pricing, 'over-sized platform fixed');
+});
+
+Deno.test('discount: a RESTAURANT-funded discount is capped at the restaurant\'s own payable', () => {
+  // Fixed 15000 clamps at subtotal (12200) then at the restaurant payable (10000).
+  const pricing = priceWith({ type: 'fixed', value: 15000, fundingSource: 'restaurant' });
+  expectEqual(pricing.discount, 10000, 'capped at the restaurant payable');
+  if (pricing.discount > pricing.subtotal) {
+    throw new Error('discount must never exceed subtotal');
+  }
+  expectEqual(pricing.restaurantPayable, 0, 'restaurant dish payable floors at 0');
+  expectEqual(pricing.netSettlement, 800, 'only the delivery fee remains');
+  expectEqual(pricing.platformFee, 2200, 'platform take UNCHANGED');
+  expectEqual(pricing.total, 3000, 'total = 13000 − 10000');
+  expectBalanced(pricing, 'over-sized restaurant fixed');
+});
+
+Deno.test('discount: a moderate fixed restaurant-funded discount reduces only the dish payable', () => {
+  const pricing = priceWith({ type: 'fixed', value: 5000, fundingSource: 'restaurant' });
+  expectEqual(pricing.discount, 5000, 'applied in full (within payable)');
+  expectEqual(pricing.restaurantPayable, 5000, 'dish payable reduced by 5000');
+  expectEqual(pricing.netSettlement, 5800, '5000 + 800 delivery');
+  expectEqual(pricing.platformFee, 2200, 'platform take UNCHANGED');
+  expectEqual(pricing.total, 8000, 'total = 13000 − 5000');
+  expectBalanced(pricing, 'restaurant fixed');
+});
+
+Deno.test('discount: PLATFORM-funded free_delivery caps at the delivery fee and the restaurant keeps its dispatch fee', () => {
+  const pricing = priceWith({ type: 'free_delivery', value: 0, fundingSource: 'platform' });
+  expectEqual(pricing.discount, 800, 'waives exactly the delivery fee');
+  expectEqual(pricing.netSettlement, 10800, 'restaurant keeps dish payable AND delivery (platform absorbs)');
+  expectEqual(pricing.platformFee, 1400, 'platformFee reduced by the delivery fee');
+  expectEqual(pricing.total, 12200, 'total = 13000 − 800');
+  expectBalanced(pricing, 'platform free delivery');
+});
+
+Deno.test('discount: RESTAURANT-funded free_delivery comes off the dispatch fee, platform take whole', () => {
+  const pricing = priceWith({ type: 'free_delivery', value: 0, fundingSource: 'restaurant' });
+  expectEqual(pricing.discount, 800, 'waives exactly the delivery fee');
+  expectEqual(pricing.restaurantPayable, 10000, 'dish payable UNCHANGED (only delivery is waived)');
+  expectEqual(pricing.netSettlement, 10000, 'delivery portion removed from netSettlement');
+  expectEqual(pricing.settlement.dispatchFee, 0, 'the net dispatch fee the restaurant receives is 0');
+  expectEqual(pricing.platformFee, 2200, 'platform take UNCHANGED');
+  expectEqual(pricing.total, 12200, 'total = 13000 − 800');
+  expectBalanced(pricing, 'restaurant free delivery');
+});
+
+Deno.test('discount: a free_delivery discount never exceeds the delivery fee even with a large value', () => {
+  const pricing = priceWith({ type: 'free_delivery', value: 5000, fundingSource: 'platform' });
+  expectEqual(pricing.discount, 800, 'capped at the 800 delivery fee, not 5000');
+  expectBalanced(pricing, 'free delivery cap');
+});
+
+Deno.test('discount: total floors at 0 and stays balanced when the discount would exceed everything', () => {
+  // Small basket so the funder cap is tiny; verify no negative total and balance.
+  const pricing = calculateOrderPricing({
+    config: DEFAULT_PRICING_CONFIG,
+    deliveryFee: 0,
+    discount: { type: 'percent', value: 100, fundingSource: 'restaurant' },
+    items: [{ basePrice: 1000, price: 1300, quantity: 1 }],
+    tip: 0,
+  });
+  if (pricing.total < 0) {
+    throw new Error('total must never be negative');
+  }
+  expectBalanced(pricing, 'floored total');
 });

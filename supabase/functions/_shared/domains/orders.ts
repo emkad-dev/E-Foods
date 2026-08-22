@@ -52,7 +52,16 @@ import {
   verifyPaystackTransaction,
 } from '../paystack.ts';
 import { loadDispatchTrackingConfig, loadPricingConfig } from '../platformSettings.ts';
-import { calculateOrderPricing, toDisplayPrice, type PricingConfig } from '../pricing.ts';
+import { calculateOrderPricing, toDisplayPrice, type PricingConfig, type ResolvedDiscount } from '../pricing.ts';
+import {
+  PROMO_CODE_COLUMNS,
+  normalizePromoCode,
+  promoRedemptionMessage,
+  promoRejectionMessage,
+  validatePromoCodeForBasket,
+  type PromoCodeRow,
+  type PromoRejectionReason,
+} from '../promoCodes.ts';
 import { broadcastOrderChanged, broadcastSupportInboxChanged, broadcastSupportThreadChanged } from '../realtime.ts';
 import { loadRestaurantById, type RestaurantRecordRow } from '../restaurants.ts';
 import { RIDER_ACTIVE_DELIVERY_STATUSES } from '../riderPositionBroadcast.ts';
@@ -307,6 +316,174 @@ const buildInitialPaymentSummary = ({
   };
 };
 
+// ── Promo-code data access (service-role only; see promoCodes.ts for the
+//    pure eligibility logic and 20260821_promo_codes.sql for the atomic caps) ──
+
+const loadPromoCodeByCode = async (code: string): Promise<PromoCodeRow | null> => {
+  const { data, error } = await serviceClient
+    .from('PromoCode')
+    .select(PROMO_CODE_COLUMNS)
+    .eq('code', code)
+    .maybeSingle<PromoCodeRow>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? null;
+};
+
+const loadAutomaticPromoCodes = async (restaurantId: string): Promise<PromoCodeRow[]> => {
+  const { data, error } = await serviceClient
+    .from('PromoCode')
+    .select(PROMO_CODE_COLUMNS)
+    .eq('isAutomatic', true)
+    .eq('isActive', true)
+    // Platform-wide (restaurantId null) or scoped to THIS restaurant.
+    .or(`restaurantId.is.null,restaurantId.eq.${restaurantId}`)
+    .returns<PromoCodeRow[]>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+};
+
+const redeemPromoCode = async ({
+  promoCodeId,
+  userId,
+  orderId,
+  discountAmount,
+}: {
+  discountAmount: number;
+  orderId: string;
+  promoCodeId: string;
+  userId: string;
+}): Promise<{ reason: string; redeemed: boolean }> => {
+  const { data, error } = await serviceClient.rpc('ebuy_redeem_promo_code', {
+    p_promo_code_id: promoCodeId,
+    p_user_id: userId,
+    p_order_id: orderId,
+    p_discount_amount: discountAmount,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as { reason?: string; redeemed?: boolean } | undefined;
+  return { reason: sanitizeText(row?.reason, 'unavailable'), redeemed: row?.redeemed === true };
+};
+
+// Best-effort: releasing a redemption for an order that never landed must never
+// itself fail the surrounding error path. Logged, not thrown.
+const releasePromoRedemption = async (orderId: string): Promise<void> => {
+  try {
+    const { error } = await serviceClient.rpc('ebuy_release_promo_redemption', { p_order_id: orderId });
+    if (error) {
+      throw new Error(error.message);
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'promo redemption release failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+};
+
+type ResolvedBasketPromo = { code: string; discount: ResolvedDiscount; promoCodeId: string };
+
+// Redeems the resolved promo ATOMICALLY (usage caps enforced in SQL) once the
+// order id exists but BEFORE the order row is written. A cap-busted redemption
+// is a hard 409, so an order is never created with a discount whose cap was
+// already exhausted. A no-op when nothing applies.
+const redeemResolvedPromoOrFail = async (
+  resolvedPromo: ResolvedBasketPromo | null | undefined,
+  userId: string,
+  orderId: string,
+  discountAmount: number
+) => {
+  if (!resolvedPromo || discountAmount <= 0) {
+    return;
+  }
+  const outcome = await redeemPromoCode({
+    promoCodeId: resolvedPromo.promoCodeId,
+    userId,
+    orderId,
+    discountAmount,
+  });
+  if (!outcome.redeemed) {
+    fail(409, promoRedemptionMessage(outcome.reason));
+  }
+};
+
+// Resolves which discount applies to a basket, WITHOUT enforcing usage caps
+// (those are atomic at redemption). A manually-entered code wins if present and
+// valid; otherwise the best-value eligible AUTOMATIC offer applies (a code with
+// isAutomatic=true auto-applies when the basket qualifies and the customer
+// typed nothing). Returns the resolved promo, a structured rejection for a bad
+// manual code, or null when nothing applies.
+const resolveBasketPromo = async ({
+  config,
+  deliveryFee,
+  items,
+  now,
+  rawCode,
+  restaurantBasis,
+  restaurantId,
+  tip,
+}: {
+  config: PricingConfig;
+  deliveryFee: number;
+  items: Array<{ basePrice: number; price: number; quantity: number }>;
+  now: Date;
+  rawCode: unknown;
+  restaurantBasis: number;
+  restaurantId: string;
+  tip: number;
+}): Promise<
+  { rejected: { minBasket?: number; reason: PromoRejectionReason } } | { resolved: ResolvedBasketPromo | null }
+> => {
+  const code = normalizePromoCode(rawCode);
+
+  // Amount a candidate discount actually yields once pricing.ts clamps it —
+  // used to (a) drop 0-value candidates and (b) rank automatic offers.
+  const discountAmountFor = (discount: ResolvedDiscount) =>
+    calculateOrderPricing({ config, deliveryFee, discount, items, tip }).discount;
+
+  if (code) {
+    const promoCode = await loadPromoCodeByCode(code);
+    const result = validatePromoCodeForBasket({ promoCode, restaurantId, restaurantBasis, now });
+    if (!result.ok) {
+      return { rejected: { minBasket: result.minBasket, reason: result.reason } };
+    }
+    // A valid code that clamps to a 0 discount for this basket is treated as
+    // "nothing to apply" rather than a redemption consuming a cap slot for free.
+    if (discountAmountFor(result.discount) <= 0) {
+      return { resolved: null };
+    }
+    return { resolved: { code: promoCode!.code, discount: result.discount, promoCodeId: promoCode!.id } };
+  }
+
+  const automatic = await loadAutomaticPromoCodes(restaurantId);
+  let best: ResolvedBasketPromo | null = null;
+  let bestAmount = 0;
+  for (const promoCode of automatic) {
+    const result = validatePromoCodeForBasket({ promoCode, restaurantId, restaurantBasis, now });
+    if (!result.ok) {
+      continue;
+    }
+    const amount = discountAmountFor(result.discount);
+    if (amount > bestAmount) {
+      bestAmount = amount;
+      best = { code: promoCode.code, discount: result.discount, promoCodeId: promoCode.id };
+    }
+  }
+
+  return { resolved: best };
+};
+
 const prepareCustomerOrderDraft = async (
   requestData: Record<string, unknown>,
   allowedPaymentMethods: readonly string[]
@@ -406,9 +583,32 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This restaurant does not deliver to your selected location yet.');
   }
 
+  // Promo resolution is server-side and stale-client-proof: the client's
+  // computed discount is never trusted — we re-load the code, re-check the
+  // window/scope/min-basket here, and re-derive the discount in pricing.ts. A
+  // bad manual code is a hard 412; caps are NOT checked here (they are enforced
+  // atomically at redemption in the handler).
+  const promoResolution = await resolveBasketPromo({
+    config: pricingConfig,
+    deliveryFee,
+    items,
+    now,
+    rawCode: requestData.promoCode,
+    restaurantBasis,
+    restaurantId,
+    tip: tipAmount,
+  });
+
+  if ('rejected' in promoResolution) {
+    fail(412, promoRejectionMessage(promoResolution.rejected));
+  }
+
+  const resolvedPromo = 'resolved' in promoResolution ? promoResolution.resolved : null;
+
   const pricing = calculateOrderPricing({
     config: pricingConfig,
     deliveryFee,
+    discount: resolvedPromo?.discount ?? null,
     items,
     tip: tipAmount,
   });
@@ -420,6 +620,9 @@ const prepareCustomerOrderDraft = async (
     items,
     paymentMethod,
     pricing,
+    // Present only when a discount actually applies (pricing.discount > 0); the
+    // handler redeems it atomically once the order id exists.
+    resolvedPromo: resolvedPromo && pricing.discount > 0 ? resolvedPromo : null,
     restaurant,
     restaurantId,
   };
@@ -930,22 +1133,34 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
   }
 
   const orderId = crypto.randomUUID();
+  // Redeem BEFORE the order row lands: a cap-busted code fails here (409) and
+  // no order is created; and if order creation then throws, the redemption is
+  // released so a failed placement never consumes a cap slot.
+  await redeemResolvedPromoOrFail(orderDraft.resolvedPromo, context.uid, orderId, orderDraft.pricing.discount);
   const payment = buildInitialPaymentSummary({
     paymentMethod: orderDraft.paymentMethod,
     settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
   });
 
-  const orderCreation = await createOrderWithItems({
-    customerId: context.uid,
-    deliveryLocation: orderDraft.deliveryLocation,
-    fulfillmentType: orderDraft.fulfillmentType,
-    items: orderDraft.items,
-    orderId,
-    payment,
-    pricing: orderDraft.pricing,
-    restaurantId: orderDraft.restaurantId,
-    restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
-  });
+  let orderCreation: { createdAt: string; timeline: { placedAt: string } };
+  try {
+    orderCreation = await createOrderWithItems({
+      customerId: context.uid,
+      deliveryLocation: orderDraft.deliveryLocation,
+      fulfillmentType: orderDraft.fulfillmentType,
+      items: orderDraft.items,
+      orderId,
+      payment,
+      pricing: orderDraft.pricing,
+      restaurantId: orderDraft.restaurantId,
+      restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
+    });
+  } catch (error) {
+    if (orderDraft.resolvedPromo) {
+      await releasePromoRedemption(orderId);
+    }
+    throw error;
+  }
 
   await insertDeliveryEvent({
     orderId,
@@ -1032,18 +1247,31 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
     settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
   });
 
-  const orderCreation = await createOrderWithItems({
-    attributedPromoId,
-    customerId: context.uid,
-    deliveryLocation: orderDraft.deliveryLocation,
-    fulfillmentType: orderDraft.fulfillmentType,
-    items: orderDraft.items,
-    orderId,
-    payment: initialPayment,
-    pricing: orderDraft.pricing,
-    restaurantId: orderDraft.restaurantId,
-    restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
-  });
+  // Same discipline as the cash path: redeem atomically before the order lands,
+  // release on any failure that leaves no live order (creation error below, or
+  // the payment-initialization cancel path further down).
+  await redeemResolvedPromoOrFail(orderDraft.resolvedPromo, context.uid, orderId, orderDraft.pricing.discount);
+
+  let orderCreation: { createdAt: string; timeline: { placedAt: string } };
+  try {
+    orderCreation = await createOrderWithItems({
+      attributedPromoId,
+      customerId: context.uid,
+      deliveryLocation: orderDraft.deliveryLocation,
+      fulfillmentType: orderDraft.fulfillmentType,
+      items: orderDraft.items,
+      orderId,
+      payment: initialPayment,
+      pricing: orderDraft.pricing,
+      restaurantId: orderDraft.restaurantId,
+      restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
+    });
+  } catch (error) {
+    if (orderDraft.resolvedPromo) {
+      await releasePromoRedemption(orderId);
+    }
+    throw error;
+  }
 
   await upsertPaymentTransaction({
     orderId,
@@ -1172,6 +1400,12 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       lastError: paymentError instanceof Error ? paymentError.message : String(paymentError),
       failedAt: nowIso(),
     });
+
+    // The order is now cancelled, so its promo redemption must not keep holding
+    // a cap slot — release it (best-effort; a failed release only over-counts).
+    if (orderDraft.resolvedPromo) {
+      await releasePromoRedemption(orderId);
+    }
 
     throw paymentError;
   }
@@ -1535,6 +1769,121 @@ const customerSubmitOrderRating: Handler = async ({ context, data }) => {
   });
 };
 
+// Cart preview for the discount engine. ADVISORY ONLY: it re-runs the exact
+// server-side validation (window/scope/min-basket) and the exact pricing.ts
+// discount math the placement path will run, so the number shown matches what
+// will be charged — but it does NOT redeem, does NOT create an order, and does
+// NOT consume a usage cap. Placement re-validates and redeems atomically; a
+// code that previews fine can still be refused at placement if its cap fills
+// in between, which is correct.
+const customerValidatePromoCode: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['customer']);
+
+  const restaurantId = sanitizeText(data.restaurantId);
+  if (!restaurantId) {
+    fail(400, 'A restaurant is required to check a promo code.');
+  }
+
+  const fulfillmentType = sanitizeText(data.fulfillmentType, 'delivery');
+  const { restaurant } = await loadRestaurantById(restaurantId);
+  if (!restaurant) {
+    fail(404, 'The selected restaurant no longer exists.');
+  }
+  // `fail` throws, but deno check does not narrow `restaurant` past it (the
+  // same tracked fail()-then-use gap this file documents elsewhere); bind a
+  // non-null local so the promo preview adds no new baseline errors.
+  const activeRestaurant = restaurant as RestaurantRecordRow;
+
+  const now = new Date();
+  const pricingConfig = await loadPricingConfig();
+  const items = buildOrderItems(data.items, restaurantId, activeRestaurant, pricingConfig, now);
+  const restaurantBasis = items.reduce(
+    (sum: number, item: { basePrice: number; quantity: number }) => sum + item.basePrice * item.quantity,
+    0
+  );
+  const deliveryFee = fulfillmentType === 'delivery' ? parseNumber(activeRestaurant.deliveryFee, 0) : 0;
+  const tip = roundCurrency(parseNumber(data.tipAmount, 0));
+
+  const code = normalizePromoCode(data.promoCode);
+  const resolution = await resolveBasketPromo({
+    config: pricingConfig,
+    deliveryFee,
+    items,
+    now,
+    rawCode: data.promoCode,
+    restaurantBasis,
+    restaurantId,
+    tip,
+  });
+
+  // A manually-entered code that failed validation: surface a client-safe
+  // reason and the undiscounted totals.
+  if ('rejected' in resolution) {
+    const baseline = calculateOrderPricing({ config: pricingConfig, deliveryFee, items, tip });
+    return json(200, {
+      data: {
+        applied: null,
+        automaticOffers: [],
+        code: code || null,
+        discount: 0,
+        message: promoRejectionMessage(resolution.rejected),
+        subtotal: baseline.subtotal,
+        total: baseline.total,
+        valid: false,
+      },
+    });
+  }
+
+  const resolved = resolution.resolved;
+  const pricing = calculateOrderPricing({
+    config: pricingConfig,
+    deliveryFee,
+    discount: resolved?.discount ?? null,
+    items,
+    tip,
+  });
+
+  // Eligible automatic offers for display, each with its previewed discount.
+  const automatic = await loadAutomaticPromoCodes(restaurantId);
+  const automaticOffers = automatic
+    .map((promoCode) => {
+      const result = validatePromoCodeForBasket({ promoCode, restaurantId, restaurantBasis, now });
+      if (!result.ok) {
+        return null;
+      }
+      const preview = calculateOrderPricing({
+        config: pricingConfig,
+        deliveryFee,
+        discount: result.discount,
+        items,
+        tip,
+      });
+      if (preview.discount <= 0) {
+        return null;
+      }
+      return { code: promoCode.code, discount: preview.discount, type: promoCode.type };
+    })
+    .filter((offer): offer is { code: string; discount: number; type: string } => offer !== null);
+
+  return json(200, {
+    data: {
+      applied: resolved
+        ? { code: resolved.code, fundingSource: resolved.discount.fundingSource, type: resolved.discount.type }
+        : null,
+      automaticOffers,
+      code: code || null,
+      discount: pricing.discount,
+      deliveryFee: pricing.deliveryFee,
+      // A manual code that validated but yields no discount for this basket.
+      message: code && !resolved ? 'This code gives no discount on your current basket.' : null,
+      subtotal: pricing.subtotal,
+      tip: pricing.tip,
+      total: pricing.total,
+      valid: pricing.discount > 0,
+    },
+  });
+};
+
 const customerGetSupportThread: Handler = async ({ context }) => {
   const { data: conversation, error: convError } = await serviceClient
     .from('SupportConversation')
@@ -1573,6 +1922,7 @@ export const ordersDomain = defineRpcDomain<AuthenticatedRequestContext>({
     customerSendSupportMessage,
     customerSubmitOrderRating,
     customerToggleFavoriteRestaurant,
+    customerValidatePromoCode,
     initializeCustomerPayment,
     placeCustomerOrder,
     refreshCustomerPaymentStatus,

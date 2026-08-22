@@ -19,6 +19,8 @@ import {
 } from '../../src/domain/orders';
 import {
   initializeCustomerPayment,
+  validateCustomerPromoCode,
+  type PromoCodePreview,
 } from '../../src/services/customerOrderActions';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 import { getRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
@@ -57,6 +59,11 @@ export default function CartScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [tipAmount, setTipAmount] = useState<number>(DEFAULT_TIP_AMOUNT);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<PromoCodePreview | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
+  const [promoMessage, setPromoMessage] = useState<string | null>(null);
+  const [autoOffers, setAutoOffers] = useState<PromoCodePreview['automaticOffers']>([]);
   const router = useRouter();
   const isMountedRef = useRef(true);
   const isCheckoutScreenFocusedRef = useRef(false);
@@ -67,6 +74,9 @@ export default function CartScreen() {
     subtotal: total,
     tip: safeTipAmount,
   });
+  // Advisory promo preview: the server re-validates and redeems at placement.
+  const promoDiscount = appliedPromo?.valid ? appliedPromo.discount : 0;
+  const effectiveTotal = promoDiscount > 0 ? Math.max(pricingPreview.total - promoDiscount, 0) : pricingPreview.total;
   const minOrder = restaurant?.minOrder ?? 0;
   const belowMinimum = total > 0 && total < minOrder;
   // Delivery is offered only when the restaurant self-provisions it (opt-in).
@@ -118,6 +128,62 @@ export default function CartScreen() {
       setCheckoutError(null);
     }
   }, [user]);
+
+  // A previewed discount is only valid for the exact basket it was computed on —
+  // clear it whenever the basket, tip, or fulfillment changes so a stale number
+  // is never shown or sent. (Placement re-validates regardless.)
+  useEffect(() => {
+    setAppliedPromo(null);
+    setPromoMessage(null);
+  }, [total, safeTipAmount, fulfillmentType, restaurantId]);
+
+  // Surface eligible automatic offers (no code entry) for the current basket.
+  useEffect(() => {
+    if (!user || !restaurantId || items.length === 0) {
+      setAutoOffers([]);
+      return;
+    }
+    let cancelled = false;
+    validateCustomerPromoCode({ fulfillmentType, items, restaurantId, tipAmount: safeTipAmount })
+      .then((preview) => {
+        if (!cancelled) {
+          setAutoOffers(preview.automaticOffers ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAutoOffers([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, restaurantId, items, fulfillmentType, safeTipAmount]);
+
+  const handleApplyPromo = useCallback(async () => {
+    const code = promoCodeInput.trim();
+    if (!code || !restaurantId) {
+      return;
+    }
+    setPromoChecking(true);
+    setPromoMessage(null);
+    try {
+      const preview = await validateCustomerPromoCode({
+        fulfillmentType,
+        items,
+        promoCode: code,
+        restaurantId,
+        tipAmount: safeTipAmount,
+      });
+      setAppliedPromo(preview);
+      setPromoMessage(preview.valid ? null : preview.message ?? 'This promo code is not valid.');
+    } catch {
+      setAppliedPromo(null);
+      setPromoMessage('Could not check that code. Please try again.');
+    } finally {
+      setPromoChecking(false);
+    }
+  }, [promoCodeInput, fulfillmentType, items, restaurantId, safeTipAmount]);
 
   useEffect(() => {
     return () => {
@@ -274,6 +340,9 @@ export default function CartScreen() {
         fulfillmentType,
         items,
         paymentMethod,
+        // The code travels on the placement request; the server re-validates and
+        // redeems it. A previewed but unapplied code is not sent.
+        promoCode: appliedPromo?.valid ? appliedPromo.code : promoCodeInput.trim() || null,
         restaurantId,
         tipAmount: safeTipAmount,
       };
@@ -558,9 +627,43 @@ export default function CartScreen() {
                 <Text style={styles.summaryDetailLabel}>Tip</Text>
                 <Text style={styles.summaryDetailValue}>{formatMoney(pricingPreview.tip)}</Text>
               </View>
+
+              <View style={styles.promoRow}>
+                <TextInput
+                  style={styles.promoInput}
+                  placeholder="Promo code"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  value={promoCodeInput}
+                  onChangeText={setPromoCodeInput}
+                  editable={!promoChecking}
+                />
+                <TouchableOpacity
+                  style={[styles.promoApplyButton, promoChecking || !promoCodeInput.trim() ? styles.promoApplyDisabled : null]}
+                  onPress={handleApplyPromo}
+                  disabled={promoChecking || !promoCodeInput.trim()}
+                >
+                  <Text style={styles.promoApplyText}>{promoChecking ? '...' : 'Apply'}</Text>
+                </TouchableOpacity>
+              </View>
+              {promoMessage ? <Text style={styles.promoError}>{promoMessage}</Text> : null}
+              {autoOffers.length > 0 && !(appliedPromo?.valid) ? (
+                <Text style={styles.promoAuto}>
+                  Offer applied automatically: {formatMoney(autoOffers[0].discount)} off
+                </Text>
+              ) : null}
+              {promoDiscount > 0 ? (
+                <View style={styles.summarySplit}>
+                  <Text style={styles.summaryDetailLabel}>
+                    Discount{appliedPromo?.applied?.code ? ` (${appliedPromo.applied.code})` : ''}
+                  </Text>
+                  <Text style={styles.summaryDiscountValue}>-{formatMoney(promoDiscount)}</Text>
+                </View>
+              ) : null}
+
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Order total</Text>
-                <Text style={styles.summaryValue}>{formatMoney(pricingPreview.total)}</Text>
+                <Text style={styles.summaryValue}>{formatMoney(effectiveTotal)}</Text>
               </View>
               <TouchableOpacity
                 style={[
@@ -954,6 +1057,54 @@ const styles = StyleSheet.create({
   summaryDetailLabel: {
     color: customerTheme.textMuted,
     fontSize: 13,
+  },
+  promoRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  promoInput: {
+    backgroundColor: '#fff',
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    borderWidth: 1,
+    color: customerTheme.text,
+    flex: 1,
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  promoApplyButton: {
+    backgroundColor: customerTheme.accentStrong,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+  },
+  promoApplyDisabled: {
+    opacity: 0.5,
+  },
+  promoApplyText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  promoError: {
+    color: '#b91c1c',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  promoAuto: {
+    color: '#047857',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  summaryDiscountValue: {
+    color: '#047857',
+    fontSize: 13,
+    fontWeight: '800',
   },
   summaryDetailValue: {
     color: customerTheme.text,

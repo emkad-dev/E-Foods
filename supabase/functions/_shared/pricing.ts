@@ -58,14 +58,47 @@ export interface PricedOrderItem {
   quantity: number;
 }
 
+export type PromoDiscountType = 'percent' | 'fixed' | 'free_delivery';
+export type PromoFundingSource = 'platform' | 'restaurant';
+
+// A discount already RESOLVED upstream (code exists, active, in-window, in
+// scope, min-basket met — all in _shared/promoCodes.ts). Everything money —
+// how large the discount actually is once clamped, and who absorbs it in the
+// settlement split — is decided HERE, in pricing.ts, and nowhere else.
+export interface ResolvedDiscount {
+  fundingSource: PromoFundingSource;
+  type: PromoDiscountType;
+  value: number;
+}
+
+// The raw discount a code asks for, BEFORE any clamp. Kept separate from the
+// clamps below so the intent is legible: percent → % of the marked-up subtotal;
+// fixed → a flat naira amount; free_delivery → the delivery fee (or a capped
+// portion of it when `value` is set).
+const rawDiscountAmount = (discount: ResolvedDiscount, subtotal: number, deliveryFee: number) => {
+  if (discount.type === 'percent') {
+    return roundCurrency((subtotal * Math.max(discount.value, 0)) / 100);
+  }
+  if (discount.type === 'fixed') {
+    return roundCurrency(Math.max(discount.value, 0));
+  }
+  // free_delivery: value 0/absent means "waive the whole fee"; a positive value
+  // caps the waiver.
+  return discount.value > 0 ? roundCurrency(Math.min(discount.value, deliveryFee)) : deliveryFee;
+};
+
 export const calculateOrderPricing = ({
   config,
   deliveryFee,
+  discount,
   items,
   tip,
 }: {
   config: PricingConfig;
   deliveryFee: number;
+  // Optional so every existing caller (no promo) keeps its exact behaviour:
+  // absent ⇒ discount 0 and the settlement is untouched.
+  discount?: ResolvedDiscount | null;
   items: PricedOrderItem[];
   tip: number;
 }) => {
@@ -75,15 +108,68 @@ export const calculateOrderPricing = ({
   const safeTip = roundCurrency(Math.max(tip, 0));
   const totalMarkup = roundCurrency(Math.max(subtotal - restaurantBasis, 0));
   const partnerServiceFee = roundCurrency(restaurantBasis * config.partnerServiceRate);
-  const restaurantPayable = roundCurrency(Math.max(restaurantBasis - partnerServiceFee, 0));
-  const platformFee = roundCurrency(totalMarkup + partnerServiceFee);
-  const netSettlement = roundCurrency(restaurantPayable + safeDeliveryFee);
-  const total = roundCurrency(subtotal + safeDeliveryFee + safeTip);
+  const restaurantPayableBase = roundCurrency(Math.max(restaurantBasis - partnerServiceFee, 0));
+  const platformFeeBase = roundCurrency(totalMarkup + partnerServiceFee);
+
+  // ── The discount amount, clamped in two stages ──────────────────────────
+  //   1. base cap: a percent/fixed discount NEVER exceeds the subtotal; a
+  //      free_delivery discount NEVER exceeds the delivery fee.
+  //   2. funder-capacity cap: the funder never goes net-negative. A
+  //      platform-funded discount is capped at the platform's take
+  //      (markup + partner service fee); a restaurant-funded one at the
+  //      restaurant's own payable (or, for free_delivery, at the delivery fee
+  //      it nets). The customer-visible discount is the clamped figure, so a
+  //      mis-sized code silently shrinks rather than paying money nobody has.
+  let discountAmount = 0;
+  const fundingSource: PromoFundingSource | null = discount ? discount.fundingSource : null;
+
+  if (discount) {
+    const raw = rawDiscountAmount(discount, subtotal, safeDeliveryFee);
+    const baseCap = discount.type === 'free_delivery' ? safeDeliveryFee : subtotal;
+    const afterBaseCap = Math.min(Math.max(raw, 0), baseCap);
+
+    const funderCapacity =
+      discount.fundingSource === 'platform'
+        ? platformFeeBase
+        : discount.type === 'free_delivery'
+          ? safeDeliveryFee
+          : restaurantPayableBase;
+
+    discountAmount = roundCurrency(Math.max(Math.min(afterBaseCap, funderCapacity), 0));
+  }
+
+  // ── The settlement split by funding source ──────────────────────────────
+  let platformFee = platformFeeBase;
+  let restaurantPayable = restaurantPayableBase;
+  let netSettlement = roundCurrency(restaurantPayableBase + safeDeliveryFee);
+  let netDispatchFee = safeDeliveryFee;
+
+  if (discount && discountAmount > 0 && fundingSource === 'platform') {
+    // Platform absorbs it: the restaurant is paid in full, the discount comes
+    // out of the platform's margin (floored at 0 by the capacity cap above).
+    platformFee = roundCurrency(Math.max(platformFeeBase - discountAmount, 0));
+  } else if (discount && discountAmount > 0 && fundingSource === 'restaurant') {
+    if (discount.type === 'free_delivery') {
+      // Comes off the restaurant's dispatch fee; the dish payable is untouched.
+      netDispatchFee = roundCurrency(Math.max(safeDeliveryFee - discountAmount, 0));
+      netSettlement = roundCurrency(restaurantPayableBase + netDispatchFee);
+    } else {
+      // Comes off the restaurant's own dish revenue; the platform take is
+      // untouched.
+      restaurantPayable = roundCurrency(Math.max(restaurantPayableBase - discountAmount, 0));
+      netSettlement = roundCurrency(restaurantPayable + safeDeliveryFee);
+    }
+  }
+
+  // total = subtotal + delivery + tip − discount, floored at 0. The discount is
+  // a NEW line — it never alters the markup formula.
+  const total = roundCurrency(Math.max(subtotal + safeDeliveryFee + safeTip - discountAmount, 0));
 
   return {
     currency: PRICING_CURRENCY,
     deliveryFee: safeDeliveryFee,
-    discount: 0,
+    discount: discountAmount,
+    discountFundingSource: discountAmount > 0 ? fundingSource : null,
     dispatchFee: safeDeliveryFee,
     netSettlement,
     partnerServiceFee,
@@ -93,7 +179,9 @@ export const calculateOrderPricing = ({
     serviceFee: 0,
     settlement: {
       basis: 'menu_base_prices',
-      dispatchFee: safeDeliveryFee,
+      discount: discountAmount,
+      discountFundingSource: discountAmount > 0 ? fundingSource : null,
+      dispatchFee: netDispatchFee,
       markupFlat: config.markupFlat,
       markupRate: config.markupRate,
       netSettlement,
@@ -109,3 +197,17 @@ export const calculateOrderPricing = ({
     total,
   };
 };
+
+// The settlement balance identity every order must satisfy, to the kobo:
+//     netSettlement + platformFee + tip === total
+// Equivalently: (subtotal + deliveryFee + tip) − discount === the sum of what
+// is paid out. Holds for a plain order (discount 0) and for BOTH funding
+// sources, because the discount reduces `total` and the funder's own payout
+// line by the identical clamped amount. Returns the signed residual (0 when
+// balanced) so tests can assert it directly.
+export const settlementBalanceResidual = (pricing: {
+  netSettlement: number;
+  platformFee: number;
+  tip: number;
+  total: number;
+}) => roundCurrency(pricing.netSettlement + pricing.platformFee + pricing.tip - pricing.total);

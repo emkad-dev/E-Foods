@@ -67,3 +67,41 @@ Deno.test('accepts a successful Paystack transaction bound to the same order ref
     },
   });
 });
+
+// Task 17 (G1): a promo order carries a DISCOUNTED pricing.total (the discount
+// is already folded into total by _shared/pricing.ts), so the gateway must have
+// charged that discounted total to the kobo — not the pre-discount amount.
+const promoOrder = {
+  id: 'order-promo-1',
+  payment: { reference: 'FEASTY-CRD-PROMO-1' },
+  // 12200 subtotal − 1220 discount = 10980 ⇒ 1_098_000 kobo.
+  pricing: { total: 10980, discount: 1220 },
+};
+
+Deno.test('accepts a promo-discounted order when the gateway charged the discounted total to the kobo', () => {
+  validatePaystackVerificationForOrder({
+    order: promoOrder,
+    paymentReference: 'FEASTY-CRD-PROMO-1',
+    transactionData: {
+      amount: 1098000,
+      reference: 'FEASTY-CRD-PROMO-1',
+      status: 'success',
+    },
+  });
+});
+
+Deno.test('rejects a promo order where the gateway charged the PRE-discount amount (discount not honored)', () => {
+  assertThrowsMessage(
+    () =>
+      validatePaystackVerificationForOrder({
+        order: promoOrder,
+        paymentReference: 'FEASTY-CRD-PROMO-1',
+        transactionData: {
+          amount: 1220000, // 12200 pre-discount, not the 10980 discounted total
+          reference: 'FEASTY-CRD-PROMO-1',
+          status: 'success',
+        },
+      }),
+    'Amount mismatch'
+  );
+});

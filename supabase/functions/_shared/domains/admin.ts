@@ -25,6 +25,7 @@ import {
 import { createAuditEntry } from '../auditLog.ts';
 import { resolveBroadcastAudience, type BroadcastSegment } from '../broadcast.ts';
 import { serviceClient } from '../client.ts';
+import { PROMO_CODE_COLUMNS, normalizePromoCode, type PromoCodeRow } from '../promoCodes.ts';
 import {
   DEFAULT_DISPATCH_STATUS,
   DEFAULT_DISPATCH_VEHICLE,
@@ -63,7 +64,7 @@ import {
   type RestaurantRecordRow,
 } from '../restaurants.ts';
 import { ADMIN_ACTIONS } from '../rpc/actions.ts';
-import { buildNameKey, nowIso, parseNumber, sanitizeOptionalText, sanitizeText } from '../rpc/coercion.ts';
+import { buildNameKey, nowIso, parseInteger, parseNumber, roundCurrency, sanitizeOptionalText, sanitizeText } from '../rpc/coercion.ts';
 import {
   ensureRole,
   getBootstrapRequestContext,
@@ -1233,6 +1234,164 @@ const adminSetRestaurantPublished: Handler = async ({ context, data }) => {
   });
 };
 
+// ── Task 17 (G1): admin CRUD for the discount-code engine ──────────────────
+// Distinct from promoList/promoCreate/promoSetActive above (those are marketing
+// BANNERS). These manage PromoCode rows — the money-moving discount codes.
+
+const PROMO_DISCOUNT_TYPES = ['percent', 'fixed', 'free_delivery'] as const;
+const PROMO_FUNDING_SOURCES = ['platform', 'restaurant'] as const;
+
+// Optional non-negative integer cap: absent/blank ⇒ null (unlimited); a present
+// value must be a positive integer.
+const parseOptionalCap = (value: unknown): number | null => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = parseInteger(value, Number.NaN);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    fail(400, 'Usage caps must be a positive whole number, or left blank for unlimited.');
+  }
+  return parsed;
+};
+
+const parseOptionalIsoDate = (value: unknown, label: string): string | null => {
+  const raw = sanitizeOptionalText(value);
+  if (!raw) {
+    return null;
+  }
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) {
+    fail(400, `${label} must be a valid date.`);
+  }
+  return new Date(ms).toISOString();
+};
+
+const adminListPromoCodes: Handler = async ({ context }) => {
+  ensureRole(context.role, ['admin']);
+  const { data, error } = await serviceClient
+    .from('PromoCode')
+    .select(`${PROMO_CODE_COLUMNS},createdAt,updatedAt`)
+    .order('createdAt', { ascending: false })
+    .returns<PromoCodeRow[]>();
+  if (error) {
+    throw new Error(error.message);
+  }
+  return json(200, { data: { promoCodes: data ?? [] } });
+};
+
+const adminCreatePromoCode: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+
+  const code = normalizePromoCode(data.code);
+  if (!code || code.length > 40) {
+    fail(400, 'A promo code (up to 40 characters) is required.');
+  }
+
+  const type = sanitizeText(data.type);
+  if (!(PROMO_DISCOUNT_TYPES as readonly string[]).includes(type)) {
+    fail(400, 'Discount type must be percent, fixed, or free_delivery.');
+  }
+
+  const fundingSource = sanitizeText(data.fundingSource, 'platform');
+  if (!(PROMO_FUNDING_SOURCES as readonly string[]).includes(fundingSource)) {
+    fail(400, 'Funding source must be platform or restaurant.');
+  }
+
+  const value = roundCurrency(parseNumber(data.value, 0));
+  if (!Number.isFinite(value) || value < 0) {
+    fail(400, 'Discount value must be a non-negative number.');
+  }
+  if (type === 'percent' && value > 100) {
+    fail(400, 'A percent discount cannot exceed 100.');
+  }
+
+  const minBasket = roundCurrency(parseNumber(data.minBasket, 0));
+  if (!Number.isFinite(minBasket) || minBasket < 0) {
+    fail(400, 'Minimum basket must be a non-negative number.');
+  }
+
+  const perUserCap = parseOptionalCap(data.perUserCap);
+  const globalCap = parseOptionalCap(data.globalCap);
+  const startsAt = parseOptionalIsoDate(data.startsAt, 'Start date');
+  const endsAt = parseOptionalIsoDate(data.endsAt, 'End date');
+  if (startsAt && endsAt && Date.parse(endsAt) < Date.parse(startsAt)) {
+    fail(400, 'The end date must be after the start date.');
+  }
+
+  const restaurantId = sanitizeOptionalText(data.restaurantId);
+  const isAutomatic = data.isAutomatic === true;
+  const now = nowIso();
+
+  const { data: created, error } = await serviceClient
+    .from('PromoCode')
+    .insert({
+      code,
+      type,
+      value,
+      minBasket,
+      perUserCap,
+      globalCap,
+      startsAt,
+      endsAt,
+      restaurantId: restaurantId ?? null,
+      fundingSource,
+      isActive: data.isActive === false ? false : true,
+      isAutomatic,
+      createdByUid: context.uid,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .select(`${PROMO_CODE_COLUMNS},createdAt,updatedAt`)
+    .maybeSingle<PromoCodeRow>();
+
+  if (error) {
+    // 23505 = the UNIQUE(code) collision.
+    if (sanitizeText((error as { code?: string }).code) === '23505') {
+      fail(409, 'A promo code with that name already exists.');
+    }
+    throw new Error(error.message);
+  }
+
+  await createAuditEntry(context.uid, 'promo_code_created', 'promo_code', code, {
+    type,
+    fundingSource,
+    value,
+  });
+
+  return json(200, { data: { promoCode: created } });
+};
+
+const adminSetPromoCodeActive: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+  const promoCodeId = sanitizeText(data.id);
+  if (!promoCodeId) {
+    fail(400, 'A promo code id is required.');
+  }
+  if (typeof data.isActive !== 'boolean') {
+    fail(400, 'An isActive flag is required.');
+  }
+
+  const { data: updated, error } = await serviceClient
+    .from('PromoCode')
+    .update({ isActive: data.isActive, updatedAt: nowIso() })
+    .eq('id', promoCodeId)
+    .select(`${PROMO_CODE_COLUMNS},createdAt,updatedAt`)
+    .maybeSingle<PromoCodeRow>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!updated) {
+    fail(404, 'The selected promo code could not be found.');
+  }
+
+  await createAuditEntry(context.uid, data.isActive ? 'promo_code_activated' : 'promo_code_deactivated', 'promo_code', promoCodeId, {
+    isActive: data.isActive,
+  });
+
+  return json(200, { data: { promoCode: updated } });
+};
+
 export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: ADMIN_ACTIONS,
   name: 'admin',
@@ -1240,11 +1399,14 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     bootstrapFirstAdmin,
   },
   handlers: {
+    adminCreatePromoCode,
     adminGetAccessOverview,
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,
+    adminListPromoCodes,
     adminReviewDispatchApplication,
     adminReviewPartnerApplication,
+    adminSetPromoCodeActive,
     adminSetRestaurantPublished,
     broadcastCancel,
     broadcastCreate,

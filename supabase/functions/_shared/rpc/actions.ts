@@ -20,6 +20,10 @@ export const ORDER_ACTIONS = [
   'customerGetSupportThread',
   'customerSubmitOrderRating',
   'customerGetPendingRatings',
+  // Task 17 (G1): validate a promo code / preview its discount, and surface
+  // eligible automatic offers, before placing. Advisory — placement
+  // re-validates and redeems server-side.
+  'customerValidatePromoCode',
 ] as const;
 
 export const DISPATCH_ACTIONS = [
@@ -72,6 +76,11 @@ export const ADMIN_ACTIONS = [
   'promoList',
   'promoCreate',
   'promoSetActive',
+  // Task 17 (G1): admin CRUD for the NEW discount-code engine — distinct from
+  // the banner promos above (promoList/promoCreate/promoSetActive).
+  'adminListPromoCodes',
+  'adminCreatePromoCode',
+  'adminSetPromoCodeActive',
   'bootstrapFirstAdmin',
 ] as const;
 
