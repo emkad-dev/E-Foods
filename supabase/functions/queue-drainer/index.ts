@@ -5,6 +5,7 @@ import { serviceClient } from '../_shared/client.ts';
 import { sweepUnacceptedOrders } from '../_shared/acceptanceDeadlineSweep.ts';
 import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
 import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
+import { sweepScheduledOrderReleases } from '../_shared/scheduledOrderReleaseSweep.ts';
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
@@ -308,6 +309,19 @@ Deno.serve(async (request) => {
     // drain or turn a successful one into a 500.
     const riderPingRetention = queueSelection === 'all' ? await sweepExpiredDispatchRiderPings() : null;
 
+    // Scheduled-order release sweep (Task 18 / G2), on the SAME safe side of
+    // runWithBackpressure as the sweeps above, and for the identical reason:
+    // runWithBackpressure THROWS EdgeBackpressureError when it sheds, which
+    // would skip anything sequenced after it. A scheduled order must keep
+    // releasing into the kitchen queue during exactly the busy periods that
+    // cause shedding. Runs BEFORE the acceptance sweep below so a just-released
+    // order — now 'placed' with a fresh placedAt stamped at release — is seen by
+    // the acceptance sweep in the SAME run as age ~0 (not instantly overdue).
+    // Bounded (RELEASE_SWEEP_LIMIT) and never throws — see
+    // sweepScheduledOrderReleases — so it cannot meaningfully delay the drain or
+    // turn a successful one into a 500.
+    const scheduledReleaseSweep = queueSelection === 'all' ? await sweepScheduledOrderReleases() : null;
+
     // Acceptance-deadline sweep (Task 14 / E3), on the SAME safe side of
     // runWithBackpressure as the two sweeps above, and for the identical
     // reason: runWithBackpressure THROWS EdgeBackpressureError when it sheds,
@@ -341,6 +355,7 @@ Deno.serve(async (request) => {
         offerSweep,
         results,
         riderPingRetention,
+        scheduledReleaseSweep,
       },
     });
     finishEdgeObservation(observation, { status: response.status });
