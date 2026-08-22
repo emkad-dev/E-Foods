@@ -53,6 +53,11 @@ import {
   verifyPaystackTransaction,
 } from '../paystack.ts';
 import { loadDispatchTrackingConfig, loadPricingConfig } from '../platformSettings.ts';
+import {
+  validateScheduledSlot,
+  scheduledSlotRejectionMessage,
+  type RestaurantHoursRow,
+} from '../scheduledOrders.ts';
 import { calculateOrderPricing, toDisplayPrice, type PricingConfig, type ResolvedDiscount } from '../pricing.ts';
 import {
   PROMO_CODE_COLUMNS,
@@ -469,6 +474,24 @@ const resolveBasketPromo = async ({
   return { resolved: best };
 };
 
+// Service-role read of a restaurant's 7 per-day trading-hours rows (Task 18 /
+// G2). RestaurantHours is RLS-on / no-policies (service-role only), so this is
+// the only read path. Slot validation runs against these rows in
+// restaurant-local time.
+const loadRestaurantHours = async (restaurantId: string): Promise<RestaurantHoursRow[]> => {
+  const { data, error } = await serviceClient
+    .from('RestaurantHours')
+    .select('dayOfWeek,isClosed,opensAt,closesAt')
+    .eq('restaurantId', restaurantId)
+    .returns<RestaurantHoursRow[]>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+};
+
 const prepareCustomerOrderDraft = async (
   requestData: Record<string, unknown>,
   allowedPaymentMethods: readonly string[]
@@ -598,6 +621,22 @@ const prepareCustomerOrderDraft = async (
     tip: tipAmount,
   });
 
+  // Task 18 (G2): optional scheduled slot. Absent/blank → an immediate order,
+  // and the rest of the pipeline is byte-for-byte unchanged. Present → validate
+  // the slot in restaurant-local time against RestaurantHours (future, within
+  // the 7-day horizon, inside opening hours for that local day-of-week,
+  // respecting isClosed). An invalid slot is a client-safe 412.
+  const rawScheduledFor = sanitizeText(requestData.scheduledFor);
+  let scheduledFor: string | null = null;
+  if (rawScheduledFor) {
+    const hours = await loadRestaurantHours(restaurantId);
+    const slot = validateScheduledSlot({ scheduledFor: rawScheduledFor, hours, now: now.getTime() });
+    if (!slot.ok) {
+      fail(412, scheduledSlotRejectionMessage(slot.reason));
+    }
+    scheduledFor = (slot as { ok: true; scheduledForIso: string }).scheduledForIso;
+  }
+
   return {
     deliveryLocation,
     fulfillmentType,
@@ -605,6 +644,7 @@ const prepareCustomerOrderDraft = async (
     items,
     paymentMethod,
     pricing,
+    scheduledFor,
     // Present only when a discount actually applies (pricing.discount > 0); the
     // handler redeems it atomically once the order id exists.
     resolvedPromo: resolvedPromo && pricing.discount > 0 ? resolvedPromo : null,
@@ -624,6 +664,7 @@ const createOrderWithItems = async ({
   pricing,
   restaurantId,
   restaurantName,
+  scheduledFor = null,
 }: {
   attributedPromoId?: string | null;
   customerId: string;
@@ -643,18 +684,25 @@ const createOrderWithItems = async ({
   pricing: JsonObject;
   restaurantId: string;
   restaurantName: string;
+  scheduledFor?: string | null;
 }) => {
   const createdAt = nowIso();
-  const timeline = {
-    placedAt: createdAt,
-  };
+  // Task 18 (G2): a scheduled order lands in 'scheduled' (pre-kitchen) and its
+  // timeline carries scheduledAt/scheduledFor but deliberately NO placedAt —
+  // placedAt is stamped later, by the release sweep, so the acceptance-deadline
+  // clock starts at release, not at scheduling. An immediate order is unchanged:
+  // status 'placed' with timeline.placedAt = createdAt.
+  const timeline: JsonObject = scheduledFor
+    ? { scheduledAt: createdAt, scheduledFor }
+    : { placedAt: createdAt };
+  const status = scheduledFor ? ORDER_STATUS.SCHEDULED : ORDER_STATUS.PLACED;
 
   const orderInsert = {
     id: orderId,
     customerId,
     restaurantId,
     restaurantName,
-    status: ORDER_STATUS.PLACED,
+    status,
     fulfillmentType,
     pricing,
     payment,
@@ -662,6 +710,7 @@ const createOrderWithItems = async ({
     deliveryLocation,
     attributedPromoId: attributedPromoId ?? null,
     cancellation: null,
+    scheduledFor,
     timeline,
     createdAt,
     updatedAt: createdAt,
@@ -736,7 +785,9 @@ export const buildRefundUpdate = ({
 };
 
 const getCustomerCancellationRefundRate = (currentStatus: string) => {
-  if ([ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
+  // Task 18 (G2): a scheduled order cancelled before release is a FULL refund —
+  // the kitchen never engaged, so the customer did nothing wrong.
+  if ([ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
     return 1;
   }
 
@@ -1127,7 +1178,11 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
     settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
   });
 
-  let orderCreation: { createdAt: string; timeline: { placedAt: string } };
+  // Task 18 (G2): a scheduled order lands in 'scheduled', an immediate one in
+  // 'placed'. Everything else on this path is unchanged.
+  const landedStatus = orderDraft.scheduledFor ? ORDER_STATUS.SCHEDULED : ORDER_STATUS.PLACED;
+
+  let orderCreation: { createdAt: string; timeline: JsonObject };
   try {
     orderCreation = await createOrderWithItems({
       customerId: context.uid,
@@ -1139,6 +1194,7 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
       pricing: orderDraft.pricing,
       restaurantId: orderDraft.restaurantId,
       restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
+      scheduledFor: orderDraft.scheduledFor,
     });
   } catch (error) {
     if (orderDraft.resolvedPromo) {
@@ -1154,6 +1210,7 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
     details: {
       fulfillmentType: orderDraft.fulfillmentType,
       paymentMethod: orderDraft.paymentMethod,
+      scheduledFor: orderDraft.scheduledFor,
       total: orderDraft.pricing.total,
     },
   });
@@ -1161,7 +1218,8 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
   const response = {
     orderId,
     paymentStatus: sanitizeText(payment.status, PAYMENT_STATUS.PENDING),
-    status: ORDER_STATUS.PLACED,
+    scheduledFor: orderDraft.scheduledFor,
+    status: landedStatus,
     total: orderDraft.pricing.total,
   };
 
@@ -1237,7 +1295,11 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
   // the payment-initialization cancel path further down).
   await redeemResolvedPromoOrFail(orderDraft.resolvedPromo, context.uid, orderId, orderDraft.pricing.discount);
 
-  let orderCreation: { createdAt: string; timeline: { placedAt: string } };
+  // Task 18 (G2): payment is captured at placement exactly as for an immediate
+  // order — the only difference is where the order lands (scheduled vs placed).
+  const landedStatus = orderDraft.scheduledFor ? ORDER_STATUS.SCHEDULED : ORDER_STATUS.PLACED;
+
+  let orderCreation: { createdAt: string; timeline: JsonObject };
   try {
     orderCreation = await createOrderWithItems({
       attributedPromoId,
@@ -1250,6 +1312,7 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       pricing: orderDraft.pricing,
       restaurantId: orderDraft.restaurantId,
       restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
+      scheduledFor: orderDraft.scheduledFor,
     });
   } catch (error) {
     if (orderDraft.resolvedPromo) {
@@ -1333,7 +1396,8 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       paymentStatus: PAYMENT_STATUS.PENDING,
       publicKeyPresent: Boolean(getPaystackPublicKey()),
       reference: paymentReference,
-      status: ORDER_STATUS.PLACED,
+      scheduledFor: orderDraft.scheduledFor,
+      status: landedStatus,
       total: orderDraft.pricing.total,
     };
 
@@ -1451,8 +1515,9 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   }
 
   const currentStatus = normalizeOrderStatus(bundle.order.status);
-  // Cancellation is only allowed before the kitchen starts preparing.
-  if (![ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
+  // Cancellation is only allowed before the kitchen starts preparing — which
+  // includes a scheduled order still waiting for release (Task 18 / G2).
+  if (![ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
     fail(412, 'This order can no longer be cancelled.');
   }
 

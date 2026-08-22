@@ -10,6 +10,11 @@ import { DEFAULT_DISPATCH_TRACKING, parseDispatchTracking, type DispatchTracking
 import { DEFAULT_DISPATCH_WEIGHTS, parseDispatchWeights, type DispatchWeights } from './dispatchWeights.ts';
 import { logEdgeEvent } from './observability.ts';
 import { DEFAULT_PRICING_CONFIG, parsePricingConfig, type PricingConfig } from './pricing.ts';
+import {
+  DEFAULT_SCHEDULED_ORDER_CONFIG,
+  parseScheduledOrderConfig,
+  type ScheduledOrderConfig,
+} from './scheduledOrders.ts';
 
 const CACHE_TTL_MS = 60_000;
 
@@ -17,6 +22,7 @@ let cached: { config: PricingConfig; expiresAt: number } | null = null;
 let cachedDispatchWeights: { config: DispatchWeights; expiresAt: number } | null = null;
 let cachedDispatchTracking: { config: DispatchTrackingConfig; expiresAt: number } | null = null;
 let cachedAcceptanceDeadline: { config: AcceptanceDeadlineConfig; expiresAt: number } | null = null;
+let cachedScheduledOrder: { config: ScheduledOrderConfig; expiresAt: number } | null = null;
 
 // Never throws: an order must not fail because the settings row is unreadable.
 // The seeded row and DEFAULT_PRICING_CONFIG hold identical values, so the
@@ -156,5 +162,44 @@ export const loadAcceptanceDeadlineConfig = async (): Promise<AcceptanceDeadline
       error: error instanceof Error ? error.message : String(error),
     });
     return DEFAULT_ACCEPTANCE_DEADLINE;
+  }
+};
+
+// Never throws: the scheduled-order release sweep and placement must not fail
+// because the settings row is unreadable, and a mistyped/zero/negative prep
+// time must not release every scheduled order instantly
+// (parseScheduledOrderConfig bounds it into [5, 180] minutes). The seeded row
+// and DEFAULT_SCHEDULED_ORDER_CONFIG hold identical values, so the fallback
+// cannot silently change release timing unless the row was edited. Mirrors
+// loadAcceptanceDeadlineConfig exactly. G5 (Task 21) will refine prep time with
+// a per-restaurant prediction; this bounded default is the interim source.
+export const loadScheduledOrderConfig = async (): Promise<ScheduledOrderConfig> => {
+  if (cachedScheduledOrder && cachedScheduledOrder.expiresAt > Date.now()) {
+    return cachedScheduledOrder.config;
+  }
+
+  try {
+    const { data, error } = await serviceClient
+      .from('PlatformSettings')
+      .select('data')
+      .eq('id', 'scheduledOrders')
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data) {
+      logEdgeEvent('warn', 'PlatformSettings scheduledOrders row missing; using defaults', {});
+    }
+
+    const config = parseScheduledOrderConfig(data?.data);
+    cachedScheduledOrder = { config, expiresAt: Date.now() + CACHE_TTL_MS };
+    return config;
+  } catch (error) {
+    logEdgeEvent('warn', 'Failed to load scheduled order config; using defaults', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return DEFAULT_SCHEDULED_ORDER_CONFIG;
   }
 };
