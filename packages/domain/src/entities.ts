@@ -153,6 +153,11 @@ export interface OrderAssignmentSummary extends DocumentData {
 }
 
 export interface OrderTimeline extends DocumentData {
+  // Task 18 (G2): stamped at creation for a scheduled order (placedAt is stamped
+  // later, at release, so the acceptance-deadline clock starts at release).
+  scheduledAt?: unknown;
+  scheduledFor?: unknown;
+  scheduledReleasedAt?: unknown;
   placedAt?: unknown;
   acceptedAt?: unknown;
   preparingAt?: unknown;
@@ -176,6 +181,9 @@ export interface OrderDocument extends DocumentData {
   createdAt: unknown;
   updatedAt?: unknown;
   scheduledAt?: unknown | null;
+  // Task 18 (G2): the customer-requested slot (UTC instant), or null for an
+  // immediate order.
+  scheduledFor?: unknown | null;
   customerPhone?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;

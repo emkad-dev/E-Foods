@@ -30,6 +30,9 @@ export type CustomerOrderRow = {
   pricing?: JsonObject | null;
   restaurantId: string;
   restaurantName: string;
+  // Task 18 (G2): the customer-requested slot as a UTC instant, or null for an
+  // immediate order. Present only on scheduled orders.
+  scheduledFor?: string | null;
   status?: string | null;
   timeline?: JsonObject | null;
   updatedAt?: string | null;
@@ -96,7 +99,7 @@ export type OrderSnapshotOptions = {
 };
 
 export const CUSTOMER_ORDER_COLUMNS =
-  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,createdAt,updatedAt';
+  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,createdAt,updatedAt';
 
 export const ORDER_STATUS = {
   ACCEPTED: 'accepted',
@@ -110,6 +113,12 @@ export const ORDER_STATUS = {
   PREPARING: 'preparing',
   READY_FOR_PICKUP: 'ready_for_pickup',
   REJECTED: 'rejected',
+  // Task 18 (G2): a paid-and-waiting scheduled order. Pre-kitchen — the
+  // release sweep flips it to PLACED at `scheduledFor − prepTimeMinutes`. It is
+  // deliberately excluded from TERMINAL_ORDER_STATUSES (below) and from the
+  // acceptance-deadline sweep's placed-like candidate set, so it is never
+  // auto-cancelled while it waits.
+  SCHEDULED: 'scheduled',
 } as const;
 
 export const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'rejected', 'failed_delivery']);
@@ -207,6 +216,9 @@ export const toOrderSnapshotResponse = (
   pricing: order.pricing ?? null,
   restaurantId: order.restaurantId,
   restaurantName: order.restaurantName,
+  // Task 18 (G2): the scheduled slot, surfaced to customer tracking and the
+  // partner kitchen board. Null for immediate orders.
+  scheduledFor: order.scheduledFor ?? null,
   status: normalizeOrderStatus(sanitizeText(order.status, DEFAULT_FUNCTION_ORDER_STATUS)),
   timeline: order.timeline ?? null,
   total: Number((order.pricing as JsonObject | null)?.total ?? 0),
