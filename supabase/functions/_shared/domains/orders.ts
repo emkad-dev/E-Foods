@@ -35,6 +35,7 @@ import {
   PAYMENT_STATUS,
   PAYSTACK_PAYMENT_METHODS,
   PREPAID_PAYMENT_METHODS,
+  releasePromoRedemption,
   toOrderSnapshotResponse,
   updateOrderRecord,
   upsertPaymentTransaction,
@@ -374,22 +375,6 @@ const redeemPromoCode = async ({
 
   const row = (Array.isArray(data) ? data[0] : data) as { reason?: string; redeemed?: boolean } | undefined;
   return { reason: sanitizeText(row?.reason, 'unavailable'), redeemed: row?.redeemed === true };
-};
-
-// Best-effort: releasing a redemption for an order that never landed must never
-// itself fail the surrounding error path. Logged, not thrown.
-const releasePromoRedemption = async (orderId: string): Promise<void> => {
-  try {
-    const { error } = await serviceClient.rpc('ebuy_release_promo_redemption', { p_order_id: orderId });
-    if (error) {
-      throw new Error(error.message);
-    }
-  } catch (error) {
-    logEdgeEvent('error', 'promo redemption release failed', {
-      error: error instanceof Error ? error.message : String(error),
-      orderId,
-    });
-  }
 };
 
 type ResolvedBasketPromo = { code: string; discount: ResolvedDiscount; promoCodeId: string };
@@ -1494,6 +1479,12 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
     timeline,
     updatedAt: nowIso(),
   });
+
+  // The order is now cancelled (customer/admin self-cancel, refunded per the
+  // rate above): free any promo-cap slot it held so a single-use code the
+  // customer cancelled out of is theirs to use again. Best-effort — a release
+  // failure must not undo the cancel/refund just committed.
+  await releasePromoRedemption(orderId);
 
   // Routed through releaseDispatchAssignmentLoad, not the plain
   // adjustDispatchRiderLoad(-1) this used to call (review round 3): this is

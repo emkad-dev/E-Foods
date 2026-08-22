@@ -47,6 +47,7 @@ import {
   isOrderOperationallyVisible,
   normalizeOrderStatus,
   ORDER_STATUS,
+  releasePromoRedemption,
 } from './orders.ts';
 import { loadAcceptanceDeadlineConfig } from './platformSettings.ts';
 import { broadcastOrderChanged } from './realtime.ts';
@@ -190,6 +191,20 @@ const autoCancelOrder = async (order: CustomerOrderRow, result: AcceptanceDeadli
   // Everything below is best-effort: the money-path unit already committed in
   // the RPC, so a realtime nudge, an event insert, or a push that fails must
   // not undo it or abort the batch.
+
+  // Free any promo-cap slot the now-cancelled (and fully refunded) order held:
+  // a single-use code must not be burned because the restaurant failed to
+  // accept in time. Runs only on a genuine cancel (cancelled === true above),
+  // and is itself best-effort — a release failure never aborts the batch.
+  try {
+    await releasePromoRedemption(order.id);
+  } catch (releaseError) {
+    logEdgeEvent('error', 'acceptance auto-cancel promo release failed', {
+      error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+      orderId: order.id,
+    });
+  }
+
   try {
     await broadcastOrderChanged(order.id, { restaurantId: order.restaurantId });
   } catch (broadcastError) {

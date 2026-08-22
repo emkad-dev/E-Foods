@@ -11,6 +11,7 @@ import {
   notifyRestaurantUsers,
   notifyUsers,
 } from './notifications.ts';
+import { logEdgeEvent } from './observability.ts';
 import { broadcastOrderChanged } from './realtime.ts';
 import type { JsonObject } from './rpc/coercion.ts';
 import { nowIso, sanitizeOptionalText, sanitizeText, toSortableTimestamp } from './rpc/coercion.ts';
@@ -263,6 +264,39 @@ export const updateOrderRecord = async (orderId: string, updates: JsonObject) =>
   await broadcastOrderChanged(orderId);
 };
 
+// Task 17 (G1): free the promo-cap slot an order held once it ends
+// cancelled/refunded. THE single shared release path — the customer placement
+// handlers (on synchronous placement/init failure) and all three
+// post-placement terminal-cancel transitions (customer self-cancel,
+// unpaid-payment timeout, acceptance-deadline auto-cancel) all funnel through
+// here, so a redemption tied to an order that does not end successful is always
+// released.
+//
+// Safe by construction:
+//   * IDEMPOTENT & no-op on the no-promo case — ebuy_release_promo_redemption
+//     deletes by the UNIQUE orderId, so an order that never redeemed deletes
+//     zero rows, and a second release deletes zero rows. No negative count, no
+//     double-free.
+//   * MONEY-DIRECTION SAFE — releasing removes the PromoRedemption row, which
+//     is exactly what ebuy_redeem_promo_code counts, so the effective cap count
+//     drops by one and the freed slot is genuinely reusable by the customer.
+//   * BEST-EFFORT — never throws; a release failure is logged, never allowed to
+//     abort or roll back the surrounding cancel/refund (same discipline as the
+//     notification calls around it).
+export const releasePromoRedemption = async (orderId: string): Promise<void> => {
+  try {
+    const { error } = await serviceClient.rpc('ebuy_release_promo_redemption', { p_order_id: orderId });
+    if (error) {
+      throw new Error(error.message);
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'promo redemption release failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+};
+
 /**
  * Compare-and-swap variant of updateOrderRecord: applies `updates` only if the
  * order's stored status still equals `expectedStatus`, and reports whether it
@@ -487,6 +521,11 @@ export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
     timeline,
     updatedAt: timedOutAt,
   });
+
+  // The order is now cancelled (payment never completed): free any promo-cap
+  // slot it held so a single-use code is not consumed by an order the customer
+  // never actually got. Best-effort — must not undo the cancel.
+  await releasePromoRedemption(order.id);
 
   await insertDeliveryEvent({
     actorUid: null,
