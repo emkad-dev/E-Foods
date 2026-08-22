@@ -26,6 +26,24 @@ import { openPhoneDialer } from '../../../src/utils/phoneLinking';
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
+// Task 18 (G2): render the scheduled slot on the tracking screen.
+const formatScheduledSlot = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toLocaleString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
 const formatRelativeAge = (value?: string | null) => {
   if (!value) {
     return 'updated recently';
@@ -100,6 +118,7 @@ export default function OrderTracking() {
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
   const canCancel = canCustomerCancelOrder(order.status);
   const refundPolicy = getCustomerRefundPolicyLabel(order.status);
+  const scheduledSlotLabel = formatScheduledSlot(order.scheduledFor);
   const hasCapturedPrepaidAmount =
     isPrepaidPaymentMethod(order.payment?.method) && ['paid', 'refunded'].includes(order.payment?.status ?? '');
   const isPendingPrepaidPayment =
@@ -240,6 +259,12 @@ export default function OrderTracking() {
             </Text>
           </View>
         </View>
+        {scheduledSlotLabel ? (
+          <View style={styles.scheduledBanner}>
+            <Text style={styles.scheduledBannerLabel}>Scheduled for</Text>
+            <Text style={styles.scheduledBannerValue}>{scheduledSlotLabel}</Text>
+          </View>
+        ) : null}
         {courierPhone ? (
           <TouchableOpacity style={styles.callButton} onPress={handleCallRider}>
             <Text style={styles.callButtonText}>Call rider</Text>
@@ -447,6 +472,26 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
+  },
+  scheduledBanner: {
+    backgroundColor: customerTheme.accentTint,
+    borderRadius: 14,
+    marginTop: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  scheduledBannerLabel: {
+    color: customerTheme.accentStrong,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  scheduledBannerValue: {
+    color: customerTheme.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
   },
   callButton: {
     alignItems: 'center',

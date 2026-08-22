@@ -33,9 +33,26 @@ const KITCHEN_ALARM_KEEP_AWAKE_TAG = 'kitchen-board';
 const orderItemCount = (order: OrderDocument) => order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0;
 
 type KitchenColumn = {
-  key: 'new' | 'preparing' | 'ready';
+  key: 'scheduled' | 'new' | 'preparing' | 'ready';
   title: string;
   orders: OrderDocument[];
+};
+
+// Task 18 (G2): a scheduled order shows its slot, not kitchen-elapsed time —
+// the kitchen has not started it yet.
+const formatScheduledSlot = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toLocaleString(undefined, {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 };
 
 type KitchenBoardProps = {
@@ -48,6 +65,7 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
   const isForeground = useAppStateVisibility();
 
   const columns = useMemo<KitchenColumn[]>(() => {
+    const scheduledOrders: OrderDocument[] = [];
     const newOrders: OrderDocument[] = [];
     const preparingOrders: OrderDocument[] = [];
     const readyOrders: OrderDocument[] = [];
@@ -55,7 +73,12 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
     for (const order of activeOrders) {
       const status = normalizeOrderStatus(order.status);
 
-      if (status === 'placed') {
+      // Task 18 (G2): scheduled orders live in their own lane, NOT "New" — the
+      // kitchen should not treat a not-yet-released order as a live ticket (and
+      // the new-order alarm below keys off the "New" lane only).
+      if (status === 'scheduled') {
+        scheduledOrders.push(order);
+      } else if (status === 'placed') {
         newOrders.push(order);
       } else if (status === 'accepted' || status === 'preparing') {
         preparingOrders.push(order);
@@ -65,18 +88,22 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
     }
 
     return [
+      { key: 'scheduled', title: 'Scheduled', orders: scheduledOrders },
       { key: 'new', title: 'New', orders: newOrders },
       { key: 'preparing', title: 'Preparing', orders: preparingOrders },
       { key: 'ready', title: 'Ready', orders: readyOrders },
     ];
   }, [activeOrders]);
 
-  const newOrderIds = useMemo(() => columns[0].orders.map((order) => order.id), [columns]);
+  // The new-order alarm keys off the "New" (placed) lane, not scheduled — a
+  // scheduled order must not trip the kitchen alarm until it is released.
+  const newColumn = useMemo(() => columns.find((column) => column.key === 'new') ?? columns[0], [columns]);
+  const newOrderIds = useMemo(() => newColumn.orders.map((order) => order.id), [newColumn]);
   const { state, soundActive, interstitialVisible, acknowledge, setMuted } = useKitchenAlarm(newOrderIds);
 
   const alarmingOrders = useMemo(
-    () => columns[0].orders.filter((order) => state.alarming.has(order.id)),
-    [columns, state.alarming]
+    () => newColumn.orders.filter((order) => state.alarming.has(order.id)),
+    [newColumn, state.alarming]
   );
 
   // expo-audio's web implementation is present, but browser autoplay policy can
@@ -178,7 +205,11 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
                     <Text style={styles.ticketMeta}>
                       {orderItemCount(order)} items · {formatPartnerMoney(order.pricing?.total ?? 0)}
                     </Text>
-                    <Text style={styles.ticketElapsed}>{getKitchenElapsedLabel(order.createdAt)}</Text>
+                    <Text style={styles.ticketElapsed}>
+                      {column.key === 'scheduled'
+                        ? formatScheduledSlot(order.scheduledFor) ?? 'Scheduled'
+                        : getKitchenElapsedLabel(order.createdAt)}
+                    </Text>
                   </TouchableOpacity>
                 ))
               )}
