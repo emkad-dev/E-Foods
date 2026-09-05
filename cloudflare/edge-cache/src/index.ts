@@ -8,8 +8,14 @@ export interface Env {
 }
 
 const CACHEABLE_ACTIONS = new Set([
+  // Deprecated aliases (public-catalog/index.ts B2 task) — still hit by
+  // installed mobile builds until the next release ages them out.
   'customerGetPublishedRestaurants',
   'customerGetPublishedRestaurantDetail',
+  // Current actions as of B2 (split catalog read: cards-only list + by-id
+  // detail, no more full-catalog-with-every-menu on every call).
+  'customerGetRestaurantList',
+  'customerGetRestaurantDetail',
 ]);
 
 const FRESH_MS = 60_000;

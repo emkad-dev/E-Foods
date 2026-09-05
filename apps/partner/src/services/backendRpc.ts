@@ -8,5 +8,6 @@ export const callPartnerBackendRpc = <T>(action: string, data?: Record<string, u
     anonKey: supabaseEnv.anonKey,
     projectId: appEnv.projectId,
     region: appEnv.functionsRegion,
+    rpcMode: appEnv.rpcMode,
     supabaseUrl: supabaseEnv.url,
   }, action, data);

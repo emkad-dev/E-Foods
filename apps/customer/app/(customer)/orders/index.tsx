@@ -1,7 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
+import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
@@ -103,12 +106,48 @@ const getEmptyStateTitle = (filter: OrderFilter) => {
   }
 };
 
+// RLS self-read policy on CustomerOrder is applied in production, so
+// `postgres_changes` works for this screen. Most other tables are
+// service-role-only and cannot use it -- see docs/rls-posture.md.
+const FALLBACK_MS = 120000;
+
 export default function OrdersList() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<OrderFilter>('all');
   const router = useRouter();
+  const isVisible = useAppStateVisibility();
+  // Shared by the subscription effect and the visibility-gated poll, so the
+  // in-flight guard has to outlive any single effect run.
+  const activeRef = useRef(false);
+
+  const loadOrders = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      const nextData = await getCustomerOrders();
+
+      if (!activeRef.current) {
+        return;
+      }
+
+      setOrders(nextData.orders as Order[]);
+    } catch (nextError) {
+      if (!activeRef.current) {
+        return;
+      }
+
+      console.error('Error fetching orders:', nextError);
+      setOrders([]);
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -117,62 +156,49 @@ export default function OrdersList() {
       return;
     }
 
-    let cancelled = false;
-
-    const loadOrders = async () => {
-      try {
-        const nextData = await getCustomerOrders();
-
-        if (cancelled) {
-          return;
-        }
-
-        setOrders(nextData.orders as Order[]);
-      } catch (nextError) {
-        if (cancelled) {
-          return;
-        }
-
-        console.error('Error fetching orders:', nextError);
-        setOrders([]);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void loadOrders();
-    const channel = supabase
-      .channel(`customer-orders:${user.uid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'CustomerOrder',
-          filter: `customerId=eq.${user.uid}`,
-        },
-        () => {
-          void loadOrders();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void loadOrders();
-        }
-      });
-
-    const interval = setInterval(() => {
-      void loadOrders();
-    }, 30000);
+    activeRef.current = true;
 
     return () => {
-      cancelled = true;
-      clearInterval(interval);
-      void supabase.removeChannel(channel);
+      activeRef.current = false;
     };
   }, [user]);
+
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) => {
+      if (!user) {
+        return () => undefined;
+      }
+
+      const channel = supabase
+        .channel(`customer-orders:${user.uid}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'CustomerOrder',
+            filter: `customerId=eq.${user.uid}`,
+          },
+          () => onChanged()
+        )
+        .subscribe((status) => onStatusChange(status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'DISCONNECTED'));
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
+    },
+    [user]
+  );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadOrders,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled: Boolean(user),
+  });
 
   const visibleOrders = useMemo(
     () => orders.filter((order) => matchesOrderFilter(order, activeFilter)),

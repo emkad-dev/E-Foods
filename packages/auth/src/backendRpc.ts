@@ -4,6 +4,8 @@ import {
   FunctionsRelayError,
   type SupabaseClient,
 } from '@supabase/supabase-js';
+import { KNOWN_RPC_TARGETS, resolveRpcMode, resolveRpcTarget } from '../../domain/src/rpcRoutes';
+import { deriveRpcFunctionUrl } from '../../domain/src/rpcUrl';
 import { clearSupabaseSession, isStaleSupabaseSessionError, SESSION_EXPIRED_ERROR_MESSAGE } from './session';
 
 export interface BackendRpcEnv {
@@ -12,6 +14,12 @@ export interface BackendRpcEnv {
   projectId?: string;
   region?: string;
   supabaseUrl?: string;
+  /**
+   * Raw EXPO_PUBLIC_RPC_MODE / VITE_RPC_MODE value. Passed through
+   * unnormalized — resolveRpcMode below treats unset/blank/unrecognized
+   * values as 'split', so callers never need to validate this themselves.
+   */
+  rpcMode?: string;
 }
 
 export const callBackendRpc = async <T>(
@@ -20,6 +28,12 @@ export const callBackendRpc = async <T>(
   action: string,
   data?: Record<string, unknown>
 ): Promise<T> => {
+  // Resolve the routing target before doing anything else — including
+  // before the session dance below. An unknown action must fail
+  // immediately and loudly, never proceed as if it were routable.
+  const rpcMode = resolveRpcMode(env.rpcMode);
+  const targetFunction = resolveRpcTarget(action, rpcMode);
+
   const resolveSession = async () => {
     const {
       data: { session },
@@ -93,6 +107,14 @@ export const callBackendRpc = async <T>(
       return null;
     }
 
+    // Rewrite the configured app-rpc URL's last path segment to target the
+    // resolved domain function (or, in legacy mode, back to app-rpc). A
+    // malformed configured URL throws here and is treated as a
+    // transport-level failure by the catch below, falling back to the
+    // relay — it is not a routing bug, so it doesn't need to fail loudly
+    // the way an unknown action does.
+    const targetUrl = deriveRpcFunctionUrl(env.backendRpcUrl.trim(), targetFunction, KNOWN_RPC_TARGETS);
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${session.access_token}`,
@@ -102,7 +124,7 @@ export const callBackendRpc = async <T>(
       headers.apikey = env.anonKey.trim();
     }
 
-    const response = await fetch(env.backendRpcUrl.trim(), {
+    const response = await fetch(targetUrl, {
       body: JSON.stringify(payload),
       headers,
       method: 'POST',
@@ -132,7 +154,7 @@ export const callBackendRpc = async <T>(
     console.warn(`Backend RPC ${action} direct URL fallback failed:`, error);
   }
 
-  const { data: responseData, error } = await supabase.functions.invoke<T>('app-rpc', {
+  const { data: responseData, error } = await supabase.functions.invoke<T>(targetFunction, {
     body: payload,
   });
 

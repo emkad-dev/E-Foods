@@ -2,6 +2,13 @@ import { useEffect } from 'react';
 import * as Linking from 'expo-linking';
 import { Stack, useRouter } from 'expo-router';
 import { AuthProvider } from '../src/contexts/AuthContext';
+import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
+import { createSentryInitializer } from '../../../packages/observability/src/sentry';
+
+const initializeSentry = createSentryInitializer({
+  loadNativeSdk: () => import('@sentry/react-native'),
+  loadWebSdk: () => import('@sentry/browser'),
+});
 
 function RootLayoutNav() {
   const router = useRouter();
@@ -60,9 +67,15 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    void initializeSentry('partner');
+  }, []);
+
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <FeatureFlagsProvider>
+        <RootLayoutNav />
+      </FeatureFlagsProvider>
     </AuthProvider>
   );
 }

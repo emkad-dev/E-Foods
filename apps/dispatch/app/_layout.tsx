@@ -1,13 +1,20 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import * as Linking from 'expo-linking';
 import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import { useDispatchOrders } from '../src/hooks/useDispatchOrders';
 import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
 import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
-import { initializeSentry } from '../../../packages/observability/src/sentry';
+import { createSentryInitializer } from '../../../packages/observability/src/sentry';
+import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import DispatchComingSoon from '../src/components/DispatchComingSoon';
 import { dispatchTheme } from '../src/theme/palette';
+
+const initializeSentry = createSentryInitializer({
+  loadNativeSdk: () => import('@sentry/react-native'),
+  loadWebSdk: () => import('@sentry/browser'),
+});
 
 // Standalone rider dispatch is shelved for the MVP (restaurants self-provision
 // their own delivery). Set to true to bring the full authenticated rider app,
@@ -16,14 +23,30 @@ const DISPATCH_ENABLED = false;
 
 function DispatchLocationSyncBridge() {
   const { user } = useAuth();
+  // Battery/cost gate: only stream location while this rider actually holds
+  // a live delivery, not just because their queue screen is showing unowned
+  // manual-queue work they could self-assign. `activeDeliveryOrders` (from
+  // useDispatchOrders) is deliberately broader than that for a `dispatch`
+  // role - dispatchGetDeliveryQueue surfaces both this rider's own assigned
+  // orders AND unowned orders any dispatcher could pick up (see
+  // isUnownedDispatchableOrder in _shared/domains/dispatch.ts) - so gating on
+  // its length alone would keep GPS running for every rider whenever ANY
+  // order anywhere is sitting unclaimed. `assignment.courierId === user.uid`
+  // narrows it to orders this specific rider is actually the assigned
+  // courier for.
+  const { activeDeliveryOrders } = useDispatchOrders();
+  const hasActiveAssignment = useMemo(
+    () => activeDeliveryOrders.some((order) => order.assignment?.courierId === user?.uid),
+    [activeDeliveryOrders, user?.uid]
+  );
   const { location } = useRealTimeLocation({
-    enabled: user?.role === 'dispatch',
+    enabled: user?.role === 'dispatch' && hasActiveAssignment,
     highAccuracy: true,
     updateInterval: 5000,
   });
 
   useEffect(() => {
-    if (!user || user.role !== 'dispatch' || !location) {
+    if (!user || user.role !== 'dispatch' || !hasActiveAssignment || !location) {
       return;
     }
 
@@ -35,7 +58,7 @@ function DispatchLocationSyncBridge() {
     }).catch((error) => {
       console.warn('Failed to sync dispatch location:', error);
     });
-  }, [location, user]);
+  }, [hasActiveAssignment, location, user]);
 
   return null;
 }
@@ -127,8 +150,10 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <RootLayoutNav />
-      <DispatchLocationSyncBridge />
+      <FeatureFlagsProvider>
+        <RootLayoutNav />
+        <DispatchLocationSyncBridge />
+      </FeatureFlagsProvider>
     </AuthProvider>
   );
 }

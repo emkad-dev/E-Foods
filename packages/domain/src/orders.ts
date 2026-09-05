@@ -17,6 +17,9 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const ORDER_STATUSES = [
   'draft',
+  // Task 18 (G2): a paid scheduled order awaiting release into the kitchen. Not
+  // terminal; the kitchen board shows it in its own lane, not "New".
+  'scheduled',
   'placed',
   'accepted',
   'preparing',
@@ -86,6 +89,8 @@ export const formatOrderStatusLabel = (status: string | null | undefined): strin
   const normalizedStatus = normalizeOrderStatus(status);
 
   switch (normalizedStatus) {
+    case 'scheduled':
+      return 'Scheduled';
     case 'ready_for_pickup':
       return 'Ready for pickup';
     case 'picked_up':
@@ -103,6 +108,8 @@ export const getOrderStatusColor = (status: string | null | undefined): string =
   const normalizedStatus = normalizeOrderStatus(status);
 
   switch (normalizedStatus) {
+    case 'scheduled':
+      return '#8b5cf6';
     case 'placed':
       return '#f5b342';
     case 'accepted':
@@ -171,14 +178,16 @@ export const formatPaymentStatusLabel = (status: string | null | undefined, meth
 
 export const canCustomerCancelOrder = (status: string | null | undefined) => {
   // Once the kitchen starts preparing, the order can no longer be self-cancelled.
+  // A 'scheduled' order (Task 18 / G2) is pre-kitchen, so it is cancellable too
+  // (full refund — the kitchen never engaged).
   const normalizedStatus = normalizeOrderStatus(status);
-  return ['placed', 'accepted'].includes(normalizedStatus);
+  return ['scheduled', 'placed', 'accepted'].includes(normalizedStatus);
 };
 
 export const getCustomerRefundPolicyLabel = (status: string | null | undefined) => {
   const normalizedStatus = normalizeOrderStatus(status);
 
-  if (['placed', 'accepted'].includes(normalizedStatus)) {
+  if (['scheduled', 'placed', 'accepted'].includes(normalizedStatus)) {
     return 'Full refund';
   }
 

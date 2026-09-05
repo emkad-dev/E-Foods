@@ -26,6 +26,7 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
+import { shouldShowSignInLoading } from '../../../../packages/auth/src';
 import { MISSING_PROFILE_ERROR, resolveDispatchAccessState } from './dispatchAuthFlow';
 
 type DispatchSignUpInput = {
@@ -264,10 +265,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       // Background reconciliation must not re-block the UI once the first paint
-      // has resolved. Only a *fresh* sign-in returns to the full-screen spinner —
-      // on web, refocusing the tab re-fires SIGNED_IN for an already-signed-in
-      // rider, and that must reconcile silently instead of unmounting the tree.
-      if (event === 'SIGNED_IN' && !hasUserRef.current) {
+      // has resolved. Only a *fresh* sign-in returns to the full-screen
+      // spinner -- on web, refocusing the tab re-fires SIGNED_IN for an
+      // already-signed-in rider, and that must reconcile silently in the
+      // background instead of flashing the spinner.
+      if (shouldShowSignInLoading({ event, hasUser: hasUserRef.current })) {
         setLoading(true);
       }
 

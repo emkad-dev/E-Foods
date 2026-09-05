@@ -42,7 +42,19 @@ export interface RestaurantDocument extends DocumentData {
   image?: string;
   logoImage?: string | null;
   cuisine?: string;
+  /** Only present on cards from customerGetRestaurantList. */
+  cuisines?: string[];
   rating?: number;
+  /**
+   * From RestaurantRecord.ratingAverage/ratingCount (Task 12/E1), maintained
+   * incrementally server-side on every customerSubmitOrderRating. Present on
+   * both a card and a detail fetch. `ratingCount < 5` means "too few ratings
+   * to trust the average" — apps/customer/src/utils/restaurantAvailability.ts's
+   * getRestaurantRatingLabel is where that "New" display threshold lives; the
+   * raw values here are never suppressed server-side.
+   */
+  ratingAverage?: number | null;
+  ratingCount?: number;
   deliveryTime?: string | number;
   openingTime?: string | null;
   closingTime?: string | null;
@@ -57,6 +69,14 @@ export interface RestaurantDocument extends DocumentData {
   isPublished?: boolean;
   latitude?: number | null;
   longitude?: number | null;
+  /**
+   * Present (possibly empty) on a full catalog entry or a single detail
+   * fetch; entirely absent — not even `[]` — on a card from
+   * customerGetRestaurantList. isRestaurantVisibleToCustomers in
+   * restaurantAvailability.ts relies on this distinction: `undefined` means
+   * "the server already applied the has-available-item filter", `[]`/present
+   * means "check it here."
+   */
   menu?: MenuCategoryDocument[];
   createdAt?: string;
   updatedAt?: string;
@@ -72,6 +92,24 @@ export interface MenuItemDocument extends DocumentData {
   categoryLabel?: string;
   category?: string;
   isAvailable?: boolean;
+  modifierGroups?: ModifierGroupDocument[] | null;
+}
+
+export interface ModifierOptionDocument extends DocumentData {
+  id: string;
+  label?: string | null;
+  priceDelta?: number | null;
+  isAvailable?: boolean | null;
+}
+
+export interface ModifierGroupDocument extends DocumentData {
+  id: string;
+  label?: string | null;
+  mode?: 'single' | 'multi' | string | null;
+  required?: boolean | null;
+  min?: number | null;
+  max?: number | null;
+  options?: ModifierOptionDocument[] | null;
 }
 
 export interface MenuCategoryDocument extends DocumentData {
@@ -87,6 +125,26 @@ export interface OrderItemDocument extends DocumentData {
   restaurantId: string;
   restaurantName: string;
   specialInstructions?: string;
+  optionDelta?: number | null;
+  selectedOptions?: OrderItemSelectedOptionDocument[] | null;
+}
+
+export interface OrderItemSelectedOptionDocument extends DocumentData {
+  groupId: string;
+  groupLabel?: string | null;
+  optionId: string;
+  optionLabel?: string | null;
+  priceDelta?: number | null;
+}
+
+export interface OrderGroupSummaryDocument extends DocumentData {
+  id: string;
+  orderIds?: string[] | null;
+  orderCount?: number | null;
+  primaryOrderId?: string | null;
+  pricing?: OrderPriceBreakdown | null;
+  payment?: OrderPaymentSummary | null;
+  restaurantIds?: string[] | null;
 }
 
 export interface OrderPriceBreakdown extends DocumentData {
@@ -156,6 +214,9 @@ export interface OrderDocument extends DocumentData {
   customerPhone?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
+  orderGroupId?: string | null;
+  orderGroup?: OrderGroupSummaryDocument | null;
+  groupOrders?: OrderDocument[] | null;
   pricing: OrderPriceBreakdown;
   payment: OrderPaymentSummary;
   assignment?: OrderAssignmentSummary | null;
@@ -164,4 +225,12 @@ export interface OrderDocument extends DocumentData {
     refundRate?: number | null;
   } | null;
   timeline?: OrderTimeline;
+  // Live-tracking extras from customerGetOrderDetail: the restaurant origin
+  // pin, the server's prep-aware initial delivery ETA, and the average speed
+  // the client uses to recompute the ETA live from each rider-position
+  // broadcast.
+  restaurantLatitude?: number | null;
+  restaurantLongitude?: number | null;
+  eta?: { minMinutes: number; maxMinutes: number } | null;
+  averageSpeedKmh?: number | null;
 }

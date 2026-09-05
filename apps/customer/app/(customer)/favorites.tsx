@@ -5,9 +5,9 @@ import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteBut
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
-import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
+import { getRestaurantList } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
-import type { DiscoveryRestaurant } from '../../src/utils/restaurantAvailability';
+import { getRestaurantRatingLabel, type DiscoveryRestaurant } from '../../src/utils/restaurantAvailability';
 
 type FavoriteRestaurant = DiscoveryRestaurant & {
   image?: string;
@@ -68,7 +68,9 @@ export default function CustomerFavoritesScreen() {
     let cancelled = false;
     setLoadingCatalog(true);
 
-    getPublishedRestaurants()
+    // Cards only — this screen renders image/logoImage/name/cuisine/deliveryTime/
+    // isOpen, all of which are on the card; it never needed the full menu.
+    getRestaurantList()
       .then(({ restaurants: catalog }) => {
         if (!cancelled) {
           setRestaurants(catalog as FavoriteRestaurant[]);
@@ -170,7 +172,7 @@ export default function CustomerFavoritesScreen() {
               {restaurant.cuisine ?? 'Kitchen'} | {restaurant.deliveryTime ?? '25-35 min'}
             </Text>
             <View style={styles.factRow}>
-              <Text style={styles.fact}>{restaurant.rating ? `Rated ${restaurant.rating}` : 'New'}</Text>
+              <Text style={styles.fact}>{getRestaurantRatingLabel(restaurant)}</Text>
               <Text style={styles.fact}>{restaurant.isOpen === false ? 'Closed' : 'Open'}</Text>
             </View>
           </View>

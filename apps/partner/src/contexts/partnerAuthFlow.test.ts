@@ -10,6 +10,7 @@ import {
   PARTNER_RESTAURANT_COMPLETION_TIMEOUT_MESSAGE,
   resolvePartnerRestaurantCompletionState,
   resolvePartnerAccessState,
+  resolvePartnerLandingRoute,
 } from './partnerAuthFlow.js';
 
 test('treats an approved partner application as restaurant access even when the claim is still customer', () => {
@@ -114,5 +115,42 @@ test('treats restaurant access as ready once the auth state is reconciled', () =
     {
       kind: 'ready',
     }
+  );
+});
+
+test('an approved restaurant lands on the dashboard', () => {
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'restaurant', applicationStatus: 'approved' }),
+    'dashboard'
+  );
+});
+
+test('a pending applicant waits on the under-review screen', () => {
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'customer', applicationStatus: 'pending' }),
+    'under-review'
+  );
+});
+
+test('a rejected applicant is sent back to the form to fix and resubmit', () => {
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'customer', applicationStatus: 'rejected' }),
+    'apply'
+  );
+});
+
+test('someone who has never applied is sent to the form', () => {
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'customer', applicationStatus: null }),
+    'apply'
+  );
+});
+
+test('the restaurant role wins even if the application status lags behind', () => {
+  // The JWT claim can sync before the account row is re-read. Role is
+  // authoritative, so an approved partner is never trapped on the waiting screen.
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'restaurant', applicationStatus: 'pending' }),
+    'dashboard'
   );
 });

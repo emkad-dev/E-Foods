@@ -1,6 +1,8 @@
 // apps/customer/src/services/promoTracking.ts
 import { Platform } from 'react-native';
 import { resolveAttributedPromoId } from '../../../../packages/domain/src/promoAttribution';
+import { KNOWN_RPC_TARGETS, resolveRpcMode, resolveRpcTarget } from '../../../../packages/domain/src/rpcRoutes';
+import { deriveRpcFunctionUrl } from '../../../../packages/domain/src/rpcUrl';
 import { appEnv, supabaseEnv } from '../config/env';
 import { supabase } from './supabase/config';
 
@@ -20,10 +22,16 @@ const track = (promoId: string, type: 'impression' | 'click') => {
       const anonKey = supabaseEnv.anonKey;
       if (!backendRpcUrl || !anonKey) return;
 
+      // promoTrack is an ACCOUNT_ACTIONS action (routed to feasty-account in
+      // split mode); resolve the same way callBackendRpc does so this
+      // deliberately-separate fetch stays in sync with the kill switch.
+      const target = resolveRpcTarget('promoTrack', resolveRpcMode(appEnv.rpcMode));
+      const targetUrl = deriveRpcFunctionUrl(backendRpcUrl, target, KNOWN_RPC_TARGETS);
+
       const { data } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
       const token = data?.session?.access_token || anonKey;
 
-      await fetch(backendRpcUrl, {
+      await fetch(targetUrl, {
         body: JSON.stringify({ action: 'promoTrack', data: { promoId, type } }),
         headers: {
           'Content-Type': 'application/json',

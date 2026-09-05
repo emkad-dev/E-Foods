@@ -14,9 +14,37 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
-import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaurantActions';
+import { savePartnerRestaurantProfile, setPartnerStorePause } from '../../src/services/partnerRestaurantActions';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
+
+// Task 16 (F2): quick pause durations — one tap picks a duration and pauses
+// immediately, no separate confirm step (pausing is fully reversible with
+// one more tap on "Resume now"). Mirrors _shared/availability.ts's
+// isStorePaused on the display side only: paused while pausedUntil is still
+// in the future, auto-resumes with no partner action once it passes.
+const PAUSE_DURATION_OPTIONS = [
+  { label: '30 min', minutes: 30 },
+  { label: '1 hour', minutes: 60 },
+  { label: '2 hours', minutes: 120 },
+  { label: '4 hours', minutes: 240 },
+] as const;
+
+const isStoreCurrentlyPaused = (pausedUntil: string | null | undefined) => {
+  if (!pausedUntil) {
+    return false;
+  }
+
+  const untilMs = Date.parse(pausedUntil);
+  return Number.isFinite(untilMs) && untilMs > Date.now();
+};
+
+const formatPausedUntil = (value: string) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
 
 const toNumberOrNull = (value: string) => {
   if (!value.trim()) {
@@ -35,6 +63,7 @@ export default function PartnerProfileScreen() {
   const { deleteAccount, linkRestaurant, loading: authLoading, signOut, user } = useAuth();
   const { error, loading, restaurant, restaurants, requiresVerifiedLink } = usePartnerRestaurant();
   const [savingProfile, setSavingProfile] = useState(false);
+  const [pauseActionPending, setPauseActionPending] = useState(false);
   const [name, setName] = useState('');
   const [cuisine, setCuisine] = useState('');
   const [description, setDescription] = useState('');
@@ -241,6 +270,47 @@ export default function PartnerProfileScreen() {
       Alert.alert('Save failed', nextError.message ?? 'Unable to save store details right now.');
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  // Task 16 (F2): the "two taps" pause action — one tap on a duration chip
+  // pauses the store immediately via the dedicated partnerSetStorePause RPC,
+  // separate from the full store-details save above so a kitchen backlog
+  // doesn't require touching (or re-validating) the rest of the profile.
+  const handlePauseStore = async (minutes: number) => {
+    if (!restaurant?.id) {
+      Alert.alert('Store setup needed', 'Create or link a restaurant record before pausing orders.');
+      return;
+    }
+
+    setPauseActionPending(true);
+
+    try {
+      await setPartnerStorePause({
+        paused: true,
+        pausedUntil: new Date(Date.now() + minutes * 60 * 1000).toISOString(),
+        restaurantId: restaurant.id,
+      });
+    } catch (nextError: any) {
+      Alert.alert('Pause failed', nextError.message ?? 'Unable to pause the store right now.');
+    } finally {
+      setPauseActionPending(false);
+    }
+  };
+
+  const handleResumeStore = async () => {
+    if (!restaurant?.id) {
+      return;
+    }
+
+    setPauseActionPending(true);
+
+    try {
+      await setPartnerStorePause({ paused: false, restaurantId: restaurant.id });
+    } catch (nextError: any) {
+      Alert.alert('Resume failed', nextError.message ?? 'Unable to resume the store right now.');
+    } finally {
+      setPauseActionPending(false);
     }
   };
 
@@ -503,6 +573,44 @@ export default function PartnerProfileScreen() {
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.cardTitle}>Pause orders</Text>
+        <Text style={styles.helperText}>
+          Kitchen backed up? Pause the whole store for a set time — customers stop seeing you in search and can&apos;t place new
+          orders. It resumes on its own the moment the time is up, no need to remember to switch it back on.
+        </Text>
+        {isStoreCurrentlyPaused(restaurant?.pausedUntil) ? (
+          <View style={styles.pausedBanner}>
+            <Text style={styles.pausedBannerTitle}>Paused right now</Text>
+            <Text style={styles.pausedBannerCopy}>
+              {restaurant?.pausedUntil && formatPausedUntil(restaurant.pausedUntil)
+                ? `Resumes automatically at ${formatPausedUntil(restaurant.pausedUntil)}, or tap below to resume sooner.`
+                : 'Tap below to resume taking orders.'}
+            </Text>
+            <TouchableOpacity
+              style={[styles.primaryButton, styles.resumeButton]}
+              onPress={handleResumeStore}
+              disabled={pauseActionPending || loading}
+            >
+              <Text style={styles.primaryButtonText}>{pauseActionPending ? 'Updating...' : 'Resume now'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.pauseChipRow}>
+            {PAUSE_DURATION_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.label}
+                style={styles.pauseChip}
+                onPress={() => handlePauseStore(option.minutes)}
+                disabled={pauseActionPending || loading || !restaurant}
+              >
+                <Text style={styles.pauseChipText}>{option.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.cardTitle}>Current publishing state</Text>
         <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
         <Text style={styles.metaLine}>Linked restaurant ID: {user?.restaurantId ?? restaurant?.id ?? 'Not linked yet'}</Text>
@@ -516,6 +624,12 @@ export default function PartnerProfileScreen() {
         <Text style={styles.metaLine}>Last live update: {restaurant?.approvedAt ?? 'Not recorded yet'}</Text>
         <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
         <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
+        <Text style={styles.metaLine}>
+          Order pause:{' '}
+          {isStoreCurrentlyPaused(restaurant?.pausedUntil)
+            ? `Paused${restaurant?.pausedUntil && formatPausedUntil(restaurant.pausedUntil) ? ` until ${formatPausedUntil(restaurant.pausedUntil)}` : ''}`
+            : 'Not paused'}
+        </Text>
         <Text style={styles.metaLine}>
           Trading hours: {restaurant?.openingTime && restaurant?.closingTime ? `${restaurant.openingTime} - ${restaurant.closingTime}` : 'Not set'}
         </Text>
@@ -743,6 +857,45 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 6,
+  },
+  pauseChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
+  },
+  pauseChip: {
+    backgroundColor: partnerTheme.warningSoft,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  pauseChipText: {
+    color: partnerTheme.warning,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  pausedBanner: {
+    backgroundColor: partnerTheme.warningSoft,
+    borderColor: '#efcf96',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 16,
+  },
+  pausedBannerTitle: {
+    color: partnerTheme.warning,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  pausedBannerCopy: {
+    color: partnerTheme.textSoft,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  resumeButton: {
+    marginTop: 14,
   },
   assetBlock: {
     flex: 1,

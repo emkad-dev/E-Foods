@@ -12,8 +12,37 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
-import { savePartnerRestaurantMenu, type PartnerMenuCategoryInput } from '../../src/services/partnerRestaurantActions';
+import {
+  savePartnerRestaurantMenu,
+  setPartnerMenuItemAvailability,
+  type PartnerMenuCategoryInput,
+} from '../../src/services/partnerRestaurantActions';
 import { partnerTheme } from '../../src/theme/palette';
+
+// Mirrors _shared/availability.ts's isMenuItemAvailable on the display side
+// only (no order-placement decision is made here — that stays server-side).
+// Unavailable when isAvailable === false (manual, indefinite) OR
+// unavailableUntil is still in the future (timed, auto-resumes with no
+// partner action once it passes).
+const isItemCurrentlyUnavailable = (item: { isAvailable?: boolean; unavailableUntil?: string | null }) => {
+  if (item.isAvailable === false) {
+    return true;
+  }
+
+  if (item.unavailableUntil) {
+    const untilMs = Date.parse(item.unavailableUntil);
+    return Number.isFinite(untilMs) && untilMs > Date.now();
+  }
+
+  return false;
+};
+
+const formatUnavailableUntil = (value: string) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
 
 const toSlug = (value: string) =>
   value
@@ -77,6 +106,7 @@ export default function PartnerMenuScreen() {
   const { user } = useAuth();
   const { error, loading, restaurant } = usePartnerRestaurant();
   const [saving, setSaving] = useState(false);
+  const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState<MenuCategoryId>('rice');
   const [itemName, setItemName] = useState('');
@@ -90,7 +120,7 @@ export default function PartnerMenuScreen() {
   const availableMeals = useMemo(
     () =>
       menu.reduce(
-        (sum, menuCategory) => sum + menuCategory.items.filter((item) => item.isAvailable !== false).length,
+        (sum, menuCategory) => sum + menuCategory.items.filter((item) => !isItemCurrentlyUnavailable(item)).length,
         0
       ),
     [menu]
@@ -265,6 +295,39 @@ export default function PartnerMenuScreen() {
     }
   };
 
+  // Task 16 (F2): the "two taps" action — one tap on "Sold out" / "Back in
+  // stock" flips this single item's availability via the dedicated
+  // partnerSetMenuItemAvailability RPC, without touching (or re-validating)
+  // any other item on the menu. Marking unavailable is always the
+  // indefinite, manual form here — it stays off until tapped again, no
+  // matter how long that takes. Restaurants that want a timed
+  // out-until-a-known-time window still get one for free: this same server
+  // action accepts an optional unavailableUntil, this screen just doesn't
+  // expose an extra tap for it.
+  const handleToggleItemAvailability = async (item: { id: string; name: string; isAvailable?: boolean; unavailableUntil?: string | null }) => {
+    if (!restaurant?.id) {
+      return;
+    }
+
+    const nextIsAvailable = isItemCurrentlyUnavailable(item);
+    setTogglingItemId(item.id);
+
+    try {
+      await setPartnerMenuItemAvailability({
+        isAvailable: nextIsAvailable,
+        itemId: item.id,
+        restaurantId: restaurant.id,
+      });
+    } catch (nextError: any) {
+      Alert.alert(
+        'Update failed',
+        nextError.message ?? `Unable to mark "${item.name}" ${nextIsAvailable ? 'available' : 'unavailable'} right now.`
+      );
+    } finally {
+      setTogglingItemId(null);
+    }
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
       <Text style={styles.title}>Menu builder</Text>
@@ -421,30 +484,49 @@ export default function PartnerMenuScreen() {
                 </Text>
               </View>
             </View>
-            {menuCategory.items.map((item) => (
-              <View key={item.id} style={styles.itemRow}>
-                <View style={styles.itemMeta}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemInfo}>
-                    ₦{item.price.toFixed(2)} | {item.categoryLabel ?? menuCategory.category} |{' '}
-                    {item.isAvailable === false ? 'Unavailable' : 'Available'}
-                  </Text>
-                  {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
+            {menuCategory.items.map((item) => {
+              const itemUnavailable = isItemCurrentlyUnavailable(item);
+              const isToggling = togglingItemId === item.id;
+              const resumeLabel =
+                itemUnavailable && item.isAvailable !== false && item.unavailableUntil
+                  ? formatUnavailableUntil(item.unavailableUntil)
+                  : null;
+
+              return (
+                <View key={item.id} style={styles.itemRow}>
+                  <View style={styles.itemMeta}>
+                    <Text style={styles.itemName}>{item.name}</Text>
+                    <Text style={styles.itemInfo}>
+                      ₦{item.price.toFixed(2)} | {item.categoryLabel ?? menuCategory.category} |{' '}
+                      {itemUnavailable ? 'Sold out' : 'Available'}
+                      {resumeLabel ? ` (back at ${resumeLabel})` : ''}
+                    </Text>
+                    {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
+                  </View>
+                  <View style={styles.itemActions}>
+                    <TouchableOpacity
+                      style={[styles.inlineAction, itemUnavailable ? styles.inlineAvailabilityOn : styles.inlineAvailabilityOff]}
+                      onPress={() => handleToggleItemAvailability(item)}
+                      disabled={isToggling}
+                    >
+                      <Text style={[styles.inlineActionText, itemUnavailable ? styles.inlineAvailabilityOnText : styles.inlineAvailabilityOffText]}>
+                        {isToggling ? 'Updating...' : itemUnavailable ? 'Back in stock' : 'Sold out'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.inlineAction} onPress={() => handleEditItem(menuCategory.category, item)}>
+                      <Text style={styles.inlineActionText}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.inlineAction, styles.inlineDanger]}
+                      onPress={() => handleRemoveItem(menuCategory.category, item.id)}
+                      disabled={saving}
+                    >
+                      <Text style={[styles.inlineActionText, styles.inlineDangerText]}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={styles.itemActions}>
-                  <TouchableOpacity style={styles.inlineAction} onPress={() => handleEditItem(menuCategory.category, item)}>
-                    <Text style={styles.inlineActionText}>Edit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.inlineAction, styles.inlineDanger]}
-                    onPress={() => handleRemoveItem(menuCategory.category, item.id)}
-                    disabled={saving}
-                  >
-                    <Text style={[styles.inlineActionText, styles.inlineDangerText]}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ))}
       </View>
@@ -744,5 +826,21 @@ const styles = StyleSheet.create({
   },
   inlineDangerText: {
     color: partnerTheme.danger,
+  },
+  // "Sold out" (item currently available, tap marks it unavailable): a
+  // neutral warning tone, since this is a normal kitchen action, not an
+  // error. "Back in stock" (item currently unavailable, tap restores it):
+  // the accent tone, matching the primary action styling elsewhere.
+  inlineAvailabilityOff: {
+    backgroundColor: partnerTheme.warningSoft,
+  },
+  inlineAvailabilityOffText: {
+    color: partnerTheme.warning,
+  },
+  inlineAvailabilityOn: {
+    backgroundColor: partnerTheme.accentSoft,
+  },
+  inlineAvailabilityOnText: {
+    color: partnerTheme.accentStrong,
   },
 });

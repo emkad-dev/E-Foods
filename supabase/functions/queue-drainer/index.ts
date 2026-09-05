@@ -2,6 +2,10 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import { sweepUnacceptedOrders } from '../_shared/acceptanceDeadlineSweep.ts';
+import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
+import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
+import { sweepScheduledOrderReleases } from '../_shared/scheduledOrderReleaseSweep.ts';
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
@@ -129,7 +133,7 @@ const processNotificationJob = async (job: NotificationJob) => {
   return { sent };
 };
 
-type QueueJob = JsonObject & { id: string; payload: unknown };
+type QueueJob = JsonObject & { id: string; payload: unknown; retry_count?: number | null };
 
 // All queues now finalize their row through the drainer. Handlers are pure and
 // idempotent: they return a result on success and throw on failure, leaving the
@@ -161,7 +165,8 @@ const queueDefinitions: Record<
       await markPaymentVerificationFailed(
         payload.orderId,
         payload.paymentReference,
-        error instanceof Error ? error.message : 'Payment verification failed.'
+        error instanceof Error ? error.message : 'Payment verification failed.',
+        (job.retry_count ?? 0) + 1
       );
     },
   },
@@ -234,7 +239,10 @@ Deno.serve(async (request) => {
   const observation = createEdgeObservation(request, 'queue-drainer');
 
   if (request.method === 'OPTIONS') {
-    const response = new Response('ok', { headers: corsHeaders, status: 204 });
+    // A 204 response must not carry a body — Deno throws a TypeError otherwise,
+    // and this branch runs outside the try/catch below, so the throw escapes as a
+    // bodiless 500 with no CORS headers and every browser preflight fails.
+    const response = new Response(null, { headers: corsHeaders, status: 204 });
     finishEdgeObservation(observation, { status: response.status });
     return response;
   }
@@ -267,6 +275,66 @@ Deno.serve(async (request) => {
         ? ['order-placement', 'payment-verification', 'notifications']
         : [queueSelection];
 
+    // Delivery-offer expiry sweep (Task 10 / D2). Rides on this function's
+    // existing every-minute pg_cron schedule
+    // (20260624_queue_drainer_schedule.sql already posts {"queue":"all"}), so
+    // there is no second cron entry, no second secret, and no second schedule
+    // that can silently stop working.
+    //
+    // Only on the 'all' selection - a targeted single-queue drain (a manual
+    // retry of one queue, a test) should do exactly what was asked.
+    //
+    // Runs BEFORE the queue drain, and that ordering is load-bearing rather
+    // than incidental. runWithBackpressure THROWS EdgeBackpressureError when
+    // it sheds (_shared/observability.ts), so anything sequenced after it
+    // inside this try block is skipped entirely on a shed minute. A previous
+    // version of this code sat below the drain while its comment claimed the
+    // sweep must survive shedding - the comment was right and the placement
+    // was wrong, which meant offers stopped expiring during exactly the busy
+    // periods that cause shedding, and every offer in flight stalled for as
+    // long as the load lasted.
+    //
+    // Hoisting is safe: the sweep is bounded (50 offers, 50 orders) and never
+    // throws - see sweepDispatchOffers - so it can neither delay the drain
+    // materially nor turn a successful drain into a 500.
+    const offerSweep = queueSelection === 'all' ? await sweepDispatchOffers() : null;
+
+    // Rider ping retention (Task 11 / D3), on the SAME safe side of
+    // runWithBackpressure as the offer sweep immediately above, and for the
+    // identical reason: runWithBackpressure throws EdgeBackpressureError when
+    // it sheds, which would skip anything sequenced after it. Pings must keep
+    // expiring during exactly the busy periods that cause shedding, or the
+    // table grows unbounded for as long as the load lasts. Bounded (at most
+    // DISPATCH_RIDER_PING_RETENTION_LIMIT rows) and never throws - see
+    // sweepExpiredDispatchRiderPings - so it cannot meaningfully delay the
+    // drain or turn a successful one into a 500.
+    const riderPingRetention = queueSelection === 'all' ? await sweepExpiredDispatchRiderPings() : null;
+
+    // Scheduled-order release sweep (Task 18 / G2), on the SAME safe side of
+    // runWithBackpressure as the sweeps above, and for the identical reason:
+    // runWithBackpressure THROWS EdgeBackpressureError when it sheds, which
+    // would skip anything sequenced after it. A scheduled order must keep
+    // releasing into the kitchen queue during exactly the busy periods that
+    // cause shedding. Runs BEFORE the acceptance sweep below so a just-released
+    // order — now 'placed' with a fresh placedAt stamped at release — is seen by
+    // the acceptance sweep in the SAME run as age ~0 (not instantly overdue).
+    // Bounded (RELEASE_SWEEP_LIMIT) and never throws — see
+    // sweepScheduledOrderReleases — so it cannot meaningfully delay the drain or
+    // turn a successful one into a 500.
+    const scheduledReleaseSweep = queueSelection === 'all' ? await sweepScheduledOrderReleases() : null;
+
+    // Acceptance-deadline sweep (Task 14 / E3), on the SAME safe side of
+    // runWithBackpressure as the two sweeps above, and for the identical
+    // reason: runWithBackpressure THROWS EdgeBackpressureError when it sheds,
+    // which would skip anything sequenced after it. A paid customer waiting on
+    // an unaccepted order must still be escalated and (at 2x the deadline)
+    // auto-cancelled-and-refunded during exactly the busy periods that cause
+    // shedding, not stalled for as long as the load lasts. Bounded
+    // (ACCEPTANCE_SWEEP_LIMIT orders) and never throws - see
+    // sweepUnacceptedOrders - so it cannot meaningfully delay the drain or turn
+    // a successful one into a 500.
+    const acceptanceSweep = queueSelection === 'all' ? await sweepUnacceptedOrders() : null;
+
     const results = await runWithBackpressure(
       'queue-drainer',
       {
@@ -284,7 +352,11 @@ Deno.serve(async (request) => {
 
     const response = json(200, {
       data: {
+        acceptanceSweep,
+        offerSweep,
         results,
+        riderPingRetention,
+        scheduledReleaseSweep,
       },
     });
     finishEdgeObservation(observation, { status: response.status });

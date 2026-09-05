@@ -40,3 +40,14 @@ export const markDispatchOrderFailed = async (orderId: string, _timeline: Record
 
 export const escalateDispatchOrder = async (orderId: string, _timeline: Record<string, unknown> | null) =>
   updateDispatchOrderStatus(orderId, 'escalate');
+
+// Delivery offers (Task 10 / D2). Both calls are one-shot: the backend decides
+// the outcome under a row lock, so there is nothing for the client to check
+// first and nothing worth retrying automatically - a retry after a win would
+// just be told "already accepted", and after a loss the offer is gone.
+
+export const acceptDispatchOffer = async (offerId: string) =>
+  callDispatchBackendRpc('dispatchAcceptOffer', { offerId });
+
+export const declineDispatchOffer = async (offerId: string) =>
+  callDispatchBackendRpc('dispatchDeclineOffer', { offerId });

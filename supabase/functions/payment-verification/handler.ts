@@ -21,17 +21,29 @@ import {
   toNumber,
   validatePaystackVerificationForOrder,
 } from './invariants.ts';
+import {
+  capturePaymentVerificationFailureSignal,
+  capturePaymentVerificationReplaySignal,
+  capturePaymentVerificationRiskSignals,
+} from '../_shared/riskSignals.ts';
 
 type JsonObject = Record<string, unknown>;
 
 type CustomerOrderRow = {
   id: string;
   customerId: string;
+  orderGroupId?: string | null;
   restaurantId: string;
   status: string | null;
   payment: JsonObject | null;
   pricing: JsonObject | null;
   timeline: JsonObject | null;
+};
+
+type OrderGroupRow = {
+  id: string;
+  orderIds?: JsonObject | null;
+  pricing?: JsonObject | null;
 };
 
 export type PaymentVerificationRequest = PaymentVerificationJob & {
@@ -86,9 +98,9 @@ const upsertPaymentTransaction = async (
   const paymentReference = normalizeStatus(payment.reference, '');
   const { data: existingTransaction, error: lookupError } = await serviceClient
     .from('PaymentTransaction')
-    .select('id')
+    .select('id,splitSubaccountCode,settlementMode')
     .eq('reference', paymentReference)
-    .maybeSingle<{ id: string }>();
+    .maybeSingle<{ id: string; settlementMode?: string | null; splitSubaccountCode?: string | null }>();
 
   if (lookupError) {
     throw new Error(`Failed to resolve payment transaction id: ${lookupError.message}`);
@@ -98,6 +110,7 @@ const upsertPaymentTransaction = async (
     id: existingTransaction?.id?.trim() || paymentReference,
     updatedAt: new Date().toISOString(),
     orderId: order.id,
+    orderGroupId: order.orderGroupId ?? null,
     customerId: order.customerId,
     restaurantId: order.restaurantId,
     provider: 'paystack',
@@ -105,6 +118,14 @@ const upsertPaymentTransaction = async (
     reference: paymentReference,
     currency: normalizeStatus(payment.currency, 'NGN'),
     amount: toNumber((order.pricing ?? {}).total, 0),
+    splitSubaccountCode:
+      typeof payment.splitSubaccountCode === 'string'
+        ? payment.splitSubaccountCode
+        : existingTransaction?.splitSubaccountCode ?? null,
+    settlementMode:
+      typeof payment.settlementMode === 'string'
+        ? payment.settlementMode
+        : existingTransaction?.settlementMode ?? 'manual',
     status: paymentStatus,
     accessCode: typeof payment.accessCode === 'string' ? payment.accessCode : null,
     authorizationUrl: typeof payment.authorizationUrl === 'string' ? payment.authorizationUrl : null,
@@ -167,24 +188,53 @@ const markOrderPaymentState = async (
     confirmedAt: (order.timeline ?? {}).confirmedAt ?? nowIso,
   };
 
-  const { error } = await serviceClient
-    .from('CustomerOrder')
-    .update({
-      // 'placed' = awaiting restaurant acceptance. 'confirmed' is NOT a valid order
-      // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
-      // partner's kitchen actions on paid orders.
-      status: 'placed',
-      payment: nextPayment,
-      timeline: nextTimeline,
-      updatedAt: nowIso,
-    })
-    .eq('id', order.id);
+  const { data: groupRows, error: groupError } = await serviceClient
+    .from('OrderGroup')
+    .select('id,orderIds,pricing')
+    .eq('id', order.orderGroupId ?? '')
+    .maybeSingle<OrderGroupRow>();
 
-  if (error) throw new Error(`Failed to update order: ${error.message}`);
+  if (groupError) {
+    throw new Error(`Failed to load order group: ${groupError.message}`);
+  }
 
-  await broadcastOrderChanged(order.id, { restaurantId: order.restaurantId });
+  const orderIds = Array.isArray(groupRows?.orderIds)
+    ? (groupRows.orderIds as unknown[]).map((value) => (typeof value === 'string' ? value : null)).filter(Boolean)
+    : [order.id];
+  const expectedAmount = typeof groupRows?.pricing === 'object' && groupRows?.pricing
+    ? toNumber((groupRows.pricing as JsonObject).total, toNumber((order.pricing ?? {}).total, 0))
+    : toNumber((order.pricing ?? {}).total, 0);
+
+  for (const orderId of orderIds) {
+    const { error } = await serviceClient
+      .from('CustomerOrder')
+      .update({
+        // 'placed' = awaiting restaurant acceptance. 'confirmed' is NOT a valid order
+        // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
+        // partner's kitchen actions on paid orders.
+        status: 'placed',
+        payment: {
+          ...nextPayment,
+          capturedAmount: expectedAmount,
+        },
+        timeline: nextTimeline,
+        updatedAt: nowIso,
+      })
+      .eq('id', orderId);
+
+    if (error) throw new Error(`Failed to update order: ${error.message}`);
+
+    await broadcastOrderChanged(orderId, { restaurantId: order.restaurantId });
+  }
 
   await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent);
+
+  await capturePaymentVerificationRiskSignals({
+    customerId: order.customerId,
+    orderId: order.id,
+    paymentReference: normalizeStatus(payment.reference, ''),
+    transactionData,
+  });
 
   const restaurantUsers = await loadRestaurantRecipientUserIds(order.restaurantId);
   if (restaurantUsers.length > 0) {
@@ -243,6 +293,10 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
 
   const existingRecord = await getIdempotencyRecord(serviceClient, idempotencyKey);
   if (existingRecord?.response) {
+    await capturePaymentVerificationReplaySignal({
+      orderId,
+      paymentReference,
+    });
     return existingRecord.response as { success: boolean; orderId: string; paymentStatus: string };
   }
 
@@ -256,6 +310,10 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
 
   const currentPayment = (order.payment ?? {}) as JsonObject;
   if (normalizeStatus(currentPayment.status, '') === 'paid') {
+    await capturePaymentVerificationReplaySignal({
+      orderId,
+      paymentReference,
+    });
     const response = { success: true, orderId, paymentStatus: 'paid' };
     await storeIdempotencyRecord(
       serviceClient,
@@ -296,7 +354,8 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
 export const markPaymentVerificationFailed = async (
   orderId: string,
   paymentReference: string,
-  message: string
+  message: string,
+  retryCount?: number | null
 ) => {
   const nowIso = new Date().toISOString();
 
@@ -346,4 +405,11 @@ export const markPaymentVerificationFailed = async (
   if (error) {
     console.error(`Failed to mark payment failed for ${orderId}: ${error.message}`);
   }
+
+  await capturePaymentVerificationFailureSignal({
+    orderId,
+    paymentReference,
+    reason: message,
+    retryCount,
+  });
 };

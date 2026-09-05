@@ -4,7 +4,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getPlatformCoverage, type DiscoveryRestaurant } from './restaurantAvailability.ts';
+import {
+  getPlatformCoverage,
+  getRestaurantRatingLabel,
+  isRestaurantVisibleToCustomers,
+  NEW_RESTAURANT_RATING_THRESHOLD,
+  type DiscoveryRestaurant,
+} from './restaurantAvailability.ts';
 import type { AddressRecord } from '../domain/entities.ts';
 
 // Lagos Island. Distances below are measured from here.
@@ -26,7 +32,7 @@ const restaurant = (overrides: Partial<DiscoveryRestaurant> = {}): DiscoveryRest
   menu: [
     {
       category: 'Mains',
-      items: [{ id: 'item-1', name: 'Jollof', description: 'Smoky party jollof', price: 2000, isAvailable: true }],
+      items: [{ id: 'item-1', name: 'Jollof', description: '', price: 2000, isAvailable: true }],
     },
   ],
   ...overrides,
@@ -137,6 +143,115 @@ test('live catalogue regression: delivery-capable restaurant without coordinates
   const coverage = getPlatformCoverage([deliveryNoCoords, pickupFar], PINNED);
   assert.equal(coverage.isCovered, false);
   assert.ok(coverage.nearestOrderableKm !== null && coverage.nearestOrderableKm > 400);
+});
+
+// --- card/client seam: customerGetRestaurantList cards have no `menu` key at
+// all (unlike a full catalog entry, whose `menu` is present, possibly `[]`).
+// This is the exact shape supabase/functions/public-catalog/catalog.ts's
+// toRestaurantCard emits (id/name/cuisine/cuisines/image/logoImage/
+// deliveryFee/deliveryTime/minOrder/latitude/longitude/deliveryRadiusKm/
+// supportsDelivery/supportsPickup/isOpen/isPublished/updatedAt/
+// ratingAverage/ratingCount, isPublished always literal true) — keep this
+// fixture in sync with that function if its field set changes.
+const card = (overrides: Partial<DiscoveryRestaurant> = {}): DiscoveryRestaurant => ({
+  id: 'card-1',
+  name: 'Card Kitchen',
+  cuisine: 'Nigerian',
+  cuisines: ['nigerian'],
+  image: undefined,
+  logoImage: null,
+  deliveryFee: 500,
+  deliveryTime: '25-35 min',
+  minOrder: 1000,
+  latitude: 6.46,
+  longitude: 3.39,
+  deliveryRadiusKm: 5,
+  supportsDelivery: true,
+  supportsPickup: true,
+  isOpen: true,
+  isPublished: true,
+  updatedAt: '2026-08-01T00:00:00.000Z',
+  ratingAverage: null,
+  ratingCount: 0,
+  ...overrides,
+  // Deliberately after the spread and set (not omitted): the field being
+  // read as `undefined` is what matters to isRestaurantVisibleToCustomers's
+  // `restaurant.menu === undefined` check, and JSON.stringify drops an
+  // `undefined` value the same as an absent key — this reproduces what a
+  // real card looks like on the wire regardless of which JS shape it takes
+  // in memory. A caller's overrides can never accidentally give this
+  // fixture a real menu.
+  menu: undefined,
+});
+
+test('a card (no menu key) is visible to customers — regression for the empty-home-feed defect', () => {
+  // Before the fix, isRestaurantVisibleToCustomers checked isPublished
+  // before the menu-undefined shim, and a card had no isPublished field
+  // either -- isPublished !== true on undefined rejected every card,
+  // emptying the home feed. This fixture matches the server's real card
+  // shape (isPublished: true is now a literal on every card) end to end.
+  assert.equal(isRestaurantVisibleToCustomers(card()), true);
+});
+
+test('a card is excluded only when the server itself marked it unpublished', () => {
+  assert.equal(isRestaurantVisibleToCustomers(card({ isPublished: false })), false);
+});
+
+test('a full catalog entry (menu present) still needs the real has-available-item check', () => {
+  assert.equal(isRestaurantVisibleToCustomers({ ...card(), menu: [] }), false);
+  assert.equal(
+    isRestaurantVisibleToCustomers({
+      ...card(),
+      menu: [{ category: 'Mains', items: [{ id: 'i1', name: 'Jollof', description: '', price: 2000, isAvailable: true }] }],
+    }),
+    true
+  );
+});
+
+test('getPlatformCoverage: a card (no menu key) inside its delivery radius is covered — C2 regression', () => {
+  // Before the fix, every card failed isRestaurantVisibleToCustomers (see
+  // above), so eligibleCandidateCount stayed 0 and this silently fell into
+  // the fail-open branch (isCovered: true) even for a customer far outside
+  // every restaurant's radius, because there was nothing left to check
+  // distance against. With the fix, a real in-range card is covered for the
+  // right reason (it passed the eligibility gate and is within range).
+  const coverage = getPlatformCoverage([card()], PINNED);
+  assert.equal(coverage.isCovered, true);
+  assert.ok(coverage.nearestOrderableKm !== null && coverage.nearestOrderableKm < 5);
+});
+
+test('getPlatformCoverage: a card (no menu key) outside every radius is correctly NOT covered — C2 regression', () => {
+  // The scenario the review called out: a customer 60km+ outside every
+  // restaurant's radius must see isCovered: false, not fail open because the
+  // eligibility gate wrongly rejected the (menu-less) card.
+  const far = card({ id: 'far-card', latitude: 9.0765, longitude: 7.3986, deliveryRadiusKm: 5 });
+  const coverage = getPlatformCoverage([far], PINNED);
+  assert.equal(coverage.isCovered, false);
+  assert.ok(coverage.nearestOrderableKm !== null && coverage.nearestOrderableKm > 400);
+});
+
+// --- getRestaurantRatingLabel: the "New" threshold flips at ratingCount === 5 ---
+
+test('getRestaurantRatingLabel: ratingCount 0 (no ratings at all) shows New', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: null, ratingCount: 0 }), 'New');
+});
+
+test('getRestaurantRatingLabel: one below the threshold (ratingCount 4) still shows New', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: 5, ratingCount: NEW_RESTAURANT_RATING_THRESHOLD - 1 }), 'New');
+});
+
+test('getRestaurantRatingLabel: exactly the threshold (ratingCount 5) shows the average, not New — the flip point', () => {
+  const label = getRestaurantRatingLabel({ ratingAverage: 4.2, ratingCount: NEW_RESTAURANT_RATING_THRESHOLD });
+  assert.notEqual(label, 'New');
+  assert.equal(label, '4.2 ★ (5)');
+});
+
+test('getRestaurantRatingLabel: well above the threshold formats the average to one decimal with the count', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: 3.6667, ratingCount: 42 }), '3.7 ★ (42)');
+});
+
+test('getRestaurantRatingLabel: missing ratingAverage/ratingCount defaults to New (undefined count treated as 0)', () => {
+  assert.equal(getRestaurantRatingLabel({ ratingAverage: undefined, ratingCount: undefined }), 'New');
 });
 
 test('zero eligible candidates because no restaurant has coordinates, but the catalogue is non-empty -> covered (live production scenario)', () => {

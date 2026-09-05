@@ -3,12 +3,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  DISPATCH_APPLICATION_PENDING_MESSAGE,
-  DISPATCH_APPLICATION_REJECTED_FALLBACK,
-  MISSING_PROFILE_ERROR,
-  resolveDispatchAccessState,
-} from './dispatchAuthFlow.js';
+import { MISSING_PROFILE_ERROR, resolveDispatchAccessState } from './dispatchAuthFlow.js';
 
 test('routes a customer-role rider with no application to phase 2', () => {
   assert.deepEqual(
@@ -40,7 +35,7 @@ test('keeps dispatch riders on the main app', () => {
   );
 });
 
-test('blocks pending applicants with the pending message', () => {
+test('routes pending applicants back to the profile flow', () => {
   assert.deepEqual(
     resolveDispatchAccessState({
       claimRole: 'customer',
@@ -49,13 +44,13 @@ test('blocks pending applicants with the pending message', () => {
       },
     }),
     {
-      kind: 'blocked',
-      message: DISPATCH_APPLICATION_PENDING_MESSAGE,
+      kind: 'complete-profile',
+      userRole: 'customer',
     }
   );
 });
 
-test('blocks rejected applicants with the rejection fallback', () => {
+test('routes rejected applicants back to the profile flow', () => {
   assert.deepEqual(
     resolveDispatchAccessState({
       claimRole: 'customer',
@@ -64,8 +59,8 @@ test('blocks rejected applicants with the rejection fallback', () => {
       },
     }),
     {
-      kind: 'blocked',
-      message: DISPATCH_APPLICATION_REJECTED_FALLBACK,
+      kind: 'complete-profile',
+      userRole: 'customer',
     }
   );
 });

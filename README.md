@@ -80,7 +80,7 @@ The current stack is:
 - `Supabase Auth` for sign-in and token issuance
 - `Supabase JWT claims` for privileged app access
 - `Supabase Edge Functions` for trusted mutations and protected read APIs
-- `Postgres via Prisma` for authority records, approvals, operational orders, riders, and audit history
+- `Supabase Postgres` (reached from Edge Functions with `supabase-js` and the service-role key) for authority records, approvals, operational orders, riders, and audit history
 
 Paystack phase 1 is implemented in code for `card` and `bank transfer` checkout:
 
@@ -157,18 +157,10 @@ npm run dev:admin
 
 ## Supabase and SQL Deploy Flow
 
-Edge Functions need both Supabase project config and a live Postgres connection:
+Edge Functions read their configuration from `functions/.env`, which the deploy scripts sync
+into Supabase secrets:
 
 ```bash
-# Runtime traffic through Supavisor connection pooling:
-DATABASE_URL=postgresql://USER.PROJECT_REF:URL_ENCODED_PASSWORD@REGION.pooler.supabase.com:6543/postgres?pgbouncer=true
-
-# Migration traffic:
-DIRECT_URL=postgresql://USER.PROJECT_REF:URL_ENCODED_PASSWORD@REGION.pooler.supabase.com:5432/postgres
-
-# Direct connection only when your environment supports IPv6 or the Supabase project has the IPv4 add-on:
-# DIRECT_URL=postgresql://USER:URL_ENCODED_PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres?sslmode=require
-
 BOOTSTRAP_ADMIN_EMAILS=admin@example.com
 PAYSTACK_SECRET_KEY=sk_test_your_secret_key_here
 PAYSTACK_PUBLIC_KEY=pk_test_your_public_key_here
@@ -177,19 +169,19 @@ PAYSTACK_CALLBACK_URL=https://feasty.com/payment/callback
 
 The checked-in example lives in [`functions/.env.example`](functions/.env.example).
 
-After setting `DATABASE_URL`, generate the Prisma client and deploy the migrations before releasing backend changes:
+Database schema changes live in `supabase/migrations/*.sql` and are applied with the Supabase
+CLI before the Edge Functions that depend on them are deployed:
 
 ```bash
-cd functions
-npm run db:doctor
-npm run prisma:generate
-npx prisma migrate deploy
+npx supabase db push --project-ref YOUR_PROJECT_REF
 ```
 
 ## Important Notes
 
 - Apply Supabase database migrations before relying on SQL-backed records and views in production.
-- If `DATABASE_URL` is missing in the environment that runs Prisma migrations, SQL-backed features will fail instead of falling back to a weaker authority path.
+- `supabase/migrations/` is the single source of truth for schema. Prisma was retired on
+  2026-07-30; see [`functions/prisma/migrations/README.md`](functions/prisma/migrations/README.md)
+  for the frozen historical migration set and why it is no longer authoritative.
 
 ## Launch Docs
 
@@ -199,7 +191,7 @@ The backend still needs a final pass before launch:
 
 1. Add `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, and `PAYSTACK_CALLBACK_URL` to `functions/.env` and the live backend environment.
 2. Deploy `paystack-webhook` and `payment-verification`.
-3. Fix `npm run db:migrate:deploy` on Supabase and apply the live migrations.
+3. Apply any pending `supabase/migrations/*.sql` to the live database.
 4. Confirm the new `DispatchRiderRecord` SQL fields are applied live.
 5. Apply the latest application-record migration (`20260514_application_records`) on Supabase before using the native approval and offboarding flows live.
 6. Rerun the full sandbox flow end to end.

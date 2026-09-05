@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
-import { getDispatchDeliveryQueue } from '../services/dispatchReadModel';
+import { getDispatchDeliveryQueue, type DispatchDeliveryOffer } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
 import { sortDispatchHistoryOrders } from '../utils/dispatchQueue';
 import { useAuth } from '../contexts/AuthContext';
 
 export type DispatchOrder = OrderDocument;
 
+const FALLBACK_MS = 120000;
+
 export const useDispatchOrders = () => {
   const { loading: authLoading, user } = useAuth();
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
+  const [offers, setOffers] = useState<DispatchDeliveryOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isVisible = useAppStateVisibility();
+  const activeRef = useRef(false);
 
   const loadOrders = useCallback(
     async (mode: 'initial' | 'refresh' | 'background' = 'initial') => {
@@ -25,9 +33,18 @@ export const useDispatchOrders = () => {
 
         const nextData = await getDispatchDeliveryQueue();
 
+        if (!activeRef.current) {
+          return;
+        }
+
         setOrders(nextData.orders as DispatchOrder[]);
+        setOffers((nextData.offers ?? []) as DispatchDeliveryOffer[]);
         setError(null);
       } catch (nextError: any) {
+        if (!activeRef.current) {
+          return;
+        }
+
         console.error('Error loading dispatch orders:', nextError);
         setError(nextError.message ?? 'Unable to load dispatch orders right now.');
       } finally {
@@ -35,13 +52,15 @@ export const useDispatchOrders = () => {
           setRefreshing(false);
         }
 
-        if (mode === 'initial') {
+        if (mode === 'initial' && activeRef.current) {
           setLoading(false);
         }
       }
     },
     []
   );
+
+  const enabled = !authLoading && Boolean(user);
 
   useEffect(() => {
     if (authLoading) {
@@ -50,37 +69,37 @@ export const useDispatchOrders = () => {
 
     if (!user) {
       setOrders([]);
+      setOffers([]);
       setError(null);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    let cancelled = false;
-
-    const guardedLoad = async (mode: 'initial' | 'background' = 'initial') => {
-      if (cancelled) {
-        return;
-      }
-
-      await loadOrders(mode);
-    };
-
-    void guardedLoad();
-    const unsubscribe = subscribeToRealtimeChanges(supabase, [ORDERS_REALTIME_TOPIC], () => {
-      void guardedLoad('background');
-    });
-    // Slow fallback poll in case the realtime connection drops silently.
-    const interval = setInterval(() => {
-      void guardedLoad('background');
-    }, 30000);
+    activeRef.current = true;
 
     return () => {
-      cancelled = true;
-      clearInterval(interval);
-      unsubscribe();
+      activeRef.current = false;
     };
-  }, [authLoading, loadOrders, user]);
+  }, [authLoading, user]);
+
+  const loadOrdersInBackground = useCallback(() => loadOrders('background'), [loadOrders]);
+
+  const subscribe = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(supabase, [ORDERS_REALTIME_TOPIC], () => onChanged(), onStatusChange),
+    []
+  );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe,
+    load: loadOrdersInBackground,
+    isVisible,
+    fallbackMs: FALLBACK_MS,
+    enabled,
+  });
 
   const deliveryOrders = useMemo(
     () => orders.filter((order) => (order.fulfillmentType ?? 'delivery') === 'delivery'),
@@ -128,6 +147,7 @@ export const useDispatchOrders = () => {
     deliveredCount,
     error,
     loading,
+    offers,
     onTheWayCount,
     orders,
     refreshing,

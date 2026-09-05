@@ -1,0 +1,52 @@
+name: Deploy unsubscribe
+
+# Path-filtered per-function deploy. Additive - closes a gap where
+# unsubscribe (like every function importing _shared) had nothing
+# redeploying it on a _shared/** change: it isn't on deploy.yml's
+# unconditional list (deliberately left alone here - see task-4-report.md
+# for why that list wasn't touched) and had no dedicated workflow of its
+# own, same as five other functions fixed alongside this one.
+#
+# unsubscribe HMAC-verifies its own token from the email link and must stay
+# verify_jwt = false (public, unauthenticated) - see supabase/config.toml's
+# entry for it, added specifically because this function had none before
+# and would otherwise silently default to requiring a JWT on next deploy.
+on:
+  push:
+    branches: [ 'main' ]
+    paths:
+      - 'supabase/functions/unsubscribe/**'
+      - 'supabase/functions/_shared/**'
+      - 'supabase/config.toml'
+      - '.github/workflows/deploy-unsubscribe.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy unsubscribe Edge Function
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      - name: Deploy unsubscribe
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          # The supabase CLI is a devDependency, so it lives in node_modules/.bin,
+          # which Actions does not put on PATH for `run:` steps. Every invocation
+          # must go through npx or it fails with "supabase: command not found".
+          npx supabase --version
+          npx supabase login --token "$SUPABASE_ACCESS_TOKEN"
+          npx supabase functions deploy unsubscribe --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes

@@ -1,0 +1,612 @@
+// Order records: the row shapes, the status vocabulary, the loaders every
+// domain reads through, and the mutations that keep an order and its delivery
+// events in step.
+//
+// Everything in here is shared by at least two domains. Customer-only order
+// creation (draft preparation, pricing, Paystack) lives in domains/orders.ts.
+
+import { serviceClient } from './client.ts';
+import {
+  buildNotificationData,
+  notifyRestaurantUsers,
+  notifyUsers,
+} from './notifications.ts';
+import { logEdgeEvent } from './observability.ts';
+import { broadcastOrderChanged } from './realtime.ts';
+import type { JsonObject } from './rpc/coercion.ts';
+import { nowIso, sanitizeOptionalText, sanitizeText, toSortableTimestamp } from './rpc/coercion.ts';
+import { fail } from './rpc/respond.ts';
+
+export type CustomerOrderRow = {
+  cancellation?: JsonObject | null;
+  createdAt?: string | null;
+  customerId: string;
+  deliveryAddress?: string | null;
+  deliveryLocation?: JsonObject | null;
+  fulfillmentType?: string | null;
+  id: string;
+  needsAttention?: boolean | null;
+  payment?: JsonObject | null;
+  pricing?: JsonObject | null;
+  orderGroupId?: string | null;
+  restaurantId: string;
+  restaurantName: string;
+  // Task 18 (G2): the customer-requested slot as a UTC instant, or null for an
+  // immediate order. Present only on scheduled orders.
+  scheduledFor?: string | null;
+  status?: string | null;
+  timeline?: JsonObject | null;
+  updatedAt?: string | null;
+};
+
+export type DeliveryAssignmentRow = {
+  assignedAt?: string | null;
+  courierId?: string | null;
+  courierName?: string | null;
+  dispatchId?: string | null;
+  dispatchOwnerId?: string | null;
+  orderId: string;
+};
+
+export type DeliveryEventRow = {
+  actorUid?: string | null;
+  createdAt?: string | null;
+  details?: JsonObject | null;
+  eventType: string;
+  id: string;
+  note?: string | null;
+  orderId: string;
+};
+
+export type OrderItemRow = {
+  itemId: string;
+  name: string;
+  orderId: string;
+  optionDelta?: number | null;
+  price: number;
+  quantity: number;
+  restaurantId: string;
+  restaurantName: string;
+  selectedOptions?: JsonObject[] | null;
+};
+
+export type PaymentTransactionRow = {
+  accessCode?: string | null;
+  authorizationUrl?: string | null;
+  channel?: string | null;
+  customerId: string;
+  gatewayStatus?: string | null;
+  lastError?: string | null;
+  method: string;
+  orderId: string;
+  orderGroupId?: string | null;
+  reference: string;
+  restaurantId: string;
+  splitSubaccountCode?: string | null;
+  settlementMode?: string | null;
+  status: string;
+};
+
+export type OrderGroupRow = {
+  customerId: string;
+  id: string;
+  orderCount?: number | null;
+  orderIds?: JsonObject | null;
+  payment?: JsonObject | null;
+  pricing?: JsonObject | null;
+  primaryOrderId: string;
+  restaurantCount?: number | null;
+  restaurantIds?: JsonObject | null;
+};
+
+export type OrderSnapshotOptions = {
+  courierPhone?: string | null;
+  courierLatitude?: number | null;
+  courierLongitude?: number | null;
+  courierUpdatedAt?: string | null;
+  customerPhone?: string | null;
+  // Live-tracking extras, populated only by customerGetOrderDetail. The map
+  // pins the restaurant origin; `eta` is the server's prep-aware initial
+  // delivery estimate for first paint and `averageSpeedKmh` lets the client
+  // recompute the live rider ETA from each rider-position broadcast without
+  // a round trip.
+  restaurantLatitude?: number | null;
+  restaurantLongitude?: number | null;
+  eta?: { minMinutes: number; maxMinutes: number } | null;
+  averageSpeedKmh?: number | null;
+  orderGroup?: OrderGroupRow | null;
+};
+
+export const CUSTOMER_ORDER_COLUMNS =
+  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,orderGroupId,createdAt,updatedAt';
+
+export const ORDER_GROUP_COLUMNS =
+  'id,customerId,primaryOrderId,orderIds,orderCount,pricing,payment,restaurantIds,restaurantCount';
+
+export const ORDER_STATUS = {
+  ACCEPTED: 'accepted',
+  CANCELLED: 'cancelled',
+  DELIVERED: 'delivered',
+  ESCALATED: 'escalated',
+  FAILED_DELIVERY: 'failed_delivery',
+  ON_THE_WAY: 'on_the_way',
+  PICKED_UP: 'picked_up',
+  PLACED: 'placed',
+  PREPARING: 'preparing',
+  READY_FOR_PICKUP: 'ready_for_pickup',
+  REJECTED: 'rejected',
+  // Task 18 (G2): a paid-and-waiting scheduled order. Pre-kitchen — the
+  // release sweep flips it to PLACED at `scheduledFor − prepTimeMinutes`. It is
+  // deliberately excluded from TERMINAL_ORDER_STATUSES (below) and from the
+  // acceptance-deadline sweep's placed-like candidate set, so it is never
+  // auto-cancelled while it waits.
+  SCHEDULED: 'scheduled',
+} as const;
+
+export const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'rejected', 'failed_delivery']);
+
+export const FAILED_ORDER_STATUSES = new Set<string>([
+  ORDER_STATUS.CANCELLED,
+  ORDER_STATUS.REJECTED,
+  ORDER_STATUS.FAILED_DELIVERY,
+]);
+
+export const PREPAID_PAYMENT_METHODS = new Set(['card', 'wallet', 'bank_transfer']);
+export const PAYSTACK_PAYMENT_METHODS = new Set(['card', 'bank_transfer']);
+
+export const PAYMENT_STATUS = {
+  AUTHORIZED: 'authorized',
+  FAILED: 'failed',
+  PAID: 'paid',
+  PENDING: 'pending',
+  REFUNDED: 'refunded',
+} as const;
+
+export const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
+export const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
+
+export const DEFAULT_FUNCTION_ORDER_STATUS = 'placed';
+export const DEFAULT_CURRENCY = 'NGN';
+
+/** A prepaid checkout that never gets paid is cancelled after this window. */
+export const ORDER_PAYMENT_TIMEOUT_MS = 15 * 60 * 1000;
+
+export const normalizeOrderStatus = (value: unknown) => {
+  const status = sanitizeText(value, 'draft');
+  switch (status) {
+    case 'pending':
+    // 'confirmed' was written by the async order/payment handlers but is not a valid
+    // order status; treat it as 'placed' so paid orders stay actionable.
+    case 'confirmed':
+      return ORDER_STATUS.PLACED;
+    case 'ready':
+      return ORDER_STATUS.READY_FOR_PICKUP;
+    default:
+      return status;
+  }
+};
+
+export const toOrderSnapshotResponse = (
+  order: CustomerOrderRow,
+  items: OrderItemRow[],
+  assignment: DeliveryAssignmentRow | null,
+  events: DeliveryEventRow[] = [],
+  options: OrderSnapshotOptions = {}
+) => ({
+  assignment: assignment
+    ? {
+        courierId: sanitizeOptionalText(assignment.courierId),
+        courierName: sanitizeOptionalText(assignment.courierName),
+        courierLatitude: options.courierLatitude ?? null,
+        courierLongitude: options.courierLongitude ?? null,
+        courierPhone: sanitizeOptionalText(options.courierPhone),
+        courierUpdatedAt: options.courierUpdatedAt ?? null,
+        dispatchId: sanitizeOptionalText(assignment.dispatchId),
+        dispatchOwnerId: sanitizeOptionalText(assignment.dispatchOwnerId),
+      }
+    : null,
+  cancellation: order.cancellation ?? null,
+  createdAt: order.createdAt ?? null,
+  customerId: order.customerId,
+  customerPhone: sanitizeOptionalText(options.customerPhone),
+  deliveryAddress: sanitizeOptionalText(order.deliveryAddress),
+  deliveryLocation: order.deliveryLocation ?? null,
+  orderGroupId: order.orderGroupId ?? null,
+  orderGroup: options.orderGroup ?? null,
+  restaurantLatitude: options.restaurantLatitude ?? null,
+  restaurantLongitude: options.restaurantLongitude ?? null,
+  eta: options.eta ?? null,
+  averageSpeedKmh: options.averageSpeedKmh ?? null,
+  events: events.map((event) => ({
+    actorUid: sanitizeOptionalText(event.actorUid),
+    createdAt: event.createdAt ?? null,
+    details: event.details ?? null,
+    eventType: event.eventType,
+    id: event.id,
+    note: sanitizeOptionalText(event.note),
+  })),
+  fulfillmentType: sanitizeText(order.fulfillmentType, 'delivery'),
+  id: order.id,
+  needsAttention: order.needsAttention === true,
+  items: items.map((item) => ({
+    id: item.itemId,
+    name: item.name,
+    price: Number(item.price ?? 0),
+    quantity: Number(item.quantity ?? 0),
+    optionDelta: item.optionDelta ?? 0,
+    restaurantId: item.restaurantId,
+    restaurantName: item.restaurantName,
+    selectedOptions: (item.selectedOptions as JsonObject[] | null | undefined) ?? [],
+  })),
+  payment: order.payment ?? null,
+  pricing: order.pricing ?? null,
+  restaurantId: order.restaurantId,
+  restaurantName: order.restaurantName,
+  // Task 18 (G2): the scheduled slot, surfaced to customer tracking and the
+  // partner kitchen board. Null for immediate orders.
+  scheduledFor: order.scheduledFor ?? null,
+  status: normalizeOrderStatus(sanitizeText(order.status, DEFAULT_FUNCTION_ORDER_STATUS)),
+  timeline: order.timeline ?? null,
+  total: Number((order.pricing as JsonObject | null)?.total ?? 0),
+  updatedAt: order.updatedAt ?? null,
+});
+
+export type DispatchOrderDetailResponse = ReturnType<typeof toOrderSnapshotResponse>;
+
+export const upsertPaymentTransaction = async (payload: JsonObject & { reference: string }) => {
+  const { data: existingTransaction, error: lookupError } = await serviceClient
+    .from('PaymentTransaction')
+    .select('id')
+    .eq('reference', payload.reference)
+    .maybeSingle<{ id: string }>();
+
+  if (lookupError) {
+    throw new Error(`Failed to resolve payment transaction id: ${lookupError.message}`);
+  }
+
+  const { error } = await serviceClient.from('PaymentTransaction').upsert(
+    {
+      id: existingTransaction?.id?.trim() || payload.reference.trim(),
+      ...payload,
+      updatedAt: new Date().toISOString(),
+    },
+    {
+    onConflict: 'reference',
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+};
+
+export const insertDeliveryEvent = async (payload: JsonObject) => {
+  const eventPayload = {
+    id: crypto.randomUUID(),
+    ...payload,
+  };
+  const { error } = await serviceClient.from('DeliveryEvent').insert(eventPayload);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+};
+
+export const updateOrderRecord = async (orderId: string, updates: JsonObject) => {
+  const { error } = await serviceClient.from('CustomerOrder').update(updates).eq('id', orderId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await broadcastOrderChanged(orderId);
+};
+
+// Task 17 (G1): free the promo-cap slot an order held once it ends
+// cancelled/refunded. THE single shared release path — the customer placement
+// handlers (on synchronous placement/init failure) and all three
+// post-placement terminal-cancel transitions (customer self-cancel,
+// unpaid-payment timeout, acceptance-deadline auto-cancel) all funnel through
+// here, so a redemption tied to an order that does not end successful is always
+// released.
+//
+// Safe by construction:
+//   * IDEMPOTENT & no-op on the no-promo case — ebuy_release_promo_redemption
+//     deletes by the UNIQUE orderId, so an order that never redeemed deletes
+//     zero rows, and a second release deletes zero rows. No negative count, no
+//     double-free.
+//   * MONEY-DIRECTION SAFE — releasing removes the PromoRedemption row, which
+//     is exactly what ebuy_redeem_promo_code counts, so the effective cap count
+//     drops by one and the freed slot is genuinely reusable by the customer.
+//   * BEST-EFFORT — never throws; a release failure is logged, never allowed to
+//     abort or roll back the surrounding cancel/refund (same discipline as the
+//     notification calls around it).
+export const releasePromoRedemption = async (orderId: string): Promise<void> => {
+  try {
+    const { error } = await serviceClient.rpc('ebuy_release_promo_redemption', { p_order_id: orderId });
+    if (error) {
+      throw new Error(error.message);
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'promo redemption release failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+};
+
+/**
+ * Compare-and-swap variant of updateOrderRecord: applies `updates` only if the
+ * order's stored status still equals `expectedStatus`, and reports whether it
+ * did. This is the write-time guard for handlers that validate a transition
+ * against a status they read earlier in the same request (a stale snapshot) and
+ * would otherwise write unconditionally — the classic read-then-write race.
+ *
+ * `expectedStatus` is the RAW stored value the caller observed (not the
+ * normalized one): PostgREST turns `.eq('id').eq('status', expected)` into
+ * `UPDATE ... WHERE id = ? AND status = ?`, which Postgres re-evaluates against
+ * the latest committed row version when it takes the row lock (EvalPlanQual
+ * under READ COMMITTED). So if a concurrent writer committed a different status
+ * (e.g. the acceptance sweep cancelling + refunding a `placed` order) between
+ * the caller's read and this write, the qual no longer matches, zero rows
+ * update, and the caller learns its snapshot was stale instead of silently
+ * clobbering the committed state. `.select('id')` is what surfaces the affected
+ * count. The broadcast fires only when the row actually changed.
+ */
+export const updateOrderRecordIfStatus = async (
+  orderId: string,
+  expectedStatus: string,
+  updates: JsonObject
+): Promise<boolean> => {
+  const { data, error } = await serviceClient
+    .from('CustomerOrder')
+    .update(updates)
+    .eq('id', orderId)
+    .eq('status', expectedStatus)
+    .select('id');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const applied = Array.isArray(data) && data.length > 0;
+  if (applied) {
+    await broadcastOrderChanged(orderId);
+  }
+  return applied;
+};
+
+export const loadOrderRelations = async (orderIds: string[]) => {
+  if (orderIds.length === 0) {
+    return {
+      assignmentsByOrderId: new Map<string, DeliveryAssignmentRow>(),
+      eventsByOrderId: new Map<string, DeliveryEventRow[]>(),
+      itemsByOrderId: new Map<string, OrderItemRow[]>(),
+    };
+  }
+
+  const [{ data: items, error: itemsError }, { data: assignments, error: assignmentError }, { data: events, error: eventsError }] =
+    await Promise.all([
+      serviceClient
+        .from('OrderItem')
+        .select('orderId,itemId,name,price,quantity,restaurantId,restaurantName')
+        .in('orderId', orderIds),
+      serviceClient
+        .from('DeliveryAssignment')
+        .select('orderId,dispatchId,dispatchOwnerId,courierId,courierName,assignedAt')
+        .in('orderId', orderIds),
+      serviceClient
+        .from('DeliveryEvent')
+        .select('id,orderId,eventType,actorUid,note,details,createdAt')
+        .in('orderId', orderIds)
+        .order('createdAt', { ascending: true }),
+    ]);
+
+  if (itemsError) {
+    throw new Error(itemsError.message);
+  }
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message);
+  }
+
+  if (eventsError) {
+    throw new Error(eventsError.message);
+  }
+
+  const itemsByOrderId = new Map<string, OrderItemRow[]>();
+  for (const item of (items ?? []) as OrderItemRow[]) {
+    const bucket = itemsByOrderId.get(item.orderId) ?? [];
+    bucket.push(item);
+    itemsByOrderId.set(item.orderId, bucket);
+  }
+
+  const assignmentsByOrderId = new Map(
+    ((assignments ?? []) as DeliveryAssignmentRow[]).map((assignment) => [assignment.orderId, assignment] as const)
+  );
+
+  const eventsByOrderId = new Map<string, DeliveryEventRow[]>();
+  for (const event of (events ?? []) as DeliveryEventRow[]) {
+    const bucket = eventsByOrderId.get(event.orderId) ?? [];
+    bucket.push(event);
+    eventsByOrderId.set(event.orderId, bucket);
+  }
+
+  return {
+    assignmentsByOrderId,
+    eventsByOrderId,
+    itemsByOrderId,
+  };
+};
+
+export const loadOrderBundle = async (orderId: string, includeEvents = false) => {
+  const { data: order, error } = await serviceClient
+    .from('CustomerOrder')
+    .select(CUSTOMER_ORDER_COLUMNS)
+    .eq('id', orderId)
+    .maybeSingle<CustomerOrderRow>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!order) {
+    return null;
+  }
+
+  const normalizedOrder = await maybeExpireUnpaidOrder(order);
+  const { assignmentsByOrderId, eventsByOrderId, itemsByOrderId } = await loadOrderRelations([orderId]);
+  return {
+    assignment: assignmentsByOrderId.get(orderId) ?? null,
+    events: includeEvents ? eventsByOrderId.get(orderId) ?? [] : [],
+    items: itemsByOrderId.get(orderId) ?? [],
+    order: normalizedOrder,
+  };
+};
+
+export const isOrderOperationallyVisible = (order: CustomerOrderRow) => {
+  const paymentMethod = sanitizeText(order.payment?.method, 'cash');
+  const paymentStatus = sanitizeText(order.payment?.status, PAYMENT_STATUS.PENDING);
+  const currentStatus = normalizeOrderStatus(order.status);
+
+  if (!PREPAID_PAYMENT_METHODS.has(paymentMethod)) {
+    return true;
+  }
+
+  if (paymentStatus === PAYMENT_STATUS.PAID) {
+    return true;
+  }
+
+  return TERMINAL_ORDER_STATUSES.has(currentStatus);
+};
+
+// Admin and partner order lists/counts stay clean: unpaid prepaid checkouts and
+// failed outcomes (cancelled/rejected/failed delivery) are excluded. Customers
+// always see their full order history via the customer read paths.
+export const isOrderCleanForReporting = (order: CustomerOrderRow) => {
+  const paymentMethod = sanitizeText(order.payment?.method, 'cash');
+  const paymentStatus = sanitizeText(order.payment?.status, PAYMENT_STATUS.PENDING);
+  const currentStatus = normalizeOrderStatus(order.status);
+
+  if (FAILED_ORDER_STATUSES.has(currentStatus)) {
+    return false;
+  }
+
+  if (PREPAID_PAYMENT_METHODS.has(paymentMethod) && paymentStatus !== PAYMENT_STATUS.PAID) {
+    return false;
+  }
+
+  return true;
+};
+
+export const assertOrderPaymentReadyForOperations = (order: CustomerOrderRow) => {
+  if (!isOrderOperationallyVisible(order)) {
+    fail(412, 'This order is still waiting for online payment confirmation and cannot move into kitchen or dispatch yet.');
+  }
+};
+
+export const assertNonTerminalOrder = (order: CustomerOrderRow) => {
+  if (TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus(order.status))) {
+    fail(412, 'This order can no longer be updated.');
+  }
+};
+
+/**
+ * Lazy expiry for prepaid orders that were never paid. Runs on read rather than
+ * on a schedule, so any path that surfaces an order also settles its fate; the
+ * returned row is the post-expiry one so callers never render a stale status.
+ */
+export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
+  const currentStatus = normalizeOrderStatus(order.status);
+  if (TERMINAL_ORDER_STATUSES.has(currentStatus)) {
+    return order;
+  }
+
+  const paymentMethod = sanitizeText(order.payment?.method);
+  const paymentStatus = sanitizeText(order.payment?.status, PAYMENT_STATUS.PENDING);
+  if (!PAYSTACK_PAYMENT_METHODS.has(paymentMethod) || paymentStatus !== PAYMENT_STATUS.PENDING) {
+    return order;
+  }
+
+  const createdAt = toSortableTimestamp(order.createdAt);
+  if (!createdAt || Date.now() - createdAt < ORDER_PAYMENT_TIMEOUT_MS) {
+    return order;
+  }
+
+  const timedOutAt = nowIso();
+  const payment = {
+    ...(order.payment ?? {}),
+    lastEvent: 'payment_timeout',
+    failedAt: timedOutAt,
+    status: PAYMENT_STATUS.FAILED,
+    verifiedAt: timedOutAt,
+  };
+  const cancellation = {
+    actor: 'system',
+    reason: 'payment_timeout',
+    timedOutAt,
+  };
+  const timeline = {
+    ...(order.timeline ?? {}),
+    cancelledAt: timedOutAt,
+    paymentTimedOutAt: timedOutAt,
+  };
+
+  await updateOrderRecord(order.id, {
+    cancellation,
+    payment,
+    status: ORDER_STATUS.CANCELLED,
+    timeline,
+    updatedAt: timedOutAt,
+  });
+
+  // The order is now cancelled (payment never completed): free any promo-cap
+  // slot it held so a single-use code is not consumed by an order the customer
+  // never actually got. Best-effort — must not undo the cancel.
+  await releasePromoRedemption(order.id);
+
+  await insertDeliveryEvent({
+    actorUid: null,
+    details: {
+      timeoutMinutes: ORDER_PAYMENT_TIMEOUT_MS / 60000,
+    },
+    eventType: 'payment_timeout',
+    orderId: order.id,
+  });
+
+  await notifyUsers([order.customerId], {
+    title: 'Order timed out',
+    body: `Order ${order.id.slice(-6).toUpperCase()} was cancelled because payment was not completed in time.`,
+    data: buildNotificationData({
+      app: 'customer',
+      orderId: order.id,
+      routeKey: 'customer_order_detail',
+      type: 'order_update',
+    }),
+  });
+  await notifyRestaurantUsers(order.restaurantId, {
+    title: 'Unpaid order cancelled',
+    body: `Order ${order.id.slice(-6).toUpperCase()} expired after the payment window closed.`,
+    data: buildNotificationData({
+      app: 'partner',
+      orderId: order.id,
+      routeKey: 'partner_order_detail',
+      type: 'order_update',
+    }),
+  });
+
+  return {
+    ...order,
+    cancellation,
+    payment,
+    status: ORDER_STATUS.CANCELLED,
+    timeline,
+    updatedAt: timedOutAt,
+  };
+};
+
+export const hasAssignedCourier = (assignment: DeliveryAssignmentRow | null) =>
+  Boolean(sanitizeText(assignment?.courierId));
+
+export const getDispatchAssignmentOwnerId = (assignment: DeliveryAssignmentRow | null) =>
+  sanitizeText(assignment?.dispatchOwnerId) ?? sanitizeText(assignment?.dispatchId);

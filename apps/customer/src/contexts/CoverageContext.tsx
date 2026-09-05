@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AddressRecord } from '../domain/entities';
-import { getPublishedRestaurants } from '../services/publicRestaurantReadModel';
+import { getRestaurantList } from '../services/publicRestaurantReadModel';
 import { getPlatformCoverage, type DiscoveryRestaurant, type PlatformCoverage } from '../utils/restaurantAvailability';
 import { useCart } from './CartContext';
 
@@ -29,9 +29,12 @@ export const CoverageProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     let cancelled = false;
 
-    // getPublishedRestaurants caches through callPublicCatalog, so this shares the home
-    // screen's fetch rather than adding a round trip.
-    getPublishedRestaurants()
+    // getRestaurantList() with no params caches through callPublicCatalog on the same
+    // key as home's identical no-coords call, so this shares that fetch rather than
+    // adding a round trip -- and coverage needs the full published set (in- and
+    // out-of-radius alike) to compute nearestOrderableKm, so it must not pass coords
+    // either (the server's coords filter is a hard exclude, not a sort key).
+    getRestaurantList()
       .then(({ restaurants: catalog }) => {
         if (!cancelled) {
           setRestaurants(catalog as DiscoveryRestaurant[]);

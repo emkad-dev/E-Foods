@@ -6,6 +6,7 @@ const ADMIN_NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/orders', label: 'Orders' },
   { to: '/approvals', label: 'Approvals' },
+  { to: '/observability', label: 'Observability' },
   { to: '/access', label: 'Access' },
   { to: '/dispatch', label: 'Dispatch' },
   { to: '/statistics', label: 'Statistics' },
@@ -35,7 +36,7 @@ export default function AppLayout() {
             <span className="wordmark-orange">Y</span>
           </span>
         </div>
-        
+
         <nav>
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
@@ -53,7 +54,7 @@ export default function AppLayout() {
         <header className="topbar">
           <h1 className="topbar-title">Hello, {greetingName}!</h1>
           <div className="topbar-meta">
-            {lastUpdated ? <span>Updated {lastUpdated.toLocaleTimeString()}</span> : <span>Loading data…</span>}
+            {lastUpdated ? <span>Updated {lastUpdated.toLocaleTimeString()}</span> : <span>Loading data...</span>}
             <span className="badge badge-primary">{session?.user.email}</span>
           </div>
         </header>

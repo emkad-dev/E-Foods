@@ -1,5 +1,5 @@
 import { FontAwesome } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,13 +14,17 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
-import AuthHeaderActions from '../../../src/components/AuthHeaderActions';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
-import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
+import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
+import { supabase } from '../../../src/services/supabase/config';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
 import {
   type DiscoveryRestaurant,
@@ -91,8 +95,13 @@ export default function HomeScreen() {
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [expandedShelf, setExpandedShelf] = useState<'nearby' | null>(null);
-  const catalogRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMountedRef = useRef(true);
+  // Distinguishes the very first load (shows the full-screen skeleton) from
+  // every later refresh driven by useRealtimeResource -- changed broadcast,
+  // reconnect, foreground resume, or the disconnected-only fallback poll --
+  // which should refresh quietly (mode: 'background') rather than re-flash
+  // the skeleton on the highest-traffic screen in the app.
+  const hasLoadedOnceRef = useRef(false);
+  const isVisible = useAppStateVisibility();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -112,7 +121,12 @@ export default function HomeScreen() {
       }
 
       try {
-        const { restaurants: catalog } = await getPublishedRestaurants();
+        // No coords passed: this screen also needs restaurants outside the
+        // customer's delivery radius (the "outside your delivery zone"
+        // section below), and the server's coords filter is a hard exclude,
+        // not just a sort key — so this stays the default updatedAt-DESC
+        // page, filtered client-side by getRestaurantAvailability instead.
+        const { restaurants: catalog } = await getRestaurantList();
         setRestaurants(catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as Restaurant[]);
         setCatalogError(null);
         trackAnalyticsEvent('customer_catalog_loaded', {
@@ -142,41 +156,32 @@ export default function HomeScreen() {
     []
   );
 
-  const scheduleCatalogRefresh = useCallback(
-    (delayMs: number) => {
-      if (!isMountedRef.current) {
-        return;
-      }
+  // First call is 'initial' (full skeleton); every later call -- from
+  // useRealtimeResource's changed/reconnect/foreground-resume/fallback-poll
+  // triggers -- is 'background' (quiet), matching the old scheduler's
+  // initial-vs-recurring split without a second, separate mount fetch.
+  const refreshCatalog = useCallback(async () => {
+    const mode = hasLoadedOnceRef.current ? 'background' : 'initial';
+    hasLoadedOnceRef.current = true;
+    await loadRestaurants(mode);
+  }, [loadRestaurants]);
 
-      if (catalogRefreshTimerRef.current) {
-        clearTimeout(catalogRefreshTimerRef.current);
-      }
-
-      catalogRefreshTimerRef.current = setTimeout(async () => {
-        const succeeded = await loadRestaurants('background');
-        scheduleCatalogRefresh(succeeded ? 30000 : 120000);
-      }, delayMs);
-    },
-    [loadRestaurants]
+  const subscribeToCatalog = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(supabase, [RESTAURANTS_REALTIME_TOPIC], () => onChanged(), onStatusChange),
+    []
   );
 
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    const initializeCatalog = async () => {
-      const succeeded = await loadRestaurants('initial');
-      scheduleCatalogRefresh(succeeded ? 30000 : 120000);
-    };
-
-    void initializeCatalog();
-
-    return () => {
-      isMountedRef.current = false;
-      if (catalogRefreshTimerRef.current) {
-        clearTimeout(catalogRefreshTimerRef.current);
-      }
-    };
-  }, [loadRestaurants, scheduleCatalogRefresh]);
+  // Realtime is the transport (this screen shows every restaurant, so unlike
+  // cart.tsx/restaurant/[id].tsx it doesn't filter the topic to one id); the
+  // fallback poll only fires while the channel is not confirmed SUBSCRIBED,
+  // and only while the app is visible.
+  useRealtimeResource({
+    subscribe: subscribeToCatalog,
+    load: refreshCatalog,
+    isVisible,
+    fallbackMs: 120000,
+  });
 
   const discoveryResults = useMemo(() => {
     return restaurants
@@ -235,17 +240,12 @@ export default function HomeScreen() {
   };
 
   const handleRetryCatalog = async () => {
-    if (catalogRefreshTimerRef.current) {
-      clearTimeout(catalogRefreshTimerRef.current);
-      catalogRefreshTimerRef.current = null;
-    }
-
-    const succeeded = await loadRestaurants('manual');
-    scheduleCatalogRefresh(succeeded ? 30000 : 120000);
+    await loadRestaurants('manual');
   };
 
   const customerName = getCustomerName(user?.displayName, user?.email);
   const greeting = `HI ${customerName.toUpperCase().slice(0, 18)}`;
+  const avatarLabel = customerName.slice(0, 1).toUpperCase();
   const locationLabel = deliveryLocation?.shortAddress ?? 'Set delivery area';
 
   if (loading) {
@@ -286,8 +286,9 @@ export default function HomeScreen() {
             </Text>
             <FontAwesome name="angle-down" size={18} color={customerTheme.brandGreen} />
           </TouchableOpacity>
-          {/* Renders null once signed in, so the chip stays centred as before. */}
-          <AuthHeaderActions />
+          <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')}>
+            <Text style={styles.avatarButtonText}>{avatarLabel}</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.searchShell}>
@@ -329,7 +330,6 @@ export default function HomeScreen() {
         </Animated.View>
       ) : null}
 
-
       {deliveryLocation ? (
         <Animated.View entering={FadeInDown.delay(360).duration(500)} style={styles.sectionBlock}>
           <View style={styles.sectionHeader}>
@@ -370,9 +370,7 @@ export default function HomeScreen() {
                   router.push(`/home/restaurant/${restaurant.id}`);
                 }}
               >
-                <View style={styles.nearbyImageShell}>
-                  <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
-                </View>
+                <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
                 <View style={styles.nearbyInfo}>
                   <View style={styles.nearbyHeader}>
                     <Text style={styles.nearbyName} numberOfLines={1}>
@@ -446,9 +444,7 @@ export default function HomeScreen() {
                     router.push(`/home/restaurant/${restaurant.id}`);
                   }}
                 >
-                  <View style={styles.unavailableImageShell}>
-                    <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
-                  </View>
+                  <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
                   <View style={styles.unavailableInfo}>
                   <View style={styles.unavailableHeader}>
                     <Text style={styles.unavailableName}>{restaurant.name}</Text>
@@ -543,17 +539,16 @@ const styles = StyleSheet.create({
   headerActionRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     marginTop: 12,
   },
   locationChip: {
     alignItems: 'center',
     backgroundColor: customerTheme.headerSurface,
-    flexShrink: 1,
     borderColor: 'rgba(3, 184, 51, 0.18)',
     borderRadius: 15,
     borderWidth: 1,
+    flex: 1,
     flexDirection: 'row',
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -565,10 +560,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginHorizontal: 10,
   },
-  nearbyImageShell: {
-    height: 132,
-    position: 'relative',
-    width: 112,
+  avatarButton: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.brandGreen,
+    borderColor: 'rgba(255, 149, 31, 0.55)',
+    borderRadius: 20,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: 'center',
+    marginLeft: 10,
+    width: 40,
+  },
+  avatarButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
   },
   searchShell: {
     alignItems: 'center',
@@ -990,7 +996,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   nearbyImage: {
-    height: '100%',
+    height: 132,
     width: 112,
   },
   nearbyInfo: {
@@ -1112,12 +1118,7 @@ const styles = StyleSheet.create({
     borderColor: '#ef4444',
   },
   unavailableImage: {
-    height: '100%',
-    width: 112,
-  },
-  unavailableImageShell: {
     height: 132,
-    position: 'relative',
     width: 112,
   },
   unavailableInfo: {

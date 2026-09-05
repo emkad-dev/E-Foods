@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -13,12 +13,18 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, withSpring } f
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../../packages/auth/src';
+import type { RealtimeResourceSubscribe } from '../../../../../../packages/runtime/src';
+import { useRealtimeResource } from '../../../../../../packages/runtime/src';
+import { useAppStateVisibility } from '../../../../../../packages/runtime/src/useAppStateVisibility';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
+import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { useCoverage } from '../../../../src/contexts/CoverageContext';
 import { customerTheme } from '../../../../src/theme/palette';
-import { getPublishedRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
+import { getRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
+import { supabase } from '../../../../src/services/supabase/config';
 import {
   COVERAGE_COMING_SOON_COPY,
   COVERAGE_COMING_SOON_TITLE,
@@ -28,6 +34,7 @@ import {
   getRestaurantAvailability,
   getRestaurantAvailabilityBadge,
   getRestaurantOperatingHoursLabel,
+  getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
 } from '../../../../src/utils/restaurantAvailability';
 
@@ -60,7 +67,7 @@ export default function RestaurantDetail() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [addedToCartVisible, setAddedToCartVisible] = useState(false);
-  const { addItem, deliveryLocation, items, restaurantId: cartRestaurantId } = useCart();
+  const { addItem, deliveryLocation, items } = useCart();
   const { isCovered } = useCoverage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -71,63 +78,96 @@ export default function RestaurantDetail() {
     transform: [{ scale: withSpring(cartButtonScale) }],
   }));
 
+  const hasValidId = Boolean(id && typeof id === 'string');
+  const isVisible = useAppStateVisibility();
+  const activeRef = useRef(false);
+
   useEffect(() => {
-    if (!id || typeof id !== 'string') {
+    if (!hasValidId) {
       setLoading(false);
       return;
     }
 
-    let active = true;
-
-    const loadRestaurant = async () => {
-      try {
-        const { restaurant: nextRestaurant } = await getPublishedRestaurantDetail(id);
-
-        if (!active) {
-          return;
-        }
-
-        if (!nextRestaurant || !isRestaurantVisibleToCustomers(nextRestaurant as DiscoveryRestaurant)) {
-          setRestaurant(null);
-          setMenu([]);
-          return;
-        }
-
-        const nextMenu = (((nextRestaurant.menu as MenuCategory[] | undefined) ?? []).map((category) => ({
-          category: category.category,
-          items: (category.items ?? []).filter((item) => item.isAvailable !== false),
-        })));
-
-        const filteredMenu = nextMenu.filter((category) => category.items.length > 0);
-
-        // When arriving from a meal search, open the category that holds the
-        // matched item so the highlighted card is on screen immediately.
-        const highlightedCategory = highlightId
-          ? filteredMenu.find((category) => category.items.some((item) => item.id === highlightId))?.category ?? null
-          : null;
-        const fallbackCategory = filteredMenu.length > 0 ? filteredMenu[0].category : null;
-
-        setRestaurant(nextRestaurant as DiscoveryRestaurant);
-        setMenu(filteredMenu);
-        setSelectedCategory((current) => current ?? highlightedCategory ?? fallbackCategory);
-      } catch (error) {
-        console.error('Error fetching restaurant:', error);
-        Alert.alert('Error', 'Could not load restaurant details');
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void loadRestaurant();
-    const interval = setInterval(loadRestaurant, 30000);
+    activeRef.current = true;
 
     return () => {
-      active = false;
-      clearInterval(interval);
+      activeRef.current = false;
     };
+  }, [hasValidId, id]);
+
+  const loadRestaurant = useCallback(async () => {
+    if (!id || typeof id !== 'string') {
+      return;
+    }
+
+    try {
+      const { restaurant: nextRestaurant } = await getRestaurantDetail(id);
+
+      if (!activeRef.current) {
+        return;
+      }
+
+      if (!nextRestaurant || !isRestaurantVisibleToCustomers(nextRestaurant as DiscoveryRestaurant)) {
+        setRestaurant(null);
+        setMenu([]);
+        return;
+      }
+
+      const nextMenu = (((nextRestaurant.menu as MenuCategory[] | undefined) ?? []).map((category) => ({
+        category: category.category,
+        items: (category.items ?? []).filter((item) => item.isAvailable !== false),
+      })));
+
+      const filteredMenu = nextMenu.filter((category) => category.items.length > 0);
+
+      // When arriving from a meal search, open the category that holds the
+      // matched item so the highlighted card is on screen immediately.
+      const highlightedCategory = highlightId
+        ? filteredMenu.find((category) => category.items.some((item) => item.id === highlightId))?.category ?? null
+        : null;
+      const fallbackCategory = filteredMenu.length > 0 ? filteredMenu[0].category : null;
+
+      setRestaurant(nextRestaurant as DiscoveryRestaurant);
+      setMenu(filteredMenu);
+      setSelectedCategory((current) => current ?? highlightedCategory ?? fallbackCategory);
+    } catch (error) {
+      console.error('Error fetching restaurant:', error);
+      Alert.alert('Error', 'Could not load restaurant details');
+    } finally {
+      if (activeRef.current) {
+        setLoading(false);
+      }
+    }
   }, [id, highlightId]);
+
+  const subscribeToRestaurant = useCallback<RealtimeResourceSubscribe>(
+    (onChanged, onStatusChange) =>
+      subscribeToRealtimeChanges(
+        supabase,
+        [RESTAURANTS_REALTIME_TOPIC],
+        (payload) => {
+          // The topic is global; skip refetches for other restaurants when tagged.
+          const changedRestaurantId = typeof payload.restaurantId === 'string' ? payload.restaurantId : null;
+          if (changedRestaurantId && id && changedRestaurantId !== id) {
+            return;
+          }
+
+          onChanged();
+        },
+        onStatusChange
+      ),
+    [id]
+  );
+
+  // Realtime is the transport; the fallback poll only fires while the
+  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
+  useRealtimeResource({
+    subscribe: subscribeToRestaurant,
+    load: loadRestaurant,
+    isVisible,
+    fallbackMs: 120000,
+    enabled: hasValidId,
+  });
 
   useEffect(() => {
     return () => {
@@ -152,37 +192,6 @@ export default function RestaurantDetail() {
   const handleAddToCart = (item: MenuItem) => {
     if (!isCovered) {
       Alert.alert(COVERAGE_COMING_SOON_TITLE, COVERAGE_COMING_SOON_COPY);
-      return;
-    }
-
-    if (cartRestaurantId && cartRestaurantId !== id) {
-      Alert.alert(
-        'Replace cart?',
-        'Your cart contains items from another restaurant. Do you want to clear it and start a new order?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Replace',
-            onPress: () => {
-              addItem(
-                {
-                  id: item.id,
-                  name: item.name,
-                  price: item.price,
-                  quantity: 1,
-                  restaurantId: id as string,
-                  restaurantName: restaurant?.name ?? 'Restaurant',
-                },
-                id as string,
-                restaurant?.name ?? 'Restaurant'
-              );
-              setCartButtonScale(1.25);
-              setTimeout(() => setCartButtonScale(1), 180);
-              triggerAddedToCartToast();
-            },
-          },
-        ]
-      );
       return;
     }
 
@@ -263,6 +272,12 @@ export default function RestaurantDetail() {
               </View>
 
               <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.summaryCard}>
+                <RestaurantLogoBadge
+                  logoImage={restaurant.logoImage}
+                  name={restaurant.name}
+                  size={56}
+                  style={styles.summaryLogo}
+                />
                 <View style={styles.summaryHeader}>
                   <View style={styles.summaryHeaderCopy}>
                     <Text style={styles.name}>{restaurant.name}</Text>
@@ -272,7 +287,7 @@ export default function RestaurantDetail() {
                 </View>
 
                 <View style={styles.factsRow}>
-                  <Text style={styles.factPill}>{restaurant.rating ? `Rated ${restaurant.rating}` : 'New'}</Text>
+                  <Text style={styles.factPill}>{getRestaurantRatingLabel(restaurant)}</Text>
                   <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
                   <Text
                     style={[
@@ -497,10 +512,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: -32,
     padding: 20,
-    paddingTop: 20,
+    paddingTop: 34,
   },
   summaryFavoriteButton: {
     backgroundColor: customerTheme.surfaceMuted,
+  },
+  summaryLogo: {
+    left: 20,
+    position: 'absolute',
+    top: -28,
   },
   summaryHeader: {
     alignItems: 'center',
@@ -745,7 +765,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 14,
     shadowColor: '#3b2912',
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
     shadowRadius: 20,
   },

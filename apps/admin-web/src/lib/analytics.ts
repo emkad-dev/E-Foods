@@ -1,5 +1,5 @@
 import type { DispatchProfileDocument, OrderDocument, RestaurantDocument, UserDocument } from '../../../../packages/domain/src';
-import { parseTimestamp } from './format';
+import { parseTimestamp } from './format.ts';
 
 export type RangeDays = 7 | 30 | 90;
 
@@ -263,6 +263,78 @@ export const buildProblemDailySeries = (
   }
 
   return [...points.values()];
+};
+
+export interface SettlementBreakdownRow {
+  dayKey: string;
+  dayLabel: string;
+  delta: number;
+  gross: number;
+  manual: number;
+  orders: number;
+  restaurantId: string;
+  restaurantName: string;
+  split: number;
+}
+
+const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+export const buildSettlementBreakdown = (orders: OrderDocument[]): SettlementBreakdownRow[] => {
+  const rows = new Map<string, SettlementBreakdownRow>();
+
+  for (const order of orders) {
+    const created = getOrderDate(order);
+
+    if (!created) {
+      continue;
+    }
+
+    const dayKey = new Date(created.getFullYear(), created.getMonth(), created.getDate()).toISOString().slice(0, 10);
+    const restaurantId = order.restaurantId || order.restaurantName || 'unknown';
+    const restaurantName = order.restaurantName || 'Unknown restaurant';
+    const key = `${dayKey}:${restaurantId}`;
+    const settlement = (order.payment?.settlement ?? {}) as Record<string, unknown>;
+    const settlementMode = String(order.payment?.settlementMode ?? '').toLowerCase();
+    const splitSubaccountCode = String(order.payment?.splitSubaccountCode ?? '').trim();
+    const paidToRestaurant = roundMoney(Number(settlement.netSettlement ?? 0));
+    const bucket =
+      rows.get(key) ??
+      ({
+        dayKey,
+        dayLabel: created.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
+        delta: 0,
+        gross: 0,
+        manual: 0,
+        orders: 0,
+        restaurantId,
+        restaurantName,
+        split: 0,
+      } as SettlementBreakdownRow);
+
+    bucket.orders += 1;
+    bucket.gross = roundMoney(bucket.gross + Number(order.pricing?.total ?? 0));
+
+    if (settlementMode === 'split' && splitSubaccountCode) {
+      bucket.split = roundMoney(bucket.split + paidToRestaurant);
+    } else {
+      bucket.manual = roundMoney(bucket.manual + paidToRestaurant);
+    }
+
+    bucket.delta = roundMoney(bucket.gross - bucket.split - bucket.manual);
+    rows.set(key, bucket);
+  }
+
+  return [...rows.values()].sort((left, right) => {
+    if (left.dayKey !== right.dayKey) {
+      return right.dayKey.localeCompare(left.dayKey);
+    }
+
+    if (right.gross !== left.gross) {
+      return right.gross - left.gross;
+    }
+
+    return left.restaurantName.localeCompare(right.restaurantName);
+  });
 };
 
 export const buildTopRestaurants = (orders: OrderDocument[], limit = 6): { name: string; orders: number; revenue: number }[] => {

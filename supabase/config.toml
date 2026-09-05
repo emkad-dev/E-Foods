@@ -9,6 +9,29 @@ skip_nonce_check = false
 [functions.app-rpc]
 verify_jwt = false
 
+# The five domain-scoped RPC functions (task A2) split app-rpc's actions
+# apart but keep its auth model exactly: each verifies the caller's JWT
+# itself inside createRpcDispatch/getAuthenticatedRequestContext, and each
+# must stay reachable pre-auth for its share of ANONYMOUS_ACTIONS
+# (bootstrapFirstAdmin on feasty-admin, promoTrack on feasty-account).
+# Turning gateway JWT verification on here would double-auth those two
+# actions and change the error shape for every unauthenticated call — do not
+# "tighten" these to true.
+[functions.feasty-orders]
+verify_jwt = false
+
+[functions.feasty-dispatch]
+verify_jwt = false
+
+[functions.feasty-partner]
+verify_jwt = false
+
+[functions.feasty-admin]
+verify_jwt = false
+
+[functions.feasty-account]
+verify_jwt = false
+
 [functions.public-catalog]
 verify_jwt = false
 
@@ -26,3 +49,26 @@ verify_jwt = false
 
 [functions.auth-gateway]
 verify_jwt = false
+
+# The three entries below were missing config.toml declarations entirely -
+# discovered while investigating why deploy.yml's hardcoded function list
+# has never included them (see task-4-report.md). Confirmed via
+# mcp__supabase__list_edge_functions against the live project that both are
+# currently ACTIVE with verify_jwt=false. Declaring that here in-repo now
+# matters: any future deploy of either one via `--use-api` (which reads
+# config.toml, defaulting an undeclared function to verify_jwt=true) would
+# otherwise silently start requiring a JWT - breaking unsubscribe's public,
+# unauthenticated link clicks from email, and breaking broadcast-runner's
+# pg_cron invocation, which doesn't carry a user JWT.
+[functions.unsubscribe]
+verify_jwt = false
+
+[functions.broadcast-runner]
+verify_jwt = false
+
+# order-placement is verify_jwt=true live (confirmed via
+# mcp__supabase__list_edge_functions), which already matches the platform
+# default for an undeclared function - added explicitly so it can't drift
+# if that default ever changes.
+[functions.order-placement]
+verify_jwt = true

@@ -32,6 +32,11 @@ export type PartnerMenuItemInput = {
   categoryId?: string;
   categoryLabel?: string;
   isAvailable?: boolean;
+  // Preserved (not written by this screen's own full-form save) so a
+  // full-menu re-upload — editing or removing a DIFFERENT item — never
+  // silently clears a timed unavailability set via the lightweight
+  // partnerSetMenuItemAvailability action.
+  unavailableUntil?: string | null;
 };
 
 export type PartnerMenuCategoryInput = {
@@ -56,3 +61,48 @@ export const savePartnerRestaurantMenu = async (restaurantId: string, menu: Part
     restaurantId,
   });
 };
+
+type SetMenuItemAvailabilityResult = {
+  isAvailable: boolean;
+  itemId: string;
+  itemName: string;
+  restaurantId: string;
+  unavailableUntil: string | null;
+};
+
+// Task 16 (F2): the "two taps" action — flips a single item's availability
+// without re-uploading the whole menu. `unavailableUntil` is only read when
+// turning an item off; passing it while turning an item back on is ignored
+// server-side (partnerSetMenuItemAvailability always clears it when
+// isAvailable is true).
+export const setPartnerMenuItemAvailability = async (input: {
+  restaurantId: string;
+  itemId: string;
+  isAvailable: boolean;
+  unavailableUntil?: string | null;
+}) =>
+  callPartnerBackendRpc<SetMenuItemAvailabilityResult>('partnerSetMenuItemAvailability', {
+    isAvailable: input.isAvailable,
+    itemId: input.itemId,
+    restaurantId: input.restaurantId,
+    unavailableUntil: input.unavailableUntil ?? null,
+  });
+
+type SetStorePauseResult = {
+  paused: boolean;
+  pausedUntil: string | null;
+  restaurantId: string;
+};
+
+// Pausing always requires a future `pausedUntil` (no indefinite store
+// pause); unpausing always clears it server-side regardless of what is sent.
+export const setPartnerStorePause = async (input: {
+  restaurantId: string;
+  paused: boolean;
+  pausedUntil?: string | null;
+}) =>
+  callPartnerBackendRpc<SetStorePauseResult>('partnerSetStorePause', {
+    paused: input.paused,
+    pausedUntil: input.pausedUntil ?? null,
+    restaurantId: input.restaurantId,
+  });

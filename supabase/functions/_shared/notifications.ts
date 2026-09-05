@@ -18,6 +18,7 @@ type NotificationRouteKey =
   | 'dispatch_profile'
   | 'dispatch_deliveries'
   | 'dispatch_delivery_detail'
+  | 'dispatch_delivery_offer'
   | 'dispatch_fleet'
   | 'dispatch_login'
   | 'admin_access'
@@ -98,6 +99,11 @@ const buildNotificationPath = (
       return '/deliveries';
     case 'dispatch_delivery_detail':
       return data.orderId ? `/delivery/${data.orderId}` : '/deliveries';
+    case 'dispatch_delivery_offer':
+      // Falls back to the deliveries list rather than a bare offer screen: an
+      // offer push that arrives after the 45s window closed should land the
+      // rider somewhere useful, not on a dead countdown.
+      return data.orderId ? `/offer/${data.orderId}` : '/deliveries';
     case 'dispatch_fleet':
       return '/fleet';
     case 'dispatch_login':
@@ -292,3 +298,72 @@ export const sendPushNotificationsToRoles = async (
   const userIds = await loadUserIdsByRoles(roles);
   return sendPushNotificationsToUsers(userIds, payload);
 };
+
+// ---------------------------------------------------------------------------
+// Fire-and-forget wrappers used by the RPC domains.
+//
+// A push failure must never fail the mutation that triggered it: the order has
+// already been written, so the caller gets its success response and the
+// delivery failure is logged instead of thrown.
+// ---------------------------------------------------------------------------
+
+const notifySafely = async (work: () => Promise<void>) => {
+  try {
+    await work();
+  } catch (error) {
+    console.error('Notification dispatch failed.', error);
+  }
+};
+
+export const notifyUsers = async (
+  userIds: string[],
+  payload: {
+    body: string;
+    data?: JsonObject;
+    title: string;
+  }
+) => {
+  await notifySafely(async () => {
+    await sendPushNotificationsToUsers(userIds, {
+      body: payload.body,
+      data: payload.data ?? {},
+      title: payload.title,
+    });
+  });
+};
+
+export const notifyAdmins = async (
+  payload: {
+    body: string;
+    data?: JsonObject;
+    title: string;
+  }
+) => {
+  await notifySafely(async () => {
+    await sendPushNotificationsToRoles(['admin'], {
+      body: payload.body,
+      data: payload.data ?? {},
+      title: payload.title,
+    });
+  });
+};
+
+export const notifyRestaurantUsers = async (
+  restaurantId: string,
+  payload: {
+    body: string;
+    data?: JsonObject;
+    title: string;
+  }
+) => {
+  await notifySafely(async () => {
+    const userIds = await loadRestaurantRecipientUserIds(restaurantId);
+    await sendPushNotificationsToUsers(userIds, {
+      body: payload.body,
+      data: payload.data ?? {},
+      title: payload.title,
+    });
+  });
+};
+
+export { notifySafely };

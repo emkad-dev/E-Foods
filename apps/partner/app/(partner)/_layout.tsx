@@ -4,6 +4,7 @@ import { Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View
 import FEASTYWordmark from '../../src/components/PartnerWordmark';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { resolvePartnerLandingRoute } from '../../src/contexts/partnerAuthFlow';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -53,6 +54,10 @@ const getPartnerShellLoadingMode = (pathname: string | null | undefined): Partne
   }
 
   if (currentPath.startsWith('/complete-restaurant-details')) {
+    return 'setup';
+  }
+
+  if (currentPath.startsWith('/application-under-review')) {
     return 'setup';
   }
 
@@ -168,8 +173,15 @@ export default function PartnerStackLayout() {
   }
 
   if (user.role !== 'restaurant') {
-    if (pathname !== '/complete-restaurant-details') {
-      return <Redirect href={'/(partner)/complete-restaurant-details' as never} />;
+    const landingRoute = resolvePartnerLandingRoute({
+      role: user.role,
+      applicationStatus: user.partnerApplicationStatus,
+    });
+    const targetPath =
+      landingRoute === 'under-review' ? '/application-under-review' : '/complete-restaurant-details';
+
+    if (pathname !== targetPath) {
+      return <Redirect href={`/(partner)${targetPath}` as never} />;
     }
 
     return <Slot />;
