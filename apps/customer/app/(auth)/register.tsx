@@ -1,23 +1,23 @@
 import { useState } from 'react';
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { Link, useLocalSearchParams } from 'expo-router';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
+import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
+import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShell';
+import AuthTextField from '../../src/components/AuthTextField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
+import SuccessBanner from '../../src/components/SuccessBanner';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
   const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
+  const headerHeight = useHeaderHeight();
+  const router = useRouter();
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
   const [nickname, setNickname] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -79,11 +79,16 @@ export default function RegisterScreen() {
         policyAcceptance: buildCustomerPolicyAcceptance('customer_signup'),
       });
 
-      Alert.alert(
-        verificationEmailSent ? 'Confirm your email' : 'Account created',
-        verificationEmailSent
-          ? 'We sent a verification email. Confirm it, then sign in to continue.'
-          : 'Your account was created, but the verification email could not be sent yet. Open the verify email screen and resend it from there.'
+      if (verificationEmailSent) {
+        router.replace({
+          pathname: '/login',
+          params: { notice: 'account-created', ...(redirectTo ? { redirectTo } : null) },
+        } as never);
+        return;
+      }
+
+      setPendingNotice(
+        'Your account was created, but the verification email could not be sent yet. Open the verify email screen and resend it from there.'
       );
     } catch (error: any) {
       Alert.alert('Registration failed', error.message);
@@ -91,166 +96,124 @@ export default function RegisterScreen() {
   };
 
   return (
-    <View style={styles.keyboardAvoider}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <AuthScreenShell
+      title="Create your account"
+      subtitle="Confirm your email, then start ordering from nearby restaurants."
+      topInset={headerHeight}
+    >
+      <SuccessBanner
+        title="Account created"
+        message={pendingNotice}
+        onDismiss={() => setPendingNotice(null)}
+      />
+
+      {error && <Text style={styles.errorText}>{error}</Text>}
+
+      <AuthTextField
+        placeholder="Nickname or username"
+        value={nickname}
+        onChangeText={handleNicknameChange}
+        editable={!loading}
+      />
+      <Text style={styles.helperText}>This is how we will greet you in the customer app.</Text>
+
+      <AuthTextField
+        style={styles.fieldGap}
+        placeholder="name@email.com"
+        value={email}
+        onChangeText={handleEmailChange}
+        autoCapitalize="none"
+        autoComplete="email"
+        keyboardType="email-address"
+        editable={!loading}
+      />
+
+      <AuthTextField
+        style={styles.fieldGap}
+        placeholder="Phone number"
+        value={phoneNumber}
+        onChangeText={handlePhoneNumberChange}
+        keyboardType="phone-pad"
+        editable={!loading}
+      />
+      <Text style={styles.helperText}>We use this for order updates and rider contact.</Text>
+
+      <View style={styles.fieldGap}>
+        <AuthPasswordField
+          placeholder="Password"
+          value={password}
+          onChangeText={handlePasswordChange}
+          editable={!loading}
+          showHint
+        />
+      </View>
+      <AuthPasswordField
+        placeholder="Confirm password"
+        value={confirmPassword}
+        onChangeText={handleConfirmPasswordChange}
+        editable={!loading}
+      />
+
+      <TouchableOpacity
+        style={styles.policyRow}
+        onPress={() => setAcceptedPolicies((current) => !current)}
+        activeOpacity={0.82}
+        disabled={loading}
       >
-        <View style={styles.container}>
-          <Text style={styles.title}>Create your account</Text>
-          <Text style={styles.copy}>Create your account, then confirm your email to start ordering from nearby restaurants.</Text>
-
-          {error && <Text style={styles.errorText}>{error}</Text>}
-
-          <TextInput
-            style={styles.input}
-            placeholder="Nickname or username"
-            value={nickname}
-            onChangeText={handleNicknameChange}
-            editable={!loading}
-          />
-          <Text style={styles.helperText}>This is how we will greet you in the customer app.</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            value={email}
-            onChangeText={handleEmailChange}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            editable={!loading}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            value={phoneNumber}
-            onChangeText={handlePhoneNumberChange}
-            keyboardType="phone-pad"
-            editable={!loading}
-          />
-          <Text style={styles.helperText}>We use this for order updates and rider contact.</Text>
-          <AuthPasswordField
-            placeholder="Password"
-            value={password}
-            onChangeText={handlePasswordChange}
-            editable={!loading}
-            showHint
-          />
-          <AuthPasswordField
-            placeholder="Confirm password"
-            value={confirmPassword}
-            onChangeText={handleConfirmPasswordChange}
-            editable={!loading}
-          />
-
-          <TouchableOpacity
-            style={styles.policyRow}
-            onPress={() => setAcceptedPolicies((current) => !current)}
-            activeOpacity={0.82}
-            disabled={loading}
-          >
-            <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
-              {acceptedPolicies ? <View style={styles.checkboxDot} /> : null}
-            </View>
-            <Text style={styles.policyText}>
-              I agree to the{' '}
-              <Link href="/terms" style={styles.policyLink}>
-                Terms
-              </Link>{' '}
-              and{' '}
-              <Link href="/privacy" style={styles.policyLink}>
-                Privacy Policy
-              </Link>
-              .
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.button, !acceptedPolicies ? styles.buttonDisabled : null]}
-            onPress={handleRegister}
-            disabled={loading || !acceptedPolicies}
-          >
-            <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create account'}</Text>
-          </TouchableOpacity>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Or sign up with</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <GoogleSignInButton />
-
-          <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
-            Already have an account? Sign in
-          </Link>
+        <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
+          {acceptedPolicies ? <View style={styles.checkboxDot} /> : null}
         </View>
-      </ScrollView>
-    </View>
+        <Text style={styles.policyText}>
+          I agree to the{' '}
+          <Link href="/terms" style={styles.policyLink}>
+            Terms
+          </Link>{' '}
+          and{' '}
+          <Link href="/privacy" style={styles.policyLink}>
+            Privacy Policy
+          </Link>
+          .
+        </Text>
+      </TouchableOpacity>
+
+      <AuthPrimaryButton
+        label={loading ? 'Creating account...' : 'Sign Up with Email'}
+        onPress={handleRegister}
+        disabled={loading || !acceptedPolicies}
+      />
+
+      <AuthDivider label="or" />
+
+      <GoogleSignInButton />
+
+      <View style={styles.switchRow}>
+        <Text style={styles.switchText}>Already have an account? </Text>
+        <Link
+          href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'}
+          style={styles.switchLink}
+        >
+          Sign In
+        </Link>
+      </View>
+    </AuthScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  keyboardAvoider: {
-    flex: 1,
-    backgroundColor: customerTheme.background,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-    paddingBottom: 40,
-  },
-  title: {
-    color: customerTheme.text,
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  copy: {
-    color: customerTheme.textMuted,
-    fontSize: 16,
-    marginBottom: 24,
-  },
   errorText: {
     color: customerTheme.danger,
-    marginBottom: 16,
-    textAlign: 'center',
     fontSize: 14,
+    marginBottom: 14,
+    textAlign: 'center',
   },
-  input: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 50,
+  fieldGap: {
     marginTop: 10,
-    paddingHorizontal: 16,
-    color: customerTheme.text,
   },
   helperText: {
     color: customerTheme.textMuted,
     fontSize: 12,
     lineHeight: 17,
     marginTop: 8,
-  },
-  button: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 12,
-    marginTop: 8,
-    paddingVertical: 15,
-  },
-  buttonDisabled: {
-    opacity: 0.55,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
   },
   checkbox: {
     alignItems: 'center',
@@ -264,11 +227,6 @@ const styles = StyleSheet.create({
   checkboxActive: {
     backgroundColor: customerTheme.accent,
     borderColor: customerTheme.accent,
-  },
-  checkmark: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '900',
   },
   checkboxDot: {
     backgroundColor: '#fff',
@@ -292,12 +250,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
-  link: {
-    color: customerTheme.link,
-    marginTop: 18,
-    textAlign: 'center',
+  switchRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 14,
   },
-  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: customerTheme.border },
-  dividerText: { marginHorizontal: 10, color: customerTheme.textMuted, fontSize: 14 },
+  switchText: {
+    color: customerTheme.textMuted,
+    fontSize: 14,
+  },
+  switchLink: {
+    color: customerTheme.brandOrange,
+    fontSize: 14,
+    fontWeight: '800',
+  },
 });

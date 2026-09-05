@@ -89,6 +89,7 @@
       },
       "EXPO_PUBLIC_PROJECT_ID": "G-VM017RKW5Q",
       "EXPO_PUBLIC_APP_DOMAIN": "app.feasty.com.ng",
+      "EXPO_PUBLIC_CATALOG_URL": "https://api.feasty.com.ng",
       "EXPO_PUBLIC_APP_SCHEME": "feasty-customer",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
       "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password",

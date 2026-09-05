@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 import type { UserDocument } from '../domain/entities';
@@ -6,6 +6,7 @@ import { DEFAULT_APP_ROLE } from '../domain/roles';
 import { appEnv } from '../config/env';
 import {
   sendVerificationEmailWithFallback,
+  verifyEmailOtp,
   sendPasswordResetEmailWithFallback,
   formatAuthError,
   createUserWithEmail,
@@ -75,6 +76,7 @@ interface AuthContextType {
   updatePhoneNumber: (phoneNumber: string) => Promise<void>;
   reloadUser: () => Promise<boolean>;
   sendVerificationEmail: () => Promise<void>;
+  verifyEmailCode: (code: string) => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -130,6 +132,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [policyAccepted, setPolicyAccepted] = useState(false);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Tracks whether a customer is already signed in, without re-subscribing the
+  // auth listener. Used to avoid re-showing the full-screen spinner when the
+  // browser re-fires SIGNED_IN on tab/app refocus.
+  const hasUserRef = useRef(false);
+
+  useEffect(() => {
+    hasUserRef.current = Boolean(user);
+  }, [user]);
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile(), clearStoredPolicyAccepted()]);
@@ -340,9 +350,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
-      // re-block the UI once the first paint has resolved. Only an explicit
-      // sign-in returns to the full-screen spinner.
-      const isInteractiveSignIn = event === 'SIGNED_IN';
+      // re-block the UI once the first paint has resolved. Only a *fresh*
+      // sign-in returns to the full-screen spinner — on web, refocusing the tab
+      // re-fires SIGNED_IN for an already-signed-in customer, and that must
+      // reconcile silently in the background instead of unmounting the tree.
+      const isInteractiveSignIn = event === 'SIGNED_IN' && !hasUserRef.current;
 
       if (isInteractiveSignIn) {
         setLoading(true);
@@ -825,6 +837,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  /** Confirms signup with the emailed code. Returns the resulting verified state. */
+  const verifyEmailCode = async (code: string): Promise<boolean> => {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser?.email) {
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
+    }
+
+    try {
+      await verifyEmailOtp(supabase, authUser.email, code);
+      trackAnalyticsEvent('customer_verification_code_confirmed');
+
+      return await reloadUser();
+    } catch (err: any) {
+      const formattedError = getCustomerAuthErrorMessage(err, 'That code did not work');
+      setError(formattedError);
+      throw new Error(formattedError);
+    }
+  };
+
   const sendVerificationEmail = async (): Promise<void> => {
     const {
       data: { user: authUser },
@@ -873,6 +909,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         updatePhoneNumber,
         reloadUser,
         sendVerificationEmail,
+        verifyEmailCode,
         clearError,
       }}
     >

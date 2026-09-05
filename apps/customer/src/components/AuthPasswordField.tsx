@@ -18,18 +18,21 @@ export default function AuthPasswordField({
   value,
 }: AuthPasswordFieldProps) {
   const [showPassword, setShowPassword] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   return (
     <View style={styles.wrapper}>
-      <View style={styles.inputWrap}>
+      <View style={[styles.inputWrap, focused ? styles.inputWrapFocused : null]}>
         <TextInput
           style={styles.input}
           placeholder={placeholder}
-          placeholderTextColor="#8e8e8e"
+          placeholderTextColor={customerTheme.textMuted}
           value={value}
           onChangeText={onChangeText}
           secureTextEntry={!showPassword}
           editable={editable}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
         />
         <TouchableOpacity style={styles.toggle} onPress={() => setShowPassword((current) => !current)} disabled={!editable}>
           <Text style={styles.toggleText}>{showPassword ? 'Hide' : 'See password'}</Text>
@@ -50,13 +53,17 @@ const styles = StyleSheet.create({
   },
   inputWrap: {
     alignItems: 'center',
-    backgroundColor: customerTheme.surface,
+    backgroundColor: customerTheme.surfaceMuted,
     borderColor: customerTheme.border,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
     minHeight: 50,
     paddingHorizontal: 16,
+  },
+  inputWrapFocused: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.accent,
   },
   input: {
     color: customerTheme.text,

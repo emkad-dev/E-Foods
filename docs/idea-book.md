@@ -65,7 +65,7 @@ Running capture of ideas, decisions, and research. Newest entries at top. Each e
 - **Inbound channels:** in-app support screen · inbound email replies · WhatsApp/social
 - **Conversation model:** threaded inbox (helpdesk-style, open/closed, full history)
 - **Admin reply delivery:** email via Resend · in-app message · push notification
-- **Bulk messaging:** marketing/promos to all · transactional/operational · segmented sends · also to partners & riders
+- **Bulk messaging:** marketing announcements to all · transactional/operational · segmented sends · also to partners & riders
 
 **What we already have (reusable)**
 - Supabase: Postgres + RLS, Auth, **Realtime Broadcast**, Edge Functions, pg_cron/queues available.

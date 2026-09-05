@@ -59,7 +59,11 @@ export const trackPromoClick = (promoId: string) => {
   track(promoId, 'click');
   const record = JSON.stringify({ promoId, clickedAt: Date.now() });
   if (Platform.OS === 'web') {
-    try { window.localStorage.setItem(LAST_CLICK_KEY, record); } catch { /* ignore */ }
+    try {
+      window.localStorage.setItem(LAST_CLICK_KEY, record);
+    } catch {
+      /* ignore */
+    }
   }
 };
 

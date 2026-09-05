@@ -21,7 +21,9 @@ export default function Index() {
     );
   }
 
-  let target = '/login';
+  // Signed-out visitors browse first; sign-in is prompted at the point of
+  // action (add to cart, checkout) rather than at the front door.
+  let target = '/home';
 
   if (user) {
     if (!user.emailVerified) {

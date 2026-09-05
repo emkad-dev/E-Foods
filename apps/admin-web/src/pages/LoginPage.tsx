@@ -36,7 +36,7 @@ export default function LoginPage() {
   const signedInWithoutAccess = !initializing && session && !allowedRole;
 
   return (
-    <div className="login-wrap">
+    <div className="login-wrap bg-gradient-to-br from-accent-soft/45 via-transparent to-brand-orange/10">
       <form className="card login-card" onSubmit={handleSubmit}>
         <div className="login-logo">
           <img className="wordmark-icon" src="/feasty-pizza.png" alt="" />
@@ -46,8 +46,8 @@ export default function LoginPage() {
             <span className="login-logo-suffix"> Admin</span>
           </span>
         </div>
-        <p className="muted" style={{ textAlign: 'center', margin: 0 }}>
-          Sign in with your admin provissioned account given by the super user to access the platform.
+        <p className="muted m-0 text-center">
+          Sign in with the admin account provisioned for you by a super user.
         </p>
         {error ? <ErrorBanner message={error} /> : null}
         {signedInWithoutAccess ? (

@@ -16,6 +16,7 @@ import {
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
 const deliveryTimeOptions = ['15-25 min', '25-35 min', '35-45 min', '45-60 min'] as const;
+type RequiredFieldKey = 'restaurantName' | 'phoneNumber' | 'address' | 'latitude' | 'longitude' | 'deliveryRadiusKm';
 
 export default function CompleteRestaurantDetailsScreen() {
   const insets = useSafeAreaInsets();
@@ -27,12 +28,14 @@ export default function CompleteRestaurantDetailsScreen() {
   const [address, setAddress] = useState('');
   const [description, setDescription] = useState('');
   const [deliveryTime, setDeliveryTime] = useState<(typeof deliveryTimeOptions)[number]>('25-35 min');
+  const [deliveryRadiusKm, setDeliveryRadiusKm] = useState('12');
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [handoffStartedAt, setHandoffStartedAt] = useState<number | null>(null);
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<RequiredFieldKey, boolean>>>({});
   const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const contactName = useMemo(
@@ -111,6 +114,23 @@ export default function CompleteRestaurantDetailsScreen() {
     setter(value);
   };
 
+  const clearFieldError = (field: RequiredFieldKey) => {
+    setFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const handleRequiredFieldChange = (field: RequiredFieldKey, setter: (value: string) => void) => (value: string) => {
+    clearFieldError(field);
+    handleFieldChange(setter)(value);
+  };
+
   const handlePickLogo = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
@@ -146,18 +166,54 @@ export default function CompleteRestaurantDetailsScreen() {
       return;
     }
 
-    if (hasLatitude !== hasLongitude) {
-      Alert.alert('Incomplete coordinates', 'Provide both latitude and longitude together, or leave both empty for now.');
+    if (!hasLatitude || !hasLongitude) {
+      Alert.alert('Location required', 'Add both latitude and longitude before submitting the restaurant application.');
       return;
     }
 
-    if ((hasLatitude && !Number.isFinite(parsedLatitude)) || (hasLongitude && !Number.isFinite(parsedLongitude))) {
+    if (!Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
       Alert.alert('Invalid location', 'Use valid numeric coordinates for the restaurant location.');
+      return;
+    }
+
+    const parsedDeliveryRadiusKm = Number.parseFloat(deliveryRadiusKm);
+    if (!Number.isFinite(parsedDeliveryRadiusKm) || parsedDeliveryRadiusKm <= 0) {
+      Alert.alert('Invalid delivery distance', 'Enter a delivery distance above zero in kilometers.');
+      return;
+    }
+
+    const nextFieldErrors: Partial<Record<RequiredFieldKey, boolean>> = {};
+
+    if (!restaurantName.trim()) {
+      nextFieldErrors.restaurantName = true;
+    }
+
+    if (!phoneNumber.trim()) {
+      nextFieldErrors.phoneNumber = true;
+    }
+
+    if (!address.trim()) {
+      nextFieldErrors.address = true;
+    }
+
+    if (!hasLatitude || !hasLongitude || !Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
+      nextFieldErrors.latitude = true;
+      nextFieldErrors.longitude = true;
+    }
+
+    if (!Number.isFinite(parsedDeliveryRadiusKm) || parsedDeliveryRadiusKm <= 0) {
+      nextFieldErrors.deliveryRadiusKm = true;
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      Alert.alert('Missing details', 'Complete the highlighted fields before continuing.');
       return;
     }
 
     setSubmitting(true);
     setHandoffError(null);
+    setFieldErrors({});
 
     try {
       const logoUpload = logoImage
@@ -173,10 +229,11 @@ export default function CompleteRestaurantDetailsScreen() {
         contactName,
         cuisine,
         deliveryTime: deliveryTime?.trim() || undefined,
+        deliveryRadiusKm: parsedDeliveryRadiusKm,
         description: description.trim() || undefined,
-        latitude: hasLatitude ? parsedLatitude : null,
+        latitude: parsedLatitude,
         logoImage: logoUpload,
-        longitude: hasLongitude ? parsedLongitude : null,
+        longitude: parsedLongitude,
         phoneNumber: phoneNumber.trim(),
         restaurantName: restaurantName.trim(),
         policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
@@ -219,20 +276,20 @@ export default function CompleteRestaurantDetailsScreen() {
         </View>
 
         <TextInput
-          style={styles.input}
+          style={[styles.input, fieldErrors.restaurantName ? styles.inputError : null]}
           placeholder="Restaurant name"
           placeholderTextColor="#8e8e8e"
           value={restaurantName}
-          onChangeText={handleFieldChange(setRestaurantName)}
+          onChangeText={handleRequiredFieldChange('restaurantName', setRestaurantName)}
           editable={!loading && !submitting && !handoffStartedAt}
         />
         <TextInput
-          style={styles.input}
+          style={[styles.input, fieldErrors.phoneNumber ? styles.inputError : null]}
           placeholder="Phone number"
           placeholderTextColor="#8e8e8e"
           keyboardType="phone-pad"
           value={phoneNumber}
-          onChangeText={handleFieldChange(setPhoneNumber)}
+          onChangeText={handleRequiredFieldChange('phoneNumber', setPhoneNumber)}
           editable={!loading && !submitting && !handoffStartedAt}
         />
 
@@ -267,12 +324,12 @@ export default function CompleteRestaurantDetailsScreen() {
         </View>
 
         <TextInput
-          style={[styles.input, styles.textArea]}
+          style={[styles.input, styles.textArea, fieldErrors.address ? styles.inputError : null]}
           placeholder="Restaurant address"
           placeholderTextColor="#8e8e8e"
           multiline
           value={address}
-          onChangeText={handleFieldChange(setAddress)}
+          onChangeText={handleRequiredFieldChange('address', setAddress)}
           editable={!loading && !submitting && !handoffStartedAt}
         />
         <TextInput
@@ -301,24 +358,34 @@ export default function CompleteRestaurantDetailsScreen() {
 
         <View style={styles.coordinatesRow}>
           <TextInput
-            style={[styles.input, styles.coordinateInput]}
-            placeholder="Latitude (optional)"
+            style={[styles.input, styles.coordinateInput, fieldErrors.latitude ? styles.inputError : null]}
+            placeholder="Latitude (required)"
             placeholderTextColor="#8e8e8e"
             keyboardType="decimal-pad"
             value={latitude}
-            onChangeText={handleFieldChange(setLatitude)}
+            onChangeText={handleRequiredFieldChange('latitude', setLatitude)}
             editable={!loading && !submitting && !handoffStartedAt}
           />
           <TextInput
-            style={[styles.input, styles.coordinateInput]}
-            placeholder="Longitude (optional)"
+            style={[styles.input, styles.coordinateInput, fieldErrors.longitude ? styles.inputError : null]}
+            placeholder="Longitude (required)"
             placeholderTextColor="#8e8e8e"
             keyboardType="decimal-pad"
             value={longitude}
-            onChangeText={handleFieldChange(setLongitude)}
+            onChangeText={handleRequiredFieldChange('longitude', setLongitude)}
             editable={!loading && !submitting && !handoffStartedAt}
           />
         </View>
+
+        <TextInput
+          style={[styles.input, fieldErrors.deliveryRadiusKm ? styles.inputError : null]}
+          placeholder="Delivery radius in km"
+          placeholderTextColor="#8e8e8e"
+          keyboardType="decimal-pad"
+          value={deliveryRadiusKm}
+          onChangeText={handleRequiredFieldChange('deliveryRadiusKm', setDeliveryRadiusKm)}
+          editable={!loading && !submitting && !handoffStartedAt}
+        />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading || submitting || Boolean(handoffStartedAt)}>
           <Text style={styles.primaryButtonText}>
@@ -433,6 +500,10 @@ const styles = StyleSheet.create({
     marginTop: 14,
     minHeight: 54,
     paddingHorizontal: 16,
+  },
+  inputError: {
+    backgroundColor: '#fff6f6',
+    borderColor: partnerTheme.danger,
   },
   textArea: {
     minHeight: 90,

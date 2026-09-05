@@ -25,7 +25,7 @@ function RequireAdmin({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (initializing) {
-    return <LoadingBlock label="Checking your session…" />;
+    return <LoadingBlock label="Checking your sessionâ€¦" />;
   }
 
   if (!session || role !== 'admin') {
@@ -52,7 +52,7 @@ export default function App() {
           <Route
             path="/"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <OverviewPage />
               </Suspense>
             }
@@ -60,7 +60,7 @@ export default function App() {
           <Route
             path="/orders"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <OrdersPage />
               </Suspense>
             }
@@ -68,7 +68,7 @@ export default function App() {
           <Route
             path="/approvals"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <ApprovalsPage />
               </Suspense>
             }
@@ -76,7 +76,7 @@ export default function App() {
           <Route
             path="/access"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <AccessPage />
               </Suspense>
             }
@@ -84,7 +84,7 @@ export default function App() {
           <Route
             path="/dispatch"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <DispatchPage />
               </Suspense>
             }
@@ -92,7 +92,7 @@ export default function App() {
           <Route
             path="/statistics"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <StatisticsPage />
               </Suspense>
             }
@@ -100,7 +100,7 @@ export default function App() {
           <Route
             path="/broadcasts"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <BroadcastsPage />
               </Suspense>
             }
@@ -108,7 +108,7 @@ export default function App() {
           <Route
             path="/promos"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <PromosPage />
               </Suspense>
             }
@@ -127,7 +127,7 @@ export default function App() {
           <Route
             index
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loadingâ€¦" />}>
                 <InboxPage />
               </Suspense>
             }

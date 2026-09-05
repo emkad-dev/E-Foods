@@ -4,7 +4,7 @@
     "slug": "feasty-dispatch",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "../customer/assets/images/icon.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "feasty-dispatch",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -15,9 +15,9 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FFF3D4",
-        "foregroundImage": "../customer/assets/images/android-icon-foreground.png",
-        "backgroundImage": "../customer/assets/images/android-icon-background.png",
-        "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "package": "com.ebuy.dispatch",
       "intentFilters": [
@@ -32,7 +32,7 @@
       ]
     },
     "web": {
-      "favicon": "../customer/assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -45,14 +45,14 @@
       [
         "expo-notifications",
         {
-          "icon": "../customer/assets/images/android-icon-monochrome.png",
+          "icon": "./assets/images/android-icon-monochrome.png",
           "color": "#E4A11B"
         }
       ],
       [
         "expo-splash-screen",
         {
-          "image": "../customer/assets/images/splash-icon.png",
+          "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"

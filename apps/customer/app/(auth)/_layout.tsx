@@ -82,7 +82,10 @@ export default function AuthLayout() {
       }}
     >
       <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="register" options={{ title: 'Create Account' }} />
+      <Stack.Screen
+        name="register"
+        options={{ headerTitle: () => null, headerTransparent: true, headerBackTitle: 'Back' }}
+      />
       <Stack.Screen name="accept-policy" options={{ title: 'Terms' }} />
       <Stack.Screen name="terms" options={{ title: 'Terms of Service' }} />
       <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />

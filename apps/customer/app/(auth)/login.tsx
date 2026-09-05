@@ -1,15 +1,21 @@
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
-import AuthLegalFooter from '../../src/components/AuthLegalFooter';
+import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
+import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShell';
+import AuthTextField from '../../src/components/AuthTextField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
+import SuccessBanner from '../../src/components/SuccessBanner';
+import { resolveSuccessNotice } from '../../src/utils/successNotices';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function LoginScreen() {
-  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const params = useLocalSearchParams<{ redirectTo?: string | string[]; notice?: string | string[] }>();
   const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
+  const [dismissedNotice, setDismissedNotice] = useState(false);
+  const notice = dismissedNotice ? null : resolveSuccessNotice(params.notice);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { signIn, loading, error, clearError } = useAuth();
@@ -38,77 +44,96 @@ export default function LoginScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={styles.title}>Login</Text>
+    <AuthScreenShell title="Welcome back" subtitle="Sign in to keep ordering from nearby restaurants.">
+      <SuccessBanner
+        title={notice?.title}
+        message={notice?.message}
+        onDismiss={() => setDismissedNotice(true)}
+      />
+
       {error && <Text style={styles.errorText}>{error}</Text>}
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
+
+      <AuthTextField
+        placeholder="name@email.com"
         value={email}
         onChangeText={handleEmailChange}
         autoCapitalize="none"
+        autoComplete="email"
         keyboardType="email-address"
         editable={!loading}
       />
-      <AuthPasswordField
-        placeholder="Password"
-        value={password}
-        onChangeText={handlePasswordChange}
-        editable={!loading}
-        showHint
-      />
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Loading...' : 'Sign In'}</Text>
-      </TouchableOpacity>
-
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>Or sign in with</Text>
-        <View style={styles.dividerLine} />
+      <View style={styles.fieldGap}>
+        <AuthPasswordField
+          placeholder="Password"
+          value={password}
+          onChangeText={handlePasswordChange}
+          editable={!loading}
+          showHint
+        />
       </View>
+
+      <AuthPrimaryButton
+        label={loading ? 'Signing in...' : 'Continue with Email'}
+        onPress={handleLogin}
+        disabled={loading}
+      />
+
+      <AuthDivider label="or" />
 
       <GoogleSignInButton />
 
+      <View style={styles.switchRow}>
+        <Text style={styles.switchText}>Don&apos;t have an account? </Text>
+        <Link
+          href={redirectTo ? { pathname: '/register', params: { redirectTo } } : '/register'}
+          style={styles.switchLink}
+        >
+          Sign Up
+        </Link>
+      </View>
+
       <Link
-        href={redirectTo ? { pathname: '/register', params: { redirectTo } } : '/register'}
-        style={styles.link}
-      >
-        Create an account
-      </Link>
-      <Link
-        href={redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'}
-        style={styles.link}
+        href={
+          redirectTo
+            ? { pathname: '/(auth)/forgot-password', params: { redirectTo } }
+            : '/(auth)/forgot-password'
+        }
+        style={styles.forgotLink}
       >
         Forgot password?
       </Link>
-
-      <AuthLegalFooter />
-    </ScrollView>
+    </AuthScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: customerTheme.background, flex: 1 },
-  container: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  title: { color: customerTheme.text, fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  errorText: { color: customerTheme.danger, marginBottom: 16, textAlign: 'center', fontSize: 14 },
-  input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: customerTheme.border,
-    backgroundColor: customerTheme.surface,
-    color: customerTheme.text,
-    borderRadius: 10,
-    paddingHorizontal: 16,
+  errorText: {
+    color: customerTheme.danger,
+    fontSize: 14,
+    marginBottom: 14,
+    textAlign: 'center',
   },
-  button: { backgroundColor: customerTheme.accent, padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 16 },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
-  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: customerTheme.border },
-  dividerText: { marginHorizontal: 10, color: customerTheme.textMuted, fontSize: 14 },
-  link: { marginTop: 12, color: customerTheme.link, textAlign: 'center' },
+  fieldGap: {
+    marginTop: 10,
+  },
+  switchRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  switchText: {
+    color: customerTheme.textMuted,
+    fontSize: 14,
+  },
+  switchLink: {
+    color: customerTheme.brandOrange,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  forgotLink: {
+    color: customerTheme.link,
+    marginTop: 12,
+    textAlign: 'center',
+  },
 });

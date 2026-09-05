@@ -22,7 +22,7 @@ and `send.` (Resend) is verified. Vercel no longer serves any traffic.
 Goals, in the user's words: images optimized via Cloudflare, and a
 Cloudflare-side queue "so the backend doesn't break." Refined into:
 
-1. **Spike absorption** — launch/promo surges should be absorbed at the edge
+1. **Spike absorption** — launch surges should be absorbed at the edge
    before they reach Supabase.
 2. **Outage resilience** — during a Supabase outage: menus stay browsable
    (read-only), and a paid order is never lost because a Paystack webhook
@@ -98,8 +98,7 @@ Unset env ⇒ no-op passthrough (current behavior), so deploys are safe before
 DNS is live. All image URLs reach clients through edge-function responses, so
 **no mobile builds are required** for images to switch over.
 
-Note: `feature/promo-landing-pages` (unmerged) pins image hosts client-side;
-when it merges, `img.feasty.com.ng` must be added to its allowlist.
+Note: the landing-pages branch (unmerged) pins image hosts client-side; when it merges, `img.feasty.com.ng` must be added to its allowlist.
 
 **Cost:** free tier 5,000 unique transformations/month, then $0.50/1,000. This
 design emits a single default width (800); a catalog of a few hundred items

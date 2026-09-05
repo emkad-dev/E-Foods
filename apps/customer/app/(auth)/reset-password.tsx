@@ -82,15 +82,10 @@ export default function ResetPasswordScreen() {
       }
 
       await supabase.auth.signOut().catch(() => undefined);
-      Alert.alert('Password updated', 'You can now sign in with your new password.', [
-        {
-          text: 'Continue to login',
-          onPress: () =>
-            router.replace(
-              redirectTo ? ({ pathname: '/login', params: { redirectTo } } as never) : ('/login' as never)
-            ),
-        },
-      ]);
+      router.replace({
+        pathname: '/login',
+        params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },
+      } as never);
     } catch (err: any) {
       const formattedError = formatAuthError(err);
       setError(formattedError);

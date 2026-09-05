@@ -3029,6 +3029,7 @@ const buildPartnerRestaurantPayload = (
   const name = sanitizeText(input.name);
   const allowPublish = options.allowPublish === true;
   const existingPublished = options.existingPublished === true;
+  const isPublished = allowPublish && input.isPublished !== undefined ? input.isPublished === true : existingPublished;
 
   if (!name) {
     fail(400, 'A restaurant name is required.');
@@ -3053,6 +3054,19 @@ const buildPartnerRestaurantPayload = (
     fail(400, 'Use valid numeric coordinates for the restaurant.');
   }
 
+  if (isPublished && (!hasLatitude || !hasLongitude)) {
+    fail(400, 'Provide both latitude and longitude before publishing the store.');
+  }
+
+  const deliveryRadiusKm =
+    input.deliveryRadiusKm === null || input.deliveryRadiusKm === undefined
+      ? null
+      : parseNumber(input.deliveryRadiusKm, Number.NaN);
+
+  if (isPublished && (deliveryRadiusKm === null || !Number.isFinite(deliveryRadiusKm) || deliveryRadiusKm <= 0)) {
+    fail(400, 'Provide a delivery radius above zero before publishing the store.');
+  }
+
   const address = sanitizeText(input.address);
   if (!address) {
     fail(400, 'A restaurant address is required.');
@@ -3071,16 +3085,15 @@ const buildPartnerRestaurantPayload = (
     cuisine: sanitizeOptionalText(input.cuisine) ?? '',
     deliveryFee: roundCurrency(parseNumber(input.deliveryFee, 0)),
     deliveryRadiusKm:
-      input.deliveryRadiusKm === null || input.deliveryRadiusKm === undefined
+      deliveryRadiusKm === null || !Number.isFinite(deliveryRadiusKm) || deliveryRadiusKm <= 0
         ? null
-        : roundCurrency(parseNumber(input.deliveryRadiusKm, 0)),
+        : roundCurrency(deliveryRadiusKm),
     deliveryTime: sanitizeText(input.deliveryTime, DEFAULT_DELIVERY_TIME),
     description: sanitizeOptionalText(input.description) ?? '',
     image: sanitizeOptionalText(input.image) ?? '',
     logoImage: sanitizeOptionalText(input.logoImage) ?? '',
     isOpen: input.isOpen !== false,
-    isPublished:
-      allowPublish && input.isPublished !== undefined ? input.isPublished === true : existingPublished,
+    isPublished,
     latitude,
     longitude,
     minOrder: roundCurrency(parseNumber(input.minOrder, 0)),
@@ -4260,6 +4273,10 @@ const handleNativeAction = async (
     const description = sanitizeOptionalText(data.description);
     const logoImage = sanitizeOptionalText(data.logoImage);
     const deliveryTime = sanitizeOptionalText(data.deliveryTime) ?? DEFAULT_DELIVERY_TIME;
+    const deliveryRadiusKm =
+      data.deliveryRadiusKm === null || data.deliveryRadiusKm === undefined
+        ? null
+        : parseNumber(data.deliveryRadiusKm, Number.NaN);
     const policyAcceptance = validatePolicyAcceptancePayload(
       data.policyAcceptance,
       'partner',
@@ -4294,6 +4311,12 @@ const handleNativeAction = async (
     if (hasLatitude && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
       fail(400, 'Use valid numeric coordinates for the restaurant location.');
     }
+    if (!hasLatitude || !hasLongitude) {
+      fail(400, 'Provide both latitude and longitude before submitting the application.');
+    }
+    if (deliveryRadiusKm === null || !Number.isFinite(deliveryRadiusKm) || deliveryRadiusKm <= 0) {
+      fail(400, 'Provide a delivery radius above zero before submitting the application.');
+    }
 
     const existingApplication = await loadPartnerApplication(context.uid);
     const currentStatus = sanitizeText(existingApplication?.status, PARTNER_APPLICATION_STATUS.PENDING);
@@ -4320,8 +4343,8 @@ const handleNativeAction = async (
         address,
         description,
         logoImage,
-        latitude: hasLatitude ? latitude : null,
-        longitude: hasLongitude ? longitude : null,
+        latitude,
+        longitude,
         deliveryTime,
         status: PARTNER_APPLICATION_STATUS.APPROVED,
         restaurantId,
@@ -4362,10 +4385,10 @@ const handleNativeAction = async (
         logoImage: logoImage ?? '',
         menu: [],
         deliveryFee: 0,
-        deliveryRadiusKm: 12,
+        deliveryRadiusKm: roundCurrency(deliveryRadiusKm),
         deliveryTime,
-        latitude: hasLatitude ? latitude : null,
-        longitude: hasLongitude ? longitude : null,
+        latitude,
+        longitude,
         minOrder: 0,
         // Delivery is opt-in: restaurants self-provision it later from their
         // profile. New restaurants launch pickup-only ("delivery coming soon").
@@ -4979,6 +5002,9 @@ const handleNativeAction = async (
       }
     }
 
+    const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
+    const attributedPromoId =
+      rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
     const orderId = crypto.randomUUID();
     const payment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
@@ -4995,6 +5021,7 @@ const handleNativeAction = async (
       pricing: orderDraft.pricing,
       restaurantId: orderDraft.restaurantId,
       restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
+      attributedPromoId,
     });
 
     await insertDeliveryEvent({
@@ -5071,10 +5098,10 @@ const handleNativeAction = async (
       }
     }
 
-    const orderId = crypto.randomUUID();
     const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
     const attributedPromoId =
       rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
+    const orderId = crypto.randomUUID();
     const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
     const initialPayment = buildInitialPaymentSummary({
       paymentMethod: orderDraft.paymentMethod,
@@ -5083,7 +5110,6 @@ const handleNativeAction = async (
     });
 
     const orderCreation = await createOrderWithItems({
-      attributedPromoId,
       customerId: context.uid,
       deliveryLocation: orderDraft.deliveryLocation,
       fulfillmentType: orderDraft.fulfillmentType,
@@ -5093,6 +5119,7 @@ const handleNativeAction = async (
       pricing: orderDraft.pricing,
       restaurantId: orderDraft.restaurantId,
       restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
+      attributedPromoId,
     });
 
     await upsertPaymentTransaction({
@@ -6866,14 +6893,23 @@ const handleNativeAction = async (
     if (statsError) {
       console.error('Promo stats lookup failed.', statsError);
     }
-    const statById = new Map<string, {
-      promoId: string; impressions: number; clicks: number;
-      attributedOrders: number; attributedRevenue: number;
-    }>(
+    const statById = new Map<
+      string,
+      {
+        promoId: string;
+        impressions: number;
+        clicks: number;
+        attributedOrders: number;
+        attributedRevenue: number;
+      }
+    >(
       (stats ?? []).map((s: {
-        promoId: string; impressions: number; clicks: number;
-        attributedOrders: number; attributedRevenue: number;
-      }) => [s.promoId, s]),
+        promoId: string;
+        impressions: number;
+        clicks: number;
+        attributedOrders: number;
+        attributedRevenue: number;
+      }) => [s.promoId, s])
     );
     const withStats = (promos ?? []).map((p) => {
       const s = statById.get(p.id);
@@ -7009,6 +7045,10 @@ type PromoRow = {
   updatedAt: string;
 };
 
+const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;
+const isBroadcastCategory = (value: unknown): value is (typeof BROADCAST_CATEGORIES)[number] =>
+  typeof value === 'string' && (BROADCAST_CATEGORIES as readonly string[]).includes(value);
+
 const validatePromoComposition = (input: {
   actionUrl: unknown;
   startsAt: unknown;
@@ -7041,10 +7081,6 @@ const validatePromoComposition = (input: {
   }
   return { actionUrl, startsAt, endsAt };
 };
-
-const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;
-const isBroadcastCategory = (value: unknown): value is (typeof BROADCAST_CATEGORIES)[number] =>
-  typeof value === 'string' && (BROADCAST_CATEGORIES as readonly string[]).includes(value);
 
 const validateBroadcastComposition = (input: {
   category: unknown;

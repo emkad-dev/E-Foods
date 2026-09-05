@@ -1,6 +1,6 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Redirect, Tabs, usePathname } from 'expo-router';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
@@ -17,6 +17,22 @@ export const unstable_settings = {
 
 const TAB_BAR_MAX_WIDTH = 380;
 const TAB_BAR_SIDE_INSET = 24;
+
+/**
+ * Routes a signed-out visitor may browse. Everything else still bounces to
+ * login carrying a redirectTo, so the sign-in prompt lands at the point of
+ * action (adding to cart, checking out) rather than at the front door.
+ */
+const PUBLIC_PREFIXES = ['/home', '/search', '/deals', '/delivery-location', '/cart'];
+
+const isPublicRoute = (pathname: string | null | undefined) => {
+  const currentPath = pathname || '/home';
+
+  return PUBLIC_PREFIXES.some(
+    (prefix) => currentPath === prefix || currentPath.startsWith(`${prefix}/`)
+  );
+};
+
 
 const renderTabIcon = (iconName: React.ComponentProps<typeof FontAwesome>['name'], color: string, focused: boolean) => (
   <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
@@ -40,18 +56,13 @@ const getCustomerShellLoadingMode = (pathname: string | null | undefined): Custo
 export default function CustomerLayout() {
   const { loading, user } = useAuth();
   const pathname = usePathname();
-  const { width } = useWindowDimensions();
   usePushNotifications();
-
-  // Keep the floating bar off the screen edges, and stop it stretching across wide web viewports.
-  const tabBarWidth = Math.min(width - TAB_BAR_SIDE_INSET * 2, TAB_BAR_MAX_WIDTH);
-  const tabBarLeft = Math.max((width - tabBarWidth) / 2, TAB_BAR_SIDE_INSET);
 
   if (loading) {
     return <LoadingSkeleton mode={getCustomerShellLoadingMode(pathname)} />;
   }
 
-  if (!user) {
+  if (!user && !isPublicRoute(pathname)) {
     const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
 
     return <Redirect href={{ pathname: '/login', params: { redirectTo } } as never} />;
@@ -73,9 +84,10 @@ export default function CustomerLayout() {
               borderTopWidth: 1,
               borderRadius: 20,
               bottom: 12,
+              left: TAB_BAR_SIDE_INSET,
               elevation: 8,
               height: 58,
-              left: tabBarLeft,
+              right: TAB_BAR_SIDE_INSET,
               paddingBottom: 6,
               paddingTop: 6,
               position: 'absolute',
@@ -83,7 +95,6 @@ export default function CustomerLayout() {
               shadowOffset: { width: 0, height: 8 },
               shadowOpacity: 0.14,
               shadowRadius: 14,
-              width: tabBarWidth,
             },
             headerShown: false,
           }}
@@ -93,6 +104,13 @@ export default function CustomerLayout() {
             options={{
               title: 'Home',
               tabBarIcon: ({ color, focused }) => renderTabIcon('home', color, focused),
+            }}
+          />
+          <Tabs.Screen
+            name="search"
+            options={{
+              title: 'Search',
+              tabBarIcon: ({ color, focused }) => renderTabIcon('search', color, focused),
             }}
           />
           <Tabs.Screen
@@ -119,10 +137,12 @@ export default function CustomerLayout() {
           <Tabs.Screen
             name="orders"
             options={{
+              // Order history now lives inside Profile, so keep the route mounted
+              // (Profile links to it) but drop it from the tab bar.
+              href: null,
               title: 'Order',
               headerShown: false,
               tabBarStyle: { display: 'none' },
-              tabBarIcon: ({ color, focused }) => renderTabIcon('list', color, focused),
             }}
           />
           <Tabs.Screen

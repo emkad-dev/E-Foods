@@ -2,26 +2,22 @@ import { FontAwesome } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Image,
   Keyboard,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
+import AuthHeaderActions from '../../../src/components/AuthHeaderActions';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getPublishedRestaurants } from '../../../src/services/publicRestaurantReadModel';
@@ -54,47 +50,6 @@ type DiscoveryEntry = {
   availability: ReturnType<typeof getRestaurantAvailability>;
   restaurant: Restaurant;
 };
-
-type SpotlightSlide = {
-  accent: 'amber' | 'hero' | 'cream';
-  copy: string;
-  cta: string;
-  id: string;
-  image?: string;
-  meta: string;
-  restaurantId?: string;
-  title: string;
-};
-
-const FEATURED_CURATIONS: {
-  accent: 'amber' | 'hero' | 'cream';
-  copy: string;
-  id: string;
-  tag: string;
-  title: string;
-}[] = [
-  {
-    accent: 'amber',
-    copy: 'Jollof trays, stews, and quick lunch picks with short delivery windows.',
-    id: 'featured-rice',
-    tag: 'Lunch rush',
-    title: 'Rice bowls that land fast',
-  },
-  {
-    accent: 'hero',
-    copy: 'Warm soups and swallow-friendly kitchens for heavier evening orders.',
-    id: 'featured-swallow',
-    tag: 'Comfort',
-    title: 'Deep soups and swallow picks',
-  },
-  {
-    accent: 'cream',
-    copy: 'Small chops, grilled bites, and quick pickup options when the queue is light.',
-    id: 'featured-snacks',
-    tag: 'Quick bite',
-    title: 'Snacks for light cravings',
-  },
-];
 
 const getCustomerName = (displayName: string | undefined, email: string | undefined) => {
   const rawValue = displayName?.trim() || email?.split('@')[0]?.trim() || 'there';
@@ -136,17 +91,13 @@ export default function HomeScreen() {
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [expandedShelf, setExpandedShelf] = useState<'nearby' | null>(null);
-  const [activeSpotlightIndex, setActiveSpotlightIndex] = useState(0);
   const catalogRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const spotlightRef = useRef<FlatList<SpotlightSlide> | null>(null);
   const isMountedRef = useRef(true);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
   const { user } = useAuth();
   const { deliveryLocation } = useCart();
   const { isCovered, nearestOrderableKm } = useCoverage();
-  const spotlightWidth = Math.max(screenWidth - 28, 280);
 
   const loadRestaurants = useCallback(
     async (mode: 'initial' | 'manual' | 'background' = 'initial') => {
@@ -248,19 +199,6 @@ export default function HomeScreen() {
     [discoveryResults]
   );
 
-  const topRatedRestaurants = useMemo(
-    () =>
-      [...availableRestaurants].sort((left, right) => {
-        const ratingDelta = (right.restaurant.rating ?? 0) - (left.restaurant.rating ?? 0);
-        if (ratingDelta !== 0) {
-          return ratingDelta;
-        }
-
-        return left.restaurant.name.localeCompare(right.restaurant.name);
-      }),
-    [availableRestaurants]
-  );
-
   const nearbyRestaurants = useMemo(
     () =>
       [...availableRestaurants].sort((left, right) => {
@@ -270,51 +208,6 @@ export default function HomeScreen() {
       }),
     [availableRestaurants]
   );
-
-  const featuredRestaurants = useMemo(
-    () => topRatedRestaurants.slice(0, Math.min(topRatedRestaurants.length, FEATURED_CURATIONS.length)),
-    [topRatedRestaurants]
-  );
-  const spotlightSlides = useMemo<SpotlightSlide[]>(
-    () =>
-      FEATURED_CURATIONS.map((feature, index) => {
-        const spotlight = featuredRestaurants[index]?.restaurant;
-        return {
-          accent: feature.accent,
-          copy: spotlight?.cuisine
-            ? `${feature.copy} ${spotlight.cuisine} is live on this slot.`
-            : feature.copy,
-          cta: spotlight ? 'Open restaurant' : 'See deals',
-          id: feature.id,
-          image: spotlight?.image,
-          meta:
-            spotlight?.name ??
-            'Featured',
-          restaurantId: spotlight?.id,
-          title: feature.title,
-        };
-      }),
-    [featuredRestaurants]
-  );
-
-  useEffect(() => {
-    if (spotlightSlides.length <= 1) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setActiveSpotlightIndex((currentIndex) => {
-        const nextIndex = (currentIndex + 1) % spotlightSlides.length;
-        spotlightRef.current?.scrollToIndex({
-          animated: true,
-          index: nextIndex,
-        });
-        return nextIndex;
-      });
-    }, 4200);
-
-    return () => clearInterval(interval);
-  }, [spotlightSlides.length]);
 
   const nearbyVisible = toShelfEntries(nearbyRestaurants, expandedShelf === 'nearby' ? undefined : 4);
   const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
@@ -351,17 +244,8 @@ export default function HomeScreen() {
     scheduleCatalogRefresh(succeeded ? 30000 : 120000);
   };
 
-  const handleSpotlightMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const nextIndex = Math.round(event.nativeEvent.contentOffset.x / spotlightWidth);
-
-    if (Number.isFinite(nextIndex)) {
-      setActiveSpotlightIndex(nextIndex);
-    }
-  };
-
   const customerName = getCustomerName(user?.displayName, user?.email);
   const greeting = `HI ${customerName.toUpperCase().slice(0, 18)}`;
-  const avatarLabel = customerName.slice(0, 1).toUpperCase();
   const locationLabel = deliveryLocation?.shortAddress ?? 'Set delivery area';
 
   if (loading) {
@@ -402,9 +286,8 @@ export default function HomeScreen() {
             </Text>
             <FontAwesome name="angle-down" size={18} color={customerTheme.brandGreen} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')}>
-            <Text style={styles.avatarButtonText}>{avatarLabel}</Text>
-          </TouchableOpacity>
+          {/* Renders null once signed in, so the chip stays centred as before. */}
+          <AuthHeaderActions />
         </View>
 
         <View style={styles.searchShell}>
@@ -446,97 +329,6 @@ export default function HomeScreen() {
         </Animated.View>
       ) : null}
 
-      <Animated.View entering={FadeInDown.delay(240).duration(500)} style={styles.featureSection}>
-        <View style={styles.spotlightStack}>
-          <View style={styles.spotlightCardBack} />
-          <View style={styles.spotlightCardMid} />
-          <FlatList
-            ref={spotlightRef}
-            data={spotlightSlides}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(item) => item.id}
-            decelerationRate="fast"
-            snapToAlignment="start"
-            onMomentumScrollEnd={handleSpotlightMomentumEnd}
-            getItemLayout={(_, index) => ({
-              index,
-              length: spotlightWidth,
-              offset: spotlightWidth * index,
-            })}
-            renderItem={({ item }) => {
-              const accentStyle =
-                item.accent === 'hero'
-                  ? styles.featureCardHero
-                  : item.accent === 'cream'
-                    ? styles.featureCardCream
-                    : styles.featureCardAmber;
-              const hasImage = Boolean(item.image);
-
-              return (
-                <TouchableOpacity
-                  activeOpacity={0.92}
-                  style={[styles.featureCard, hasImage ? styles.featureCardImage : accentStyle, { width: spotlightWidth }]}
-                  onPress={() => {
-                    if (item.restaurantId) {
-                      trackAnalyticsEvent('customer_spotlight_opened', {
-                        destination: 'restaurant',
-                      });
-                      router.push(`/home/restaurant/${item.restaurantId}`);
-                      return;
-                    }
-
-                    trackAnalyticsEvent('customer_spotlight_opened', {
-                      destination: 'deals',
-                    });
-                    router.push('/deals');
-                  }}
-                >
-                  {hasImage ? (
-                    <>
-                      <Image source={{ uri: item.image }} style={styles.featureImageBackdrop} />
-                      <LinearGradient
-                        colors={['transparent', 'rgba(9,15,29,0.85)']}
-                        style={styles.featureImageGradient}
-                      />
-                      <View style={styles.featureContentOverlay}>
-                        <Text style={styles.featureTagLight}>{item.meta}</Text>
-                        <Text style={styles.featureTitleLight}>{item.title}</Text>
-                        <Text style={styles.featureCopyLight} numberOfLines={2}>
-                          {item.copy}
-                        </Text>
-                        <View style={styles.featureCtaPill}>
-                          <Text style={styles.featureCtaPillText}>{item.cta}</Text>
-                          <FontAwesome name="long-arrow-right" size={15} color="#ffffff" />
-                        </View>
-                      </View>
-                    </>
-                  ) : (
-                    <View style={styles.featureContent}>
-                      <Text style={styles.featureTag}>{item.meta}</Text>
-                      <Text style={styles.featureTitle}>{item.title}</Text>
-                      <Text style={styles.featureCopy}>{item.copy}</Text>
-                      <View style={styles.featureFooter}>
-                        <Text style={styles.featureMeta}>{item.cta}</Text>
-                        <FontAwesome name="long-arrow-right" size={16} color={customerTheme.text} />
-                      </View>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            }}
-          />
-        </View>
-        <View style={styles.spotlightDots}>
-          {spotlightSlides.map((slide, index) => (
-            <View
-              key={slide.id}
-              style={[styles.spotlightDot, index === activeSpotlightIndex ? styles.spotlightDotActive : null]}
-            />
-          ))}
-        </View>
-      </Animated.View>
 
       {deliveryLocation ? (
         <Animated.View entering={FadeInDown.delay(360).duration(500)} style={styles.sectionBlock}>
@@ -578,7 +370,9 @@ export default function HomeScreen() {
                   router.push(`/home/restaurant/${restaurant.id}`);
                 }}
               >
-                <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
+                <View style={styles.nearbyImageShell}>
+                  <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
+                </View>
                 <View style={styles.nearbyInfo}>
                   <View style={styles.nearbyHeader}>
                     <Text style={styles.nearbyName} numberOfLines={1}>
@@ -652,7 +446,9 @@ export default function HomeScreen() {
                     router.push(`/home/restaurant/${restaurant.id}`);
                   }}
                 >
-                  <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
+                  <View style={styles.unavailableImageShell}>
+                    <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
+                  </View>
                   <View style={styles.unavailableInfo}>
                   <View style={styles.unavailableHeader}>
                     <Text style={styles.unavailableName}>{restaurant.name}</Text>
@@ -747,16 +543,17 @@ const styles = StyleSheet.create({
   headerActionRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 8,
+    justifyContent: 'center',
     marginTop: 12,
   },
   locationChip: {
     alignItems: 'center',
     backgroundColor: customerTheme.headerSurface,
+    flexShrink: 1,
     borderColor: 'rgba(3, 184, 51, 0.18)',
     borderRadius: 15,
     borderWidth: 1,
-    flex: 1,
     flexDirection: 'row',
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -768,21 +565,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginHorizontal: 10,
   },
-  avatarButton: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.brandGreen,
-    borderColor: 'rgba(255, 149, 31, 0.55)',
-    borderRadius: 20,
-    borderWidth: 1,
-    height: 40,
-    justifyContent: 'center',
-    marginLeft: 10,
-    width: 40,
-  },
-  avatarButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
+  nearbyImageShell: {
+    height: 132,
+    position: 'relative',
+    width: 112,
   },
   searchShell: {
     alignItems: 'center',
@@ -1204,7 +990,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   nearbyImage: {
-    height: 132,
+    height: '100%',
     width: 112,
   },
   nearbyInfo: {
@@ -1326,7 +1112,12 @@ const styles = StyleSheet.create({
     borderColor: '#ef4444',
   },
   unavailableImage: {
+    height: '100%',
+    width: 112,
+  },
+  unavailableImageShell: {
     height: 132,
+    position: 'relative',
     width: 112,
   },
   unavailableInfo: {

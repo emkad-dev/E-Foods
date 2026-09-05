@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Alert, StyleSheet, Text } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
-import AuthLegalFooter from '../../src/components/AuthLegalFooter';
+import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
+import AuthScreenShell from '../../src/components/AuthScreenShell';
+import AuthTextField from '../../src/components/AuthTextField';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function ForgotPasswordScreen() {
@@ -27,15 +29,10 @@ export default function ForgotPasswordScreen() {
     setSubmitting(true);
     try {
       await resetPassword(email.trim());
-        Alert.alert('Reset email sent', 'Open the link in your inbox to choose a new password.', [
-          {
-            text: 'Back to login',
-            onPress: () =>
-              router.replace(
-                redirectTo ? ({ pathname: '/login', params: { redirectTo } } as never) : ('/login' as never)
-              ),
-          },
-        ]);
+      router.replace({
+        pathname: '/login',
+        params: { notice: 'reset-email-sent', ...(redirectTo ? { redirectTo } : null) },
+      } as never);
     } catch (error: any) {
       Alert.alert('Unable to send reset email', error.message);
     } finally {
@@ -44,90 +41,48 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
+    <AuthScreenShell
+      title="Reset your password"
+      subtitle="We will email you a secure link to finish resetting your password."
     >
-      <Text style={styles.title}>Reset your password</Text>
-      <Text style={styles.copy}>We will email you a secure link to finish resetting your password.</Text>
-
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
+      <AuthTextField
+        placeholder="name@email.com"
         value={email}
         onChangeText={handleEmailChange}
         autoCapitalize="none"
+        autoComplete="email"
         keyboardType="email-address"
         editable={!submitting}
       />
 
-      <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
-        <Text style={styles.buttonText}>{submitting ? 'Sending...' : 'Send reset email'}</Text>
-      </TouchableOpacity>
+      <AuthPrimaryButton
+        label={submitting ? 'Sending...' : 'Send reset email'}
+        onPress={handleResetPassword}
+        disabled={submitting}
+      />
 
-      <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
+      <Link
+        href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'}
+        style={styles.link}
+      >
         Back to login
       </Link>
-
-      <AuthLegalFooter />
-    </ScrollView>
+    </AuthScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: customerTheme.background,
-    flex: 1,
-  },
-  container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  title: {
-    color: customerTheme.text,
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  copy: {
-    color: customerTheme.textMuted,
-    fontSize: 16,
-    marginBottom: 24,
-  },
   errorText: {
     color: customerTheme.danger,
-    marginBottom: 16,
-    textAlign: 'center',
     fontSize: 14,
-  },
-  input: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 10,
-    borderWidth: 1,
-    height: 50,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    color: customerTheme.text,
-  },
-  button: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 10,
-    paddingVertical: 15,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+    marginBottom: 14,
+    textAlign: 'center',
   },
   link: {
     color: customerTheme.link,
-    marginTop: 18,
+    marginTop: 16,
     textAlign: 'center',
   },
 });

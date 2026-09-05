@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { updateUserDocument } from '../../src/services/supabase/profile';
+import SuccessBanner from '../../src/components/SuccessBanner';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function VerifyEmailScreen() {
-  const { user, reloadUser, sendVerificationEmail, signOut, error, clearError } = useAuth();
+  const { user, reloadUser, sendVerificationEmail, verifyEmailCode, signOut, error, clearError } = useAuth();
   const params = useLocalSearchParams<{
     access_token?: string | string[];
     code?: string | string[];
@@ -18,6 +19,9 @@ export default function VerifyEmailScreen() {
   const [processingLink, setProcessingLink] = useState(false);
   const [resending, setResending] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [confirmingCode, setConfirmingCode] = useState(false);
   const router = useRouter();
   const accessToken = useMemo(() => {
     if (Array.isArray(params.access_token)) return params.access_token[0];
@@ -95,16 +99,47 @@ export default function VerifyEmailScreen() {
     }
   }, [router, user?.emailVerified]);
 
+  const handleConfirmCode = async () => {
+    const trimmed = code.trim();
+
+    if (trimmed.length < 6) {
+      Alert.alert('Enter the full code', 'The code in your email is 6 digits.');
+      return;
+    }
+
+    setConfirmingCode(true);
+    try {
+      const verified = await verifyEmailCode(trimmed);
+
+      if (verified) {
+        setNotice({
+          title: 'Email confirmed',
+          message: 'Your email has been confirmed. You can continue to the customer app.',
+        });
+        setCode('');
+      }
+    } catch (codeError: any) {
+      Alert.alert('Could not confirm code', codeError.message);
+    } finally {
+      setConfirmingCode(false);
+    }
+  };
+
   const handleRefreshStatus = async () => {
     setChecking(true);
     try {
       const emailVerified = await reloadUser();
-      Alert.alert(
-        emailVerified ? 'Success' : 'Not verified yet',
-        emailVerified
-          ? 'Your email has been confirmed. You can continue to the customer app.'
-          : 'Please open the verification link we sent and come back here after confirming it.'
-      );
+      if (emailVerified) {
+        setNotice({
+          title: 'Email confirmed',
+          message: 'Your email has been confirmed. You can continue to the customer app.',
+        });
+      } else {
+        Alert.alert(
+          'Not verified yet',
+          'Please open the verification link we sent and come back here after confirming it.'
+        );
+      }
     } catch (error: any) {
       Alert.alert('Unable to refresh status', error.message);
     } finally {
@@ -116,7 +151,7 @@ export default function VerifyEmailScreen() {
     setResending(true);
     try {
       await sendVerificationEmail();
-      Alert.alert('Verification link sent', 'Please check your inbox for the new link.');
+      setNotice({ title: 'Verification link sent', message: 'Please check your inbox for the new link.' });
     } catch (error: any) {
       Alert.alert('Unable to resend email', error.message);
     } finally {
@@ -141,18 +176,42 @@ export default function VerifyEmailScreen() {
       <Text style={styles.copy}>
         {processingLink
           ? 'Confirming your email link now. Stay on this screen for a moment.'
-          : `We sent a verification link to ${user?.email ?? 'your inbox'}. Confirm it, then come back here to continue.`}
+          : `We sent a 6-digit code to ${user?.email ?? 'your inbox'}. Enter it below to confirm your email.`}
       </Text>
+
+      <SuccessBanner title={notice?.title} message={notice?.message} onDismiss={() => setNotice(null)} />
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
+      <TextInput
+        style={styles.codeInput}
+        placeholder="000000"
+        placeholderTextColor={customerTheme.textMuted}
+        value={code}
+        onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+        keyboardType="number-pad"
+        textContentType="oneTimeCode"
+        autoComplete="one-time-code"
+        maxLength={6}
+        editable={!confirmingCode && !processingLink}
+        accessibilityLabel="6-digit confirmation code"
+      />
+
       <TouchableOpacity
-        style={styles.primaryButton}
+        style={[styles.primaryButton, code.trim().length < 6 ? styles.buttonDisabled : null]}
+        onPress={handleConfirmCode}
+        disabled={confirmingCode || processingLink || code.trim().length < 6}
+      >
+        <Text style={styles.primaryText}>{confirmingCode ? 'Confirming...' : 'Confirm email'}</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.secondaryButton}
         onPress={handleRefreshStatus}
         disabled={checking || processingLink}
       >
-        <Text style={styles.primaryText}>
-          {processingLink ? 'Confirming...' : checking ? 'Checking...' : "I've confirmed it"}
+        <Text style={styles.secondaryText}>
+          {processingLink ? 'Confirming...' : checking ? 'Checking...' : 'I used the link instead'}
         </Text>
       </TouchableOpacity>
 
@@ -161,7 +220,7 @@ export default function VerifyEmailScreen() {
         onPress={handleResendEmail}
         disabled={resending || processingLink}
       >
-        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Resend verification link'}</Text>
+        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Send a new code'}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -203,12 +262,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
   },
+  codeInput: {
+    backgroundColor: customerTheme.surfaceMuted,
+    borderColor: customerTheme.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: customerTheme.text,
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: 10,
+    marginBottom: 14,
+    paddingVertical: 14,
+    textAlign: 'center',
+  },
   primaryButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
     borderRadius: 10,
     marginBottom: 12,
     paddingVertical: 15,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   primaryText: {
     color: '#fff',

@@ -12,159 +12,189 @@
 <meta property="og:url" content="https://feasty.com.ng">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Karla:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Karla:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
+    /* Paper the ticket is printed on — warm, not the cool sage it replaced. */
+    --paper: #fffcf4;
+    --paper-edge: #f6f0e2;
+    --ink: #14180f;
+    --ink-soft: #5f6656;
     --green: #2e7d32;
     --green-deep: #1b5e20;
     --green-tint: #e8f5e9;
     --orange: #f57c00;
     --orange-soft: #ffe0b2;
-    --sage: #f3f7f6;
-    --sage-strong: #d8e3df;
-    --ink: #0d1522;
-    --ink-soft: #5b6978;
-    --card: #fbfcfc;
+    /* Stamp red. Used once, on the status stamp, and nowhere else. */
+    --stamp: #c0392b;
+    --rule: #dcd5c2;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
     font-family: 'Karla', system-ui, sans-serif;
     color: var(--ink);
-    background: var(--sage);
+    background: var(--paper);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, .wordmark {
-    font-family: 'Bricolage Grotesque', 'Karla', sans-serif;
-  }
+  h1, h2, h3, .wordmark { font-family: 'Bricolage Grotesque', 'Karla', sans-serif; }
+  .mono { font-family: 'Azeret Mono', ui-monospace, monospace; }
   a { color: var(--green-deep); }
+  :focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; border-radius: 4px; }
 
   .shell { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 
   /* ---------- nav ---------- */
-  nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 0;
-  }
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
   .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-  .brand img { width: 44px; height: auto; transform: rotate(-8deg); }
-  .wordmark {
-    font-weight: 800; font-size: 1.5rem; letter-spacing: 0.04em;
-    color: var(--green-deep);
-  }
+  .brand img { width: 40px; height: auto; }
+  .wordmark { font-weight: 800; font-size: 1.5rem; letter-spacing: 0.04em; color: var(--green-deep); }
   .wordmark span { color: var(--orange); }
   .nav-link {
-    font-weight: 700; text-decoration: none; font-size: 0.95rem;
-    color: var(--green-deep);
-    border: 2px solid var(--sage-strong); border-radius: 999px;
-    padding: 8px 18px;
+    font-family: 'Azeret Mono', monospace;
+    font-weight: 500; text-decoration: none; font-size: 0.8rem;
+    letter-spacing: 0.04em; color: var(--green-deep);
+    border: 1.5px solid var(--rule); border-radius: 999px; padding: 9px 18px;
     transition: border-color .15s ease, background .15s ease;
   }
   .nav-link:hover, .nav-link:focus-visible { border-color: var(--green); background: var(--green-tint); }
 
   /* ---------- hero ---------- */
   .hero {
-    display: grid; grid-template-columns: 1.15fr 0.85fr;
-    align-items: center; gap: 32px;
-    padding: 56px 0 72px;
+    display: grid; grid-template-columns: 1.05fr 0.95fr;
+    align-items: center; gap: 56px; padding: 48px 0 76px;
   }
   .eyebrow {
-    display: inline-block;
-    font-weight: 700; font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase;
-    color: var(--orange);
-    background: var(--orange-soft);
-    border-radius: 999px; padding: 5px 14px;
-    margin-bottom: 18px;
+    font-family: 'Azeret Mono', monospace;
+    display: inline-block; font-weight: 500; font-size: 0.72rem;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft);
+    padding-bottom: 10px; margin-bottom: 20px;
+    border-bottom: 1.5px dashed var(--rule);
   }
   h1 {
-    font-size: clamp(2.4rem, 5.5vw, 3.9rem);
-    font-weight: 800; line-height: 1.06; letter-spacing: -0.02em;
-    margin-bottom: 20px;
+    font-size: clamp(2.5rem, 5.6vw, 4.1rem);
+    font-weight: 800; line-height: 1.02; letter-spacing: -0.03em; margin-bottom: 20px;
   }
   h1 em { font-style: normal; color: var(--green); }
-  .lede {
-    font-size: 1.13rem; color: var(--ink-soft); max-width: 32em;
-    margin-bottom: 30px;
-  }
+  .lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 30em; margin-bottom: 30px; }
   .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
   .btn {
     display: inline-block; text-decoration: none; font-weight: 700; font-size: 1rem;
-    border-radius: 14px; padding: 14px 26px;
-    transition: transform .12s ease, box-shadow .12s ease;
+    border-radius: 12px; padding: 14px 26px;
+    transition: transform .14s cubic-bezier(.23,1,.32,1), box-shadow .14s ease;
   }
-  .btn:hover, .btn:focus-visible { transform: translateY(-2px); }
-  .btn-primary {
-    background: var(--orange); color: #fff;
-    box-shadow: 0 6px 18px rgba(245, 124, 0, .32);
+  .btn-primary { background: var(--orange); color: #fff; box-shadow: 0 6px 18px rgba(245,124,0,.28); }
+  @media (hover: hover) and (pointer: fine) {
+    .btn:hover { transform: translateY(-2px); }
   }
-  .btn-secondary {
-    background: transparent; color: var(--green-deep);
-    border: 2px solid var(--green);
-  }
-  .btn-secondary:hover, .btn-secondary:focus-visible { background: var(--green-tint); }
+  .btn:active { transform: scale(.98); }
 
-  .hero-art { text-align: center; }
-  .hero-art img {
-    width: min(100%, 360px); height: auto;
-    transform: rotate(6deg);
-    filter: drop-shadow(0 18px 28px rgba(27, 94, 32, .22));
-    animation: bob 5s ease-in-out infinite;
+  /* ---------- signature: the order ticket ---------- */
+  .ticket-stage { display: flex; justify-content: center; }
+  .ticket {
+    position: relative; width: min(100%, 330px);
+    background: var(--paper);
+    border: 1.5px solid var(--rule);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    padding: 22px 24px 6px;
+    transform: rotate(-1.2deg);
+    box-shadow: 0 18px 34px rgba(20,24,15,.13);
+    font-family: 'Azeret Mono', ui-monospace, monospace;
+    font-size: 0.78rem; line-height: 1.9; color: var(--ink);
   }
-  @keyframes bob {
-    0%, 100% { transform: rotate(6deg) translateY(0); }
-    50%      { transform: rotate(4deg) translateY(-12px); }
+  .ticket-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .ticket-head img { width: 26px; height: auto; }
+  .ticket-brand { font-weight: 700; letter-spacing: 0.12em; color: var(--green-deep); }
+  .ticket-id { color: var(--ink-soft); }
+  .ticket hr { border: none; border-top: 1.5px dashed var(--rule); margin: 12px 0; }
+  .ticket-kitchen { font-weight: 700; letter-spacing: 0.02em; }
+  .trow { display: flex; justify-content: space-between; gap: 14px; }
+  .trow span:last-child { white-space: nowrap; }
+  .ticket-total { font-weight: 700; }
+  .ticket-paid { color: var(--green); font-weight: 500; }
+  .stamp {
+    display: inline-block; margin: 14px 0 4px;
+    font-weight: 700; font-size: 0.82rem; letter-spacing: 0.14em;
+    color: var(--stamp); border: 2.5px solid var(--stamp); border-radius: 5px;
+    padding: 5px 12px; transform: rotate(-3deg); opacity: .92;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .hero-art img { animation: none; }
-    .btn:hover { transform: none; }
+  /* Torn bottom edge — same melted-cheese language as the section divider. */
+  .ticket-tear { display: block; width: 100%; height: 14px; margin-top: 2px; }
+
+  /* one orchestrated page-load moment, then the page holds still */
+  .tline { opacity: 0; animation: print .34s cubic-bezier(.23,1,.32,1) forwards; }
+  .tline:nth-child(1) { animation-delay: .10s; }
+  .tline:nth-child(2) { animation-delay: .16s; }
+  .tline:nth-child(3) { animation-delay: .22s; }
+  .tline:nth-child(4) { animation-delay: .28s; }
+  .tline:nth-child(5) { animation-delay: .34s; }
+  .tline:nth-child(6) { animation-delay: .40s; }
+  .tline:nth-child(7) { animation-delay: .46s; }
+  .tline:nth-child(8) { animation-delay: .52s; }
+  @keyframes print { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .stamp { opacity: 0; animation: land .32s cubic-bezier(.23,1,.32,1) .72s forwards; }
+  @keyframes land {
+    from { opacity: 0; transform: rotate(-3deg) scale(1.14); }
+    to   { opacity: .92; transform: rotate(-3deg) scale(1); }
   }
 
   /* ---------- drip divider (echoes the melted cheese in the logo) ---------- */
   .drip { display: block; width: 100%; height: 70px; }
 
-  /* ---------- routes ---------- */
-  .routes { background: var(--green); padding: 8px 0 84px; }
+  /* ---------- journey rail ---------- */
+  /* The four labels are real order statuses, not marketing steps, and the
+     filled dots stop exactly where the hero ticket's stamp says it is. */
+  .routes { background: var(--green); padding: 8px 0 78px; }
   .routes h2 {
     color: #fff; font-weight: 800; font-size: clamp(1.5rem, 3vw, 2rem);
-    margin: 26px 0 28px; letter-spacing: -0.01em;
+    margin: 26px 0 34px; letter-spacing: -0.015em; max-width: 18em;
   }
-  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-  .card {
-    background: var(--card); border-radius: 20px; padding: 32px 30px;
-    display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
-    border-top: 6px solid var(--orange);
+  .rail { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 24px; }
+  .rail-step {
+    position: relative; text-align: center; padding-top: 30px;
+    font-family: 'Azeret Mono', monospace;
+    font-size: 0.72rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255, 252, 244, .55);
   }
-  .card.partner { border-top-color: var(--orange); }
-  .card h3 { font-size: 1.35rem; font-weight: 800; }
-  .card p { color: var(--ink-soft); flex: 1; }
-  .tag {
-    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--green-deep); background: var(--green-tint);
-    border-radius: 999px; padding: 4px 12px;
+  .rail-step::before {
+    content: ''; position: absolute; top: 9px; left: 0; right: 0;
+    border-top: 1.5px dashed rgba(255, 252, 244, .32);
   }
-  .card .btn { margin-top: 6px; }
-  .btn-green { background: var(--green); color: #fff; box-shadow: 0 6px 18px rgba(27,94,32,.28); }
-  .btn-soon {
-    background: var(--sage-strong); color: var(--ink-soft);
-    cursor: default; box-shadow: none;
+  .rail-step:first-child::before { left: 50%; }
+  .rail-step:last-child::before  { right: 50%; }
+  .rail-dot {
+    position: absolute; top: 3px; left: calc(50% - 6px);
+    width: 12px; height: 12px; border-radius: 999px;
+    background: var(--green); border: 2px solid rgba(255, 252, 244, .45);
   }
-  .btn-soon:hover { transform: none; }
+  .rail-step.done { color: #fffcf4; }
+  .rail-step.done .rail-dot { background: var(--orange); border-color: var(--orange); }
+  .rail-step.now .rail-dot { box-shadow: 0 0 0 5px rgba(245, 124, 0, .22); }
+  .rail-note { color: rgba(255, 252, 244, .78); max-width: 44em; margin-bottom: 26px; }
 
   /* ---------- footer ---------- */
-  footer {
-    background: var(--green-deep); color: #cfe3d1;
-    padding: 26px 0; font-size: 0.9rem;
-  }
+  footer { background: var(--green-deep); color: #cfe3d1; padding: 26px 0; font-size: 0.9rem; }
   footer .shell { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; }
   footer a { color: #fff; font-weight: 700; text-decoration: none; }
   footer a:hover { text-decoration: underline; }
 
-  @media (max-width: 760px) {
-    .hero { grid-template-columns: 1fr; padding: 32px 0 56px; text-align: left; }
-    .hero-art { order: -1; }
-    .hero-art img { width: min(52vw, 240px); }
-    .cards { grid-template-columns: 1fr; }
+  @media (max-width: 820px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding: 28px 0 56px; }
+    .ticket-stage { justify-content: flex-start; }
+    .rail { grid-template-columns: 1fr 1fr; row-gap: 26px; }
+    /* Two per row: re-trim the connector so it never dangles off a row end. */
+    .rail-step:nth-child(odd)::before  { left: 50%; right: 0; }
+    .rail-step:nth-child(even)::before { left: 0; right: 50%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    /* Content must never depend on motion to become visible. */
+    .tline, .stamp { animation: none; opacity: 1; }
+    .stamp { opacity: .92; }
+    .btn:hover, .btn:active { transform: none; }
   }
 </style>
 </head>
@@ -176,7 +206,7 @@
       <img src="/feasty-pizza.png" alt="">
       <span class="wordmark">FEAST<span>Y</span></span>
     </a>
-    <a class="nav-link" href="https://partner.feasty.com.ng">Partner portal</a>
+    <a class="nav-link" href="https://partner.feasty.com.ng">Restaurant login</a>
   </nav>
 </header>
 
@@ -186,16 +216,38 @@
       <span class="eyebrow">Now cooking in Nigeria</span>
       <h1>Hot food, <em>straight</em> to your door.</h1>
       <p class="lede">
-        FEASTY connects you with kitchens you love. Browse real menus, pay with
-        card or transfer, and follow your order live — from the stove to your street.
+        Browse real menus from kitchens near you, pay with card or transfer, and
+        follow your order from the stove to your street.
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://app.feasty.com.ng">Start an order</a>
-        <a class="btn btn-secondary" href="https://partner.feasty.com.ng">Join as a restaurant</a>
       </div>
     </div>
-    <div class="hero-art">
-      <img src="/feasty-pizza.png" alt="FEASTY pizza slice logo">
+
+    <div class="ticket-stage">
+      <figure class="ticket" aria-label="Example FEASTY order ticket, currently on the way">
+        <div class="tline ticket-head">
+          <span class="ticket-brand">FEASTY</span>
+          <img src="/feasty-pizza.png" alt="">
+        </div>
+        <div class="tline ticket-id">ORDER #A73K02 · 12:41</div>
+        <hr>
+        <div class="tline ticket-kitchen">MAMA NGOZI'S KITCHEN</div>
+        <div class="tline ticket-id">YABA, LAGOS</div>
+        <hr>
+        <div class="tline trow"><span>2 × Jollof + chicken</span><span>₦4,300</span></div>
+        <div class="tline trow"><span>1 × Moin moin</span><span>₦900</span></div>
+        <hr>
+        <div class="tline trow ticket-total"><span>TOTAL</span><span>₦5,200</span></div>
+        <div class="tline ticket-paid">PAID · CARD</div>
+        <span class="stamp">ON THE WAY</span>
+        <svg class="ticket-tear" viewBox="0 0 300 14" preserveAspectRatio="none" aria-hidden="true">
+          <path fill="#fffcf4" stroke="#dcd5c2" stroke-width="1.5"
+            d="M0,0 L0,7 C12,14 25,14 37,7 C50,0 62,0 75,7 C87,14 100,14 112,7
+               C125,0 137,0 150,7 C162,14 175,14 187,7 C200,0 212,0 225,7
+               C237,14 250,14 262,7 C275,0 287,0 300,7 L300,0 Z"/>
+        </svg>
+      </figure>
     </div>
   </section>
 
@@ -209,29 +261,18 @@
 
   <section class="routes" id="order">
     <div class="shell">
-      <h2>Two ways into FEASTY</h2>
-      <div class="cards">
-        <div class="card">
-          <span class="tag">For the hungry</span>
-          <h3>Order on FEASTY</h3>
-          <p>
-            Browse kitchens near you, build your cart, and pay with card or
-            transfer — all in your browser, no download needed. Track every
-            order live from the stove to your street.
-          </p>
-          <a class="btn btn-primary" href="https://app.feasty.com.ng">Start ordering</a>
-        </div>
-        <div class="card partner">
-          <span class="tag">For restaurants</span>
-          <h3>Grow with FEASTY</h3>
-          <p>
-            Put your kitchen in front of more customers. Manage your menu, accept
-            orders, and run your own delivery from one simple dashboard — you keep
-            100% of your menu prices.
-          </p>
-          <a class="btn btn-green" href="https://partner.feasty.com.ng">Open the partner portal</a>
-        </div>
-      </div>
+      <h2>Know where your food is, the whole way.</h2>
+      <ol class="rail">
+        <li class="rail-step done"><span class="rail-dot"></span>Placed</li>
+        <li class="rail-step done"><span class="rail-dot"></span>Preparing</li>
+        <li class="rail-step done now"><span class="rail-dot"></span>On the way</li>
+        <li class="rail-step"><span class="rail-dot"></span>Delivered</li>
+      </ol>
+      <p class="rail-note">
+        Your order moves through these on screen — from the kitchen accepting it
+        to the rider reaching your door. No guessing, no phone calls.
+      </p>
+      <a class="btn btn-primary" href="https://app.feasty.com.ng">Start an order</a>
     </div>
   </section>
 </main>
@@ -239,7 +280,7 @@
 <footer>
   <div class="shell">
     <span>© 2026 FEASTY · Made with plenty pepper 🌶️</span>
-    <span><a href="https://app.feasty.com.ng">Order food</a> · <a href="https://partner.feasty.com.ng">Partners</a></span>
+    <span><a href="https://app.feasty.com.ng">Order food</a> · <a href="https://partner.feasty.com.ng">Restaurant login</a></span>
   </div>
 </footer>
 

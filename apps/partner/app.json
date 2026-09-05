@@ -50,7 +50,11 @@
       "EXPO_PUBLIC_APP_SCHEME": "feasty-partner",
       "EXPO_PUBLIC_PARTNER_WEB_ORIGIN": "https://partner.feasty.com.ng",
       "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
-      "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
+      "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password",
+      "EXPO_PUBLIC_SUPABASE_URL": "https://rgfbheorvtolixdcpjhy.supabase.co",
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnZmJoZW9ydnRvbGl4ZGNwamh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODE4MTgsImV4cCI6MjA5MzA1NzgxOH0.gJVihwyRHJTuPKxTKpm3UNIqUs5OiG5xCJK1fqweDzk",
+      "EXPO_PUBLIC_SUPABASE_PROJECT_REF": "rgfbheorvtolixdcpjhy",
+      "EXPO_PUBLIC_BACKEND_RPC_URL": "https://rgfbheorvtolixdcpjhy.supabase.co/functions/v1/app-rpc"
     }
   }
 }

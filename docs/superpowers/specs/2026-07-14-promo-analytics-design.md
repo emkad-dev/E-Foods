@@ -101,8 +101,8 @@ Answer two questions per promo, in the admin panel:
 
 ## Error handling & edge cases
 
-- **Tracking is fire-and-forget.** A failed `promoTrack` or attribution never blocks the banner or
-  the order placement.
+- **Tracking is fire-and-forget.** A failed `promoTrack` or attribution never blocks the banner or the
+  order placement.
 - **Impression dedup is per session.** A new session recounts an impression — accepted as fine for
   CTR sanity without persistent identity.
 - **Deleted promos:** `"PromoEvent"` rows and attributions are retained historically (no FK); the reporting join

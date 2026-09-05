@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import BreakdownCard from '../components/BreakdownCard';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import KpiCard from '../components/KpiCard';
@@ -16,7 +16,7 @@ import {
   getOrderDate,
   type RangeDays,
 } from '../lib/analytics';
-import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
+import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
 import { getApprovalTone, getOrderTone, getPaymentChartColor, getStatusChartColor } from '../theme/tones';
 
 export default function OverviewPage() {
@@ -98,112 +98,28 @@ export default function OverviewPage() {
 
       <div className="grid-2">
         <div className="section-stack">
-          <div className="card">
-            <div className="card-title-row">
-              <h3 className="card-title">Orders by status</h3>
-              <Link to="/statistics" className="muted" style={{ fontSize: 13 }}>
-                more →
-              </Link>
-            </div>
-            {statusBreakdown.length === 0 ? (
-              <EmptyState title="No orders yet" body="Order status distribution will appear here." />
-            ) : (
-              <>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie
-                      data={statusBreakdown}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={60}
-                      outerRadius={95}
-                      paddingAngle={3}
-                    >
-                      {statusBreakdown.map((slice, index) => (
-                        <Cell key={slice.name} fill={getStatusChartColor(slice.name, index)} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div>
-                  {statusBreakdown.map((slice, index) => (
-                    <div key={slice.name} className="list-row">
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: 999,
-                            background: getStatusChartColor(slice.name, index),
-                            display: 'inline-block',
-                          }}
-                        />
-                        {humanizeStatus(slice.name)}
-                      </span>
-                      <span className="cell-strong">{formatNumber(slice.value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          <BreakdownCard
+            title="Orders by status"
+            moreHref="/statistics"
+            slices={statusBreakdown}
+            colorFor={getStatusChartColor}
+            emptyTitle="No orders yet"
+            emptyBody="Order status distribution will appear here."
+          />
 
-          <div className="card">
-            <div className="card-title-row">
-              <h3 className="card-title">Payments by status</h3>
-              <Link to="/statistics" className="muted" style={{ fontSize: 13 }}>
-                more →
-              </Link>
-            </div>
-            {paymentBreakdown.length === 0 ? (
-              <EmptyState title="No payments yet" body="Payment status distribution will appear here." />
-            ) : (
-              <>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie
-                      data={paymentBreakdown}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={60}
-                      outerRadius={95}
-                      paddingAngle={3}
-                    >
-                      {paymentBreakdown.map((slice, index) => (
-                        <Cell key={slice.name} fill={getPaymentChartColor(slice.name, index)} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div>
-                  {paymentBreakdown.map((slice, index) => (
-                    <div key={slice.name} className="list-row">
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: 999,
-                            background: getPaymentChartColor(slice.name, index),
-                            display: 'inline-block',
-                          }}
-                        />
-                        {humanizeStatus(slice.name)}
-                      </span>
-                      <span className="cell-strong">{formatNumber(slice.value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          <BreakdownCard
+            title="Payments by status"
+            moreHref="/statistics"
+            slices={paymentBreakdown}
+            colorFor={getPaymentChartColor}
+            emptyTitle="No payments yet"
+            emptyBody="Payment status distribution will appear here."
+          />
 
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Approval pulse</h3>
-              <Link to="/approvals" className="muted" style={{ fontSize: 13 }}>
+              <Link to="/approvals" className="muted text-[13px]">
                 more →
               </Link>
             </div>
@@ -229,7 +145,7 @@ export default function OverviewPage() {
         <div className="card">
           <div className="card-title-row">
             <h3 className="card-title">Orders history</h3>
-            <Link to="/orders" className="muted" style={{ fontSize: 13 }}>
+            <Link to="/orders" className="muted text-[13px]">
               more →
             </Link>
           </div>

@@ -1,6 +1,7 @@
 import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { customerTheme } from '../theme/palette';
 
 export default function AuthHeaderActions() {
   const { user } = useAuth();
@@ -37,19 +38,19 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   secondaryButton: {
-    borderColor: '#d5b06b',
+    borderColor: customerTheme.accent,
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   secondaryText: {
-    color: '#7a5b23',
+    color: customerTheme.accentStrong,
     fontSize: 12,
     fontWeight: '700',
   },
   primaryButton: {
-    backgroundColor: '#f5b342',
+    backgroundColor: customerTheme.brandOrange,
     borderRadius: 999,
     marginLeft: 8,
     paddingHorizontal: 12,

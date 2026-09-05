@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams } from 'expo-router';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import OrderStepDot from '../../../src/components/OrderStepDot';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
@@ -54,6 +56,26 @@ export default function OrderTracking() {
   const [cancelling, setCancelling] = useState(false);
   const [refreshingPayment, setRefreshingPayment] = useState(false);
 
+  // Derived above the early returns below so the progress hooks stay unconditional.
+  const fulfillmentType = order?.fulfillmentType ?? 'delivery';
+  const trackingSteps = getTrackingSteps(fulfillmentType);
+  const normalizedStatus = order ? normalizeOrderStatus(order.status) : null;
+  const currentStep = normalizedStatus ? trackingSteps.indexOf(normalizedStatus) : -1;
+  const previousStepRef = useRef<number | null>(null);
+
+  // Confirm real forward progress only: not the first render, and never on a
+  // status that moved backwards (a cancellation should not feel like success).
+  useEffect(() => {
+    const previousStep = previousStepRef.current;
+    previousStepRef.current = currentStep;
+
+    if (previousStep === null || currentStep <= previousStep) {
+      return;
+    }
+
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+  }, [currentStep]);
+
   if (!user) {
     return (
       <View style={styles.promptContainer}>
@@ -81,10 +103,6 @@ export default function OrderTracking() {
     );
   }
 
-  const fulfillmentType = order.fulfillmentType ?? 'delivery';
-  const trackingSteps = getTrackingSteps(fulfillmentType);
-  const normalizedStatus = normalizeOrderStatus(order.status);
-  const currentStep = trackingSteps.indexOf(normalizedStatus);
   const total = order.pricing?.total ?? order.total;
   const paymentStatus = formatPaymentStatusLabel(order.payment?.status, order.payment?.method);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
@@ -224,7 +242,10 @@ export default function OrderTracking() {
 
           return (
             <Animated.View key={step} entering={FadeIn.delay(index * 120)} style={styles.stepRow}>
-              <View style={[styles.stepCircle, active ? styles.stepCircleActive : null, current ? styles.stepCircleCurrent : null]} />
+              <OrderStepDot
+                active={active}
+                style={[styles.stepCircle, active ? styles.stepCircleActive : null, current ? styles.stepCircleCurrent : null]}
+              />
               <Text style={[styles.stepLabel, active ? styles.stepLabelActive : null]}>{formatOrderStatusLabel(step)}</Text>
             </Animated.View>
           );

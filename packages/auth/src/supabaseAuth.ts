@@ -84,6 +84,31 @@ export const signOutUser = async (supabase: SupabaseClient) => {
 
 export const getUserRoleClaim = async (user: User): Promise<AuthRole | null> => getSupabaseUserRole(user);
 
+/**
+ * Confirms a signup with the 6-digit code from the verification email.
+ *
+ * This is the redirect-free half of email confirmation: no emailRedirectTo, no
+ * redirect allowlist entry, and nothing tied to the app's hostname — which is
+ * why it survives a domain move that would invalidate emailed links.
+ *
+ * Requires the Supabase "Confirm signup" template to expose {{ .Token }}. A
+ * template carrying both the token and the confirmation URL lets the link and
+ * the code work at the same time, so existing emails keep working.
+ */
+export const verifyEmailOtp = async (supabase: SupabaseClient, email: string, token: string) => {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token: token.trim(),
+    type: 'signup',
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
 export const sendVerificationEmailWithFallback = async (
   supabase: SupabaseClient,
   email: string,

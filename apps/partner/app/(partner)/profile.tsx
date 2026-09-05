@@ -28,6 +28,7 @@ const toNumberOrNull = (value: string) => {
 };
 
 const INPUT_PLACEHOLDER_COLOR = '#6a7d76';
+type PublishFieldKey = 'name' | 'latitude' | 'longitude' | 'deliveryRadiusKm';
 
 export default function PartnerProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -52,6 +53,7 @@ export default function PartnerProfileScreen() {
   const [supportsPickup, setSupportsPickup] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
   const [isPublished, setIsPublished] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<PublishFieldKey, boolean>>>({});
 
   const linkedRestaurantId = user?.restaurantId ?? restaurant?.id ?? null;
   const linkableRestaurants = [...restaurants].sort((left, right) => left.name.localeCompare(right.name));
@@ -136,6 +138,37 @@ export default function PartnerProfileScreen() {
     }
   };
 
+  const clearFieldError = (field: PublishFieldKey) => {
+    setFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const handleRequiredFieldChange = (field: PublishFieldKey, setter: (value: string) => void) => (value: string) => {
+    clearFieldError(field);
+    setter(value);
+  };
+
+  const handlePublishToggle = (value: boolean) => {
+    setIsPublished(value);
+
+    if (!value) {
+      setFieldErrors((current) => {
+        const next = { ...current };
+        delete next.latitude;
+        delete next.longitude;
+        delete next.deliveryRadiusKm;
+        return next;
+      });
+    }
+  };
+
   const handleSaveProfile = async () => {
     if (!user) {
       Alert.alert('Session expired', 'Sign in again before saving store changes.');
@@ -143,11 +176,34 @@ export default function PartnerProfileScreen() {
     }
 
     if (!name.trim()) {
+      setFieldErrors({ name: true });
       Alert.alert('Store name required', 'Add a restaurant name before saving.');
       return;
     }
 
+    const parsedLatitude = toNumberOrNull(latitude);
+    const parsedLongitude = toNumberOrNull(longitude);
+    const parsedDeliveryRadiusKm = toNumberOrNull(deliveryRadiusKm);
+
+    if (isPublished) {
+      if (parsedLatitude === null || parsedLongitude === null) {
+        setFieldErrors({
+          latitude: parsedLatitude === null,
+          longitude: parsedLongitude === null,
+        });
+        Alert.alert('Location required', 'Add both latitude and longitude before publishing this store.');
+        return;
+      }
+
+      if (parsedDeliveryRadiusKm === null || parsedDeliveryRadiusKm <= 0) {
+        setFieldErrors({ deliveryRadiusKm: true });
+        Alert.alert('Delivery radius required', 'Add a delivery distance above zero before publishing this store.');
+        return;
+      }
+    }
+
     setSavingProfile(true);
+    setFieldErrors({});
 
     try {
       const savedRestaurant = await savePartnerRestaurantProfile({
@@ -164,9 +220,9 @@ export default function PartnerProfileScreen() {
         closingTime,
         deliveryFee: toNumberOrNull(deliveryFee),
         minOrder: toNumberOrNull(minOrder),
-        latitude: toNumberOrNull(latitude),
-        longitude: toNumberOrNull(longitude),
-        deliveryRadiusKm: toNumberOrNull(deliveryRadiusKm),
+        latitude: parsedLatitude,
+        longitude: parsedLongitude,
+        deliveryRadiusKm: parsedDeliveryRadiusKm,
         isPublished,
         supportsDelivery,
         supportsPickup,
@@ -243,11 +299,11 @@ export default function PartnerProfileScreen() {
         <Text style={styles.cardTitle}>Restaurant details</Text>
         <Text style={styles.fieldLabel}>Restaurant name</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, fieldErrors.name ? styles.inputError : null]}
           placeholder="Type the exact restaurant name customers should see"
           placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={name}
-          onChangeText={setName}
+          onChangeText={handleRequiredFieldChange('name', setName)}
         />
         <Text style={styles.fieldLabel}>Cuisine</Text>
         <TextInput
@@ -360,33 +416,33 @@ export default function PartnerProfileScreen() {
           <View style={styles.fieldColumn}>
             <Text style={styles.fieldLabel}>Latitude</Text>
             <TextInput
-              style={styles.input}
-              placeholder="Optional map latitude"
+              style={[styles.input, fieldErrors.latitude ? styles.inputError : null]}
+              placeholder="Required to publish"
               placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
               value={latitude}
-              onChangeText={setLatitude}
+              onChangeText={handleRequiredFieldChange('latitude', setLatitude)}
               keyboardType="decimal-pad"
             />
           </View>
           <View style={styles.fieldColumn}>
             <Text style={styles.fieldLabel}>Longitude</Text>
             <TextInput
-              style={styles.input}
-              placeholder="Optional map longitude"
+              style={[styles.input, fieldErrors.longitude ? styles.inputError : null]}
+              placeholder="Required to publish"
               placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
               value={longitude}
-              onChangeText={setLongitude}
+              onChangeText={handleRequiredFieldChange('longitude', setLongitude)}
               keyboardType="decimal-pad"
             />
           </View>
         </View>
         <Text style={styles.fieldLabel}>Delivery radius</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, fieldErrors.deliveryRadiusKm ? styles.inputError : null]}
           placeholder="Maximum delivery distance in km"
           placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={deliveryRadiusKm}
-          onChangeText={setDeliveryRadiusKm}
+          onChangeText={handleRequiredFieldChange('deliveryRadiusKm', setDeliveryRadiusKm)}
           keyboardType="decimal-pad"
         />
 
@@ -424,7 +480,7 @@ export default function PartnerProfileScreen() {
           <Text style={styles.toggleLabel}>Visible to customers</Text>
           <Switch
             value={isPublished}
-            onValueChange={setIsPublished}
+            onValueChange={handlePublishToggle}
             trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
             thumbColor={isPublished ? partnerTheme.accent : '#f3f4f6'}
           />
@@ -599,6 +655,10 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingHorizontal: 14,
     paddingVertical: 13,
+  },
+  inputError: {
+    backgroundColor: '#fff6f6',
+    borderColor: partnerTheme.danger,
   },
   fieldColumn: {
     flex: 1,

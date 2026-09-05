@@ -17,7 +17,7 @@
 - `serviceFee` stays in stored order pricing JSON and types, always `0` on new orders (backward shape-compat).
 - Legacy orders are never migrated; partner analytics must fall back gracefully on their stored fields.
 - Do NOT touch `functions/prisma/schema.prisma` — it is not maintained for new tables (Promo was never added).
-- New tables follow the existing PascalCase quoted-identifier style (see `supabase/migrations/20260714_promo_notifications.sql`); RLS enabled, no policies = service-role only.
+- New tables follow the existing PascalCase quoted-identifier style (see existing quoted-identifier migrations); RLS enabled, no policies = service-role only.
 - Deno test command (deno is winget-installed, not on the default tool-shell PATH — run in PowerShell):
   `$env:Path = "$env:LOCALAPPDATA\Microsoft\WinGet\Links;$env:Path"; deno test supabase/functions/_shared/pricing.test.ts`
 - Base branch: `main` (pricing files are identical between main and feature/auth-gateway-hardening; the auth branch only diverges in phone/auth files).

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Animated, { Easing, FadeOut, LinearTransition, useReducedMotion } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -46,6 +48,7 @@ export default function CartScreen() {
   } = useCart();
   const { user } = useAuth();
   const { isCovered } = useCoverage();
+  const reduceMotion = useReducedMotion();
   const [deliveryNote, setDeliveryNote] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
   const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
@@ -64,6 +67,20 @@ export default function CartScreen() {
   });
   const minOrder = restaurant?.minOrder ?? 0;
   const belowMinimum = total > 0 && total < minOrder;
+  // Haptics are a no-op on web and must never break a cart mutation.
+  const tapFeedback = (run: () => Promise<unknown>) => {
+    void run().catch(() => undefined);
+  };
+
+  const handleQuantityChange = (itemId: string, nextQuantity: number) => {
+    tapFeedback(() => Haptics.selectionAsync());
+    updateQuantity(itemId, nextQuantity);
+  };
+
+  const handleRemoveItem = (itemId: string) => {
+    tapFeedback(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+    removeItem(itemId);
+  };
   // Delivery is offered only when the restaurant self-provisions it (opt-in).
   // Everyone else is pickup-only with delivery shown as "coming soon".
   const isDeliverySupported = restaurant?.supportsDelivery === true;
@@ -291,25 +308,39 @@ export default function CartScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <View style={styles.itemCard}>
+          <Animated.View
+            style={styles.itemCard}
+            exiting={reduceMotion ? undefined : FadeOut.duration(160)}
+            layout={
+              reduceMotion
+                ? undefined
+                : LinearTransition.duration(220).easing(Easing.bezier(0.23, 1, 0.32, 1).factory())
+            }
+          >
             <View style={styles.itemCopy}>
               <Text style={styles.itemName}>{item.name}</Text>
               <Text style={styles.itemMeta}>{formatMoney(item.price)} each</Text>
             </View>
 
             <View style={styles.itemActions}>
-              <TouchableOpacity style={styles.quantityButton} onPress={() => updateQuantity(item.id, item.quantity - 1)}>
+              <TouchableOpacity
+                style={styles.quantityButton}
+                onPress={() => handleQuantityChange(item.id, item.quantity - 1)}
+              >
                 <Text style={styles.quantityButtonText}>-</Text>
               </TouchableOpacity>
               <Text style={styles.quantityText}>{item.quantity}</Text>
-              <TouchableOpacity style={styles.quantityButton} onPress={() => updateQuantity(item.id, item.quantity + 1)}>
+              <TouchableOpacity
+                style={styles.quantityButton}
+                onPress={() => handleQuantityChange(item.id, item.quantity + 1)}
+              >
                 <Text style={styles.quantityButtonText}>+</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.removeButton} onPress={() => removeItem(item.id)}>
+              <TouchableOpacity style={styles.removeButton} onPress={() => handleRemoveItem(item.id)}>
                 <Text style={styles.removeButtonText}>Remove</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
         )}
         ListFooterComponent={
           <View style={styles.footer}>

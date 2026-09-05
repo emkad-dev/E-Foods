@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
@@ -94,6 +94,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<UserDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Tracks whether a rider is already signed in, without re-subscribing the
+  // auth listener. Used to avoid re-showing the full-screen spinner when the
+  // browser re-fires SIGNED_IN on tab/app refocus.
+  const hasUserRef = useRef(false);
+
+  useEffect(() => {
+    hasUserRef.current = Boolean(user);
+  }, [user]);
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
@@ -256,8 +264,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       // Background reconciliation must not re-block the UI once the first paint
-      // has resolved. Only an explicit sign-in returns to the full-screen spinner.
-      if (event === 'SIGNED_IN') {
+      // has resolved. Only a *fresh* sign-in returns to the full-screen spinner —
+      // on web, refocusing the tab re-fires SIGNED_IN for an already-signed-in
+      // rider, and that must reconcile silently instead of unmounting the tree.
+      if (event === 'SIGNED_IN' && !hasUserRef.current) {
         setLoading(true);
       }
 

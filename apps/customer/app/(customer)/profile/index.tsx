@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import SuccessBanner from '../../../src/components/SuccessBanner';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { customerTheme } from '../../../src/theme/palette';
 
@@ -48,6 +49,7 @@ export default function ProfileScreen() {
   const { deleteAccount, loading, signOut, updateDisplayName, updatePhoneNumber, user } = useAuth();
   const [usernameDraft, setUsernameDraft] = useState('');
   const [phoneDraft, setPhoneDraft] = useState('');
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     setUsernameDraft(user?.displayName?.trim() ?? '');
@@ -97,7 +99,7 @@ export default function ProfileScreen() {
 
     try {
       await updateDisplayName(nextUsername);
-      Alert.alert('Username saved', 'Your customer greeting has been updated.');
+      setNotice({ title: 'Username saved', message: 'Your customer greeting has been updated.' });
     } catch (nextError: any) {
       Alert.alert('Save failed', nextError.message ?? 'Unable to update username right now.');
     }
@@ -117,7 +119,7 @@ export default function ProfileScreen() {
 
     try {
       await updatePhoneNumber(nextPhone);
-      Alert.alert('Phone saved', 'Your customer contact number has been updated.');
+      setNotice({ title: 'Phone saved', message: 'Your customer contact number has been updated.' });
     } catch (nextError: any) {
       Alert.alert('Save failed', nextError.message ?? 'Unable to update phone number right now.');
     }
@@ -134,14 +136,11 @@ export default function ProfileScreen() {
     );
   }
 
-  const initials = (user.displayName?.trim() || user.email?.trim() || 'U').slice(0, 1).toUpperCase();
-
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+      <SuccessBanner title={notice?.title} message={notice?.message} onDismiss={() => setNotice(null)} />
+
       <View style={styles.heroCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
-        </View>
         <View style={styles.heroCopy}>
           <Text style={styles.heroTitle}>{user.displayName ?? 'Customer account'}</Text>
           <Text style={styles.heroMeta}>{user.email}</Text>
@@ -238,7 +237,6 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   heroCard: {
-    alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
     borderRadius: 18,
@@ -246,22 +244,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 16,
   },
-  avatar: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 20,
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '800',
-  },
   heroCopy: {
     flex: 1,
-    marginLeft: 12,
   },
   heroTitle: {
     color: customerTheme.text,
