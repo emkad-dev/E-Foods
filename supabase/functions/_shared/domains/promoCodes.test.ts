@@ -28,10 +28,13 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
 // Neutralize all network (realtime broadcast, push, email) so the handlers run
 // offline. Every fetch resolves to a benign OK.
+const originalFetch = globalThis.fetch;
 globalThis.fetch = (async () => new Response('{}', { status: 200 })) as typeof fetch;
 
 const { ordersDomain } = await import('./orders.ts');
 const { serviceClient } = await import('../client.ts');
+const originalPromoCodesFrom = serviceClient.from.bind(serviceClient);
+const originalPromoCodesRpc = serviceClient.rpc.bind(serviceClient);
 
 const placeCustomerOrder = ordersDomain.handlers.placeCustomerOrder;
 if (typeof placeCustomerOrder !== 'function') {
@@ -78,6 +81,22 @@ const createTable = (initialRows: Row[], failInsert = false) => {
       },
       in(col: string, vals: unknown[]) {
         filtered = filtered.filter((row) => vals.includes(row[col]));
+        return builder;
+      },
+      gte(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) >= (val as string | number);
+        });
+        return builder;
+      },
+      lt(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) < (val as string | number);
+        });
         return builder;
       },
       or() {
@@ -475,4 +494,13 @@ Deno.test('customerValidatePromoCode: an eligible AUTOMATIC offer surfaces even 
   expectEqual(offers[0].code, 'AUTO15', 'the automatic code is listed');
   expectEqual(body.data?.discount, 1830, 'the best automatic offer is auto-applied (15% of 12200)');
   expectEqual(body.data?.valid, true, 'an auto-applied offer reads as valid');
+});
+
+Deno.test('promoCodes cleanup: restore shared client and fetch', () => {
+  // Keep the shared Deno process clean for later files.
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = originalPromoCodesFrom;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = originalPromoCodesRpc;
+  globalThis.fetch = originalFetch;
 });

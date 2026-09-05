@@ -25,6 +25,7 @@ no policies" as an unfinished migration and adds policies to `fix` it.
 | **DeliveryOffer** | `supabase/migrations/20260816_dispatch_delivery_offers.sql` (Task 10 / D2) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **DispatchRiderPing** | `supabase/migrations/20260820_dispatch_rider_ping.sql` (Task 11 / D3) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **OrderRating** | `supabase/migrations/20260820_order_ratings.sql` (Task 12 / E1) | ❌ | **service-role-only** (RLS enabled, no policies) |
+| **OrderGroup** | `supabase/migrations/20260827_multi_store_cart.sql` (Task 20 / G4) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **PromoCode** | `supabase/migrations/20260821_promo_codes.sql` (Task 17 / G1) | ❌ | **service-role-only** (RLS enabled, no policies) |
 | **PromoRedemption** | `supabase/migrations/20260821_promo_codes.sql` (Task 17 / G1) | ❌ | **service-role-only** (RLS enabled, no policies) |
 
@@ -114,6 +115,24 @@ provisional:
   `customerGetPendingRatings` — an Edge Function action — is the only reader,
   and would expose `courierId`/`restaurantId`/`comment` on rows with no client
   code path that needs them read directly.
+
+### `OrderGroup`
+
+Shared placement/payment anchor for multi-store baskets. One row per placed
+basket, even when the basket only contains a single restaurant. Reasons the
+policy-less posture is correct rather than provisional:
+
+- **No client touches it through the Data API.** The customer order flow
+  creates and reads it only through `placeCustomerOrder`,
+  `initializeCustomerPayment`, `refreshCustomerPaymentStatus`, and
+  `customerGetOrderDetail` â€” all Edge Function paths under the service role.
+- **It is a coordination record, not a user-owned resource.** The row ties a
+  basket together, but the customer-visible order rows remain `CustomerOrder`
+  rows. A SELECT policy would buy nothing while the only readers are Edge
+  Functions.
+- **Broadcast and RLS stay aligned with the existing posture.** Order updates
+  still reach the customer app through the existing `orders` Broadcast topic;
+  no `postgres_changes` subscription is introduced on `OrderGroup`.
 
 ### `PromoCode` / `PromoRedemption`
 

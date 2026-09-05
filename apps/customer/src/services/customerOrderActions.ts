@@ -4,6 +4,7 @@ import { callCustomerBackendRpc } from './backendRpc';
 import { clearCustomerReadCache } from './customerReadModel';
 import { buildCustomerPaymentCallbackUrl } from './paymentRouting';
 import { takeAttributedPromoId } from './promoTracking';
+import { getStoredSessionId } from './session';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 
 export const PREPAID_CHECKOUT_DISABLED_MESSAGE =
@@ -79,6 +80,7 @@ export const initializeCustomerPayment = async ({
   }
 
   const attributedPromoId = takeAttributedPromoId();
+  const deviceSessionId = await getStoredSessionId().catch(() => null);
 
   return callCustomerBackendRpc<InitializeCustomerPaymentResult>('initializeCustomerPayment', {
     deliveryLocation,
@@ -92,6 +94,7 @@ export const initializeCustomerPayment = async ({
     paymentMethod,
     restaurantId,
     tipAmount,
+    deviceSessionId,
     // Server re-validates and redeems; the client's previewed discount is never trusted.
     ...(promoCode ? { promoCode } : {}),
     ...(attributedPromoId ? { attributedPromoId } : {}),

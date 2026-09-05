@@ -34,6 +34,7 @@ import {
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
+import { upsertCourierShiftSlots } from '../courierSupply.ts';
 import { buildTransactionalEmailHtml, loadUserEmailRecipient, sendTransactionalEmail } from '../email.ts';
 import { DEFAULT_NIGERIA_COORDINATE } from '../nigeriaGeography.ts';
 import {
@@ -49,12 +50,15 @@ import {
   toOrderSnapshotResponse,
   type CustomerOrderRow,
 } from '../orders.ts';
+import { loadRiskEvents, type RiskEventRow } from '../riskEvents.ts';
 import {
   broadcastPromosChanged,
   broadcastRestaurantsChanged,
   broadcastSupportInboxChanged,
   broadcastSupportThreadChanged,
 } from '../realtime.ts';
+import { listFeatureFlags, loadFeatureFlagMap, upsertFeatureFlag } from '../featureFlags.ts';
+import { loadOperationalAlerts } from '../operationalAlerts.ts';
 import {
   DEFAULT_DELIVERY_TIME,
   RESTAURANT_APPROVAL_COLUMNS,
@@ -367,6 +371,10 @@ const adminReviewDispatchApplication: Handler = async ({ context, data }) => {
       phoneNumber: sanitizeText(application.phoneNumber),
       updatedAt: reviewedAt,
     });
+    const vehicleMake = sanitizeOptionalText(application.vehicleMake);
+    const vehicleModel = sanitizeOptionalText(application.vehicleModel);
+    const vehiclePlateNumber = sanitizeOptionalText(application.vehiclePlateNumber);
+    const licenseNumber = sanitizeOptionalText(application.licenseNumber);
     await ensureDispatchRiderRecord(applicationId, {
       acceptanceRate: 100,
       completedTrips: 0,
@@ -375,12 +383,39 @@ const adminReviewDispatchApplication: Handler = async ({ context, data }) => {
       lga: application.lga,
       latitude: parseNumber(application.latitude, DEFAULT_NIGERIA_COORDINATE.latitude),
       longitude: parseNumber(application.longitude, DEFAULT_NIGERIA_COORDINATE.longitude),
+      licenseNumber,
       phoneNumber: application.phoneNumber,
       region: application.region,
+      verifiedAt: reviewedAt,
+      verifiedByUid: context.uid,
+      verificationStatus: 'approved',
+      vehicleMake,
+      vehicleModel,
+      vehiclePlateNumber,
       status: DEFAULT_DISPATCH_STATUS,
       vehicleType: sanitizeText(application.vehicleType, DEFAULT_DISPATCH_VEHICLE),
       zone: sanitizeText(application.region),
     });
+    const seedShiftSlots = [8, 12, 16].map((hour, index) => {
+      const slotStart = new Date(reviewedAt);
+      slotStart.setUTCHours(hour, 0, 0, 0);
+      if (slotStart.getTime() < Date.parse(reviewedAt)) {
+        slotStart.setUTCDate(slotStart.getUTCDate() + 1);
+      }
+
+      const slotEnd = new Date(slotStart);
+      slotEnd.setUTCHours(hour + 4, 0, 0, 0);
+
+      return {
+        endsAt: slotEnd.toISOString(),
+        forecastDemand: [2, 3, 4][index] ?? 2,
+        notes:
+          index === 0 ? 'Morning rider coverage' : index === 1 ? 'Lunch demand window' : 'Evening demand window',
+        startsAt: slotStart.toISOString(),
+        status: 'planned',
+      };
+    });
+    await upsertCourierShiftSlots(applicationId, seedShiftSlots);
 
     const { error: applicationError } = await serviceClient
       .from('DispatchApplicationRecord')
@@ -388,7 +423,11 @@ const adminReviewDispatchApplication: Handler = async ({ context, data }) => {
         approvedByUid: context.uid,
         rejectionReason: null,
         reviewedAt,
+        verifiedAt: reviewedAt,
+        verifiedByUid: context.uid,
+        verificationStatus: 'approved',
         status: DISPATCH_APPLICATION_STATUS.APPROVED,
+        reviewNotes: null,
         updatedAt: reviewedAt,
       })
       .eq('id', applicationId);
@@ -403,6 +442,10 @@ const adminReviewDispatchApplication: Handler = async ({ context, data }) => {
         approvedByUid: context.uid,
         rejectionReason: rejectionReason ?? 'Application rejected by admin review.',
         reviewedAt,
+        verifiedAt: reviewedAt,
+        verifiedByUid: context.uid,
+        verificationStatus: 'rejected',
+        reviewNotes: rejectionReason ?? 'Application rejected by admin review.',
         status: DISPATCH_APPLICATION_STATUS.REJECTED,
         updatedAt: reviewedAt,
       })
@@ -428,6 +471,7 @@ const adminReviewDispatchApplication: Handler = async ({ context, data }) => {
     {
       rejectionReason: rejectionReason ?? null,
       vehicleType: sanitizeText(application.vehicleType),
+      verificationStatus: decision === 'approve' ? 'approved' : 'rejected',
     }
   );
   await notifyUsers([applicationId], {
@@ -658,7 +702,7 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
 
 const adminGetDashboardSnapshot: Handler = async ({ context }) => {
   ensureRole(context.role, ['admin']);
-  const [usersResult, restaurantsResult, ordersResult, ridersResult] = await Promise.all([
+  const [usersResult, restaurantsResult, ordersResult, ridersResult, featureFlags] = await Promise.all([
     serviceClient
       .from('UserAccount')
       .select(USER_ACCOUNT_COLUMNS)
@@ -675,6 +719,7 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
       .from('DispatchRiderRecord')
       .select(DISPATCH_RIDER_COLUMNS)
       .order('updatedAt', { ascending: false }),
+    loadFeatureFlagMap(),
   ]);
 
   if (usersResult.error || restaurantsResult.error || ordersResult.error || ridersResult.error) {
@@ -729,6 +774,7 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
         // so it never reaches partner/customer reads.
         missedOrderCount: restaurant.missedOrderCount ?? 0,
       })),
+      featureFlags,
       users: users.map((user) => buildUserAccountResponse(user, rolesByUserId.get(user.uid) ?? [])),
     },
   });
@@ -751,6 +797,90 @@ const adminGetAccessOverview: Handler = async ({ context }) => {
   return json(200, {
     data: {
       users: userRows.map((user) => buildUserAccountResponse(user, rolesByUserId.get(user.uid) ?? [])),
+    },
+  });
+};
+
+const adminGetRiskEvents: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+  const riskEvents = await loadRiskEvents({
+    eventType: sanitizeOptionalText(data.eventType),
+    limit: parseInteger(data.limit, 50),
+    offset: parseInteger(data.offset, 0),
+    severity: sanitizeOptionalText(data.severity),
+    subjectId: sanitizeOptionalText(data.subjectId),
+    subjectType: sanitizeOptionalText(data.subjectType),
+  });
+
+  return json(200, {
+    data: {
+      riskEvents: riskEvents.map((event: RiskEventRow) => {
+        const metadata = event.metadata ?? {};
+        const paymentReference =
+          typeof metadata.paymentReference === 'string'
+            ? metadata.paymentReference
+            : event.subjectType === 'payment'
+              ? event.subjectId
+              : null;
+        const paymentId =
+          typeof metadata.paymentId === 'string'
+            ? metadata.paymentId
+            : typeof metadata.payment_id === 'string'
+              ? metadata.payment_id
+              : null;
+
+        return {
+          ...event,
+          metadata,
+          paymentId,
+          paymentReference,
+        };
+      }),
+    },
+  });
+};
+
+const adminListFeatureFlags: Handler = async ({ context }) => {
+  ensureRole(context.role, ['admin']);
+
+  return json(200, {
+    data: {
+      featureFlags: await listFeatureFlags(),
+    },
+  });
+};
+
+const adminUpsertFeatureFlag: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+
+  const featureFlag = await upsertFeatureFlag({
+    description: data.description,
+    enabled: data.enabled === true,
+    key: data.key,
+  });
+
+  return json(200, {
+    data: {
+      featureFlag,
+    },
+  });
+};
+
+const adminGetOperationalAlerts: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+
+  const operationalAlerts = await loadOperationalAlerts({
+    alertType: sanitizeOptionalText(data.alertType),
+    limit: parseInteger(data.limit, 50),
+    offset: parseInteger(data.offset, 0),
+    severity: sanitizeOptionalText(data.severity),
+    subjectId: sanitizeOptionalText(data.subjectId),
+    subjectType: sanitizeOptionalText(data.subjectType),
+  });
+
+  return json(200, {
+    data: {
+      operationalAlerts,
     },
   });
 };
@@ -1403,11 +1533,15 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetAccessOverview,
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,
+    adminGetOperationalAlerts,
+    adminGetRiskEvents,
+    adminListFeatureFlags,
     adminListPromoCodes,
     adminReviewDispatchApplication,
     adminReviewPartnerApplication,
     adminSetPromoCodeActive,
     adminSetRestaurantPublished,
+    adminUpsertFeatureFlag,
     broadcastCancel,
     broadcastCreate,
     broadcastGet,

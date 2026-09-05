@@ -48,10 +48,23 @@ export type WeeklyEarningsRecord = {
   restaurantName?: string | null;
 };
 
+export type CourierPayoutSnapshot = {
+  currency: string;
+  id: string | null;
+  ledgerTotal: number;
+  paidAt: string | null;
+  periodEndsAt: string;
+  periodStartsAt: string;
+  reference: string | null;
+  reviewNotes: string | null;
+  status: string;
+};
+
 export type WeeklyEarningsReport = {
   averagePerDelivery: number;
   currency: string;
   deliveredOrders: number;
+  payout: CourierPayoutSnapshot;
   records: WeeklyEarningsRecord[];
   total: number;
   week: {
@@ -61,5 +74,32 @@ export type WeeklyEarningsReport = {
   };
 };
 
+export type DispatchShiftSlot = {
+  courierId: string;
+  createdAt?: string | null;
+  endsAt: string;
+  forecastDemand: number;
+  id: string;
+  notes?: string | null;
+  startsAt: string;
+  status: string;
+  updatedAt?: string | null;
+};
+
 export const getDispatchWeeklyEarnings = async () =>
   callDispatchBackendRpc<WeeklyEarningsReport>('dispatchGetWeeklyEarnings');
+
+export const getDispatchShiftSlots = async () =>
+  callDispatchBackendRpc<{ courierId: string; slots: DispatchShiftSlot[] }>('dispatchGetShiftSlots');
+
+export const upsertDispatchShiftSlots = async (input: {
+  courierId?: string;
+  slots: Array<{
+    endsAt: string;
+    forecastDemand?: number;
+    id?: string;
+    notes?: string;
+    startsAt: string;
+    status?: string;
+  }>;
+}) => callDispatchBackendRpc<{ courierId: string; slots: DispatchShiftSlot[] }>('dispatchUpsertShiftSlots', input);

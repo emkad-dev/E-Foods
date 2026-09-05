@@ -4,7 +4,7 @@ import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { submitPartnerApplication } from '../../src/services/partnerApplications';
+import { submitPartnerApplication } from '../../src/services/partnerApplications.js';
 import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { supabase } from '../../src/services/supabase/config';

@@ -14,6 +14,7 @@ import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import DispatchLiveMap from '../../src/components/DispatchLiveMap';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useDispatchShiftSlots } from '../../src/hooks/useDispatchShiftSlots';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { useWeeklyEarnings } from '../../src/hooks/useWeeklyEarnings';
 import {
@@ -30,6 +31,7 @@ type ProfileSection =
   | 'inbox'
   | 'recentDeliveries'
   | 'weeklyEarnings'
+  | 'shiftSlots'
   | 'payments'
   | 'activity'
   | 'rewards'
@@ -54,6 +56,7 @@ const menuItems: { icon: keyof typeof FontAwesome.glyphMap; key: ProfileSection;
   { icon: 'bell-o', key: 'inbox', label: 'Inbox' },
   { icon: 'history', key: 'recentDeliveries', label: 'Recent deliveries' },
   { icon: 'line-chart', key: 'weeklyEarnings', label: 'Weekly earnings' },
+  { icon: 'clock-o', key: 'shiftSlots', label: 'Shift slots' },
   { icon: 'credit-card', key: 'payments', label: 'Payments' },
   { icon: 'bar-chart', key: 'activity', label: 'Activity Insights' },
   { icon: 'gift', key: 'rewards', label: 'Rewards' },
@@ -75,11 +78,21 @@ const formatDateTime = (value?: string | null) => {
   }).format(new Date(value));
 };
 
+const formatShiftWindow = (startsAt: string, endsAt: string) =>
+  `${new Intl.DateTimeFormat('en-NG', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(startsAt))} - ${new Intl.DateTimeFormat('en-NG', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(endsAt))}`;
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { error, riders } = useDispatchRiders();
   const { error: earningsError, loading: earningsLoading, refresh: refreshEarnings, refreshing, report } = useWeeklyEarnings();
+  const { error: shiftSlotsError, loading: shiftSlotsLoading, refresh: refreshShiftSlots, slots } = useDispatchShiftSlots();
   const [selectedSection, setSelectedSection] = useState<ProfileSection>('profile');
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
@@ -359,7 +372,53 @@ export default function ProfileScreen() {
           ) : (
             <Text style={styles.emptyText}>No earnings this week.</Text>
           )}
+          <Text style={styles.sectionLabel}>Payout snapshot</Text>
+          <View style={styles.payoutCard}>
+            <Text style={styles.payoutTitle}>{report?.payout?.status ?? 'pending'}</Text>
+            <Text style={styles.payoutAmount}>{formatMoney(report?.payout?.ledgerTotal ?? report?.total ?? 0)}</Text>
+            <Text style={styles.payoutMeta}>
+              {report?.payout?.paidAt ? `Paid ${formatDateTime(report.payout.paidAt)}` : 'Awaiting payout'}
+            </Text>
+            {report?.payout?.reference ? <Text style={styles.payoutMeta}>Ref {report.payout.reference}</Text> : null}
+          </View>
         </>
+      )}
+    </View>
+  );
+
+  const renderShiftSlots = () => (
+    <View style={styles.detailCard}>
+      <View style={styles.detailHeader}>
+        <TouchableOpacity style={styles.backIcon} onPress={() => setSelectedSection('profile')}>
+          <FontAwesome name="arrow-left" size={14} color={dispatchTheme.text} />
+        </TouchableOpacity>
+        <Text style={styles.detailTitle}>Shift slots</Text>
+      </View>
+      {shiftSlotsLoading ? <ActivityIndicator color={dispatchTheme.accent} /> : null}
+      {shiftSlotsError ? <Text style={styles.errorText}>{shiftSlotsError}</Text> : null}
+      <Text style={styles.emptyText}>
+        These slots are seeded from the operations forecast. They show when the courier network expects to be busiest.
+      </Text>
+      <TouchableOpacity style={styles.secondaryButton} onPress={refreshShiftSlots} disabled={shiftSlotsLoading}>
+        <Text style={styles.secondaryButtonText}>{shiftSlotsLoading ? 'Loading...' : 'Refresh slots'}</Text>
+      </TouchableOpacity>
+      {slots.length ? (
+        slots.map((slot) => (
+          <View key={slot.id} style={styles.shiftCard}>
+            <View style={styles.shiftHeader}>
+              <Text style={styles.shiftTitle}>
+                {formatShiftWindow(slot.startsAt, slot.endsAt)}
+              </Text>
+              <View style={styles.shiftDemandBadge}>
+                <Text style={styles.shiftDemandBadgeText}>{slot.forecastDemand} forecast</Text>
+              </View>
+            </View>
+            <Text style={styles.shiftMeta}>{slot.status}</Text>
+            {slot.notes ? <Text style={styles.shiftMeta}>{slot.notes}</Text> : null}
+          </View>
+        ))
+      ) : (
+        <Text style={styles.emptyText}>No shift slots have been published for this courier yet.</Text>
       )}
     </View>
   );
@@ -412,6 +471,8 @@ export default function ProfileScreen() {
         return renderProfileEditor();
       case 'weeklyEarnings':
         return renderWeeklyEarnings();
+      case 'shiftSlots':
+        return renderShiftSlots();
       case 'activity':
         return renderActivity();
       case 'session':
@@ -702,6 +763,31 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 18,
   },
+  payoutCard: {
+    backgroundColor: '#f1f5f2',
+    borderRadius: 16,
+    marginTop: 10,
+    padding: 14,
+  },
+  payoutTitle: {
+    color: dispatchTheme.textMuted,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  payoutAmount: {
+    color: dispatchTheme.text,
+    fontSize: 26,
+    fontWeight: '900',
+    marginTop: 6,
+  },
+  payoutMeta: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
   transactionRow: {
     alignItems: 'center',
     backgroundColor: '#f1f5f2',
@@ -725,6 +811,40 @@ const styles = StyleSheet.create({
     color: dispatchTheme.accentStrong,
     fontSize: 14,
     fontWeight: '900',
+  },
+  shiftCard: {
+    backgroundColor: '#f1f5f2',
+    borderRadius: 16,
+    marginTop: 12,
+    padding: 14,
+  },
+  shiftHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  shiftTitle: {
+    color: dispatchTheme.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '900',
+    paddingRight: 10,
+  },
+  shiftDemandBadge: {
+    backgroundColor: dispatchTheme.accentTint,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  shiftDemandBadgeText: {
+    color: dispatchTheme.accentStrong,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  shiftMeta: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    marginTop: 6,
   },
   mapCard: {
     borderColor: dispatchTheme.border,

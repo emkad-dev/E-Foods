@@ -72,13 +72,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   }, [deliveryLocation, fulfillmentType, items, restaurantId, restaurantName]);
 
   const addItem = (item: CartItem, newRestaurantId: string, newRestaurantName: string) => {
-    // If cart already has items from another restaurant, warn (UI should handle)
-    if (restaurantId && restaurantId !== newRestaurantId) {
-      // For simplicity, we'll clear and start new – but you might want to show an alert
-      setItems([]);
-      setRestaurantId(newRestaurantId);
-      setRestaurantName(newRestaurantName);
-    } else if (!restaurantId) {
+    if (!restaurantId) {
       setRestaurantId(newRestaurantId);
       setRestaurantName(newRestaurantName);
     }
@@ -86,12 +80,10 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     setItems((prev) => {
       const existing = prev.find((i) => i.id === item.id);
       if (existing) {
-        return prev.map((i) =>
-          i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
-        );
-      } else {
-        return [...prev, { ...item, quantity: 1 }];
+        return prev.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
       }
+
+      return [...prev, { ...item, quantity: 1 }];
     });
   };
 
@@ -152,3 +144,4 @@ export const useCart = () => {
   if (!context) throw new Error('useCart must be used within CartProvider');
   return context;
 };
+

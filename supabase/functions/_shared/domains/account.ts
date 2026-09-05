@@ -32,6 +32,7 @@ import {
   validatePolicyAcceptancePayload,
 } from '../policyAcceptance.ts';
 import { validatePromoTrack } from '../promoTrack.ts';
+import { loadFeatureFlagMap } from '../featureFlags.ts';
 import { broadcastRidersChanged } from '../realtime.ts';
 import { loadManagedRestaurantForUser, loadRestaurantById } from '../restaurants.ts';
 import { ACCOUNT_ACTIONS } from '../rpc/actions.ts';
@@ -175,6 +176,13 @@ const promoTrack: AnonymousRpcHandler = async ({ data }) => {
   }
   return json(200, { data: { ok: true } });
 };
+
+const getFeatureFlags: Handler = async () =>
+  json(200, {
+    data: {
+      featureFlags: await loadFeatureFlagMap(),
+    },
+  });
 
 const getPolicyAcceptance: Handler = async ({ context, data }) => {
   const app = normalizePolicyApp(data.app);
@@ -777,6 +785,7 @@ export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
     deleteOwnAccount,
     disableUserAccess,
     enableUserAccess,
+    getFeatureFlags,
     getPolicyAcceptance,
     provisionStaffAccount,
     recordPolicyAcceptance: recordPolicyAcceptanceHandler,

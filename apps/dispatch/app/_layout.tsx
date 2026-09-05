@@ -6,9 +6,15 @@ import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { useDispatchOrders } from '../src/hooks/useDispatchOrders';
 import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
 import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
-import { initializeSentry } from '../../../packages/observability/src/sentry';
+import { createSentryInitializer } from '../../../packages/observability/src/sentry';
+import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import DispatchComingSoon from '../src/components/DispatchComingSoon';
 import { dispatchTheme } from '../src/theme/palette';
+
+const initializeSentry = createSentryInitializer({
+  loadNativeSdk: () => import('@sentry/react-native'),
+  loadWebSdk: () => import('@sentry/browser'),
+});
 
 // Standalone rider dispatch is shelved for the MVP (restaurants self-provision
 // their own delivery). Set to true to bring the full authenticated rider app,
@@ -144,8 +150,10 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <RootLayoutNav />
-      <DispatchLocationSyncBridge />
+      <FeatureFlagsProvider>
+        <RootLayoutNav />
+        <DispatchLocationSyncBridge />
+      </FeatureFlagsProvider>
     </AuthProvider>
   );
 }

@@ -25,6 +25,9 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 const { ordersDomain } = await import('./orders.ts');
 const { serviceClient } = await import('../client.ts');
 const { WAT_OFFSET_MS } = await import('../scheduledOrders.ts');
+const originalScheduledOrdersFrom = serviceClient.from.bind(serviceClient);
+const originalScheduledOrdersRpc = serviceClient.rpc.bind(serviceClient);
+const originalScheduledOrdersFetch = globalThis.fetch;
 
 const expectEqual = (actual: unknown, expected: unknown, label: string) => {
   if (actual !== expected) {
@@ -116,6 +119,23 @@ const installPlacementMocks = (restaurant: Row, hoursRows: Row[]) => {
           state.orderInserts.push(payload);
           return { error: null };
         },
+        select: () => {
+          // Risk-signal reads during placement only need a query-shaped empty
+          // response here.
+          const builder: any = {
+            eq: () => builder,
+            gte: () => builder,
+            lt: () => builder,
+            order: () => builder,
+            limit: () => builder,
+            returns: () => builder,
+            maybeSingle: async () => ({ data: null, error: null }),
+            single: async () => ({ data: null, error: null }),
+            then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
+              Promise.resolve({ data: [], error: null }).then(resolve),
+          };
+          return builder;
+        },
       };
     }
     if (table === 'OrderItem') {
@@ -146,6 +166,8 @@ const installPlacementMocks = (restaurant: Row, hoursRows: Row[]) => {
       const builder: any = {
         select: () => builder,
         eq: () => builder,
+        gte: () => builder,
+        lt: () => builder,
         in: () => builder,
         or: () => builder,
         order: () => builder,
@@ -253,6 +275,22 @@ const installCancelMocks = (order: Row) => {
       },
       in(col: string, vals: unknown[]) {
         filtered = filtered.filter((row) => vals.includes(row[col]));
+        return builder;
+      },
+      gte(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) >= (val as string | number);
+        });
+        return builder;
+      },
+      lt(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) < (val as string | number);
+        });
         return builder;
       },
       order() {
@@ -374,4 +412,13 @@ Deno.test('cancelCustomerOrder: a scheduled order cancelled before release is fu
   } finally {
     mocks.restore();
   }
+});
+
+Deno.test('scheduledOrders cleanup: restore shared client and fetch', () => {
+  // Keep later files on the real client and fetch implementation.
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = originalScheduledOrdersFrom;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = originalScheduledOrdersRpc;
+  globalThis.fetch = originalScheduledOrdersFetch;
 });

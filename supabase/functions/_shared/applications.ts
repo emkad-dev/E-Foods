@@ -49,8 +49,18 @@ export type DispatchApplicationRow = {
   id: string;
   latitude?: number | null;
   lga: string;
+  licenceBackPath?: string | null;
+  licenceFrontPath?: string | null;
+  licenseNumber?: string | null;
   longitude?: number | null;
+  reviewNotes?: string | null;
   phoneNumber: string;
+  verifiedAt?: string | null;
+  verifiedByUid?: string | null;
+  verificationStatus?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehiclePlateNumber?: string | null;
   region: string;
   rejectionReason?: string | null;
   reviewedAt?: string | null;
@@ -65,7 +75,7 @@ export const PARTNER_APPLICATION_COLUMNS =
   'id,uid,email,contactName,phoneNumber,restaurantName,cuisine,address,description,logoImage,latitude,longitude,deliveryTime,status,restaurantId,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt';
 
 export const DISPATCH_APPLICATION_COLUMNS =
-  'id,uid,email,displayName,phoneNumber,region,lga,vehicleType,currentAddress,latitude,longitude,status,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt';
+  'id,uid,email,displayName,phoneNumber,region,lga,vehicleType,vehicleMake,vehicleModel,vehiclePlateNumber,licenseNumber,licenceFrontPath,licenceBackPath,currentAddress,latitude,longitude,status,verificationStatus,verifiedByUid,verifiedAt,reviewNotes,submittedAt,reviewedAt,approvedByUid,rejectionReason,updatedAt';
 
 export const buildPartnerApplicationResponse = (application: PartnerApplicationRow) => ({
   address: sanitizeText(application.address),
@@ -96,7 +106,11 @@ export const buildDispatchApplicationResponse = (application: DispatchApplicatio
   id: application.id,
   latitude: application.latitude ?? DEFAULT_NIGERIA_COORDINATE.latitude,
   lga: sanitizeText(application.lga),
+  licenceBackPath: sanitizeOptionalText(application.licenceBackPath),
+  licenceFrontPath: sanitizeOptionalText(application.licenceFrontPath),
+  licenseNumber: sanitizeOptionalText(application.licenseNumber),
   longitude: application.longitude ?? DEFAULT_NIGERIA_COORDINATE.longitude,
+  reviewNotes: sanitizeOptionalText(application.reviewNotes),
   phoneNumber: sanitizeText(application.phoneNumber),
   region: sanitizeText(application.region),
   rejectionReason: sanitizeOptionalText(application.rejectionReason),
@@ -104,6 +118,12 @@ export const buildDispatchApplicationResponse = (application: DispatchApplicatio
   status: sanitizeText(application.status, DISPATCH_APPLICATION_STATUS.PENDING),
   submittedAt: application.submittedAt,
   uid: application.uid,
+  verifiedAt: application.verifiedAt ?? null,
+  verifiedByUid: sanitizeOptionalText(application.verifiedByUid),
+  verificationStatus: sanitizeText(application.verificationStatus, DISPATCH_APPLICATION_STATUS.PENDING),
+  vehicleMake: sanitizeOptionalText(application.vehicleMake),
+  vehicleModel: sanitizeOptionalText(application.vehicleModel),
+  vehiclePlateNumber: sanitizeOptionalText(application.vehiclePlateNumber),
   vehicleType: sanitizeText(application.vehicleType, DEFAULT_DISPATCH_VEHICLE),
 });
 

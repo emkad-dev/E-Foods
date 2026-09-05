@@ -17,8 +17,15 @@ export type DispatchRiderRow = {
   lga?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  licenseNumber?: string | null;
   phoneNumber?: string | null;
   region?: string | null;
+  verifiedAt?: string | null;
+  verifiedByUid?: string | null;
+  verificationStatus?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehiclePlateNumber?: string | null;
   status: string;
   updatedAt?: string | null;
   vehicleType: string;
@@ -29,7 +36,7 @@ export const DEFAULT_DISPATCH_STATUS = 'Available';
 export const DEFAULT_DISPATCH_VEHICLE = 'Bike';
 
 export const DISPATCH_RIDER_COLUMNS =
-  'id,displayName,status,zone,vehicleType,acceptanceRate,activeLoad,completedTrips,latitude,longitude,createdAt,updatedAt';
+  'id,displayName,status,zone,vehicleType,vehicleMake,vehicleModel,vehiclePlateNumber,licenseNumber,verificationStatus,verifiedByUid,verifiedAt,acceptanceRate,activeLoad,completedTrips,latitude,longitude,createdAt,updatedAt';
 
 export const buildDispatchRiderResponse = (rider: DispatchRiderRow) => ({
   acceptanceRate: rider.acceptanceRate ?? null,
@@ -39,10 +46,17 @@ export const buildDispatchRiderResponse = (rider: DispatchRiderRow) => ({
   displayName: sanitizeText(rider.displayName, 'Dispatch rider'),
   id: rider.id,
   lga: sanitizeOptionalText(rider.lga ?? rider.zone),
+  licenseNumber: sanitizeOptionalText(rider.licenseNumber),
   latitude: rider.latitude ?? null,
   longitude: rider.longitude ?? null,
   phoneNumber: sanitizeOptionalText(rider.phoneNumber),
   region: sanitizeOptionalText(rider.region ?? rider.zone),
+  verifiedAt: rider.verifiedAt ?? null,
+  verifiedByUid: sanitizeOptionalText(rider.verifiedByUid),
+  verificationStatus: sanitizeText(rider.verificationStatus, 'pending'),
+  vehicleMake: sanitizeOptionalText(rider.vehicleMake),
+  vehicleModel: sanitizeOptionalText(rider.vehicleModel),
+  vehiclePlateNumber: sanitizeOptionalText(rider.vehiclePlateNumber),
   status: sanitizeText(rider.status, DEFAULT_DISPATCH_STATUS),
   updatedAt: rider.updatedAt ?? null,
   vehicleType: sanitizeText(rider.vehicleType, DEFAULT_DISPATCH_VEHICLE),
@@ -165,10 +179,17 @@ export const ensureDispatchRiderRecord = async (
     currentAddress?: string | null;
     displayName: string;
     lga?: string | null;
+    licenseNumber?: string | null;
     latitude?: number | null;
     longitude?: number | null;
     phoneNumber?: string | null;
     region?: string | null;
+    verifiedAt?: string | null;
+    verifiedByUid?: string | null;
+    verificationStatus?: string | null;
+    vehicleMake?: string | null;
+    vehicleModel?: string | null;
+    vehiclePlateNumber?: string | null;
     status?: string;
     vehicleType?: string;
     zone?: string;
@@ -194,7 +215,14 @@ export const ensureDispatchRiderRecord = async (
           : parseNumber(riderData.longitude, DEFAULT_NIGERIA_COORDINATE.longitude),
       region: sanitizeOptionalText(riderData.region),
       lga: sanitizeOptionalText(riderData.lga),
+      licenseNumber: sanitizeOptionalText(riderData.licenseNumber),
       phoneNumber: sanitizeOptionalText(riderData.phoneNumber),
+      verifiedAt: sanitizeOptionalText(riderData.verifiedAt),
+      verifiedByUid: sanitizeOptionalText(riderData.verifiedByUid),
+      verificationStatus: sanitizeText(riderData.verificationStatus, 'pending'),
+      vehicleMake: sanitizeOptionalText(riderData.vehicleMake),
+      vehicleModel: sanitizeOptionalText(riderData.vehicleModel),
+      vehiclePlateNumber: sanitizeOptionalText(riderData.vehiclePlateNumber),
       currentAddress: sanitizeOptionalText(riderData.currentAddress),
       updatedAt: timestamp,
     },

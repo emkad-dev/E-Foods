@@ -4,6 +4,7 @@ import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
 import { formatCurrency } from '../lib/format';
+import { useFeatureFlag } from '../lib/useFeatureFlag';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 
 const isLive = (promo: Promo): boolean => {
@@ -25,6 +26,7 @@ const toIso = (localValue: string): string | null =>
   localValue ? new Date(localValue).toISOString() : null;
 
 export default function PromosPage() {
+  const promoComposerV2 = useFeatureFlag('promo_composer_v2');
   const [promos, setPromos] = useState<Promo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +97,7 @@ export default function PromosPage() {
     <section className="page promos-page">
       <div className="promo-compose card">
         <h3>New promo</h3>
+        {!promoComposerV2 ? <p className="muted">Experimental composer remains dark until the flag is enabled.</p> : null}
         <p className="muted">
           Broadcasts a live in-app banner to every customer currently on the app, and stays fetchable while active.
         </p>

@@ -5,6 +5,7 @@ export * from './tracking';
 export * from './phone';
 export * from './policies';
 export * from './promoAttribution';
+export * from './featureFlags';
 export * from './roles';
 export * from './rpcRoutes';
 export * from './rpcUrl';

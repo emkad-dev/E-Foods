@@ -13,6 +13,7 @@ import { computeEtaRange, haversineKm } from '../deliveryEta.ts';
 import { isDeliveryOutOfRange } from '../deliveryCoverage.ts';
 import { loadDispatchRiderSnapshot } from '../dispatchRiders.ts';
 import { releaseDispatchAssignmentLoad } from '../dispatchSelection.ts';
+import { loadRestaurantPrepTimeEstimate, loadRestaurantTimingContext } from '../prepTime.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -22,11 +23,17 @@ import {
 import { buildNotificationData, notifyRestaurantUsers, notifySafely, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import {
+  captureOrderPlacementRiskSignals,
+  capturePaymentVerificationRiskSignals,
+  captureRefundAbuseSignals,
+} from '../riskSignals.ts';
+import {
   CUSTOMER_ORDER_COLUMNS,
   DEFAULT_CURRENCY,
   insertDeliveryEvent,
   loadOrderBundle,
   loadOrderRelations,
+  ORDER_GROUP_COLUMNS,
   maybeExpireUnpaidOrder,
   normalizeOrderStatus,
   ORDER_STATUS,
@@ -40,6 +47,7 @@ import {
   updateOrderRecord,
   upsertPaymentTransaction,
   type CustomerOrderRow,
+  type OrderGroupRow,
   type PaymentTransactionRow,
 } from '../orders.ts';
 import {
@@ -69,8 +77,8 @@ import {
   type PromoRejectionReason,
 } from '../promoCodes.ts';
 import { broadcastOrderChanged, broadcastSupportInboxChanged, broadcastSupportThreadChanged } from '../realtime.ts';
+import { resolveModifierSelections } from '../itemModifiers.ts';
 import { loadRestaurantById, type RestaurantRecordRow } from '../restaurants.ts';
-import { RIDER_ACTIVE_DELIVERY_STATUSES } from '../riderPositionBroadcast.ts';
 import { ORDER_ACTIONS } from '../rpc/actions.ts';
 import type { JsonObject } from '../rpc/coercion.ts';
 import {
@@ -185,6 +193,7 @@ const flattenRestaurantMenu = (restaurant: RestaurantRecordRow) => {
           // below is what interprets isAvailable together with unavailableUntil, and it
           // needs the real unavailableUntil value alongside it, not a derived boolean.
           isAvailable: itemRecord.isAvailable,
+          modifierGroups: Array.isArray(itemRecord.modifierGroups) ? itemRecord.modifierGroups : [],
           name: sanitizeText(itemRecord.name),
           price: parseNumber(itemRecord.price, Number.NaN),
           unavailableUntil: itemRecord.unavailableUntil,
@@ -234,7 +243,15 @@ const buildOrderItems = (
     }
 
     // Restaurant's own price — settlement and min-order run on this.
-    const basePrice = menuItem.price;
+    const modifierResolution = resolveModifierSelections({
+      groups: menuItem.modifierGroups,
+      selectedOptions: itemRecord.selectedOptions,
+    });
+    if (!modifierResolution.ok) {
+      fail(412, modifierResolution.reason);
+    }
+
+    const basePrice = roundCurrency(menuItem.price + modifierResolution.optionDelta);
 
     return {
       basePrice,
@@ -243,11 +260,93 @@ const buildOrderItems = (
       // Customer-facing price with the platform markup embedded, re-derived
       // server-side from the authoritative menu price (never client input).
       price: toDisplayPrice(basePrice, pricingConfig),
+      optionDelta: modifierResolution.optionDelta,
       quantity,
       restaurantId,
       restaurantName: sanitizeText(restaurant.name, 'Restaurant'),
+      selectedOptions: modifierResolution.selectedOptions,
     };
   });
+};
+
+type PreparedRestaurantOrderDraft = {
+  items: Array<{
+    basePrice: number;
+    id: string;
+    name: string;
+    optionDelta?: number | null;
+    price: number;
+    quantity: number;
+    restaurantId: string;
+    restaurantName: string;
+    selectedOptions?: JsonObject[] | null;
+  }>;
+  orderId: string;
+  pricing: JsonObject;
+  restaurant: RestaurantRecordRow;
+  restaurantId: string;
+  restaurantName: string;
+  tipAmount: number;
+};
+
+const sumCurrency = (values: number[]) => roundCurrency(values.reduce((sum, value) => sum + value, 0));
+
+const aggregateOrderGroupPricing = (orders: PreparedRestaurantOrderDraft[]) => {
+  const template = (orders[0]?.pricing ?? {}) as JsonObject;
+  const settlementTemplate = (template.settlement ?? {}) as JsonObject;
+  const subtotal = sumCurrency(orders.map((order) => parseNumber(order.pricing.subtotal, 0)));
+  const deliveryFee = sumCurrency(orders.map((order) => parseNumber(order.pricing.deliveryFee, 0)));
+  const serviceFee = sumCurrency(orders.map((order) => parseNumber(order.pricing.serviceFee, 0)));
+  const tip = sumCurrency(orders.map((order) => parseNumber(order.pricing.tip, 0)));
+  const discount = sumCurrency(orders.map((order) => parseNumber(order.pricing.discount, 0)));
+  const total = sumCurrency(orders.map((order) => parseNumber(order.pricing.total, 0)));
+  const restaurantBasis = sumCurrency(orders.map((order) => parseNumber(order.pricing.restaurantBasis, 0)));
+  const partnerServiceFee = sumCurrency(orders.map((order) => parseNumber(order.pricing.partnerServiceFee, 0)));
+  const restaurantPayable = sumCurrency(orders.map((order) => parseNumber(order.pricing.restaurantPayable, 0)));
+  const platformFee = sumCurrency(
+    orders.map((order) => parseNumber(((order.pricing.settlement ?? {}) as JsonObject).platformFee, 0))
+  );
+  const netSettlement = sumCurrency(
+    orders.map((order) => parseNumber(((order.pricing.settlement ?? {}) as JsonObject).netSettlement, 0))
+  );
+  const totalMarkup = sumCurrency(
+    orders.map((order) => parseNumber(((order.pricing.settlement ?? {}) as JsonObject).totalMarkup, 0))
+  );
+  const dispatchFee = sumCurrency(
+    orders.map((order) => parseNumber(((order.pricing.settlement ?? {}) as JsonObject).dispatchFee, 0))
+  );
+
+  return {
+    currency: template.currency ?? DEFAULT_CURRENCY,
+    deliveryFee,
+    discount,
+    discountFundingSource: discount > 0 ? null : null,
+    dispatchFee,
+    netSettlement,
+    partnerServiceFee,
+    platformFee,
+    restaurantBasis,
+    restaurantPayable,
+    serviceFee,
+    settlement: {
+      basis: 'menu_base_prices',
+      discount,
+      discountFundingSource: discount > 0 ? null : null,
+      dispatchFee,
+      markupFlat: parseNumber(settlementTemplate.markupFlat, 0),
+      markupRate: parseNumber(settlementTemplate.markupRate, 0),
+      netSettlement,
+      partnerServiceFee,
+      partnerServiceRate: parseNumber(settlementTemplate.partnerServiceRate, 0),
+      platformFee,
+      restaurantBasis,
+      restaurantPayable,
+      totalMarkup,
+    },
+    subtotal,
+    tip,
+    total,
+  };
 };
 
 const normalizeDeliveryLocation = (deliveryLocation: unknown) => {
@@ -281,17 +380,24 @@ const buildInitialPaymentSummary = ({
   reference = null,
   authorizationUrl = null,
   accessCode = null,
+  deviceSessionId = null,
+  settlementMode = 'manual',
+  splitSubaccountCode = null,
   settlement = null,
 }: {
   accessCode?: string | null;
   authorizationUrl?: string | null;
+  deviceSessionId?: string | null;
   paymentMethod: string;
   reference?: string | null;
+  settlementMode?: string | null;
+  splitSubaccountCode?: string | null;
   settlement?: JsonObject | null;
 }) => {
   if (!PREPAID_PAYMENT_METHODS.has(paymentMethod)) {
     return {
       capturedAmount: 0,
+      deviceSessionId: sanitizeOptionalText(deviceSessionId),
       lastEvent: 'awaiting_cash_collection',
       method: paymentMethod,
       processor: PAYMENT_PROVIDER_CASH,
@@ -299,7 +405,9 @@ const buildInitialPaymentSummary = ({
       refundAmount: 0,
       refundedAt: null,
       paidAt: null,
+      settlementMode: sanitizeText(settlementMode, 'manual'),
       settlement,
+      splitSubaccountCode: sanitizeOptionalText(splitSubaccountCode),
       status: PAYMENT_STATUS.PENDING,
     };
   }
@@ -309,6 +417,7 @@ const buildInitialPaymentSummary = ({
     authorizationUrl,
     capturedAmount: 0,
     channel: paymentMethod === 'bank_transfer' ? 'bank_transfer' : 'card',
+    deviceSessionId: sanitizeOptionalText(deviceSessionId),
     lastEvent: 'awaiting_customer_payment',
     method: paymentMethod,
     paidAt: null,
@@ -316,9 +425,29 @@ const buildInitialPaymentSummary = ({
     reference,
     refundAmount: 0,
     refundedAt: null,
+    settlementMode: sanitizeText(settlementMode, 'manual'),
     settlement,
+    splitSubaccountCode: sanitizeOptionalText(splitSubaccountCode),
     status: PAYMENT_STATUS.PENDING,
     verifiedAt: null,
+  };
+};
+
+export type PaymentSettlementSummary = {
+  settlementMode: 'manual' | 'split';
+  splitSubaccountCode: string | null;
+};
+
+export const resolvePaymentSettlementSummary = (
+  restaurant: Pick<RestaurantRecordRow, 'paystackSubaccountCode'>,
+  allowSplit = true
+): PaymentSettlementSummary => {
+  const splitSubaccountCode = sanitizeOptionalText(restaurant.paystackSubaccountCode);
+  const settlementMode = allowSplit && splitSubaccountCode ? 'split' : 'manual';
+
+  return {
+    settlementMode,
+    splitSubaccountCode: settlementMode === 'split' ? splitSubaccountCode : null,
   };
 };
 
@@ -492,17 +621,44 @@ const loadRestaurantHours = async (restaurantId: string): Promise<RestaurantHour
   return data ?? [];
 };
 
+const groupRequestedItemsByRestaurant = (requestedItems: unknown, fallbackRestaurantId: string) => {
+  if (!Array.isArray(requestedItems) || requestedItems.length === 0) {
+    fail(400, 'Add at least one item before placing an order.');
+  }
+
+  const grouped = new Map<string, { items: unknown[]; restaurantId: string; restaurantName: string }>();
+
+  for (const requestedItem of requestedItems) {
+    const itemRecord = requestedItem as JsonObject;
+    const restaurantId = sanitizeText(itemRecord.restaurantId, fallbackRestaurantId);
+    if (!restaurantId) {
+      fail(400, 'Each order item must include a restaurant id.');
+    }
+
+    const restaurantName = sanitizeText(itemRecord.restaurantName, 'Restaurant');
+    const bucket = grouped.get(restaurantId) ?? { items: [], restaurantId, restaurantName };
+    bucket.items.push(requestedItem);
+    if (restaurantName) {
+      bucket.restaurantName = restaurantName;
+    }
+    grouped.set(restaurantId, bucket);
+  }
+
+  return [...grouped.values()];
+};
+
 const prepareCustomerOrderDraft = async (
   requestData: Record<string, unknown>,
-  allowedPaymentMethods: readonly string[]
+  allowedPaymentMethods: readonly string[] 
 ) => {
-  const restaurantId = sanitizeText(requestData.restaurantId);
+  const fallbackRestaurantId = sanitizeText(requestData.restaurantId);
   const fulfillmentType = sanitizeText(requestData.fulfillmentType, 'delivery');
   const paymentMethod = sanitizeText(requestData.paymentMethod, 'card');
   const idempotencyKey = sanitizeText(requestData.idempotencyKey);
   const tipAmount = roundCurrency(parseNumber(requestData.tipAmount, 0));
+  const deviceSessionId = sanitizeText(requestData.deviceSessionId);
 
-  if (!restaurantId) {
+  if (!fallbackRestaurantId) {
     fail(400, 'A restaurant is required to place an order.');
   }
 
@@ -524,6 +680,115 @@ const prepareCustomerOrderDraft = async (
 
   if (tipAmount < 0 || tipAmount > 200) {
     fail(400, 'Tip amount is outside the allowed range.');
+  }
+
+  const restaurantId = fallbackRestaurantId;
+  const groupedRequests = groupRequestedItemsByRestaurant(requestData.items, fallbackRestaurantId);
+  const isMultiStore = groupedRequests.length > 1;
+  const multiStoreNow = new Date();
+
+  if (isMultiStore) {
+    if (normalizePromoCode(requestData.promoCode)) {
+      fail(412, 'Promo codes are not yet supported for multi-store checkouts.');
+    }
+
+    const pricingConfig = await loadPricingConfig();
+    const multiStoreLocation =
+      fulfillmentType === 'delivery' ? normalizeDeliveryLocation(requestData.deliveryLocation) : null;
+    if (fulfillmentType === 'delivery' && !multiStoreLocation) {
+      fail(400, 'A valid delivery location is required.');
+    }
+
+    const restaurantDrafts: PreparedRestaurantOrderDraft[] = [];
+    let primaryRestaurant: RestaurantRecordRow | null = null;
+
+    for (const [index, groupedRequest] of groupedRequests.entries()) {
+      const { restaurant, approval } = await loadRestaurantById(groupedRequest.restaurantId);
+      if (!restaurant) {
+        fail(404, 'The selected restaurant no longer exists.');
+      }
+
+      if (restaurant.isPublished === false || restaurant.isOpen === false) {
+        fail(412, 'This restaurant is not accepting orders right now.');
+      }
+
+      if (sanitizeOptionalText(approval?.status) && sanitizeText(approval?.status) !== 'approved') {
+        fail(412, 'This restaurant is not accepting orders right now.');
+      }
+
+      if (isStorePaused(restaurant, multiStoreNow)) {
+        fail(412, 'This restaurant is paused right now. Please check back soon.');
+      }
+
+      if (fulfillmentType === 'delivery' && restaurant.supportsDelivery === false) {
+        fail(412, 'This restaurant does not support delivery.');
+      }
+
+      if (fulfillmentType === 'pickup' && restaurant.supportsPickup === false) {
+        fail(412, 'This restaurant does not support pickup.');
+      }
+
+      const items = buildOrderItems(groupedRequest.items, groupedRequest.restaurantId, restaurant, pricingConfig, multiStoreNow);
+      const restaurantBasis = items.reduce((sum, item) => sum + item.basePrice * item.quantity, 0);
+      const minOrder = parseNumber(restaurant.minOrder, 0);
+      if (restaurantBasis < minOrder) {
+        fail(412, `This restaurant requires a minimum order of ${minOrder.toFixed(2)}.`);
+      }
+
+      if (fulfillmentType === 'delivery') {
+        if (
+          isDeliveryOutOfRange({
+            restaurantLatitude: restaurant.latitude,
+            restaurantLongitude: restaurant.longitude,
+            deliveryLatitude: multiStoreLocation?.latitude,
+            deliveryLongitude: multiStoreLocation?.longitude,
+            deliveryRadiusKm: restaurant.deliveryRadiusKm,
+          })
+        ) {
+          fail(412, 'This restaurant does not deliver to your selected location yet.');
+        }
+      }
+
+      const tipShare = index === 0 ? tipAmount : 0;
+      const deliveryFee = fulfillmentType === 'delivery' ? parseNumber(restaurant.deliveryFee, 0) : 0;
+      const pricing = calculateOrderPricing({
+        config: pricingConfig,
+        deliveryFee,
+        items,
+        tip: tipShare,
+      });
+
+      if (!primaryRestaurant) {
+        primaryRestaurant = restaurant;
+      }
+
+      restaurantDrafts.push({
+        items,
+        orderId: crypto.randomUUID(),
+        pricing,
+        restaurant,
+        restaurantId: groupedRequest.restaurantId,
+        restaurantName: sanitizeText(restaurant.name, 'Restaurant'),
+        tipAmount: tipShare,
+      });
+    }
+
+    return {
+      deliveryLocation: multiStoreLocation,
+      fulfillmentType,
+      idempotencyKey,
+      orderId: restaurantDrafts[0]?.orderId ?? crypto.randomUUID(),
+      orders: restaurantDrafts,
+      paymentMethod,
+      pricing: aggregateOrderGroupPricing(restaurantDrafts),
+      primaryRestaurant,
+      primaryRestaurantId: restaurantDrafts[0]?.restaurantId ?? fallbackRestaurantId,
+      restaurant: primaryRestaurant,
+      restaurantId: restaurantDrafts[0]?.restaurantId ?? fallbackRestaurantId,
+      resolvedPromo: null,
+      scheduledFor: null,
+      multiStore: true,
+    };
   }
 
   const { restaurant, approval } = await loadRestaurantById(restaurantId);
@@ -645,6 +910,7 @@ const prepareCustomerOrderDraft = async (
     paymentMethod,
     pricing,
     scheduledFor,
+    deviceSessionId,
     // Present only when a discount actually applies (pricing.discount > 0); the
     // handler redeems it atomically once the order id exists.
     resolvedPromo: resolvedPromo && pricing.discount > 0 ? resolvedPromo : null,
@@ -727,10 +993,12 @@ const createOrderWithItems = async ({
       itemId: item.id,
       name: item.name,
       basePrice: item.basePrice,
+      optionDelta: item.optionDelta ?? 0,
       price: item.price,
       quantity: item.quantity,
       restaurantId: item.restaurantId,
       restaurantName: item.restaurantName,
+      selectedOptions: item.selectedOptions ?? [],
     }))
   );
 
@@ -740,6 +1008,133 @@ const createOrderWithItems = async ({
   }
 
   await broadcastOrderChanged(orderId, { restaurantId });
+
+  return {
+    createdAt,
+    timeline,
+  };
+};
+
+const createOrderGroupWithItems = async ({
+  attributedPromoId,
+  customerId,
+  deliveryLocation,
+  fulfillmentType,
+  groupId,
+  orders,
+  payment,
+  paymentMethod,
+  pricing,
+  scheduledFor = null,
+}: {
+  attributedPromoId?: string | null;
+  customerId: string;
+  deliveryLocation: JsonObject | null;
+  fulfillmentType: string;
+  groupId: string;
+  orders: PreparedRestaurantOrderDraft[];
+  payment: JsonObject;
+  paymentMethod: string;
+  pricing: JsonObject;
+  scheduledFor?: string | null;
+}) => {
+  const createdAt = nowIso();
+  const timeline: JsonObject = scheduledFor ? { scheduledAt: createdAt, scheduledFor } : { placedAt: createdAt };
+  const status = scheduledFor ? ORDER_STATUS.SCHEDULED : ORDER_STATUS.PLACED;
+  const primaryOrderId = orders[0]?.orderId ?? groupId;
+  const orderIds = orders.map((order) => order.orderId);
+  const restaurantIds = orders.map((order) => order.restaurantId);
+  const settlementSummary = resolvePaymentSettlementSummary(orders[0]?.restaurant ?? { paystackSubaccountCode: null }, orders.length === 1);
+  const groupPayment = {
+    ...payment,
+    settlement: pricing.settlement ?? payment.settlement ?? null,
+  };
+
+  const createdOrderIds: string[] = [];
+  try {
+    for (const order of orders) {
+      const orderPayment = buildInitialPaymentSummary({
+        paymentMethod,
+        reference: sanitizeOptionalText(payment.reference),
+        accessCode: sanitizeOptionalText(payment.accessCode),
+        authorizationUrl: sanitizeOptionalText(payment.authorizationUrl),
+        deviceSessionId: sanitizeOptionalText(payment.deviceSessionId),
+        settlementMode: settlementSummary.settlementMode,
+        splitSubaccountCode: settlementSummary.splitSubaccountCode,
+        settlement: (order.pricing.settlement ?? null) as JsonObject | null,
+      });
+
+      const orderInsert = {
+        attributedPromoId: attributedPromoId ?? null,
+        cancellation: null,
+        createdAt,
+        customerId,
+        deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
+        deliveryLocation,
+        fulfillmentType,
+        id: order.orderId,
+        orderGroupId: groupId,
+        payment: orderPayment,
+        pricing: order.pricing,
+        restaurantId: order.restaurantId,
+        restaurantName: order.restaurantName,
+        scheduledFor,
+        status,
+        timeline,
+        updatedAt: createdAt,
+      };
+
+      const { error: orderError } = await serviceClient.from('CustomerOrder').insert(orderInsert);
+      if (orderError) {
+        throw new Error(orderError.message);
+      }
+
+      const { error: itemsError } = await serviceClient.from('OrderItem').insert(
+        order.items.map((item) => ({
+          orderId: order.orderId,
+          itemId: item.id,
+          name: item.name,
+          basePrice: item.basePrice,
+          optionDelta: item.optionDelta ?? 0,
+          price: item.price,
+          quantity: item.quantity,
+          restaurantId: item.restaurantId,
+          restaurantName: item.restaurantName,
+          selectedOptions: item.selectedOptions ?? [],
+        }))
+      );
+
+      if (itemsError) {
+        throw new Error(itemsError.message);
+      }
+
+      createdOrderIds.push(order.orderId);
+      await broadcastOrderChanged(order.orderId, { restaurantId: order.restaurantId });
+    }
+
+    const { error: groupError } = await serviceClient.from('OrderGroup').insert({
+      createdAt,
+      customerId,
+      id: groupId,
+      orderCount: orders.length,
+      orderIds,
+      payment: groupPayment,
+      pricing,
+      primaryOrderId,
+      restaurantCount: restaurantIds.length,
+      restaurantIds,
+      updatedAt: createdAt,
+    });
+
+    if (groupError) {
+      throw new Error(groupError.message);
+    }
+  } catch (error) {
+    await serviceClient.from('CustomerOrder').delete().in('id', createdOrderIds);
+    await serviceClient.from('OrderItem').delete().in('orderId', createdOrderIds);
+    await serviceClient.from('OrderGroup').delete().eq('id', groupId);
+    throw error;
+  }
 
   return {
     createdAt,
@@ -798,6 +1193,46 @@ const getCustomerCancellationRefundRate = (currentStatus: string) => {
   return 0;
 };
 
+const loadOrderGroupOrders = async (order: CustomerOrderRow): Promise<CustomerOrderRow[]> => {
+  const groupId = sanitizeText(order.orderGroupId);
+  if (!groupId) {
+    return [order];
+  }
+
+  const { data, error } = await serviceClient
+    .from('CustomerOrder')
+    .select(CUSTOMER_ORDER_COLUMNS)
+    .eq('orderGroupId', groupId)
+    .order('createdAt', { ascending: true })
+    .returns<CustomerOrderRow[]>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as CustomerOrderRow[];
+  return rows.length > 0 ? rows : [order];
+};
+
+const loadOrderGroupSummary = async (order: CustomerOrderRow): Promise<OrderGroupRow | null> => {
+  const groupId = sanitizeText(order.orderGroupId);
+  if (!groupId) {
+    return null;
+  }
+
+  const { data, error } = await serviceClient
+    .from('OrderGroup')
+    .select(ORDER_GROUP_COLUMNS)
+    .eq('id', groupId)
+    .maybeSingle<OrderGroupRow>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? null;
+};
+
 /** Folds a verified Paystack transaction into the order + payment ledger. */
 const syncOrderPaymentState = async ({
   order,
@@ -821,6 +1256,9 @@ const syncOrderPaymentState = async ({
     transactionStatus
   );
   const transactionAmount = fromKoboAmount(transactionData.amount);
+  const groupOrders = await loadOrderGroupOrders(order);
+  const groupSummary = await loadOrderGroupSummary(order);
+  const expectedAmount = parseNumber(groupSummary?.pricing?.total, parseNumber(order.pricing?.total, 0));
 
   let nextPayment: JsonObject = {
     ...existingPayment,
@@ -829,6 +1267,11 @@ const syncOrderPaymentState = async ({
     method: paymentMethod,
     processor: PAYMENT_PROVIDER_PAYSTACK,
     reference: paymentReference,
+    settlementMode: sanitizeText(
+      existingPayment.settlementMode,
+      sanitizeOptionalText(existingPayment.splitSubaccountCode) ? 'split' : 'manual'
+    ),
+    splitSubaccountCode: sanitizeOptionalText(existingPayment.splitSubaccountCode),
     verifiedAt: verifiedAtIso,
   };
 
@@ -858,20 +1301,33 @@ const syncOrderPaymentState = async ({
     };
   }
 
-  await updateOrderRecord(order.id, {
-    payment: nextPayment,
-    updatedAt: verifiedAtIso,
-  });
+  for (const groupOrder of groupOrders) {
+    const orderPayment = {
+      ...nextPayment,
+      capturedAmount:
+        sanitizeText(nextPayment.status) === PAYMENT_STATUS.PAID
+          ? parseNumber(groupOrder.pricing?.total, expectedAmount)
+          : parseNumber(groupOrder.payment?.capturedAmount, 0),
+    };
+
+    await updateOrderRecord(groupOrder.id, {
+      payment: orderPayment,
+      updatedAt: verifiedAtIso,
+    });
+  }
 
   await upsertPaymentTransaction({
     orderId: order.id,
     customerId: order.customerId,
     restaurantId: order.restaurantId,
+    orderGroupId: sanitizeText(order.orderGroupId) || null,
     provider: PAYMENT_PROVIDER_PAYSTACK,
     method: paymentMethod,
     reference: paymentReference,
     currency: DEFAULT_CURRENCY,
-    amount: parseNumber((order.pricing ?? {}).total, 0),
+    amount: expectedAmount,
+    splitSubaccountCode: sanitizeOptionalText(nextPayment.splitSubaccountCode),
+    settlementMode: sanitizeText(nextPayment.settlementMode, 'manual'),
     status: sanitizeText(nextPayment.status, PAYMENT_STATUS.PENDING),
     accessCode: sanitizeOptionalText(existingPayment.accessCode),
     authorizationUrl: sanitizeOptionalText(existingPayment.authorizationUrl),
@@ -891,27 +1347,36 @@ const syncOrderPaymentState = async ({
     updatedAt: verifiedAtIso,
   });
 
+  await capturePaymentVerificationRiskSignals({
+    customerId: order.customerId,
+    orderId: order.id,
+    paymentReference,
+    transactionData,
+  });
+
   if (sanitizeText(nextPayment.status) === PAYMENT_STATUS.PAID) {
-    await insertDeliveryEvent({
-      orderId: order.id,
-      eventType: 'payment_confirmed',
-      actorUid: null,
-      details: {
-        amount: transactionAmount,
-        provider: PAYMENT_PROVIDER_PAYSTACK,
-        reference: paymentReference,
-      },
-    });
-    await notifyRestaurantUsers(order.restaurantId, {
-      title: 'Paid order received',
-      body: `Order ${order.id.slice(-6).toUpperCase()} is paid and ready for confirmation.`,
-      data: buildNotificationData({
-        app: 'partner',
-        orderId: order.id,
-        routeKey: 'partner_order_detail',
-        type: 'order_update',
-      }),
-    });
+    for (const groupOrder of groupOrders) {
+      await insertDeliveryEvent({
+        orderId: groupOrder.id,
+        eventType: 'payment_confirmed',
+        actorUid: null,
+        details: {
+          amount: transactionAmount,
+          provider: PAYMENT_PROVIDER_PAYSTACK,
+          reference: paymentReference,
+        },
+      });
+      await notifyRestaurantUsers(groupOrder.restaurantId, {
+        title: 'Paid order received',
+        body: `Order ${groupOrder.id.slice(-6).toUpperCase()} is paid and ready for confirmation.`,
+        data: buildNotificationData({
+          app: 'partner',
+          orderId: groupOrder.id,
+          routeKey: 'partner_order_detail',
+          type: 'order_update',
+        }),
+      });
+    }
   }
 
   return nextPayment;
@@ -926,7 +1391,7 @@ const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEv
   const { data: paymentRecord, error: paymentError } = await serviceClient
     .from('PaymentTransaction')
     .select(
-      'orderId,customerId,restaurantId,method,reference,status,accessCode,authorizationUrl,channel,gatewayStatus,lastError'
+      'orderId,orderGroupId,customerId,restaurantId,method,reference,status,accessCode,authorizationUrl,channel,gatewayStatus,lastError'
     )
     .eq('reference', paymentReference)
     .maybeSingle<PaymentTransactionRow>();
@@ -936,7 +1401,8 @@ const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEv
   }
 
   const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
-  const expectedAmountKobo = toKoboAmount(parseNumber((order.pricing ?? {}).total, 0));
+  const groupSummary = await loadOrderGroupSummary(order);
+  const expectedAmountKobo = toKoboAmount(parseNumber(groupSummary?.pricing?.total, parseNumber((order.pricing ?? {}).total, 0)));
   const actualAmountKobo = parseInteger(verifiedTransaction.amount, -1);
 
   // The gateway is authoritative about *whether* money moved, never about how
@@ -987,40 +1453,6 @@ const readCoordinatePair = (value: unknown): CoordinatePair | null => {
   return null;
 };
 
-/**
- * Restaurant origin coordinates for the customer tracking map. Best-effort:
- * a missing row or a read error resolves to null (the map simply omits the
- * restaurant pin) rather than failing order detail.
- */
-const loadRestaurantCoordinates = async (
-  restaurantId: string | null | undefined
-): Promise<CoordinatePair | null> => {
-  const safeRestaurantId = sanitizeText(restaurantId);
-  if (!safeRestaurantId) {
-    return null;
-  }
-
-  try {
-    const { data, error } = await serviceClient
-      .from('Restaurant')
-      .select('latitude,longitude')
-      .eq('id', safeRestaurantId)
-      .maybeSingle<{ latitude: number | null; longitude: number | null }>();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return readCoordinatePair(data);
-  } catch (error) {
-    logEdgeEvent('warn', 'Failed to load restaurant coordinates for tracking map', {
-      error: error instanceof Error ? error.message : String(error),
-      restaurantId: safeRestaurantId,
-    });
-    return null;
-  }
-};
-
 const customerGetOrderDetail: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['customer', 'admin']);
   const orderId = sanitizeText(data.orderId);
@@ -1038,49 +1470,81 @@ const customerGetOrderDetail: Handler = async ({ context, data }) => {
   }
 
   const riderSnapshot = await loadDispatchRiderSnapshot(bundle.assignment?.courierId);
+  const orderGroup = await loadOrderGroupSummary(bundle.order);
+  const orderGroupId = sanitizeText(bundle.order.orderGroupId);
+  const groupOrders = orderGroupId ? await loadOrderGroupOrders(bundle.order) : [];
+  const groupOrderRelations =
+    orderGroupId && groupOrders.length > 0 ? await loadOrderRelations(groupOrders.map((groupOrder) => groupOrder.id)) : null;
 
   // Live-tracking extras for the customer map. Restaurant coordinates pin the
   // origin (public, non-sensitive); the tracking config gives the average
   // speed for the ETA. Both reads are best-effort: a missing restaurant row or
   // an unreadable settings row must not break order detail, so failures fall
   // back to null/defaults rather than throwing.
+  const restaurantTiming = await loadRestaurantTimingContext(bundle!.order.restaurantId);
   const trackingConfig = await loadDispatchTrackingConfig();
   // bundle! : narrowed non-null by the fail() guard above (fail returns never),
   // but that narrowing does not carry across the awaits in between under deno
   // check - the same pre-existing, already-baselined pattern this file uses
   // for bundle elsewhere (see dispatchAssignOrderCourier's bundle! note).
-  const restaurantCoordinates = await loadRestaurantCoordinates(bundle!.order.restaurantId);
   const deliveryCoordinates = readCoordinatePair(bundle!.order.deliveryLocation);
-  const riderCoordinates = readCoordinatePair({
-    latitude: riderSnapshot.courierLatitude,
-    longitude: riderSnapshot.courierLongitude,
+  const acceptedAtIso =
+    sanitizeText((bundle!.order.timeline as { acceptedAt?: unknown } | null | undefined)?.acceptedAt) ||
+    sanitizeText(bundle!.order.createdAt) ||
+    '';
+  const prepEstimate = await loadRestaurantPrepTimeEstimate({
+    acceptedAtIso,
+    fallbackDeliveryTime: restaurantTiming?.deliveryTime ?? null,
+    restaurantId: bundle!.order.restaurantId,
   });
+  const restaurantCoordinates =
+    restaurantTiming && typeof restaurantTiming.latitude === 'number' && typeof restaurantTiming.longitude === 'number'
+      ? { latitude: restaurantTiming.latitude, longitude: restaurantTiming.longitude }
+      : null;
 
-  const inTransit = RIDER_ACTIVE_DELIVERY_STATUSES.includes(normalizeOrderStatus(bundle!.order.status));
-  const etaRange =
-    inTransit && riderCoordinates && deliveryCoordinates
+  const prepEtaRange =
+    restaurantCoordinates && deliveryCoordinates
       ? computeEtaRange(
           haversineKm(
-            riderCoordinates.latitude,
-            riderCoordinates.longitude,
+            restaurantCoordinates.latitude,
+            restaurantCoordinates.longitude,
             deliveryCoordinates.latitude,
             deliveryCoordinates.longitude
           ),
           trackingConfig.averageSpeedKmh
         )
       : null;
+  const orderEta = {
+    minMinutes: prepEstimate.minutes + (prepEtaRange?.minMinutes ?? 0),
+    maxMinutes: prepEstimate.minutes + (prepEtaRange?.maxMinutes ?? 0),
+  };
+
+  const orderSnapshot = toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], {
+    ...riderSnapshot,
+    averageSpeedKmh: trackingConfig.averageSpeedKmh,
+    eta: { maxMinutes: orderEta.maxMinutes, minMinutes: orderEta.minMinutes },
+    orderGroup,
+    restaurantLatitude: restaurantCoordinates?.latitude ?? null,
+    restaurantLongitude: restaurantCoordinates?.longitude ?? null,
+  });
 
   return json(
     200,
     {
       data: {
-        order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, [], {
-          ...riderSnapshot,
-          averageSpeedKmh: trackingConfig.averageSpeedKmh,
-          eta: etaRange ? { maxMinutes: etaRange.maxMinutes, minMinutes: etaRange.minMinutes } : null,
-          restaurantLatitude: restaurantCoordinates?.latitude ?? null,
-          restaurantLongitude: restaurantCoordinates?.longitude ?? null,
-        }),
+        order:
+          groupOrderRelations && groupOrders.length > 0
+            ? {
+                ...orderSnapshot,
+                groupOrders: groupOrders.map((groupOrder) =>
+                  toOrderSnapshotResponse(
+                    groupOrder,
+                    groupOrderRelations.itemsByOrderId.get(groupOrder.id) ?? [],
+                    groupOrderRelations.assignmentsByOrderId.get(groupOrder.id) ?? null
+                  )
+                ),
+              }
+            : orderSnapshot,
       },
     },
     { 'Cache-Control': 'private, max-age=6, must-revalidate' }
@@ -1168,7 +1632,10 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
     }
   }
 
-  const orderId = crypto.randomUUID();
+  const groupedOrders = Array.isArray((orderDraft as { orders?: unknown }).orders)
+    ? (orderDraft as { orders: PreparedRestaurantOrderDraft[] }).orders
+    : null;
+  const orderId = groupedOrders?.[0]?.orderId ?? crypto.randomUUID();
   // Redeem BEFORE the order row lands: a cap-busted code fails here (409) and
   // no order is created; and if order creation then throws, the redemption is
   // released so a failed placement never consumes a cap slot.
@@ -1176,6 +1643,7 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
   const payment = buildInitialPaymentSummary({
     paymentMethod: orderDraft.paymentMethod,
     settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
+    deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
   });
 
   // Task 18 (G2): a scheduled order lands in 'scheduled', an immediate one in
@@ -1184,18 +1652,35 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
 
   let orderCreation: { createdAt: string; timeline: JsonObject };
   try {
-    orderCreation = await createOrderWithItems({
-      customerId: context.uid,
-      deliveryLocation: orderDraft.deliveryLocation,
-      fulfillmentType: orderDraft.fulfillmentType,
-      items: orderDraft.items,
-      orderId,
-      payment,
-      pricing: orderDraft.pricing,
-      restaurantId: orderDraft.restaurantId,
-      restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
-      scheduledFor: orderDraft.scheduledFor,
-    });
+    if (groupedOrders) {
+      orderCreation = await createOrderGroupWithItems({
+        customerId: context.uid,
+        deliveryLocation: orderDraft.deliveryLocation,
+        fulfillmentType: orderDraft.fulfillmentType,
+        groupId: orderId,
+        orders: groupedOrders,
+        payment,
+        paymentMethod: orderDraft.paymentMethod,
+        pricing: orderDraft.pricing,
+        scheduledFor: orderDraft.scheduledFor,
+      });
+    } else {
+      orderCreation = await createOrderWithItems({
+        customerId: context.uid,
+        deliveryLocation: orderDraft.deliveryLocation,
+        fulfillmentType: orderDraft.fulfillmentType,
+        items: orderDraft.items,
+        orderId,
+        payment,
+        pricing: orderDraft.pricing,
+        restaurantId: orderDraft.restaurantId,
+        restaurantName: sanitizeText(
+          (orderDraft as { restaurant?: RestaurantRecordRow }).restaurant?.name,
+          'Restaurant'
+        ),
+        scheduledFor: orderDraft.scheduledFor,
+      });
+    }
   } catch (error) {
     if (orderDraft.resolvedPromo) {
       await releasePromoRedemption(orderId);
@@ -1215,6 +1700,12 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
     },
   });
 
+  await captureOrderPlacementRiskSignals({
+    customerId: context.uid,
+    deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+    orderId,
+  });
+
   const response = {
     orderId,
     paymentStatus: sanitizeText(payment.status, PAYMENT_STATUS.PENDING),
@@ -1227,26 +1718,47 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
     await storeIdempotencyRecord(idempotencyKey, 'place_customer_order', context.uid, response);
   }
 
-  await notifyRestaurantUsers(orderDraft.restaurantId, {
-    title: 'New cash order',
-    body: `Order ${orderId.slice(-6).toUpperCase()} is waiting for restaurant confirmation.`,
-    data: buildNotificationData({
-      app: 'partner',
-      orderId,
-      routeKey: 'partner_order_detail',
-      type: 'order_update',
-    }),
-  });
+  if (groupedOrders) {
+    for (const restaurantOrder of groupedOrders) {
+      await notifyRestaurantUsers(restaurantOrder.restaurantId, {
+        title: 'New cash order',
+        body: `Order ${orderId.slice(-6).toUpperCase()} is waiting for restaurant confirmation.`,
+        data: buildNotificationData({
+          app: 'partner',
+          orderId: restaurantOrder.orderId,
+          routeKey: 'partner_order_detail',
+          type: 'order_update',
+        }),
+      });
+    }
+  } else {
+    await notifyRestaurantUsers(orderDraft.restaurantId, {
+      title: 'New cash order',
+      body: `Order ${orderId.slice(-6).toUpperCase()} is waiting for restaurant confirmation.`,
+      data: buildNotificationData({
+        app: 'partner',
+        orderId,
+        routeKey: 'partner_order_detail',
+        type: 'order_update',
+      }),
+    });
+  }
 
   await notifySafely(async () => {
-    const restaurantName = sanitizeText(orderDraft.restaurant.name, 'the restaurant');
+    const restaurantName = sanitizeText(
+      (orderDraft as { primaryRestaurant?: RestaurantRecordRow | null }).primaryRestaurant?.name ??
+        (orderDraft as { restaurant?: RestaurantRecordRow | null }).restaurant?.name,
+      'the restaurant'
+    );
     await sendTransactionalEmail({
       to: context.email,
       subject: `Order ${shortOrderCode(orderId)} placed`,
       html: buildTransactionalEmailHtml({
         heading: 'Your order has been placed',
         lines: [
-          `We received your order ${shortOrderCode(orderId)} for ${restaurantName}.`,
+          groupedOrders
+            ? `We received your multi-store order ${shortOrderCode(orderId)} for ${restaurantName} and other selected restaurants.`
+            : `We received your order ${shortOrderCode(orderId)} for ${restaurantName}.`,
           `Total: ${formatNairaAmount(orderDraft.pricing.total)} (pay with cash on ${
             orderDraft.fulfillmentType === 'delivery' ? 'delivery' : 'pickup'
           }).`,
@@ -1279,14 +1791,24 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
     }
   }
 
-  const orderId = crypto.randomUUID();
+  const groupedOrders = Array.isArray((orderDraft as { orders?: unknown }).orders)
+    ? (orderDraft as { orders: PreparedRestaurantOrderDraft[] }).orders
+    : null;
+  const orderId = groupedOrders?.[0]?.orderId ?? crypto.randomUUID();
   const rawAttributedPromoId = sanitizeText(data.attributedPromoId);
   const attributedPromoId =
     rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
   const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
+  const paymentSettlement = resolvePaymentSettlementSummary(
+    orderDraft.restaurant,
+    !(groupedOrders && groupedOrders.length > 1)
+  );
   const initialPayment = buildInitialPaymentSummary({
     paymentMethod: orderDraft.paymentMethod,
     reference: paymentReference,
+    deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+    settlementMode: paymentSettlement.settlementMode,
+    splitSubaccountCode: paymentSettlement.splitSubaccountCode,
     settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
   });
 
@@ -1301,19 +1823,37 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
 
   let orderCreation: { createdAt: string; timeline: JsonObject };
   try {
-    orderCreation = await createOrderWithItems({
-      attributedPromoId,
-      customerId: context.uid,
-      deliveryLocation: orderDraft.deliveryLocation,
-      fulfillmentType: orderDraft.fulfillmentType,
-      items: orderDraft.items,
-      orderId,
-      payment: initialPayment,
-      pricing: orderDraft.pricing,
-      restaurantId: orderDraft.restaurantId,
-      restaurantName: sanitizeText(orderDraft.restaurant.name, 'Restaurant'),
-      scheduledFor: orderDraft.scheduledFor,
-    });
+    if (groupedOrders) {
+      orderCreation = await createOrderGroupWithItems({
+        attributedPromoId,
+        customerId: context.uid,
+        deliveryLocation: orderDraft.deliveryLocation,
+        fulfillmentType: orderDraft.fulfillmentType,
+        groupId: orderId,
+        orders: groupedOrders,
+        payment: initialPayment,
+        paymentMethod: orderDraft.paymentMethod,
+        pricing: orderDraft.pricing,
+        scheduledFor: orderDraft.scheduledFor,
+      });
+    } else {
+      orderCreation = await createOrderWithItems({
+        attributedPromoId,
+        customerId: context.uid,
+        deliveryLocation: orderDraft.deliveryLocation,
+        fulfillmentType: orderDraft.fulfillmentType,
+        items: orderDraft.items,
+        orderId,
+        payment: initialPayment,
+        pricing: orderDraft.pricing,
+        restaurantId: orderDraft.restaurantId,
+        restaurantName: sanitizeText(
+          (orderDraft as { restaurant?: RestaurantRecordRow }).restaurant?.name,
+          'Restaurant'
+        ),
+        scheduledFor: orderDraft.scheduledFor,
+      });
+    }
   } catch (error) {
     if (orderDraft.resolvedPromo) {
       await releasePromoRedemption(orderId);
@@ -1325,11 +1865,14 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
     orderId,
     customerId: context.uid,
     restaurantId: orderDraft.restaurantId,
+    orderGroupId: groupedOrders ? orderId : null,
     provider: PAYMENT_PROVIDER_PAYSTACK,
     method: orderDraft.paymentMethod,
     reference: paymentReference,
     currency: DEFAULT_CURRENCY,
     amount: orderDraft.pricing.total,
+    splitSubaccountCode: paymentSettlement.splitSubaccountCode,
+    settlementMode: paymentSettlement.settlementMode,
     status: PAYMENT_STATUS.PENDING,
   });
 
@@ -1339,6 +1882,17 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       email: context.email,
       paymentMethod: orderDraft.paymentMethod,
       reference: paymentReference,
+      subaccount: paymentSettlement.settlementMode === 'split' ? paymentSettlement.splitSubaccountCode : null,
+      transactionCharge:
+        paymentSettlement.settlementMode === 'split'
+          ? roundCurrency(
+              Math.max(
+                parseNumber(orderDraft.pricing.total, 0) -
+                  parseNumber(((orderDraft.pricing.settlement ?? {}) as JsonObject).netSettlement, 0),
+                0
+              )
+            )
+          : null,
       metadata: {
         customerId: context.uid,
         fulfillmentType: orderDraft.fulfillmentType,
@@ -1355,23 +1909,47 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       reference: paymentReference,
       accessCode: sanitizeOptionalText(initializedTransaction.access_code),
       authorizationUrl: sanitizeOptionalText(initializedTransaction.authorization_url),
+      deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+      settlementMode: paymentSettlement.settlementMode,
+      splitSubaccountCode: paymentSettlement.splitSubaccountCode,
       settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
     });
 
-    await updateOrderRecord(orderId, {
-      payment: paymentWithAuthorization,
-      updatedAt: nowIso(),
-    });
+    if (groupedOrders) {
+      for (const restaurantOrder of groupedOrders) {
+        await updateOrderRecord(restaurantOrder.orderId, {
+          payment: buildInitialPaymentSummary({
+            paymentMethod: orderDraft.paymentMethod,
+            reference: paymentReference,
+            accessCode: sanitizeOptionalText(initializedTransaction.access_code),
+            authorizationUrl: sanitizeOptionalText(initializedTransaction.authorization_url),
+            deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+            settlementMode: paymentSettlement.settlementMode,
+            splitSubaccountCode: paymentSettlement.splitSubaccountCode,
+            settlement: (restaurantOrder.pricing.settlement ?? null) as JsonObject | null,
+          }),
+          updatedAt: nowIso(),
+        });
+      }
+    } else {
+      await updateOrderRecord(orderId, {
+        payment: paymentWithAuthorization,
+        updatedAt: nowIso(),
+      });
+    }
 
     await upsertPaymentTransaction({
       orderId,
       customerId: context.uid,
       restaurantId: orderDraft.restaurantId,
+      orderGroupId: groupedOrders ? orderId : null,
       provider: PAYMENT_PROVIDER_PAYSTACK,
       method: orderDraft.paymentMethod,
       reference: paymentReference,
       currency: DEFAULT_CURRENCY,
       amount: orderDraft.pricing.total,
+      splitSubaccountCode: paymentSettlement.splitSubaccountCode,
+      settlementMode: paymentSettlement.settlementMode,
       status: PAYMENT_STATUS.PENDING,
       accessCode: sanitizeOptionalText(initializedTransaction.access_code),
       authorizationUrl: sanitizeOptionalText(initializedTransaction.authorization_url),
@@ -1387,6 +1965,12 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
         provider: PAYMENT_PROVIDER_PAYSTACK,
         reference: paymentReference,
       },
+    });
+
+    await captureOrderPlacementRiskSignals({
+      customerId: context.uid,
+      deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+      orderId,
     });
 
     const response = {
@@ -1422,24 +2006,47 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       verifiedAt: nowIso(),
     };
 
-    await updateOrderRecord(orderId, {
-      cancellation: {
-        actor: 'system',
-        reason: 'payment_initialization_failed',
-      },
-      payment: failedPayment,
-      status: ORDER_STATUS.CANCELLED,
-      timeline: {
-        ...orderCreation.timeline,
-        paymentInitializationFailedAt: nowIso(),
-      },
-      updatedAt: nowIso(),
-    });
+    if (groupedOrders) {
+      for (const restaurantOrder of groupedOrders) {
+        await updateOrderRecord(restaurantOrder.orderId, {
+          cancellation: {
+            actor: 'system',
+            reason: 'payment_initialization_failed',
+          },
+          payment: buildInitialPaymentSummary({
+            paymentMethod: orderDraft.paymentMethod,
+            deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+            settlement: (restaurantOrder.pricing.settlement ?? null) as JsonObject | null,
+          }),
+          status: ORDER_STATUS.CANCELLED,
+          timeline: {
+            ...orderCreation.timeline,
+            paymentInitializationFailedAt: nowIso(),
+          },
+          updatedAt: nowIso(),
+        });
+      }
+    } else {
+      await updateOrderRecord(orderId, {
+        cancellation: {
+          actor: 'system',
+          reason: 'payment_initialization_failed',
+        },
+        payment: failedPayment,
+        status: ORDER_STATUS.CANCELLED,
+        timeline: {
+          ...orderCreation.timeline,
+          paymentInitializationFailedAt: nowIso(),
+        },
+        updatedAt: nowIso(),
+      });
+    }
 
     await upsertPaymentTransaction({
       orderId,
       customerId: context.uid,
       restaurantId: orderDraft.restaurantId,
+      orderGroupId: groupedOrders ? orderId : null,
       provider: PAYMENT_PROVIDER_PAYSTACK,
       method: orderDraft.paymentMethod,
       reference: paymentReference,
@@ -1591,6 +2198,11 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
       actorRole: context.role,
       refundRate,
     },
+  });
+
+  await captureRefundAbuseSignals({
+    customerId: bundle.order.customerId,
+    orderId,
   });
   await notifyRestaurantUsers(bundle.order.restaurantId, {
     title: 'Order cancelled',

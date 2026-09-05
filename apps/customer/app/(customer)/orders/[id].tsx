@@ -23,6 +23,7 @@ import { useCustomerOrder } from '../../../src/hooks/useCustomerOrder';
 import { cancelCustomerOrder, refreshCustomerPaymentStatus } from '../../../src/services/customerOrderActions';
 import { customerTheme } from '../../../src/theme/palette';
 import { openPhoneDialer } from '../../../src/utils/phoneLinking';
+import { buildOrderTrackingSummary } from '../../../src/utils/orderTrackingSummary';
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
@@ -113,7 +114,10 @@ export default function OrderTracking() {
   const trackingSteps = getTrackingSteps(fulfillmentType);
   const normalizedStatus = normalizeOrderStatus(order.status);
   const currentStep = trackingSteps.indexOf(normalizedStatus);
-  const total = order.pricing?.total ?? order.total;
+  const groupSummary = buildOrderTrackingSummary(order);
+  const checkoutTotal = groupSummary?.total ?? order.pricing?.total ?? order.total;
+  const restaurantTotal = order.pricing?.total ?? order.total;
+  const paymentTotalLabel = groupSummary ? 'Shared checkout total' : 'Total';
   const paymentStatus = formatPaymentStatusLabel(order.payment?.status, order.payment?.method);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
   const canCancel = canCustomerCancelOrder(order.status);
@@ -151,6 +155,18 @@ export default function OrderTracking() {
       : null;
   const etaRange = computeEtaRangeBetween(riderMapPoint, deliveryMapPoint, order.averageSpeedKmh ?? null);
   const liveMapVisible = liveMapEligible && !!riderMapPoint && !!deliveryMapPoint;
+  const etaSummary = liveMapVisible
+    ? etaRange
+    : order.eta
+      ? {
+          ...order.eta,
+          minutes: Math.round((order.eta.minMinutes + order.eta.maxMinutes) / 2),
+        }
+      : null;
+  const etaSummaryLabel = liveMapVisible ? 'Live rider ETA' : 'Estimated delivery';
+  const etaSummaryHint = liveMapVisible
+    ? 'Updates with the rider position.'
+    : 'Includes kitchen prep time and delivery distance.';
   const liveLocationUpdatedAt = formatRelativeAge(livePosition?.updatedAt ?? order.assignment?.courierUpdatedAt);
   const courierLocationUpdatedAt = formatRelativeAge(order.assignment?.courierUpdatedAt);
   const courierLocationStatus = hasCourierCoordinates ? 'Live' : courierPhone ? 'Assigned' : 'Waiting';
@@ -272,6 +288,29 @@ export default function OrderTracking() {
         ) : null}
       </View>
 
+      {groupSummary ? (
+        <View style={styles.groupCard}>
+          <Text style={styles.sectionTitle}>{groupSummary.title}</Text>
+          <Text style={styles.groupSubtitle}>{groupSummary.subtitle}</Text>
+          <View style={styles.groupTotalRow}>
+            <Text style={styles.groupTotalLabel}>{groupSummary.totalLabel}</Text>
+            <Text style={styles.groupTotalValue}>{formatMoney(groupSummary.total)}</Text>
+          </View>
+          {groupSummary.lines.map((line) => (
+            <View key={line.id} style={styles.groupLine}>
+              <View style={styles.groupLineCopy}>
+                <Text style={styles.groupLineTitle}>{line.restaurantName}</Text>
+                <Text style={styles.groupLineMeta}>
+                  {line.itemCount} {line.itemCount === 1 ? 'item' : 'items'}
+                  {line.isPrimary ? ' · primary order' : ''}
+                </Text>
+              </View>
+              <Text style={styles.groupLineAmount}>{formatMoney(line.subtotal)}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       <View style={styles.progressCard}>
         <Text style={styles.sectionTitle}>Tracking</Text>
         {trackingSteps.map((step, index) => {
@@ -289,13 +328,28 @@ export default function OrderTracking() {
 
       <View style={styles.detailCard}>
         <Text style={styles.sectionTitle}>Payment and delivery</Text>
-        <Text style={styles.total}>Total: {formatMoney(total)}</Text>
-        <Text style={styles.detailLine}>Subtotal: {formatMoney(order.pricing?.subtotal ?? total)}</Text>
-        <Text style={styles.detailLine}>Delivery fee: {formatMoney(order.pricing?.deliveryFee ?? 0)}</Text>
-        {order.pricing?.serviceFee ? (
-          <Text style={styles.detailLine}>Service fee: {formatMoney(order.pricing.serviceFee)}</Text>
+        <Text style={styles.total}>
+          {paymentTotalLabel}: {formatMoney(checkoutTotal)}
+        </Text>
+        {etaSummary ? (
+          <View style={styles.etaSummaryCard}>
+            <View style={styles.etaSummaryRow}>
+              <Text style={styles.etaSummaryLabel}>{etaSummaryLabel}</Text>
+              <Text style={styles.etaSummaryValue}>{formatEtaRange(etaSummary)}</Text>
+            </View>
+            <Text style={styles.etaSummaryHint}>{etaSummaryHint}</Text>
+          </View>
         ) : null}
-        <Text style={styles.detailLine}>Tip: {formatMoney(order.pricing?.tip ?? 0)}</Text>
+        {groupSummary ? <Text style={styles.detailLine}>Restaurant order total: {formatMoney(restaurantTotal)}</Text> : null}
+        <Text style={styles.detailLine}>
+          {groupSummary ? 'Restaurant delivery fee' : 'Delivery fee'}: {formatMoney(order.pricing?.deliveryFee ?? 0)}
+        </Text>
+        {order.pricing?.serviceFee ? (
+          <Text style={styles.detailLine}>
+            {groupSummary ? 'Restaurant service fee' : 'Service fee'}: {formatMoney(order.pricing.serviceFee)}
+          </Text>
+        ) : null}
+        <Text style={styles.detailLine}>{groupSummary ? 'Restaurant tip' : 'Tip'}: {formatMoney(order.pricing?.tip ?? 0)}</Text>
         <Text style={styles.detailLine}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
         {order.payment?.reference ? <Text style={styles.detailLine}>Reference: {order.payment.reference}</Text> : null}
@@ -556,11 +610,103 @@ const styles = StyleSheet.create({
     marginTop: 12,
     padding: 18,
   },
+  groupCard: {
+    backgroundColor: customerTheme.accentTint,
+    borderColor: customerTheme.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 18,
+  },
+  groupSubtitle: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  groupTotalRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 14,
+  },
+  groupTotalLabel: {
+    color: customerTheme.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  groupTotalValue: {
+    color: customerTheme.accentStrong,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  groupLine: {
+    alignItems: 'flex-start',
+    borderTopColor: customerTheme.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 12,
+  },
+  groupLineCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  groupLineTitle: {
+    color: customerTheme.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  groupLineMeta: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  groupLineAmount: {
+    color: customerTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
   total: {
     color: customerTheme.accentStrong,
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 8,
+  },
+  etaSummaryCard: {
+    backgroundColor: customerTheme.accentTint,
+    borderColor: customerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  etaSummaryRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  etaSummaryLabel: {
+    color: customerTheme.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  etaSummaryValue: {
+    color: customerTheme.accentStrong,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  etaSummaryHint: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
   },
   detailLine: {
     color: customerTheme.textMuted,

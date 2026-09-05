@@ -30,36 +30,42 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
 
 Deno.test('ensureDispatchRiderRecord: the upsert payload carries no activeLoad, so re-provisioning cannot reset a live claim count', async () => {
   const upserts: Array<Record<string, unknown>> = [];
+  const originalFrom = serviceClient.from.bind(serviceClient);
 
-  // deno-lint-ignore no-explicit-any
-  (serviceClient as any).from = (table: string) => {
-    if (table !== 'DispatchRiderRecord') {
-      throw new Error(`dispatchRiders.test.ts: unexpected table "${table}"`);
-    }
-    return {
-      upsert(payload: Record<string, unknown>, opts?: { onConflict?: string }) {
-        upserts.push({ ...payload, __onConflict: opts?.onConflict });
-        return Promise.resolve({ error: null });
-      },
+  try {
+    // deno-lint-ignore no-explicit-any
+    (serviceClient as any).from = (table: string) => {
+      if (table !== 'DispatchRiderRecord') {
+        throw new Error(`dispatchRiders.test.ts: unexpected table "${table}"`);
+      }
+      return {
+        upsert(payload: Record<string, unknown>, opts?: { onConflict?: string }) {
+          upserts.push({ ...payload, __onConflict: opts?.onConflict });
+          return Promise.resolve({ error: null });
+        },
+      };
     };
-  };
 
-  await ensureDispatchRiderRecord('rider-1', {
-    acceptanceRate: 100,
-    completedTrips: 0,
-    displayName: 'Ada Rider',
-    status: 'Available',
-    vehicleType: 'bike',
-    zone: 'Yaba',
-  });
+    await ensureDispatchRiderRecord('rider-1', {
+      acceptanceRate: 100,
+      completedTrips: 0,
+      displayName: 'Ada Rider',
+      status: 'Available',
+      vehicleType: 'bike',
+      zone: 'Yaba',
+    });
 
-  expectEqual(upserts.length, 1, 'one upsert was issued');
-  expectEqual(upserts[0].__onConflict, 'id', 'it is an id-keyed upsert - it updates an existing row in place');
-  expectEqual(
-    Object.prototype.hasOwnProperty.call(upserts[0], 'activeLoad'),
-    false,
-    'activeLoad is absent from the payload, so an existing rider keeps the load ledger they had'
-  );
-  expectEqual(upserts[0].id, 'rider-1', 'the record is still keyed and written as before');
-  expectEqual(upserts[0].displayName, 'Ada Rider', 'the profile fields are still written');
+    expectEqual(upserts.length, 1, 'one upsert was issued');
+    expectEqual(upserts[0].__onConflict, 'id', 'it is an id-keyed upsert - it updates an existing row in place');
+    expectEqual(
+      Object.prototype.hasOwnProperty.call(upserts[0], 'activeLoad'),
+      false,
+      'activeLoad is absent from the payload, so an existing rider keeps the load ledger they had'
+    );
+    expectEqual(upserts[0].id, 'rider-1', 'the record is still keyed and written as before');
+    expectEqual(upserts[0].displayName, 'Ada Rider', 'the profile fields are still written');
+  } finally {
+    // deno-lint-ignore no-explicit-any
+    (serviceClient as any).from = originalFrom;
+  }
 });

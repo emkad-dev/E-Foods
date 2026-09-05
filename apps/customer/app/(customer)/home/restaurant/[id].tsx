@@ -67,7 +67,7 @@ export default function RestaurantDetail() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [addedToCartVisible, setAddedToCartVisible] = useState(false);
-  const { addItem, deliveryLocation, items, restaurantId: cartRestaurantId } = useCart();
+  const { addItem, deliveryLocation, items } = useCart();
   const { isCovered } = useCoverage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -192,37 +192,6 @@ export default function RestaurantDetail() {
   const handleAddToCart = (item: MenuItem) => {
     if (!isCovered) {
       Alert.alert(COVERAGE_COMING_SOON_TITLE, COVERAGE_COMING_SOON_COPY);
-      return;
-    }
-
-    if (cartRestaurantId && cartRestaurantId !== id) {
-      Alert.alert(
-        'Replace cart?',
-        'Your cart contains items from another restaurant. Do you want to clear it and start a new order?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Replace',
-            onPress: () => {
-              addItem(
-                {
-                  id: item.id,
-                  name: item.name,
-                  price: item.price,
-                  quantity: 1,
-                  restaurantId: id as string,
-                  restaurantName: restaurant?.name ?? 'Restaurant',
-                },
-                id as string,
-                restaurant?.name ?? 'Restaurant'
-              );
-              setCartButtonScale(1.25);
-              setTimeout(() => setCartButtonScale(1), 180);
-              triggerAddedToCartToast();
-            },
-          },
-        ]
-      );
       return;
     }
 
@@ -818,3 +787,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+

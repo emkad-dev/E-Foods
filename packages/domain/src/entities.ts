@@ -61,6 +61,42 @@ export interface MenuItemDocument extends DocumentData {
   // timestamp (timed, auto-resumes with no write once it passes — see
   // supabase/functions/_shared/availability.ts's isMenuItemAvailable).
   unavailableUntil?: string | null;
+  modifierGroups?: ModifierGroupDocument[] | null;
+}
+
+export interface ModifierOptionDocument extends DocumentData {
+  id: string;
+  label?: string | null;
+  priceDelta?: number | null;
+  isAvailable?: boolean | null;
+}
+
+export interface ModifierGroupDocument extends DocumentData {
+  id: string;
+  label?: string | null;
+  mode?: 'single' | 'multi' | string | null;
+  required?: boolean | null;
+  min?: number | null;
+  max?: number | null;
+  options?: ModifierOptionDocument[] | null;
+}
+
+export interface OrderItemSelectedOptionDocument extends DocumentData {
+  groupId: string;
+  groupLabel?: string | null;
+  optionId: string;
+  optionLabel?: string | null;
+  priceDelta?: number | null;
+}
+
+export interface OrderGroupSummaryDocument extends DocumentData {
+  id: string;
+  orderIds?: string[] | null;
+  orderCount?: number | null;
+  primaryOrderId?: string | null;
+  pricing?: OrderPriceBreakdown | null;
+  payment?: OrderPaymentSummary | null;
+  restaurantIds?: string[] | null;
 }
 
 export interface MenuCategoryDocument extends DocumentData {
@@ -111,6 +147,8 @@ export interface OrderItemDocument extends DocumentData {
   restaurantId: string;
   restaurantName: string;
   specialInstructions?: string;
+  optionDelta?: number | null;
+  selectedOptions?: OrderItemSelectedOptionDocument[] | null;
 }
 
 export interface OrderPriceBreakdown extends DocumentData {
@@ -187,6 +225,9 @@ export interface OrderDocument extends DocumentData {
   customerPhone?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
+  orderGroupId?: string | null;
+  orderGroup?: OrderGroupSummaryDocument | null;
+  groupOrders?: OrderDocument[] | null;
   pricing: OrderPriceBreakdown;
   payment: OrderPaymentSummary;
   assignment?: OrderAssignmentSummary | null;
@@ -203,6 +244,13 @@ export interface DispatchProfileDocument extends DocumentData {
   name?: string | null;
   fullName?: string | null;
   phoneNumber?: string | null;
+  licenseNumber?: string | null;
+  verifiedAt?: string | null;
+  verifiedByUid?: string | null;
+  verificationStatus?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehiclePlateNumber?: string | null;
   status?: string | null;
   zone?: string | null;
   currentZone?: string | null;
@@ -255,12 +303,63 @@ export interface DispatchApplicationDocument extends DocumentData {
   region: string;
   lga: string;
   vehicleType: string;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehiclePlateNumber?: string | null;
+  licenseNumber?: string | null;
+  licenceFrontPath?: string | null;
+  licenceBackPath?: string | null;
   latitude: number;
   longitude: number;
   currentAddress?: string | null;
   status: 'pending' | 'approved' | 'rejected' | string;
+  verificationStatus?: 'pending' | 'approved' | 'rejected' | string;
   submittedAt: string;
   reviewedAt?: string | null;
   approvedByUid?: string | null;
+  verifiedByUid?: string | null;
+  verifiedAt?: string | null;
+  reviewNotes?: string | null;
   rejectionReason?: string | null;
+}
+
+export interface DispatchShiftSlotDocument extends DocumentData {
+  id: string;
+  courierId: string;
+  startsAt: string;
+  endsAt: string;
+  forecastDemand: number;
+  status: string;
+  notes?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface CourierEarningDocument extends DocumentData {
+  id: string;
+  courierId: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  deliveredAt: string;
+  restaurantId?: string | null;
+  restaurantName?: string | null;
+  payoutId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface CourierPayoutDocument extends DocumentData {
+  id: string;
+  courierId: string;
+  periodStartsAt: string;
+  periodEndsAt: string;
+  currency: string;
+  ledgerTotal: number;
+  status: string;
+  paidAt?: string | null;
+  reference?: string | null;
+  reviewNotes?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }

@@ -32,6 +32,9 @@ const { dispatchDomain } = await import('./dispatch.ts');
 const { partnerDomain } = await import('./partner.ts');
 const { ordersDomain } = await import('./orders.ts');
 const { serviceClient } = await import('../client.ts');
+const originalDispatchLoadReleaseFrom = serviceClient.from.bind(serviceClient);
+const originalDispatchLoadReleaseRpc = serviceClient.rpc.bind(serviceClient);
+const originalDispatchLoadReleaseFetch = globalThis.fetch;
 
 const dispatchUpdateOrderStatus = dispatchDomain.handlers.dispatchUpdateOrderStatus;
 if (typeof dispatchUpdateOrderStatus !== 'function') {
@@ -138,6 +141,22 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
         filtered = filtered.filter((row) => (row[col] ?? null) === val);
         return builder;
       },
+      gte(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) >= (val as string | number);
+        });
+        return builder;
+      },
+      lt(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) < (val as string | number);
+        });
+        return builder;
+      },
       order(col: string, opts?: { ascending?: boolean }) {
         orderCol = col;
         orderAscending = opts?.ascending !== false;
@@ -146,6 +165,9 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
       limit(n: number) {
         limitN = n;
         return builder;
+      },
+      returns() {
+        return Promise.resolve({ data: filtered.map(snapshot), error: null });
       },
       async maybeSingle() {
         if (hooks.beforeRead) await hooks.beforeRead();
@@ -820,4 +842,13 @@ Deno.test('partnerUpdateOrderStatus: an accept racing the sweep\'s cancel+refund
   const payment = order?.payment as Record<string, unknown>;
   expectEqual(payment.status, 'refunded', 'the refund is intact - not overwritten with the stale paid payment');
   expectEqual(payment.refundAmount, 5000, 'the refund amount is intact');
+});
+
+Deno.test('dispatchLoadRelease cleanup: restore shared client and fetch', () => {
+  // Keep later files on the real client and fetch implementation.
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = originalDispatchLoadReleaseFrom;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = originalDispatchLoadReleaseRpc;
+  globalThis.fetch = originalDispatchLoadReleaseFetch;
 });

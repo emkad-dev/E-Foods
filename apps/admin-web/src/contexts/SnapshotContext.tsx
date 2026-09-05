@@ -18,6 +18,7 @@ const POLL_INTERVAL_MS = 120000;
 
 const EMPTY_SNAPSHOT: AdminDashboardSnapshot = {
   dispatchProfiles: [],
+  featureFlags: {},
   orders: [],
   restaurants: [],
   users: [],

@@ -92,6 +92,24 @@ export interface MenuItemDocument extends DocumentData {
   categoryLabel?: string;
   category?: string;
   isAvailable?: boolean;
+  modifierGroups?: ModifierGroupDocument[] | null;
+}
+
+export interface ModifierOptionDocument extends DocumentData {
+  id: string;
+  label?: string | null;
+  priceDelta?: number | null;
+  isAvailable?: boolean | null;
+}
+
+export interface ModifierGroupDocument extends DocumentData {
+  id: string;
+  label?: string | null;
+  mode?: 'single' | 'multi' | string | null;
+  required?: boolean | null;
+  min?: number | null;
+  max?: number | null;
+  options?: ModifierOptionDocument[] | null;
 }
 
 export interface MenuCategoryDocument extends DocumentData {
@@ -107,6 +125,26 @@ export interface OrderItemDocument extends DocumentData {
   restaurantId: string;
   restaurantName: string;
   specialInstructions?: string;
+  optionDelta?: number | null;
+  selectedOptions?: OrderItemSelectedOptionDocument[] | null;
+}
+
+export interface OrderItemSelectedOptionDocument extends DocumentData {
+  groupId: string;
+  groupLabel?: string | null;
+  optionId: string;
+  optionLabel?: string | null;
+  priceDelta?: number | null;
+}
+
+export interface OrderGroupSummaryDocument extends DocumentData {
+  id: string;
+  orderIds?: string[] | null;
+  orderCount?: number | null;
+  primaryOrderId?: string | null;
+  pricing?: OrderPriceBreakdown | null;
+  payment?: OrderPaymentSummary | null;
+  restaurantIds?: string[] | null;
 }
 
 export interface OrderPriceBreakdown extends DocumentData {
@@ -176,6 +214,9 @@ export interface OrderDocument extends DocumentData {
   customerPhone?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
+  orderGroupId?: string | null;
+  orderGroup?: OrderGroupSummaryDocument | null;
+  groupOrders?: OrderDocument[] | null;
   pricing: OrderPriceBreakdown;
   payment: OrderPaymentSummary;
   assignment?: OrderAssignmentSummary | null;
@@ -185,8 +226,9 @@ export interface OrderDocument extends DocumentData {
   } | null;
   timeline?: OrderTimeline;
   // Live-tracking extras from customerGetOrderDetail: the restaurant origin
-  // pin, the server's initial straight-line ETA, and the average speed the
-  // client uses to recompute the ETA live from each rider-position broadcast.
+  // pin, the server's prep-aware initial delivery ETA, and the average speed
+  // the client uses to recompute the ETA live from each rider-position
+  // broadcast.
   restaurantLatitude?: number | null;
   restaurantLongitude?: number | null;
   eta?: { minMinutes: number; maxMinutes: number } | null;

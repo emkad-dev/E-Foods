@@ -22,6 +22,7 @@ import {
   buildDailySeries,
   buildPaymentBreakdown,
   buildProblemDailySeries,
+  buildSettlementBreakdown,
   buildStatusBreakdown,
   buildTopRestaurants,
   buildZoneBreakdown,
@@ -47,6 +48,7 @@ export default function StatisticsPage() {
   const statusBreakdown = useMemo(() => buildStatusBreakdown(windowedOrders), [windowedOrders]);
   const paymentBreakdown = useMemo(() => buildPaymentBreakdown(windowedOrders), [windowedOrders]);
   const problemSeries = useMemo(() => buildProblemDailySeries(windowedOrders, rangeDays), [windowedOrders, rangeDays]);
+  const settlementBreakdown = useMemo(() => buildSettlementBreakdown(windowedOrders), [windowedOrders]);
   const topRestaurants = useMemo(() => buildTopRestaurants(windowedOrders), [windowedOrders]);
   const zoneBreakdown = useMemo(() => buildZoneBreakdown(snapshot.dispatchProfiles), [snapshot.dispatchProfiles]);
   const currency = windowedOrders.find((order) => order.pricing?.currency)?.pricing?.currency ?? 'NGN';
@@ -189,6 +191,47 @@ export default function StatisticsPage() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title-row">
+          <h3 className="card-title">Settlement by restaurant and day</h3>
+        </div>
+        {settlementBreakdown.length === 0 ? (
+          <EmptyState
+            title="No settlement data"
+            body="Split and manual settlement totals will appear once paid orders land."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Restaurant</th>
+                  <th>Orders</th>
+                  <th>Gross</th>
+                  <th>Split</th>
+                  <th>Manual</th>
+                  <th>Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settlementBreakdown.slice(0, 12).map((row) => (
+                  <tr key={`${row.dayKey}:${row.restaurantId}`}>
+                    <td>{row.dayLabel}</td>
+                    <td className="cell-strong">{row.restaurantName}</td>
+                    <td>{formatNumber(row.orders)}</td>
+                    <td className="cell-amount">{formatCurrency(row.gross, currency)}</td>
+                    <td className="cell-amount">{formatCurrency(row.split, currency)}</td>
+                    <td className="cell-amount">{formatCurrency(row.manual, currency)}</td>
+                    <td className="cell-amount">{formatCurrency(row.delta, currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="grid-2">

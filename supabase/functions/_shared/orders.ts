@@ -28,6 +28,7 @@ export type CustomerOrderRow = {
   needsAttention?: boolean | null;
   payment?: JsonObject | null;
   pricing?: JsonObject | null;
+  orderGroupId?: string | null;
   restaurantId: string;
   restaurantName: string;
   // Task 18 (G2): the customer-requested slot as a UTC instant, or null for an
@@ -61,10 +62,12 @@ export type OrderItemRow = {
   itemId: string;
   name: string;
   orderId: string;
+  optionDelta?: number | null;
   price: number;
   quantity: number;
   restaurantId: string;
   restaurantName: string;
+  selectedOptions?: JsonObject[] | null;
 };
 
 export type PaymentTransactionRow = {
@@ -76,10 +79,24 @@ export type PaymentTransactionRow = {
   lastError?: string | null;
   method: string;
   orderId: string;
+  orderGroupId?: string | null;
   reference: string;
   restaurantId: string;
   splitSubaccountCode?: string | null;
+  settlementMode?: string | null;
   status: string;
+};
+
+export type OrderGroupRow = {
+  customerId: string;
+  id: string;
+  orderCount?: number | null;
+  orderIds?: JsonObject | null;
+  payment?: JsonObject | null;
+  pricing?: JsonObject | null;
+  primaryOrderId: string;
+  restaurantCount?: number | null;
+  restaurantIds?: JsonObject | null;
 };
 
 export type OrderSnapshotOptions = {
@@ -89,17 +106,22 @@ export type OrderSnapshotOptions = {
   courierUpdatedAt?: string | null;
   customerPhone?: string | null;
   // Live-tracking extras, populated only by customerGetOrderDetail. The map
-  // pins the restaurant origin; `eta` is the server's initial straight-line
-  // estimate for first paint and `averageSpeedKmh` lets the client recompute
-  // it live from each rider-position broadcast without a round trip.
+  // pins the restaurant origin; `eta` is the server's prep-aware initial
+  // delivery estimate for first paint and `averageSpeedKmh` lets the client
+  // recompute the live rider ETA from each rider-position broadcast without
+  // a round trip.
   restaurantLatitude?: number | null;
   restaurantLongitude?: number | null;
   eta?: { minMinutes: number; maxMinutes: number } | null;
   averageSpeedKmh?: number | null;
+  orderGroup?: OrderGroupRow | null;
 };
 
 export const CUSTOMER_ORDER_COLUMNS =
-  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,createdAt,updatedAt';
+  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,orderGroupId,createdAt,updatedAt';
+
+export const ORDER_GROUP_COLUMNS =
+  'id,customerId,primaryOrderId,orderIds,orderCount,pricing,payment,restaurantIds,restaurantCount';
 
 export const ORDER_STATUS = {
   ACCEPTED: 'accepted',
@@ -189,6 +211,8 @@ export const toOrderSnapshotResponse = (
   customerPhone: sanitizeOptionalText(options.customerPhone),
   deliveryAddress: sanitizeOptionalText(order.deliveryAddress),
   deliveryLocation: order.deliveryLocation ?? null,
+  orderGroupId: order.orderGroupId ?? null,
+  orderGroup: options.orderGroup ?? null,
   restaurantLatitude: options.restaurantLatitude ?? null,
   restaurantLongitude: options.restaurantLongitude ?? null,
   eta: options.eta ?? null,
@@ -209,8 +233,10 @@ export const toOrderSnapshotResponse = (
     name: item.name,
     price: Number(item.price ?? 0),
     quantity: Number(item.quantity ?? 0),
+    optionDelta: item.optionDelta ?? 0,
     restaurantId: item.restaurantId,
     restaurantName: item.restaurantName,
+    selectedOptions: (item.selectedOptions as JsonObject[] | null | undefined) ?? [],
   })),
   payment: order.payment ?? null,
   pricing: order.pricing ?? null,

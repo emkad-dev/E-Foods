@@ -18,12 +18,15 @@ Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
+const originalPromoReleaseFetch = globalThis.fetch;
 globalThis.fetch = (async () => new Response('{}', { status: 200 })) as typeof fetch;
 
 const { ordersDomain } = await import('./orders.ts');
 const sharedOrders = await import('../orders.ts');
 const { sweepUnacceptedOrders } = await import('../acceptanceDeadlineSweep.ts');
 const { serviceClient } = await import('../client.ts');
+const originalPromoReleaseFrom = serviceClient.from.bind(serviceClient);
+const originalPromoReleaseRpc = serviceClient.rpc.bind(serviceClient);
 
 const cancelCustomerOrder = ordersDomain.handlers.cancelCustomerOrder;
 if (typeof cancelCustomerOrder !== 'function') {
@@ -61,6 +64,22 @@ const createTable = (initialRows: Row[]) => {
       },
       in(col: string, vals: unknown[]) {
         filtered = filtered.filter((r) => vals.includes(r[col]));
+        return b;
+      },
+      gte(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) >= (val as string | number);
+        });
+        return b;
+      },
+      lt(col: string, val: unknown) {
+        filtered = filtered.filter((row) => {
+          const cell = row[col];
+          if (cell === null || cell === undefined) return false;
+          return (cell as string | number) < (val as string | number);
+        });
         return b;
       },
       or() {
@@ -322,4 +341,13 @@ Deno.test('sweepUnacceptedOrders: an auto-cancelled NO-PROMO order is a clean no
   const result = await sweepUnacceptedOrders();
   expectEqual(result.cancelled, 1, 'the order was auto-cancelled');
   expectEqual(state.redemptions().length, 0, 'store still empty, no error');
+});
+
+Deno.test('promoRelease cleanup: restore shared client and fetch', () => {
+  // Keep later files on the real client and fetch implementation.
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = originalPromoReleaseFrom;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = originalPromoReleaseRpc;
+  globalThis.fetch = originalPromoReleaseFetch;
 });

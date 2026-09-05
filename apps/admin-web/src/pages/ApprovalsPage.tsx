@@ -12,6 +12,16 @@ import {
 import { getAdminApprovalQueue } from '../services/platformReads';
 import { getApplicationTone, getApprovalTone } from '../theme/tones';
 
+const formatVehicleLine = (application: {
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehiclePlateNumber?: string | null;
+}) => {
+  const parts = [application.vehicleMake, application.vehicleModel].filter(Boolean);
+  const label = parts.length > 0 ? parts.join(' ') : 'Vehicle details pending';
+  return `${label}${application.vehiclePlateNumber ? ` · ${application.vehiclePlateNumber}` : ''}`;
+};
+
 export default function ApprovalsPage() {
   const { data, loading, error, refresh } = usePolledRpc(getAdminApprovalQueue);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -80,7 +90,7 @@ export default function ApprovalsPage() {
               <div>
                 <div className="list-row-title">{application.restaurantName}</div>
                 <div className="list-row-sub">
-                  {application.contactName} · {application.email} · {application.cuisine}
+                  {application.contactName} Â· {application.email} Â· {application.cuisine}
                 </div>
                 <div className="list-row-sub">{application.address}</div>
               </div>
@@ -129,7 +139,12 @@ export default function ApprovalsPage() {
               <div>
                 <div className="list-row-title">{application.displayName}</div>
                 <div className="list-row-sub">
-                  {application.email} · {application.vehicleType} · {application.region} / {application.lga}
+                  {application.email} Â· {application.vehicleType} Â· {application.region} / {application.lga}
+                </div>
+                <div className="list-row-sub">{formatVehicleLine(application)}</div>
+                <div className="list-row-sub">
+                  Licence {application.licenseNumber ?? 'pending'} · Docs{' '}
+                  {application.licenceFrontPath && application.licenceBackPath ? 'captured' : 'missing'}
                 </div>
               </div>
               <div className="row-actions">

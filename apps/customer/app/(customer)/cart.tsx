@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -27,6 +27,7 @@ import { getRestaurantDetail } from '../../src/services/publicRestaurantReadMode
 import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
 import { promptForAuth } from '../../src/utils/authPrompt';
+import { groupCartItemsByRestaurant } from '../../src/utils/checkoutGrouping';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
 import { getRestaurantAvailability } from '../../src/utils/restaurantAvailability';
@@ -37,6 +38,20 @@ const CHECKOUT_FAILURE_MESSAGE = 'Check network and try again.';
 const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer'];
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 const formatPlainNumber = (amount: number) => Math.round(amount).toLocaleString('en-US');
+
+type RestaurantCheckoutSummary = {
+  deliveryFee: number;
+  items: ReturnType<typeof groupCartItemsByRestaurant>[number]['items'];
+  minOrder: number;
+  restaurant: RestaurantDocument | null;
+  restaurantId: string;
+  restaurantName: string;
+  subtotal: number;
+  supportsDelivery: boolean;
+  supportsPickup: boolean;
+  totalQuantity: number;
+  warning: string | null;
+};
 
 export default function CartScreen() {
   const {
@@ -55,7 +70,6 @@ export default function CartScreen() {
   const { isCovered } = useCoverage();
   const [deliveryNote, setDeliveryNote] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('card');
-  const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [tipAmount, setTipAmount] = useState<number>(DEFAULT_TIP_AMOUNT);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -64,63 +78,114 @@ export default function CartScreen() {
   const [promoChecking, setPromoChecking] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [autoOffers, setAutoOffers] = useState<PromoCodePreview['automaticOffers']>([]);
+  const [restaurantsById, setRestaurantsById] = useState<Record<string, RestaurantDocument | null>>({});
+  const [restaurantsLoading, setRestaurantsLoading] = useState(false);
   const router = useRouter();
   const isMountedRef = useRef(true);
   const isCheckoutScreenFocusedRef = useRef(false);
-  const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
   const safeTipAmount = tipOptions.includes(tipAmount as (typeof tipOptions)[number]) ? tipAmount : DEFAULT_TIP_AMOUNT;
+  const restaurantGroups = useMemo(() => groupCartItemsByRestaurant(items), [items]);
+  const restaurantIds = useMemo(
+    () => Array.from(new Set(restaurantGroups.map((group) => group.restaurantId))),
+    [restaurantGroups]
+  );
+  const restaurantIdsKey = restaurantIds.join('|');
+  const isMixedBasket = restaurantIds.length > 1;
+  const primaryRestaurantId = restaurantGroups[0]?.restaurantId ?? restaurantId;
+  const primaryRestaurantName = restaurantGroups[0]?.restaurantName ?? restaurantName;
+  const allRestaurantsLoaded = restaurantIds.length > 0 && restaurantIds.every((id) => Boolean(restaurantsById[id]));
+
+  const restaurantSummaries = useMemo<RestaurantCheckoutSummary[]>(
+    () =>
+      restaurantGroups.map((group) => {
+        const restaurant = restaurantsById[group.restaurantId] ?? null;
+        const availability = restaurant ? getRestaurantAvailability(restaurant, deliveryLocation) : null;
+        const supportsDelivery = restaurant?.supportsDelivery === true;
+        const supportsPickup = restaurant?.supportsPickup !== false;
+        const minOrder = restaurant?.minOrder ?? 0;
+        const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
+        const belowMinimum = restaurant ? group.subtotal < minOrder : false;
+        const outOfArea = fulfillmentType === 'delivery' && availability?.reason === 'out_of_area';
+        let warning: string | null = null;
+
+        if (restaurantsLoading) {
+          warning = 'Loading restaurant details...';
+        } else if (!restaurant) {
+          warning = 'This restaurant is no longer available for checkout.';
+        } else if (restaurant.isOpen === false) {
+          warning = 'This restaurant is currently closed.';
+        } else if (restaurant.isPublished !== true) {
+          warning = 'This restaurant is currently unavailable for new orders.';
+        } else if (fulfillmentType === 'delivery' && !supportsDelivery) {
+          warning = 'This restaurant does not support delivery.';
+        } else if (fulfillmentType === 'pickup' && !supportsPickup) {
+          warning = 'Pickup is no longer available for this restaurant.';
+        } else if (outOfArea) {
+          warning = 'This restaurant does not deliver to your pinned address. Try pickup or choose a closer restaurant.';
+        } else if (belowMinimum) {
+          warning = `Add ${Math.max(1, Math.ceil(minOrder - group.subtotal)).toLocaleString('en-US')} more to meet the minimum order.`;
+        }
+
+        return {
+          deliveryFee,
+          items: group.items,
+          minOrder,
+          restaurant,
+          restaurantId: group.restaurantId,
+          restaurantName: restaurant?.name ?? group.restaurantName,
+          subtotal: group.subtotal,
+          supportsDelivery,
+          supportsPickup,
+          totalQuantity: group.totalQuantity,
+          warning,
+        };
+      }),
+    [deliveryLocation, fulfillmentType, restaurantGroups, restaurantsById, restaurantsLoading]
+  );
+
+  const basketSubtotal = restaurantSummaries.reduce((sum, group) => sum + group.subtotal, 0);
+  const basketDeliveryFee = fulfillmentType === 'delivery' ? restaurantSummaries.reduce((sum, group) => sum + group.deliveryFee, 0) : 0;
   const pricingPreview = calculateCheckoutTotal({
-    deliveryFee,
-    subtotal: total,
+    deliveryFee: basketDeliveryFee,
+    subtotal: basketSubtotal,
     tip: safeTipAmount,
   });
-  // Advisory promo preview: the server re-validates and redeems at placement.
-  const promoDiscount = appliedPromo?.valid ? appliedPromo.discount : 0;
+  const basketSupportsDelivery = restaurantSummaries.length > 0 && restaurantSummaries.every((group) => group.supportsDelivery);
+  const basketSupportsPickup = restaurantSummaries.length > 0 && restaurantSummaries.every((group) => group.supportsPickup);
+  const checkoutBlockedReason = !isCovered
+    ? COVERAGE_COMING_SOON_COPY
+    : !allRestaurantsLoaded
+      ? 'Loading restaurant details...'
+      : restaurantSummaries.find((group) => group.warning)?.warning ?? null;
+  const promoEligible = !isMixedBasket && restaurantSummaries.length === 1 && Boolean(primaryRestaurantId) && allRestaurantsLoaded;
+  const promoDiscount = promoEligible && appliedPromo?.valid ? appliedPromo.discount : 0;
   const effectiveTotal = promoDiscount > 0 ? Math.max(pricingPreview.total - promoDiscount, 0) : pricingPreview.total;
-  const minOrder = restaurant?.minOrder ?? 0;
-  const belowMinimum = total > 0 && total < minOrder;
-  // Delivery is offered only when the restaurant self-provisions it (opt-in).
-  // Everyone else is pickup-only with delivery shown as "coming soon".
-  const isDeliverySupported = restaurant?.supportsDelivery === true;
-  const isPickupSupported = restaurant?.supportsPickup !== false;
-  const deliveryComingSoon = Boolean(restaurant) && !isDeliverySupported;
-  const isRestaurantPublished = restaurant?.isPublished === true;
-  // Per-restaurant delivery-radius check (Finding 2): platform coverage only tells us FEASTY
-  // serves this area at all — a customer can still be inside platform coverage but outside
-  // THIS restaurant's own deliveryRadiusKm. Only a delivery order can be blocked by this; a
-  // pickup order never touches a delivery radius. Only the 'out_of_area' reason applies here —
-  // 'closed' / 'pickup_only' / 'delivery_disabled' are already handled by the branches above.
-  const restaurantDeliveryAvailability = restaurant ? getRestaurantAvailability(restaurant, deliveryLocation) : null;
-  const isOutOfRestaurantDeliveryRange =
-    fulfillmentType === 'delivery' && restaurantDeliveryAvailability?.reason === 'out_of_area';
-  const restaurantUnavailableReason =
-    !isCovered
-      ? COVERAGE_COMING_SOON_COPY
-      : !restaurant
-        ? 'This restaurant is no longer available for checkout.'
-        : restaurant.isOpen === false
-          ? 'This restaurant is currently closed.'
-            : !isRestaurantPublished
-            ? 'This restaurant is currently unavailable for new orders.'
-            : isOutOfRestaurantDeliveryRange
-              ? 'This restaurant does not deliver to your pinned address. Try pickup or choose a closer restaurant.'
-              : fulfillmentType === 'pickup' && !isPickupSupported
-              ? 'Pickup is no longer available for this restaurant.'
-              : belowMinimum
-                ? `Add ${Math.max(1, Math.ceil(minOrder - total)).toLocaleString('en-US')} more to meet the minimum order.`
-                : null;
+  const checkoutTitle = isMixedBasket
+    ? `${restaurantSummaries.length} restaurants in cart`
+    : restaurantSummaries[0]?.restaurantName ?? primaryRestaurantName ?? 'Checkout';
+  const checkoutSubtitle = isMixedBasket
+    ? 'Orders are grouped by restaurant. One payment completes the basket.'
+    : 'Review your order before checkout.';
+  const checkoutDisabled = submitting || Boolean(checkoutBlockedReason) || (fulfillmentType === 'delivery' && !deliveryLocation) || !primaryRestaurantId;
 
   useEffect(() => {
     setDeliveryNote(deliveryLocation?.note ?? '');
   }, [deliveryLocation?.note]);
 
-  // If this restaurant does not self-provision delivery, delivery is "coming
-  // soon" — quietly move the customer to pickup so checkout stays unblocked.
   useEffect(() => {
-    if (deliveryComingSoon && fulfillmentType === 'delivery') {
-      setFulfillmentType('pickup');
+    if (restaurantsLoading) {
+      return;
     }
-  }, [deliveryComingSoon, fulfillmentType, setFulfillmentType]);
+
+    if (fulfillmentType === 'delivery' && !basketSupportsDelivery && basketSupportsPickup) {
+      setFulfillmentType('pickup');
+      return;
+    }
+
+    if (fulfillmentType === 'pickup' && !basketSupportsPickup && basketSupportsDelivery) {
+      setFulfillmentType('delivery');
+    }
+  }, [basketSupportsDelivery, basketSupportsPickup, fulfillmentType, restaurantsLoading, setFulfillmentType]);
 
   useEffect(() => {
     if (!user) {
@@ -129,22 +194,19 @@ export default function CartScreen() {
     }
   }, [user]);
 
-  // A previewed discount is only valid for the exact basket it was computed on —
-  // clear it whenever the basket, tip, or fulfillment changes so a stale number
-  // is never shown or sent. (Placement re-validates regardless.)
   useEffect(() => {
     setAppliedPromo(null);
-    setPromoMessage(null);
-  }, [total, safeTipAmount, fulfillmentType, restaurantId]);
+    setPromoMessage(isMixedBasket ? 'Promo codes are unavailable for mixed baskets.' : null);
+  }, [fulfillmentType, isMixedBasket, primaryRestaurantId, safeTipAmount, total]);
 
-  // Surface eligible automatic offers (no code entry) for the current basket.
   useEffect(() => {
-    if (!user || !restaurantId || items.length === 0) {
+    if (!user || !primaryRestaurantId || items.length === 0 || isMixedBasket) {
       setAutoOffers([]);
       return;
     }
+
     let cancelled = false;
-    validateCustomerPromoCode({ fulfillmentType, items, restaurantId, tipAmount: safeTipAmount })
+    validateCustomerPromoCode({ fulfillmentType, items, restaurantId: primaryRestaurantId, tipAmount: safeTipAmount })
       .then((preview) => {
         if (!cancelled) {
           setAutoOffers(preview.automaticOffers ?? []);
@@ -155,16 +217,23 @@ export default function CartScreen() {
           setAutoOffers([]);
         }
       });
+
     return () => {
       cancelled = true;
     };
-  }, [user, restaurantId, items, fulfillmentType, safeTipAmount]);
+  }, [fulfillmentType, isMixedBasket, items, primaryRestaurantId, safeTipAmount, user]);
 
   const handleApplyPromo = useCallback(async () => {
     const code = promoCodeInput.trim();
-    if (!code || !restaurantId) {
+    if (isMixedBasket) {
+      setPromoMessage('Promo codes are unavailable for mixed baskets.');
       return;
     }
+
+    if (!code || !primaryRestaurantId) {
+      return;
+    }
+
     setPromoChecking(true);
     setPromoMessage(null);
     try {
@@ -172,7 +241,7 @@ export default function CartScreen() {
         fulfillmentType,
         items,
         promoCode: code,
-        restaurantId,
+        restaurantId: primaryRestaurantId,
         tipAmount: safeTipAmount,
       });
       setAppliedPromo(preview);
@@ -183,7 +252,7 @@ export default function CartScreen() {
     } finally {
       setPromoChecking(false);
     }
-  }, [promoCodeInput, fulfillmentType, items, restaurantId, safeTipAmount]);
+  }, [fulfillmentType, isMixedBasket, items, primaryRestaurantId, promoCodeInput, safeTipAmount]);
 
   useEffect(() => {
     return () => {
@@ -206,47 +275,57 @@ export default function CartScreen() {
   const activeRef = useRef(false);
 
   useEffect(() => {
-    if (!restaurantId) {
-      setRestaurant(null);
-      return;
-    }
-
     activeRef.current = true;
-
     return () => {
       activeRef.current = false;
     };
-  }, [restaurantId]);
+  }, []);
 
-  const loadRestaurant = useCallback(async () => {
-    if (!restaurantId) {
+  const loadRestaurants = useCallback(async () => {
+    if (!restaurantIds.length) {
       return;
     }
 
+    setRestaurantsLoading(true);
     try {
-      const { restaurant: nextRestaurant } = await getRestaurantDetail(restaurantId);
+      const results = await Promise.allSettled(
+        restaurantIds.map(async (id) => {
+          const { restaurant } = await getRestaurantDetail(id);
+          return [id, restaurant as RestaurantDocument | null] as const;
+        })
+      );
+
       if (!activeRef.current) {
         return;
       }
 
-      setRestaurant(nextRestaurant as RestaurantDocument | null);
+      const nextRestaurants: Record<string, RestaurantDocument | null> = {};
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const [id, restaurant] = result.value;
+          nextRestaurants[id] = restaurant;
+        }
+      }
+      setRestaurantsById(nextRestaurants);
     } catch {
-      console.warn('Unable to load checkout restaurant.');
       if (activeRef.current) {
-        setRestaurant(null);
+        setRestaurantsById({});
+      }
+    } finally {
+      if (activeRef.current) {
+        setRestaurantsLoading(false);
       }
     }
-  }, [restaurantId]);
+  }, [restaurantIdsKey]);
 
-  const subscribeToRestaurant = useCallback<RealtimeResourceSubscribe>(
+  const subscribeToRestaurants = useCallback<RealtimeResourceSubscribe>(
     (onChanged, onStatusChange) =>
       subscribeToRealtimeChanges(
         supabase,
         [RESTAURANTS_REALTIME_TOPIC],
         (payload) => {
-          // The topic is global; skip refetches for other restaurants when tagged.
           const changedRestaurantId = typeof payload.restaurantId === 'string' ? payload.restaurantId : null;
-          if (changedRestaurantId && restaurantId && changedRestaurantId !== restaurantId) {
+          if (changedRestaurantId && !restaurantIds.includes(changedRestaurantId)) {
             return;
           }
 
@@ -254,25 +333,23 @@ export default function CartScreen() {
         },
         onStatusChange
       ),
-    [restaurantId]
+    [restaurantIdsKey]
   );
 
-  // Realtime is the transport; the fallback poll only fires while the
-  // channel is not confirmed SUBSCRIBED, and only while the app is visible.
   useRealtimeResource({
-    subscribe: subscribeToRestaurant,
-    load: loadRestaurant,
+    subscribe: subscribeToRestaurants,
+    load: loadRestaurants,
     isVisible,
     fallbackMs: 120000,
-    enabled: Boolean(restaurantId),
+    enabled: restaurantIds.length > 0,
   });
 
   const handleFulfillmentChange = (nextType: FulfillmentType) => {
-    if (nextType === 'delivery' && !isDeliverySupported) {
+    if (nextType === 'delivery' && !basketSupportsDelivery) {
       return;
     }
 
-    if (nextType === 'pickup' && !isPickupSupported) {
+    if (nextType === 'pickup' && !basketSupportsPickup) {
       return;
     }
 
@@ -295,7 +372,7 @@ export default function CartScreen() {
   };
 
   const handlePlaceOrder = async () => {
-    if (!restaurantId || items.length === 0) {
+    if (!primaryRestaurantId || items.length === 0) {
       return;
     }
 
@@ -309,24 +386,27 @@ export default function CartScreen() {
       return;
     }
 
-    if (fulfillmentType === 'delivery' && !deliveryLocation) {
-      router.push('/delivery-location');
+    if (checkoutBlockedReason) {
+      Alert.alert('Checkout unavailable', checkoutBlockedReason);
       return;
     }
 
-    if (belowMinimum) {
-      Alert.alert('Minimum order not reached', `This restaurant requires a minimum subtotal of ${formatPlainNumber(minOrder)}.`);
+    if (fulfillmentType === 'delivery' && !deliveryLocation) {
+      router.push('/delivery-location');
       return;
     }
 
     trackAnalyticsEvent('customer_checkout_started', {
       fulfillment_type: fulfillmentType,
       items_count: items.length,
+      mixed_basket: isMixedBasket,
       payment_method: paymentMethod,
-      restaurant_id: restaurantId,
+      restaurant_count: restaurantSummaries.length,
+      restaurant_id: primaryRestaurantId,
       tip_amount: safeTipAmount,
       has_delivery_location: Boolean(deliveryLocation),
     });
+
     setSubmitting(true);
     try {
       const checkoutPayload = {
@@ -340,10 +420,8 @@ export default function CartScreen() {
         fulfillmentType,
         items,
         paymentMethod,
-        // The code travels on the placement request; the server re-validates and
-        // redeems it. A previewed but unapplied code is not sent.
-        promoCode: appliedPromo?.valid ? appliedPromo.code : promoCodeInput.trim() || null,
-        restaurantId,
+        promoCode: promoEligible && appliedPromo?.valid ? appliedPromo.code : promoEligible ? promoCodeInput.trim() || null : null,
+        restaurantId: primaryRestaurantId,
         tipAmount: safeTipAmount,
       };
 
@@ -390,15 +468,21 @@ export default function CartScreen() {
         ListHeaderComponent={
           <View style={styles.heroCard}>
             <Text style={styles.heroEyebrow}>Checkout</Text>
-            <Text style={styles.title}>{restaurantName}</Text>
-            <Text style={styles.subtitle}>Review your order before checkout.</Text>
+            <Text style={styles.title}>{checkoutTitle}</Text>
+            <Text style={styles.subtitle}>{checkoutSubtitle}</Text>
+            <Text style={styles.heroMeta}>
+              {items.length} item{items.length === 1 ? '' : 's'}
+              {isMixedBasket ? ` across ${restaurantSummaries.length} restaurants` : ''}
+            </Text>
           </View>
         }
         renderItem={({ item }) => (
           <View style={styles.itemCard}>
             <View style={styles.itemCopy}>
               <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>{formatMoney(item.price)} each</Text>
+              <Text style={styles.itemMeta}>
+                {formatMoney(item.price)} each{isMixedBasket ? ` · ${item.restaurantName}` : ''}
+              </Text>
             </View>
 
             <View style={styles.itemActions}>
@@ -417,6 +501,47 @@ export default function CartScreen() {
         )}
         ListFooterComponent={
           <View style={styles.footer}>
+            {isMixedBasket ? (
+              <View style={styles.mixedBasketCard}>
+                <Text style={styles.mixedBasketTitle}>Mixed basket</Text>
+                <Text style={styles.mixedBasketCopy}>
+                  Orders are prepared separately by restaurant. One payment covers the full basket.
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionLabel}>Grouped subtotals</Text>
+              {restaurantSummaries.map((summary) => (
+                <View key={summary.restaurantId} style={styles.groupCard}>
+                  <View style={styles.groupHeader}>
+                    <View style={styles.groupHeaderCopy}>
+                      <Text style={styles.groupTitle}>{summary.restaurantName}</Text>
+                      <Text style={styles.groupMeta}>
+                        {summary.totalQuantity} item{summary.totalQuantity === 1 ? '' : 's'} · {summary.items.length} line
+                        {summary.items.length === 1 ? '' : 's'}
+                      </Text>
+                    </View>
+                    <Text style={styles.groupSubtotal}>{formatMoney(summary.subtotal)}</Text>
+                  </View>
+                  <View style={styles.summarySplit}>
+                    <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
+                    <Text style={styles.summaryDetailValue}>
+                      {fulfillmentType === 'delivery' ? formatMoney(summary.deliveryFee) : 'No delivery fee'}
+                    </Text>
+                  </View>
+                  {summary.warning ? (
+                    <Text style={styles.groupWarning}>{summary.warning}</Text>
+                  ) : (
+                    <Text style={styles.groupReady}>Ready for {fulfillmentType}</Text>
+                  )}
+                </View>
+              ))}
+              <Text style={styles.groupNote}>
+                Restaurant subtotals are itemized here; payment is still captured once for the entire basket.
+              </Text>
+            </View>
+
             <View style={styles.sectionCard}>
               <Text style={styles.sectionLabel}>Fulfillment</Text>
               <View style={styles.fulfillmentToggle}>
@@ -424,10 +549,10 @@ export default function CartScreen() {
                   style={[
                     styles.fulfillmentOption,
                     fulfillmentType === 'delivery' ? styles.fulfillmentOptionActive : styles.fulfillmentOptionIdle,
-                    !isDeliverySupported ? styles.fulfillmentOptionDisabled : null,
+                    !basketSupportsDelivery ? styles.fulfillmentOptionDisabled : null,
                   ]}
                   onPress={() => handleFulfillmentChange('delivery')}
-                  disabled={!isDeliverySupported}
+                  disabled={!basketSupportsDelivery}
                 >
                   <FontAwesome
                     name="motorcycle"
@@ -443,19 +568,17 @@ export default function CartScreen() {
                     >
                       Delivery
                     </Text>
-                    {deliveryComingSoon ? (
-                      <Text style={styles.fulfillmentSoonText}>Coming soon</Text>
-                    ) : null}
+                    {!basketSupportsDelivery ? <Text style={styles.fulfillmentSoonText}>Mixed basket</Text> : null}
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.fulfillmentOption,
                     fulfillmentType === 'pickup' ? styles.fulfillmentOptionActive : styles.fulfillmentOptionIdle,
-                    !isPickupSupported ? styles.fulfillmentOptionDisabled : null,
+                    !basketSupportsPickup ? styles.fulfillmentOptionDisabled : null,
                   ]}
                   onPress={() => handleFulfillmentChange('pickup')}
-                  disabled={!isPickupSupported}
+                  disabled={!basketSupportsPickup}
                 >
                   <FontAwesome
                     name="shopping-bag"
@@ -475,13 +598,13 @@ export default function CartScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.fulfillmentHint}>
-                {deliveryComingSoon
-                  ? 'This restaurant is pickup-only for now — delivery is coming soon.'
+                {isMixedBasket
+                  ? 'Each restaurant is checked on its own rules. Delivery only stays available when every restaurant supports it.'
                   : fulfillmentType === 'delivery'
                     ? 'We will deliver to the pinned map location you choose below.'
                     : 'Skip the map step and collect your order directly from the restaurant.'}
               </Text>
-              {restaurantUnavailableReason ? <Text style={styles.warningText}>{restaurantUnavailableReason}</Text> : null}
+              {checkoutBlockedReason ? <Text style={styles.warningText}>{checkoutBlockedReason}</Text> : null}
             </View>
 
             {user ? (
@@ -506,9 +629,7 @@ export default function CartScreen() {
                       </View>
                       <View style={styles.locationCopy}>
                         <Text style={styles.locationTitle}>Choose where we should deliver</Text>
-                        <Text style={styles.locationAddress}>
-                          Drop a pin on the map to set your exact delivery spot.
-                        </Text>
+                        <Text style={styles.locationAddress}>Drop a pin on the map to set your exact delivery spot.</Text>
                       </View>
                     </TouchableOpacity>
                   )}
@@ -529,9 +650,11 @@ export default function CartScreen() {
                       <FontAwesome name="shopping-bag" size={17} color={customerTheme.accentStrong} />
                     </View>
                     <View style={styles.locationCopy}>
-                      <Text style={styles.locationTitle}>Pickup from {restaurantName}</Text>
+                      <Text style={styles.locationTitle}>
+                        Pickup from {isMixedBasket ? `${restaurantSummaries.length} restaurants` : restaurantSummaries[0]?.restaurantName ?? primaryRestaurantName}
+                      </Text>
                       <Text style={styles.locationAddress}>
-                        We will keep this order ready for collection once the restaurant marks it prepared.
+                        We will keep each order ready for collection once the restaurant marks it prepared.
                       </Text>
                     </View>
                   </View>
@@ -551,18 +674,12 @@ export default function CartScreen() {
               <View style={styles.optionGrid}>
                 {paymentOptions.map((option) => {
                   const isActive = paymentMethod === option;
-                  const supportingCopy =
-                    option === 'bank_transfer'
-                      ? 'Pay with transfer'
-                      : 'Pay with card';
+                  const supportingCopy = option === 'bank_transfer' ? 'Pay with transfer' : 'Pay with card';
 
                   return (
-                      <TouchableOpacity
-                        key={option}
-                        style={[
-                          styles.optionCard,
-                          isActive ? styles.optionCardActive : null,
-                        ]}
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.optionCard, isActive ? styles.optionCardActive : null]}
                       onPress={() => {
                         setCheckoutError(null);
                         setPaymentMethod(option);
@@ -615,7 +732,7 @@ export default function CartScreen() {
               <Text style={styles.sectionLabel}>Summary</Text>
               <View style={styles.summarySplit}>
                 <Text style={styles.summaryDetailLabel}>Subtotal</Text>
-                <Text style={styles.summaryDetailValue}>{formatMoney(total)}</Text>
+                <Text style={styles.summaryDetailValue}>{formatMoney(basketSubtotal)}</Text>
               </View>
               <View style={styles.summarySplit}>
                 <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
@@ -636,18 +753,22 @@ export default function CartScreen() {
                   autoCorrect={false}
                   value={promoCodeInput}
                   onChangeText={setPromoCodeInput}
-                  editable={!promoChecking}
+                  editable={!promoChecking && promoEligible}
                 />
                 <TouchableOpacity
-                  style={[styles.promoApplyButton, promoChecking || !promoCodeInput.trim() ? styles.promoApplyDisabled : null]}
+                  style={[
+                    styles.promoApplyButton,
+                    promoChecking || !promoCodeInput.trim() || !promoEligible ? styles.promoApplyDisabled : null,
+                  ]}
                   onPress={handleApplyPromo}
-                  disabled={promoChecking || !promoCodeInput.trim()}
+                  disabled={promoChecking || !promoCodeInput.trim() || !promoEligible}
                 >
                   <Text style={styles.promoApplyText}>{promoChecking ? '...' : 'Apply'}</Text>
                 </TouchableOpacity>
               </View>
+              {!promoEligible ? <Text style={styles.promoAuto}>Promo codes are unavailable for mixed baskets.</Text> : null}
               {promoMessage ? <Text style={styles.promoError}>{promoMessage}</Text> : null}
-              {autoOffers.length > 0 && !(appliedPromo?.valid) ? (
+              {autoOffers.length > 0 && !appliedPromo?.valid ? (
                 <Text style={styles.promoAuto}>
                   Offer applied automatically: {formatMoney(autoOffers[0].discount)} off
                 </Text>
@@ -666,24 +787,23 @@ export default function CartScreen() {
                 <Text style={styles.summaryValue}>{formatMoney(effectiveTotal)}</Text>
               </View>
               <TouchableOpacity
-                style={[
-                  styles.checkoutButton,
-                  submitting || Boolean(restaurantUnavailableReason) ? styles.checkoutButtonDisabled : null,
-                ]}
+                style={[styles.checkoutButton, checkoutDisabled ? styles.checkoutButtonDisabled : null]}
                 onPress={handlePlaceOrder}
-                disabled={submitting || Boolean(restaurantUnavailableReason)}
+                disabled={checkoutDisabled}
               >
                 <Text style={styles.checkoutButtonText}>
                   {user
-                    ? fulfillmentType === 'delivery'
-                      ? deliveryLocation
-                        ? submitting
+                    ? checkoutBlockedReason
+                      ? 'Checkout unavailable'
+                      : fulfillmentType === 'delivery'
+                        ? deliveryLocation
+                          ? submitting
+                            ? 'Opening payment...'
+                            : 'Pay and place order'
+                          : 'Choose delivery location'
+                        : submitting
                           ? 'Opening payment...'
                           : 'Pay and place order'
-                        : 'Choose delivery location'
-                      : submitting
-                        ? 'Opening payment...'
-                        : 'Pay and place order'
                     : 'Sign in to place order'}
                 </Text>
               </TouchableOpacity>
@@ -740,6 +860,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.7,
     textTransform: 'uppercase',
+  },
+  heroMeta: {
+    color: customerTheme.textSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 8,
   },
   title: {
     color: customerTheme.text,
@@ -810,6 +936,27 @@ const styles = StyleSheet.create({
   guestPromptWrapper: {
     marginBottom: 12,
   },
+  mixedBasketCard: {
+    backgroundColor: '#f8fbff',
+    borderColor: '#d6e7ff',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  mixedBasketTitle: {
+    color: customerTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  mixedBasketCopy: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
   sectionCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
@@ -825,6 +972,58 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: 10,
     textTransform: 'uppercase',
+  },
+  groupCard: {
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 12,
+  },
+  groupHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  groupHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  groupTitle: {
+    color: customerTheme.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  groupMeta: {
+    color: customerTheme.textMuted,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  groupSubtotal: {
+    color: customerTheme.accentStrong,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  groupWarning: {
+    color: '#8a4f12',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  groupReady: {
+    color: '#047857',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  groupNote: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
   },
   fulfillmentToggle: {
     backgroundColor: customerTheme.surfaceStrong,

@@ -1,4 +1,5 @@
 import { validatePaystackVerificationForOrder } from './invariants.ts';
+import { DEFAULT_PRICING_CONFIG, calculateOrderPricing, settlementBalanceResidual } from '../_shared/pricing.ts';
 
 const order = {
   id: 'order-1',
@@ -8,6 +9,12 @@ const order = {
   pricing: {
     total: 2500,
   },
+};
+
+const expectEqual = (actual: unknown, expected: unknown, label: string) => {
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
 };
 
 const assertThrowsMessage = (work: () => void, expectedMessage: string) => {
@@ -66,6 +73,17 @@ Deno.test('accepts a successful Paystack transaction bound to the same order ref
       status: 'success',
     },
   });
+});
+
+Deno.test('settlement balance stays exact for the settlement split', () => {
+  const pricing = calculateOrderPricing({
+    config: DEFAULT_PRICING_CONFIG,
+    deliveryFee: 800,
+    items: [{ basePrice: 5000, price: 6100, quantity: 2 }],
+    tip: 100,
+  });
+
+  expectEqual(settlementBalanceResidual(pricing), 0, 'settlement balance residual');
 });
 
 // Task 17 (G1): a promo order carries a DISCOUNTED pricing.total (the discount

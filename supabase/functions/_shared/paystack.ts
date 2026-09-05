@@ -128,6 +128,8 @@ export const initializePaystackTransaction = async ({
   metadata,
   paymentMethod,
   reference,
+  subaccount = null,
+  transactionCharge = null,
 }: {
   amount: number;
   callbackUrl?: string | null;
@@ -135,6 +137,8 @@ export const initializePaystackTransaction = async ({
   metadata: JsonObject;
   paymentMethod: string;
   reference: string;
+  subaccount?: string | null;
+  transactionCharge?: number | null;
 }) => {
   const payload: JsonObject = {
     amount: String(toKoboAmount(amount)),
@@ -144,6 +148,14 @@ export const initializePaystackTransaction = async ({
     metadata: JSON.stringify(metadata),
     reference,
   };
+
+  if (subaccount) {
+    payload.subaccount = subaccount;
+  }
+
+  if (transactionCharge !== null && transactionCharge !== undefined) {
+    payload.transaction_charge = String(toKoboAmount(transactionCharge));
+  }
 
   if (callbackUrl) {
     payload.callback_url = callbackUrl;

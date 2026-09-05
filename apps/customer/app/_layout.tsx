@@ -4,12 +4,18 @@ import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import LoadingSkeleton from '../src/components/LoadingSkeleton';
 import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
 import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRouting';
 import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
-import { initializeSentry } from '../../../packages/observability/src/sentry';
+import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { customerTheme } from '../src/theme/palette';
+
+const initializeSentry = createSentryInitializer({
+  loadNativeSdk: () => import('@sentry/react-native'),
+  loadWebSdk: () => import('@sentry/browser'),
+});
 
 const AUTH_PAGES = new Set([
   '/login',
@@ -254,9 +260,11 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <CartProvider>
-        <RootLayoutNav />
-      </CartProvider>
+      <FeatureFlagsProvider>
+        <CartProvider>
+          <RootLayoutNav />
+        </CartProvider>
+      </FeatureFlagsProvider>
     </AuthProvider>
   );
 }

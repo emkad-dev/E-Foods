@@ -25,6 +25,9 @@ const {
 } = await import('./dispatchSelection.ts');
 const { serviceClient } = await import('./client.ts');
 const { DEFAULT_DISPATCH_WEIGHTS } = await import('./dispatchWeights.ts');
+const originalDispatchFrom = serviceClient.from.bind(serviceClient);
+const originalDispatchRpc = serviceClient.rpc.bind(serviceClient);
+const originalGlobalFetch = globalThis.fetch;
 
 const expectEqual = (actual: unknown, expected: unknown, label: string) => {
   if (actual !== expected) {
@@ -203,6 +206,10 @@ type MockState = {
   broadcastCount: number;
   deliveryEvents: Array<Record<string, unknown>>;
   offers: MockOffer[];
+  prepSamples: Array<Record<string, unknown>>;
+  restaurantDeliveryTime: string;
+  restaurantLatitude: number | null;
+  restaurantLongitude: number | null;
   riderLoad: Record<string, number>;
 };
 
@@ -211,23 +218,37 @@ const RIDER_ID = 'rider-1';
 const ORDER_ID = 'order-1';
 const MAX_OFFERS = 3;
 
-const buildOrder = () => ({
+const buildOrder = (overrides: Record<string, unknown> = {}) => ({
   customerId: 'customer-1',
+  deliveryLocation: null,
   fulfillmentType: 'delivery',
   id: ORDER_ID,
   restaurantId: RESTAURANT_ID,
   restaurantName: 'Test Kitchen',
+  ...overrides,
 });
 
 const snapshot = <T>(value: T): T => structuredClone(value);
 
-const installMocks = (riderIds: string[] = [RIDER_ID]): MockState => {
+const installMocks = (
+  riderIds: string[] = [RIDER_ID],
+  options: {
+    prepSamples?: Array<Record<string, unknown>>;
+    restaurantDeliveryTime?: string;
+    restaurantLatitude?: number | null;
+    restaurantLongitude?: number | null;
+  } = {}
+): MockState => {
   const state: MockState = {
     adminRoleLookups: 0,
     assignment: null,
     broadcastCount: 0,
     deliveryEvents: [],
     offers: [],
+    prepSamples: options.prepSamples ?? [],
+    restaurantDeliveryTime: options.restaurantDeliveryTime ?? '5 min',
+    restaurantLatitude: options.restaurantLatitude ?? null,
+    restaurantLongitude: options.restaurantLongitude ?? null,
     riderLoad: Object.fromEntries(riderIds.map((id) => [id, 0])),
   };
 
@@ -291,7 +312,52 @@ const installMocks = (riderIds: string[] = [RIDER_ID]): MockState => {
       return {
         select: () => ({
           eq: () => ({
-            maybeSingle: async () => ({ data: { latitude: null, longitude: null }, error: null }),
+            maybeSingle: async () => ({
+              data: {
+                deliveryTime: state.restaurantDeliveryTime,
+                latitude: state.restaurantLatitude,
+                longitude: state.restaurantLongitude,
+              },
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
+
+    if (table === 'CustomerOrder') {
+      return {
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: async () => ({
+                data: snapshot(state.prepSamples),
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      };
+    }
+
+    if (table === 'PlatformSettings') {
+      return {
+        select: () => ({
+          eq: (_col: string, id: string) => ({
+            maybeSingle: async () => {
+              if (id !== 'dispatchTracking') {
+                return { data: null, error: null };
+              }
+
+              return {
+                data: {
+                  data: {
+                    averageSpeedKmh: 18,
+                  },
+                },
+                error: null,
+              };
+            },
           }),
         }),
       };
@@ -442,6 +508,39 @@ Deno.test('runAutomaticDispatchAssignment: offers the only eligible rider on acc
   expectEqual(state.deliveryEvents.length, 1, 'exactly one DeliveryEvent written');
   expectEqual(state.deliveryEvents[0]?.eventType, 'dispatch_offered', 'offer path event type');
   expectEqual(state.broadcastCount, 1, 'order-changed broadcast fired once');
+});
+
+Deno.test('runAutomaticDispatchAssignment: accepted orders do not auto-offer when the prep estimate is still longer than the ride', async () => {
+  const sampleBase = Date.parse('2026-08-27T10:00:00.000Z');
+  const state = installMocks(['rider-1'], {
+    prepSamples: Array.from({ length: 20 }, (_, index) => ({
+      acceptedAtIso: new Date(sampleBase + index * 60_000).toISOString(),
+      readyAtIso: new Date(sampleBase + (index + 60) * 60_000).toISOString(),
+    })),
+    restaurantLatitude: 6.5244,
+    restaurantLongitude: 3.3792,
+    restaurantDeliveryTime: '25-35 min',
+  });
+  const order = buildOrder({
+    deliveryLocation: {
+      address: 'Customer drop-off',
+      latitude: 6.5245,
+      longitude: 3.3793,
+    },
+  });
+
+  const outcome = await runAutomaticDispatchAssignment(
+    order as never,
+    state.assignment as never,
+    'restaurant-owner-uid',
+    'accepted',
+    weightsLoader,
+    '2026-08-27T10:10:00.000Z'
+  );
+
+  expectEqual(outcome.outcome, 'skipped', 'prep timing can defer an accepted order until the kitchen is closer to ready');
+  expectEqual(state.offers.length, 0, 'no rider is offered while the kitchen prep window is still too long');
+  expectEqual(state.deliveryEvents.length, 0, 'no delivery events are written when the order is deferred');
 });
 
 Deno.test('runAutomaticDispatchAssignment: a second attempt while an offer is live does not create a second offer', async () => {
@@ -691,6 +790,18 @@ const installEmptyPoolMocks = (): EmptyPoolMockState => {
       };
     }
 
+    if (table === 'CustomerOrder') {
+      return {
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: async () => ({ data: [], error: null }),
+            }),
+          }),
+        }),
+      };
+    }
+
     // Nobody has ever been offered this order, so the exclusion set is empty -
     // which is exactly what makes an empty pool `pool_empty` (retryable, a
     // rider coming online fixes it) rather than `exhausted` (we walked the
@@ -810,4 +921,13 @@ Deno.test('runAutomaticDispatchAssignment: a lapsed but unswept offer does not b
   expectEqual(state.offers[1]?.courierId, 'rider-2', 'it went to the next rider');
   expectEqual(state.riderLoad['rider-1'], 0, 'no counter movement');
   expectEqual(state.riderLoad['rider-2'], 0, 'no counter movement');
+});
+
+Deno.test('dispatchSelection cleanup: restore shared client and fetch', () => {
+  // Leave the shared test client in its real state for the next files.
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = originalDispatchFrom;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = originalDispatchRpc;
+  globalThis.fetch = originalGlobalFetch;
 });

@@ -53,6 +53,7 @@
 
 import { serviceClient } from './client.ts';
 import { calculateDistanceKm, type GeoPoint } from './deliveryCoverage.ts';
+import { computeEtaRange } from './deliveryEta.ts';
 import {
   DISPATCH_OFFER_TTL_SECONDS,
   MAX_DISPATCH_OFFERS,
@@ -72,8 +73,10 @@ import {
   type CustomerOrderRow,
   type DeliveryAssignmentRow,
 } from './orders.ts';
+import { loadDispatchTrackingConfig } from './platformSettings.ts';
 import { broadcastOrderChanged } from './realtime.ts';
 import { parseInteger, sanitizeText, unique } from './rpc/coercion.ts';
+import { loadRestaurantPrepTimeEstimate, loadRestaurantTimingContext, type RestaurantTimingContext } from './prepTime.ts';
 
 // ---------------------------------------------------------------------------
 // The scorer: pure functions, no I/O. Exported so tests can exercise them
@@ -278,22 +281,6 @@ const loadDispatchCandidates = async (restaurantId: string | null): Promise<Disp
   }
 
   return candidates;
-};
-
-const loadRestaurantCoordinate = async (restaurantId: string): Promise<GeoPoint | null> => {
-  const { data, error } = await serviceClient
-    .from('RestaurantRecord')
-    .select('latitude,longitude')
-    .eq('id', restaurantId)
-    .maybeSingle<{ latitude?: number | null; longitude?: number | null }>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return hasCoordinates(data ?? null)
-    ? { latitude: (data as { latitude: number }).latitude, longitude: (data as { longitude: number }).longitude }
-    : null;
 };
 
 // ---------------------------------------------------------------------------
@@ -554,7 +541,8 @@ export const runAutomaticDispatchAssignment = async (
   assignment: DeliveryAssignmentRow | null,
   actorUid: string,
   targetStatus: string,
-  loadWeights: () => Promise<DispatchWeights>
+  loadWeights: () => Promise<DispatchWeights>,
+  statusChangedAtIso?: string | null
 ): Promise<AutomaticDispatchOutcome> => {
   const currentStatus = normalizeOrderStatus(targetStatus);
   if (!AUTO_DISPATCH_ELIGIBLE_STATUSES.includes(currentStatus)) {
@@ -567,6 +555,45 @@ export const runAutomaticDispatchAssignment = async (
 
   if (sanitizeText(assignment?.courierId)) {
     return { outcome: 'already_assigned', ownerId: getDispatchAssignmentOwnerId(assignment) || null };
+  }
+
+  if (currentStatus === ORDER_STATUS.ACCEPTED) {
+    const restaurantTiming = await loadRestaurantTimingContext(order.restaurantId);
+    const acceptedAtIso =
+      sanitizeText(statusChangedAtIso) ||
+      sanitizeText((order.timeline as { acceptedAt?: unknown } | null | undefined)?.acceptedAt) ||
+      sanitizeText(order.createdAt) ||
+      '';
+
+    const prepEstimate = await loadRestaurantPrepTimeEstimate({
+      acceptedAtIso,
+      fallbackDeliveryTime: restaurantTiming?.deliveryTime ?? null,
+      restaurantId: order.restaurantId,
+    });
+
+    const deliveryLocation = order.deliveryLocation as
+      | { latitude?: number | null; longitude?: number | null }
+      | null
+      | undefined;
+    const restaurantCoordinates =
+      restaurantTiming &&
+      hasCoordinates(restaurantTiming)
+        ? { latitude: restaurantTiming.latitude, longitude: restaurantTiming.longitude }
+        : null;
+
+    if (restaurantCoordinates && hasCoordinates(deliveryLocation)) {
+      const trackingConfig = await loadDispatchTrackingConfig();
+      const travelDistanceKm = calculateDistanceKm(restaurantCoordinates, {
+        latitude: deliveryLocation.latitude as number,
+        longitude: deliveryLocation.longitude as number,
+      });
+      const travelEta = computeEtaRange(travelDistanceKm, trackingConfig.averageSpeedKmh);
+      const PREP_BUFFER_MINUTES = 5;
+
+      if (prepEstimate.minutes > travelEta.minutes + PREP_BUFFER_MINUTES) {
+        return { outcome: 'skipped' };
+      }
+    }
   }
 
   // One read answers everything selection needs before scoring a pool: who is
@@ -602,13 +629,20 @@ export const runAutomaticDispatchAssignment = async (
     return { outcome: 'exhausted' };
   }
 
-  const [restaurantCoordinate, restaurantScopedCandidates] = await Promise.all([
-    loadRestaurantCoordinate(order.restaurantId),
+  const [restaurantTiming, restaurantScopedCandidates] = (await Promise.all([
+    loadRestaurantTimingContext(order.restaurantId),
     loadDispatchCandidates(order.restaurantId),
-  ]);
+  ])) as [RestaurantTimingContext | null, DispatchCandidate[]];
+
+  const restaurantCoordinate =
+    restaurantTiming &&
+    typeof restaurantTiming.latitude === 'number' &&
+    typeof restaurantTiming.longitude === 'number'
+      ? { latitude: restaurantTiming.latitude, longitude: restaurantTiming.longitude }
+      : null;
 
   let restaurantScoped = true;
-  let candidates = restaurantScopedCandidates.filter((candidate) => !excluded.has(candidate.id));
+  let candidates: DispatchCandidate[] = restaurantScopedCandidates.filter((candidate) => !excluded.has(candidate.id));
   if (candidates.length === 0) {
     restaurantScoped = false;
     candidates = (await loadDispatchCandidates(null)).filter((candidate) => !excluded.has(candidate.id));

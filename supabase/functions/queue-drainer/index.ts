@@ -133,7 +133,7 @@ const processNotificationJob = async (job: NotificationJob) => {
   return { sent };
 };
 
-type QueueJob = JsonObject & { id: string; payload: unknown };
+type QueueJob = JsonObject & { id: string; payload: unknown; retry_count?: number | null };
 
 // All queues now finalize their row through the drainer. Handlers are pure and
 // idempotent: they return a result on success and throw on failure, leaving the
@@ -165,7 +165,8 @@ const queueDefinitions: Record<
       await markPaymentVerificationFailed(
         payload.orderId,
         payload.paymentReference,
-        error instanceof Error ? error.message : 'Payment verification failed.'
+        error instanceof Error ? error.message : 'Payment verification failed.',
+        (job.retry_count ?? 0) + 1
       );
     },
   },

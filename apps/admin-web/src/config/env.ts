@@ -32,9 +32,10 @@ export const appEnv = {
     import.meta.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     import.meta.env.BACKEND_RPC_URL
   ),
+  sentryDsn: resolveEnv(import.meta.env.VITE_SENTRY_DSN, import.meta.env.EXPO_PUBLIC_SENTRY_DSN),
   // Kill switch for RPC routing: 'split' (default) sends each action to its
   // own domain function; 'legacy' routes everything to app-rpc. Passed
-  // through raw — resolveRpcMode normalizes unset/blank/unrecognized values
+  // through raw - resolveRpcMode normalizes unset/blank/unrecognized values
   // to 'split'.
   rpcMode: resolveEnv(import.meta.env.VITE_RPC_MODE, import.meta.env.EXPO_PUBLIC_RPC_MODE),
 };

@@ -41,21 +41,7 @@ export const resolveDispatchAccessState = ({
     };
   }
 
-  if (userDocument.dispatchApplicationStatus === 'pending') {
-    return {
-      kind: 'blocked',
-      message: DISPATCH_APPLICATION_PENDING_MESSAGE,
-    };
-  }
-
-  if (userDocument.dispatchApplicationStatus === 'rejected') {
-    return {
-      kind: 'blocked',
-      message: userDocument.dispatchApplicationRejectionReason ?? DISPATCH_APPLICATION_REJECTED_FALLBACK,
-    };
-  }
-
-  if (claimRole === 'dispatch') {
+  if (claimRole === 'dispatch' && userDocument.dispatchApplicationStatus !== 'pending' && userDocument.dispatchApplicationStatus !== 'rejected') {
     return {
       kind: 'dispatch',
       userRole: 'dispatch',

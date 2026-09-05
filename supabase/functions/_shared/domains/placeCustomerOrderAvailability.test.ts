@@ -22,6 +22,9 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
 const { ordersDomain } = await import('./orders.ts');
 const { serviceClient } = await import('../client.ts');
+const originalPlaceOrderAvailabilityFrom = serviceClient.from.bind(serviceClient);
+const originalPlaceOrderAvailabilityRpc = serviceClient.rpc.bind(serviceClient);
+const originalPlaceOrderAvailabilityFetch = globalThis.fetch;
 
 const expectEqual = (actual: unknown, expected: unknown, label: string) => {
   if (actual !== expected) {
@@ -124,6 +127,24 @@ const installMocks = (restaurant: Record<string, unknown> | null) => {
           state.orderInserts.push(payload);
           return { error: null };
         },
+        select: () => {
+          // Risk-signal reads during placement only need a query-shaped empty
+          // response here.
+          // deno-lint-ignore no-explicit-any
+          const builder: any = {
+            eq: () => builder,
+            gte: () => builder,
+            lt: () => builder,
+            order: () => builder,
+            limit: () => builder,
+            returns: () => builder,
+            maybeSingle: async () => ({ data: null, error: null }),
+            single: async () => ({ data: null, error: null }),
+            then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
+              Promise.resolve({ data: [], error: null }).then(resolve),
+          };
+          return builder;
+        },
       };
     }
 
@@ -153,6 +174,8 @@ const installMocks = (restaurant: Record<string, unknown> | null) => {
       const builder: any = {
         select: () => builder,
         eq: () => builder,
+        gte: () => builder,
+        lt: () => builder,
         or: () => builder,
         order: () => builder,
         limit: () => builder,
@@ -355,4 +378,13 @@ Deno.test('drift guard: hasAvailableMenuItem (catalog list filter) and placeCust
         `(catalog says available=${catalogSaysAvailable}, placement accepted=${placementAccepted}, rejection: "${rejectionMessage}")`
     );
   }
+});
+
+Deno.test('placeCustomerOrderAvailability cleanup: restore shared client and fetch', () => {
+  // Keep later files on the real client and fetch implementation.
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = originalPlaceOrderAvailabilityFrom;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = originalPlaceOrderAvailabilityRpc;
+  globalThis.fetch = originalPlaceOrderAvailabilityFetch;
 });

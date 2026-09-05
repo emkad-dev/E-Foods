@@ -13,6 +13,7 @@ import LoginPage from './pages/LoginPage';
 const OverviewPage = lazy(() => import('./pages/OverviewPage'));
 const OrdersPage = lazy(() => import('./pages/OrdersPage'));
 const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
+const ObservabilityPage = lazy(() => import('./pages/ObservabilityPage'));
 const AccessPage = lazy(() => import('./pages/AccessPage'));
 const DispatchPage = lazy(() => import('./pages/DispatchPage'));
 const StatisticsPage = lazy(() => import('./pages/StatisticsPage'));
@@ -25,7 +26,7 @@ function RequireAdmin({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (initializing) {
-    return <LoadingBlock label="Checking your session…" />;
+    return <LoadingBlock label="Checking your session..." />;
   }
 
   if (!session || role !== 'admin') {
@@ -52,7 +53,7 @@ export default function App() {
           <Route
             path="/"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <OverviewPage />
               </Suspense>
             }
@@ -60,7 +61,7 @@ export default function App() {
           <Route
             path="/orders"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <OrdersPage />
               </Suspense>
             }
@@ -68,15 +69,31 @@ export default function App() {
           <Route
             path="/approvals"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <ApprovalsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/observability"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
+                <ObservabilityPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/risk-signals"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
+                <ObservabilityPage />
               </Suspense>
             }
           />
           <Route
             path="/access"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <AccessPage />
               </Suspense>
             }
@@ -84,7 +101,7 @@ export default function App() {
           <Route
             path="/dispatch"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <DispatchPage />
               </Suspense>
             }
@@ -92,7 +109,7 @@ export default function App() {
           <Route
             path="/statistics"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <StatisticsPage />
               </Suspense>
             }
@@ -100,7 +117,7 @@ export default function App() {
           <Route
             path="/broadcasts"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <BroadcastsPage />
               </Suspense>
             }
@@ -108,7 +125,7 @@ export default function App() {
           <Route
             path="/promos"
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <PromosPage />
               </Suspense>
             }
@@ -127,7 +144,7 @@ export default function App() {
           <Route
             index
             element={
-              <Suspense fallback={<LoadingBlock label="Loading…" />}>
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <InboxPage />
               </Suspense>
             }

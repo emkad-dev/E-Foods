@@ -1047,7 +1047,23 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   // subsequent `await`s (tracked as baseline debt, not something this task
   // takes on for the whole file).
   try {
-    await runAutomaticDispatchAssignment(bundle!.order, bundle!.assignment, context.uid, nextState!.status, loadDispatchWeights);
+    const statusTimelinePatch = nextState!.timelinePatch as {
+      acceptedAt?: unknown;
+      preparingAt?: unknown;
+      readyAt?: unknown;
+    };
+    const statusChangedAtIso = sanitizeText(
+      statusTimelinePatch.acceptedAt ?? statusTimelinePatch.preparingAt ?? statusTimelinePatch.readyAt
+    );
+
+    await runAutomaticDispatchAssignment(
+      bundle!.order,
+      bundle!.assignment,
+      context.uid,
+      nextState!.status,
+      loadDispatchWeights,
+      statusChangedAtIso || null
+    );
   } catch (error) {
     logEdgeEvent('error', 'automatic dispatch assignment failed', {
       error: error instanceof Error ? error.message : String(error),

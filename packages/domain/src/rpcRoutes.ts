@@ -41,7 +41,7 @@ export type RpcTarget = RpcFunction | typeof LEGACY_RPC_FUNCTION;
  */
 export const KNOWN_RPC_TARGETS: readonly RpcTarget[] = ['feasty-orders', 'feasty-dispatch', 'feasty-partner', 'feasty-admin', 'feasty-account', LEGACY_RPC_FUNCTION];
 
-/** The authoritative action -> split-mode Edge Function map. Covers exactly the 70 actions in actions.ts. */
+/** The authoritative action -> split-mode Edge Function map. Covers exactly the 77 actions in actions.ts. */
 export const RPC_ROUTES: Record<string, RpcFunction> = {
   "customerGetOrders": 'feasty-orders',
   "customerGetOrderDetail": 'feasty-orders',
@@ -59,8 +59,10 @@ export const RPC_ROUTES: Record<string, RpcFunction> = {
   "dispatchGetDeliveryQueue": 'feasty-dispatch',
   "dispatchGetRiders": 'feasty-dispatch',
   "dispatchGetWeeklyEarnings": 'feasty-dispatch',
+  "dispatchGetShiftSlots": 'feasty-dispatch',
   "dispatchGetOrderDetail": 'feasty-dispatch',
   "upsertDispatchRiderProfile": 'feasty-dispatch',
+  "dispatchUpsertShiftSlots": 'feasty-dispatch',
   "syncDispatchRiderLocation": 'feasty-dispatch',
   "dispatchAssignOrderCourier": 'feasty-dispatch',
   "dispatchUpdateOrderStatus": 'feasty-dispatch',
@@ -83,6 +85,10 @@ export const RPC_ROUTES: Record<string, RpcFunction> = {
   "adminSetRestaurantPublished": 'feasty-admin',
   "adminGetDashboardSnapshot": 'feasty-admin',
   "adminGetAccessOverview": 'feasty-admin',
+  "adminGetRiskEvents": 'feasty-admin',
+  "adminListFeatureFlags": 'feasty-admin',
+  "adminUpsertFeatureFlag": 'feasty-admin',
+  "adminGetOperationalAlerts": 'feasty-admin',
   "supportGetInbox": 'feasty-admin',
   "supportGetConversation": 'feasty-admin',
   "supportSendAgentReply": 'feasty-admin',
@@ -102,6 +108,7 @@ export const RPC_ROUTES: Record<string, RpcFunction> = {
   "adminSetPromoCodeActive": 'feasty-admin',
   "bootstrapFirstAdmin": 'feasty-admin',
   "promoTrack": 'feasty-account',
+  "getFeatureFlags": 'feasty-account',
   "getPolicyAcceptance": 'feasty-account',
   "recordPolicyAcceptance": 'feasty-account',
   "provisionStaffAccount": 'feasty-account',

@@ -6,6 +6,14 @@ import { loadUserAccount, loadUserPhoneNumber, syncUserRoleState, upsertUserAcco
 import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { serviceClient } from '../client.ts';
+import {
+  buildCourierWeeklyEarningsSummary,
+  loadCourierEarnings,
+  loadCourierPayouts,
+  loadCourierShiftSlots,
+  upsertCourierShiftSlots,
+  uploadDispatchDocument,
+} from '../courierSupply.ts';
 import { recordDispatchRiderPing } from '../dispatchRiderPings.ts';
 import { broadcastRiderPositionToActiveOrders } from '../riderPositionBroadcast.ts';
 import {
@@ -195,9 +203,6 @@ const getLagosWeekWindow = (date = new Date()) => {
     timezone: 'Africa/Lagos',
   };
 };
-
-const getDispatchEarningsAmount = (pricing: JsonObject | null | undefined) =>
-  roundCurrency(parseNumber(pricing?.dispatchFee, parseNumber(pricing?.deliveryFee, 0)));
 
 const getOrderDeliveredAt = (order: CustomerOrderRow) =>
   sanitizeOptionalText(order.timeline?.deliveredAt) ??
@@ -493,73 +498,57 @@ const dispatchGetWeeklyEarnings: Handler = async ({ context, data }) => {
   const requestedCourierId = sanitizeText(data.courierId);
   const courierId = context.role === 'admin' && requestedCourierId ? requestedCourierId : context.uid;
   const weekWindow = getLagosWeekWindow();
+  const records = await loadCourierEarnings(courierId, weekWindow.startsAt, weekWindow.endsAt);
+  const payouts = await loadCourierPayouts(courierId);
+  const summary = buildCourierWeeklyEarningsSummary({ payouts, records, weekWindow });
 
-  const { data: assignments, error: assignmentError } = await serviceClient
-    .from('DeliveryAssignment')
-    .select('orderId,courierId,courierName,assignedAt')
-    .eq('courierId', courierId);
+  return json(200, {
+    data: summary,
+  });
+};
 
-  if (assignmentError) {
-    throw new Error(assignmentError.message);
-  }
-
-  const orderIds = ((assignments ?? []) as DeliveryAssignmentRow[])
-    .map((assignment) => sanitizeText(assignment.orderId))
-    .filter(Boolean);
-
-  if (orderIds.length === 0) {
-    return json(200, {
-      data: {
-        averagePerDelivery: 0,
-        currency: DEFAULT_CURRENCY,
-        deliveredOrders: 0,
-        records: [],
-        total: 0,
-        week: weekWindow,
-      },
-    });
-  }
-
-  const { data: orders, error: orderError } = await serviceClient
-    .from('CustomerOrder')
-    .select(CUSTOMER_ORDER_COLUMNS)
-    .in('id', orderIds)
-    .eq('status', ORDER_STATUS.DELIVERED)
-    .order('updatedAt', { ascending: false });
-
-  if (orderError) {
-    throw new Error(orderError.message);
-  }
-
-  const deliveredOrders = ((orders ?? []) as CustomerOrderRow[]).filter(
-    (order) =>
-      normalizeOrderStatus(order.status) === ORDER_STATUS.DELIVERED &&
-      isIsoDateInWindow(getOrderDeliveredAt(order), weekWindow.startsAt, weekWindow.endsAt)
-  );
-  const records = deliveredOrders.map((order) => {
-    const earningsAmount = getDispatchEarningsAmount(order.pricing);
-    const deliveredAt = getOrderDeliveredAt(order);
-
-    return {
-      address: sanitizeOptionalText(order.deliveryLocation?.shortAddress) ??
-        sanitizeOptionalText(order.deliveryAddress),
-      amount: earningsAmount,
-      deliveredAt,
-      orderId: order.id,
-      restaurantName: order.restaurantName,
-    };
-  }).sort((left, right) => Date.parse(right.deliveredAt ?? '') - Date.parse(left.deliveredAt ?? ''));
-  const total = roundCurrency(records.reduce((sum, record) => sum + record.amount, 0));
-  const deliveredOrderCount = records.length;
+const dispatchGetShiftSlots: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch', 'admin']);
+  const requestedCourierId = sanitizeText(data.courierId);
+  const courierId = context.role === 'admin' && requestedCourierId ? requestedCourierId : context.uid;
+  const slots = await loadCourierShiftSlots(courierId);
 
   return json(200, {
     data: {
-      averagePerDelivery: deliveredOrderCount > 0 ? roundCurrency(total / deliveredOrderCount) : 0,
-      currency: DEFAULT_CURRENCY,
-      deliveredOrders: deliveredOrderCount,
-      records,
-      total,
-      week: weekWindow,
+      courierId,
+      slots,
+    },
+  });
+};
+
+const dispatchUpsertShiftSlots: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch', 'admin']);
+  const requestedCourierId = sanitizeText(data.courierId);
+  const courierId = context.role === 'admin' && requestedCourierId ? requestedCourierId : context.uid;
+  const slots = Array.isArray(data.slots) ? data.slots : [];
+
+  if (slots.length === 0) {
+    fail(400, 'Add at least one shift slot before saving.');
+  }
+
+  await upsertCourierShiftSlots(
+    courierId,
+    slots.map((slot) => ({
+      endsAt: sanitizeText((slot as JsonObject).endsAt),
+      forecastDemand: parseNumber((slot as JsonObject).forecastDemand, 0),
+      id: sanitizeOptionalText((slot as JsonObject).id) ?? undefined,
+      notes: sanitizeOptionalText((slot as JsonObject).notes),
+      startsAt: sanitizeText((slot as JsonObject).startsAt),
+      status: sanitizeOptionalText((slot as JsonObject).status) ?? undefined,
+    }))
+  );
+
+  const savedSlots = await loadCourierShiftSlots(courierId);
+
+  return json(200, {
+    data: {
+      courierId,
+      slots: savedSlots,
     },
   });
 };
@@ -1111,7 +1100,15 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   const region = sanitizeText(data.region);
   const lga = sanitizeText(data.lga);
   const vehicleType = sanitizeText(data.vehicleType);
+  const vehicleMake = sanitizeOptionalText(data.vehicleMake);
+  const vehicleModel = sanitizeOptionalText(data.vehicleModel);
+  const vehiclePlateNumber = sanitizeOptionalText(data.vehiclePlateNumber);
+  const licenseNumber = sanitizeOptionalText(data.licenseNumber);
   const currentAddress = sanitizeOptionalText(data.currentAddress);
+  const licenceFrontBase64 = sanitizeText(data.licenceFrontBase64);
+  const licenceBackBase64 = sanitizeText(data.licenceBackBase64);
+  const licenceFrontMimeType = sanitizeOptionalText(data.licenceFrontMimeType) ?? 'image/jpeg';
+  const licenceBackMimeType = sanitizeOptionalText(data.licenceBackMimeType) ?? 'image/jpeg';
   const policyAcceptance = validatePolicyAcceptancePayload(
     data.policyAcceptance,
     'dispatch',
@@ -1133,6 +1130,21 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   if (!vehicleType) {
     fail(400, 'Select a delivery vehicle before submitting.');
   }
+  if (!vehicleMake) {
+    fail(400, 'Add the vehicle make before submitting.');
+  }
+  if (!vehicleModel) {
+    fail(400, 'Add the vehicle model before submitting.');
+  }
+  if (!vehiclePlateNumber) {
+    fail(400, 'Add the vehicle plate number before submitting.');
+  }
+  if (!licenseNumber) {
+    fail(400, 'Add the licence number before submitting.');
+  }
+  if (!licenceFrontBase64 || !licenceBackBase64) {
+    fail(400, 'Upload both sides of your licence before submitting.');
+  }
 
   const existingApplication = await loadDispatchApplication(context.uid);
   const currentStatus = sanitizeText(existingApplication?.status, DISPATCH_APPLICATION_STATUS.PENDING);
@@ -1147,6 +1159,18 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   const submittedAt = existingApplication?.submittedAt ?? nowIso();
   const updatedAt = nowIso();
   const currentAccount = await loadUserAccount(context.uid);
+  const licenceFrontPath = await uploadDispatchDocument({
+    base64: licenceFrontBase64,
+    courierId: context.uid,
+    kind: 'licence_front',
+    mimeType: licenceFrontMimeType,
+  });
+  const licenceBackPath = await uploadDispatchDocument({
+    base64: licenceBackBase64,
+    courierId: context.uid,
+    kind: 'licence_back',
+    mimeType: licenceBackMimeType,
+  });
 
   const { error: applicationError } = await serviceClient.from('DispatchApplicationRecord').upsert(
     {
@@ -1158,14 +1182,24 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
       region,
       lga,
       vehicleType,
+      vehicleMake,
+      vehicleModel,
+      vehiclePlateNumber,
+      licenseNumber,
+      licenceFrontPath,
+      licenceBackPath,
       currentAddress,
       latitude: coordinates.latitude,
       longitude: coordinates.longitude,
-      status: DISPATCH_APPLICATION_STATUS.APPROVED,
+      status: DISPATCH_APPLICATION_STATUS.PENDING,
+      verificationStatus: DISPATCH_APPLICATION_STATUS.PENDING,
       submittedAt,
-      reviewedAt: updatedAt,
-      approvedByUid: context.uid,
+      reviewedAt: null,
+      verifiedAt: null,
+      verifiedByUid: null,
       rejectionReason: null,
+      reviewNotes: null,
+      approvedByUid: null,
       updatedAt,
     },
     { onConflict: 'id' }
@@ -1175,35 +1209,15 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
     throw new Error(applicationError.message);
   }
 
-  await syncUserRoleState(context.uid, 'dispatch', null, {
-    accountDisabled: false,
-    disabledAt: null,
-    disabledByUid: null,
-    lastPrivilegedRole: 'dispatch',
-  });
-  await ensureDispatchRiderRecord(context.uid, {
-    acceptanceRate: 100,
-    completedTrips: 0,
-    currentAddress,
-    displayName,
-    lga,
-    latitude: coordinates.latitude,
-    longitude: coordinates.longitude,
-    phoneNumber,
-    region,
-    status: DEFAULT_DISPATCH_STATUS,
-    vehicleType,
-    zone: region,
-  });
   await upsertUserAccount({
     uid: context.uid,
     email: context.email,
     displayName,
     phoneNumber,
     emailVerified: true,
-    roleDisplay: 'dispatch',
-    dispatchApplicationStatus: DISPATCH_APPLICATION_STATUS.APPROVED,
-    dispatchApplicationReviewedAt: updatedAt,
+    roleDisplay: 'customer',
+    dispatchApplicationStatus: DISPATCH_APPLICATION_STATUS.PENDING,
+    dispatchApplicationReviewedAt: null,
     dispatchApplicationRejectionReason: null,
     createdAt: currentAccount?.createdAt ?? updatedAt,
     updatedAt,
@@ -1215,8 +1229,8 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
     vehicleType,
   });
   await notifyAdmins({
-    title: 'New dispatch rider',
-    body: `${displayName} is now live for dispatch access in ${region}.`,
+    title: 'New dispatch application',
+    body: `${displayName} submitted a courier application in ${region}.`,
     data: buildNotificationData({
       app: 'admin',
       extra: {
@@ -1229,7 +1243,7 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
 
   return json(200, {
     data: {
-      status: DISPATCH_APPLICATION_STATUS.APPROVED,
+      status: DISPATCH_APPLICATION_STATUS.PENDING,
       submittedAt,
       targetUid: context.uid,
     },
@@ -1438,9 +1452,11 @@ export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
     dispatchGetOrderDetail,
     dispatchGetRiders,
     dispatchGetWeeklyEarnings,
+    dispatchGetShiftSlots,
     dispatchUpdateOrderStatus,
     submitDispatchApplication,
     syncDispatchRiderLocation,
+    dispatchUpsertShiftSlots,
     upsertDispatchRiderProfile,
   },
 });
