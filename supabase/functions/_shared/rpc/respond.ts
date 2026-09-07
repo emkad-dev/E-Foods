@@ -14,7 +14,13 @@ export class RpcError extends Error {
   }
 }
 
-export const fail = (status: number, message: string): never => {
+// The annotation belongs on the CONST, not just on the arrow's return type.
+// TypeScript only applies never-returning control-flow analysis to a call
+// through a variable whose declared type says it returns `never`; a return
+// annotation on an inferred function expression does not qualify. Without it,
+// every `if (!x.ok) fail(...)` guard in the domain modules fails to narrow the
+// discriminated union that follows.
+export const fail: (status: number, message: string) => never = (status, message) => {
   throw new RpcError(status, message);
 };
 

@@ -131,6 +131,17 @@ const result = spawnSync(
     // that: it disables lock-file discovery/writing outright instead of
     // leaving a lock in place that looks authoritative but isn't consulted.
     '--no-lock',
+    // Pin the Deno config explicitly. Deno 2.9 discovers `tsconfig.json`
+    // files, and this script runs with cwd: repoRoot, where the nearest one
+    // is the Expo apps' root tsconfig.json (`extends: "expo/tsconfig.base"`).
+    // Deno cannot resolve that extends target, so it applied an effectively
+    // empty compilerOptions - strict off - to the edge functions, which
+    // silently disables discriminated-union narrowing and manufactures
+    // TS2339 "property does not exist" errors on correct code. Most of the
+    // historical baseline was that artifact. supabase/deno.json is the config
+    // these functions are actually written against ("strict": true).
+    '--config',
+    'supabase/deno.json',
     ...targets,
   ],
   {
