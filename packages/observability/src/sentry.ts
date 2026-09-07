@@ -80,6 +80,58 @@ export const captureAppErrorPayload = (
   ...buildCaptureContext(appName, source, extra),
 });
 
+/** The subset of the DOM `window` this module actually touches. */
+type WebGlobalScope = {
+  addEventListener: (type: string, listener: (event: never) => void) => void;
+  document?: unknown;
+  removeEventListener: (type: string, listener: (event: never) => void) => void;
+};
+
+/**
+ * Returns the real DOM window, or null when there isn't one.
+ *
+ * `typeof window !== 'undefined'` is NOT a web check in React Native:
+ * react-native/Libraries/Core/setUpGlobals.js assigns `global.window =
+ * global`, so the binding always exists on native. That alias carries
+ * neither a DOM `document` nor `addEventListener`, so the old check sent
+ * native into the web branch and threw on `window.addEventListener` before
+ * the ErrorUtils branch below could ever run.
+ *
+ * Probing for the APIs this module calls (rather than for the `window`
+ * binding) is what makes web/native detection correct on RN, RN Web, Expo
+ * web, and Node/jsdom test environments alike — and it is deliberately a
+ * single shared helper so the platform choice in createSentryInitializer and
+ * the handler choice here can never disagree about which runtime this is.
+ */
+const resolveWebScope = (): WebGlobalScope | null => {
+  // Cast through `unknown`: the DOM lib types `window` as `Window &
+  // typeof globalThis`, whose overloaded addEventListener does not overlap
+  // structurally with the narrow shape above.
+  const candidate = (globalThis as typeof globalThis & { window?: unknown }).window as unknown as
+    | Partial<WebGlobalScope>
+    | undefined;
+
+  if (!candidate || typeof candidate !== 'object') {
+    return null;
+  }
+
+  if (typeof candidate.document === 'undefined') {
+    return null;
+  }
+
+  if (
+    typeof candidate.addEventListener !== 'function' ||
+    typeof candidate.removeEventListener !== 'function'
+  ) {
+    return null;
+  }
+
+  return candidate as WebGlobalScope;
+};
+
+/** True only in a real DOM environment. See resolveWebScope. */
+export const isWebRuntime = () => resolveWebScope() !== null;
+
 export const installGlobalErrorHandlers = (
   capture: SentryCapture,
   appName: string
@@ -90,12 +142,12 @@ export const installGlobalErrorHandlers = (
 
   const globalScope = globalThis as typeof globalThis & {
     ErrorUtils?: GlobalErrorUtils;
-    window?: Window;
   };
 
+  const webScope = resolveWebScope();
   const restoreWindowListeners: Array<() => void> = [];
 
-  if (typeof globalScope.window !== 'undefined') {
+  if (webScope) {
     const onError = (event: ErrorEvent) => {
       const payload = captureAppErrorPayload(appName, 'window.error', event.error ?? event.message, {
         filename: event.filename || null,
@@ -110,18 +162,18 @@ export const installGlobalErrorHandlers = (
       capture(payload.error, payload);
     };
 
-    globalScope.window.addEventListener('error', onError);
-    globalScope.window.addEventListener('unhandledrejection', onUnhandledRejection);
-    restoreWindowListeners.push(() => globalScope.window?.removeEventListener('error', onError));
+    webScope.addEventListener('error', onError);
+    webScope.addEventListener('unhandledrejection', onUnhandledRejection);
+    restoreWindowListeners.push(() => webScope.removeEventListener('error', onError));
     restoreWindowListeners.push(() =>
-      globalScope.window?.removeEventListener('unhandledrejection', onUnhandledRejection)
+      webScope.removeEventListener('unhandledrejection', onUnhandledRejection)
     );
   }
 
   const errorUtils = globalScope.ErrorUtils;
   let previousHandler: GlobalErrorHandler | null = null;
 
-  if (!globalScope.window && errorUtils?.setGlobalHandler) {
+  if (!webScope && errorUtils?.setGlobalHandler) {
     previousHandler = errorUtils.getGlobalHandler?.() ?? null;
     errorUtils.setGlobalHandler((error, isFatal) => {
       const payload = captureAppErrorPayload(appName, 'react-native.global', error, {
@@ -151,7 +203,7 @@ export const createSentryInitializer = (deps: Partial<SentryInitializerDeps> = {
   const getDsn = deps.getDsn ?? (() => readTrimmedEnv('EXPO_PUBLIC_SENTRY_DSN') || DEFAULT_SENTRY_DSN);
   const loadWebSdk = deps.loadWebSdk ?? (async () => import('@sentry/browser'));
   const loadNativeSdk = deps.loadNativeSdk ?? null;
-  const getPlatform = deps.getPlatform ?? (() => (typeof globalThis.window !== 'undefined' ? 'web' : 'native'));
+  const getPlatform = deps.getPlatform ?? (() => (isWebRuntime() ? 'web' : 'native'));
   const getEnvironment = deps.getEnvironment ?? (() => readTrimmedEnv('EXPO_PUBLIC_APP_ENV') || (isDevelopment ? 'development' : 'production'));
   const installHandlers = deps.installHandlers ?? installGlobalErrorHandlers;
 
