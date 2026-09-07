@@ -165,6 +165,15 @@ export interface OrderPriceBreakdown extends DocumentData {
   partnerServiceFee?: number;
   /** Food payout: basis − service charge. Legacy orders carry the commission-era value. */
   restaurantPayable?: number;
+  /**
+   * Task 8 (C2) settlement figures, written by the server on placement
+   * (_shared/domains/orders.ts). `netSettlement` is what the restaurant's
+   * subaccount receives. Absent on legacy orders.
+   */
+  settlement?: {
+    netSettlement?: number;
+    platformFee?: number;
+  } | null;
 }
 
 export interface OrderPaymentSummary extends DocumentData {

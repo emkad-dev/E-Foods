@@ -1,10 +1,11 @@
+/**
+ * Run with: node --test --experimental-strip-types apps/admin-web/src/lib/analytics.test.ts
+ */
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
 import { buildSettlementBreakdown } from './analytics.ts';
 
-const expectEqual = (actual: unknown, expected: unknown, label: string) => {
-  if (actual !== expected) {
-    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
-};
 
 const orders = [
   {
@@ -27,15 +28,15 @@ const orders = [
   },
 ] as const;
 
-Deno.test('buildSettlementBreakdown groups orders by restaurant and day', () => {
+test('buildSettlementBreakdown groups orders by restaurant and day', () => {
   const rows = buildSettlementBreakdown(orders as never);
 
-  expectEqual(rows.length, 1, 'row count');
+  assert.equal(rows.length, 1, 'row count');
   const [row] = rows;
-  expectEqual(row.restaurantName, 'Sunrise Kitchen', 'restaurantName');
-  expectEqual(row.orders, 2, 'orders');
-  expectEqual(row.gross, 20200, 'gross');
-  expectEqual(row.split, 10800, 'split');
-  expectEqual(row.manual, 6200, 'manual');
-  expectEqual(row.delta, 3200, 'delta');
+  assert.equal(row.restaurantName, 'Sunrise Kitchen', 'restaurantName');
+  assert.equal(row.orders, 2, 'orders');
+  assert.equal(row.gross, 20200, 'gross');
+  assert.equal(row.split, 10800, 'split');
+  assert.equal(row.manual, 6200, 'manual');
+  assert.equal(row.delta, 3200, 'delta');
 });

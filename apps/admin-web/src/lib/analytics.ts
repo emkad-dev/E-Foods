@@ -293,7 +293,10 @@ export const buildSettlementBreakdown = (orders: OrderDocument[]): SettlementBre
     const restaurantId = order.restaurantId || order.restaurantName || 'unknown';
     const restaurantName = order.restaurantName || 'Unknown restaurant';
     const key = `${dayKey}:${restaurantId}`;
-    const settlement = (order.payment?.settlement ?? {}) as Record<string, unknown>;
+    // netSettlement is written by the server onto `pricing.settlement`
+    // (_shared/domains/orders.ts), not onto the payment record — only
+    // settlementMode and splitSubaccountCode live on the transaction.
+    const settlement = (order.pricing?.settlement ?? {}) as Record<string, unknown>;
     const settlementMode = String(order.payment?.settlementMode ?? '').toLowerCase();
     const splitSubaccountCode = String(order.payment?.splitSubaccountCode ?? '').trim();
     const paidToRestaurant = roundMoney(Number(settlement.netSettlement ?? 0));
