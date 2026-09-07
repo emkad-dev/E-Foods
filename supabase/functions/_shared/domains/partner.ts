@@ -85,7 +85,7 @@ const getPartnerKitchenPriority = (order: CustomerOrderRow) => {
     return 3;
   }
 
-  if ([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY].includes(status)) {
+  if (([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY] as readonly string[]).includes(status)) {
     return 4;
   }
 
@@ -132,7 +132,7 @@ const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
         },
       };
     case 'preparing':
-      if (![ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
+      if (!([ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED] as readonly string[]).includes(currentStatus)) {
         fail(412, 'Only accepted orders can move into preparation.');
       }
 
@@ -144,7 +144,7 @@ const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
         },
       };
     case 'ready':
-      if (![ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING].includes(currentStatus)) {
+      if (!([ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING] as readonly string[]).includes(currentStatus)) {
         fail(412, 'Only active kitchen orders can be marked ready.');
       }
 
@@ -158,7 +158,7 @@ const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
     case 'delivered':
       // Restaurants that self-provision delivery (and pickup handoffs) complete
       // their own orders — no platform rider is involved.
-      if (![ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+      if (!([ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP] as readonly string[]).includes(currentStatus)) {
         fail(412, 'Only orders that are ready can be marked delivered.');
       }
 
@@ -170,7 +170,7 @@ const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
         },
       };
     case 'reject':
-      if (![ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
+      if (!([ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED] as readonly string[]).includes(currentStatus)) {
         fail(412, 'Only active incoming orders can be rejected.');
       }
 

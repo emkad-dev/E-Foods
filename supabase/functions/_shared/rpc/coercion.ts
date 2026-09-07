@@ -32,7 +32,11 @@ export const sanitizeOptionalText = (value: unknown) => {
 
 export const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 
-export const parseNumber = (value: unknown, fallback = 0) => {
+// `fallback` is generic so a caller can ask for a non-numeric miss value -
+// dispatch's rider ping wants `null` for "no accuracy reported" rather than
+// a sentinel 0. Defaulting F to number keeps every existing call site's
+// return type exactly `number`.
+export const parseNumber = <F = number>(value: unknown, fallback: number | F = 0): number | F => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }

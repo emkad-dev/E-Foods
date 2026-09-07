@@ -247,7 +247,17 @@ const provisionStaffAccount: Handler = async ({ context, data }) => {
   let restaurantId = ['restaurant', 'dispatch'].includes(role) ? requestedRestaurantId : null;
   let restaurantName: string | null = null;
 
-  let authUser = await findSupabaseAuthUserByEmail(email);
+  // The admin auth API returns a bare JSON object, so every field arrives as
+  // `unknown` through the index signature. Naming the two nested bags this
+  // handler actually reaches into (`user` on a create/update response,
+  // `user_metadata` on a lookup) is what lets those reads type-check; the
+  // sanitizers below already accept `unknown` and validate at runtime.
+  type ProvisionedAuthUser = Record<string, unknown> & {
+    user?: Record<string, unknown>;
+    user_metadata?: Record<string, unknown>;
+  };
+
+  let authUser: ProvisionedAuthUser | null = await findSupabaseAuthUserByEmail(email);
   let created = false;
 
   if (!authUser) {

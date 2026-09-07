@@ -854,9 +854,9 @@ const adminUpsertFeatureFlag: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['admin']);
 
   const featureFlag = await upsertFeatureFlag({
-    description: data.description,
+    description: sanitizeOptionalText(data.description),
     enabled: data.enabled === true,
-    key: data.key,
+    key: sanitizeText(data.key),
   });
 
   return json(200, {

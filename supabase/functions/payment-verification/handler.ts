@@ -199,7 +199,14 @@ const markOrderPaymentState = async (
   }
 
   const orderIds = Array.isArray(groupRows?.orderIds)
-    ? (groupRows.orderIds as unknown[]).map((value) => (typeof value === 'string' ? value : null)).filter(Boolean)
+    ? // A type-predicate filter, not map-to-null + filter(Boolean): the latter
+      // drops the same values at runtime but leaves the element type
+      // `string | null`, so every orderId below was nullable and could not be
+      // handed to broadcastOrderChanged. The `.length > 0` clause preserves
+      // filter(Boolean)'s rejection of the empty string exactly.
+      (groupRows.orderIds as unknown[]).filter(
+        (value): value is string => typeof value === 'string' && value.length > 0
+      )
     : [order.id];
   const expectedAmount = typeof groupRows?.pricing === 'object' && groupRows?.pricing
     ? toNumber((groupRows.pricing as JsonObject).total, toNumber((order.pricing ?? {}).total, 0))

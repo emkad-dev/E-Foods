@@ -160,7 +160,7 @@ const getDispatchQueuePriority = (order: CustomerOrderRow, assignment: DeliveryA
     return 0;
   }
 
-  if (!hasCourier && [ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(status)) {
+  if (!hasCourier && ([ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP] as readonly string[]).includes(status)) {
     return 1;
   }
 
@@ -168,11 +168,11 @@ const getDispatchQueuePriority = (order: CustomerOrderRow, assignment: DeliveryA
     return 2;
   }
 
-  if (hasCourier && [ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(status)) {
+  if (hasCourier && ([ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP] as readonly string[]).includes(status)) {
     return 3;
   }
 
-  if ([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY].includes(status)) {
+  if (([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY] as readonly string[]).includes(status)) {
     return 4;
   }
 
@@ -253,7 +253,7 @@ const buildDispatchStatusUpdate = (
         timelinePatch: { onTheWayAt: time },
       };
     case 'delivered':
-      if (![ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY].includes(currentStatus)) {
+      if (!([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY] as readonly string[]).includes(currentStatus)) {
         fail(412, 'Only picked-up delivery orders can be marked delivered.');
       }
 
@@ -266,7 +266,7 @@ const buildDispatchStatusUpdate = (
         timelinePatch: { deliveredAt: time },
       };
     case 'failed_delivery':
-      if (![ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY].includes(currentStatus)) {
+      if (!([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY] as readonly string[]).includes(currentStatus)) {
         fail(412, 'Only rider-active delivery orders can be marked as failed.');
       }
 
@@ -824,7 +824,7 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
   assertOrderPaymentReadyForOperations(bundle.order);
 
   const currentStatus = normalizeOrderStatus(bundle.order.status);
-  if (![ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+  if (!([ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP] as readonly string[]).includes(currentStatus)) {
     fail(412, 'Wait for the restaurant to accept the order before assigning a rider.');
   }
 
