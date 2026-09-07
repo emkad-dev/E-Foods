@@ -16,9 +16,14 @@ Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_123');
 
 Deno.test('initializePaystackTransaction forwards split fields to Paystack', async () => {
 
-  let capturedBody: Record<string, unknown> | null = null;
+  // Collected rather than held in a `let`: TypeScript's control-flow
+  // analysis cannot see an assignment made from inside the fetch stub, so a
+  // nullable `let` stays narrowed to `null` and every guarded read below
+  // resolves to `never`. Reading element 0 of a typed array has no such
+  // problem and keeps the assertions honest.
+  const capturedBodies: Record<string, unknown>[] = [];
   globalThis.fetch = async (_input, init) => {
-    capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    capturedBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
     return new Response(JSON.stringify({ status: true, data: { access_code: 'code-1' } }), {
       headers: { 'Content-Type': 'application/json' },
       status: 200,
@@ -40,18 +45,25 @@ Deno.test('initializePaystackTransaction forwards split fields to Paystack', asy
     globalThis.fetch = originalFetch;
   }
 
-  if (!capturedBody) {
+  const body = capturedBodies[0];
+
+  if (!body) {
     throw new Error('Expected Paystack request body to be captured.');
   }
 
-  expectEqual(capturedBody.subaccount, 'ACCT_split_123', 'subaccount');
-  expectEqual(capturedBody.transaction_charge, '220000', 'transaction_charge');
+  expectEqual(body.subaccount, 'ACCT_split_123', 'subaccount');
+  expectEqual(body.transaction_charge, '220000', 'transaction_charge');
 });
 
 Deno.test('initializePaystackTransaction omits split fields for manual settlement', async () => {
-  let capturedBody: Record<string, unknown> | null = null;
+  // Collected rather than held in a `let`: TypeScript's control-flow
+  // analysis cannot see an assignment made from inside the fetch stub, so a
+  // nullable `let` stays narrowed to `null` and every guarded read below
+  // resolves to `never`. Reading element 0 of a typed array has no such
+  // problem and keeps the assertions honest.
+  const capturedBodies: Record<string, unknown>[] = [];
   globalThis.fetch = async (_input, init) => {
-    capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    capturedBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
     return new Response(JSON.stringify({ status: true, data: { access_code: 'code-1' } }), {
       headers: { 'Content-Type': 'application/json' },
       status: 200,
@@ -70,14 +82,16 @@ Deno.test('initializePaystackTransaction omits split fields for manual settlemen
     globalThis.fetch = originalFetch;
   }
 
-  if (!capturedBody) {
+  const body = capturedBodies[0];
+
+  if (!body) {
     throw new Error('Expected Paystack request body to be captured.');
   }
 
-  if ('subaccount' in capturedBody) {
-    throw new Error(`Expected no subaccount field, got ${JSON.stringify(capturedBody.subaccount)}`);
+  if ('subaccount' in body) {
+    throw new Error(`Expected no subaccount field, got ${JSON.stringify(body.subaccount)}`);
   }
-  if ('transaction_charge' in capturedBody) {
-    throw new Error(`Expected no transaction_charge field, got ${JSON.stringify(capturedBody.transaction_charge)}`);
+  if ('transaction_charge' in body) {
+    throw new Error(`Expected no transaction_charge field, got ${JSON.stringify(body.transaction_charge)}`);
   }
 });

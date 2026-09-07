@@ -269,18 +269,25 @@ const buildOrderItems = (
   });
 };
 
+// One shape for a priced order line, shared by the draft and by
+// createOrderWithItems. It used to be spelled out twice, and the copy on
+// createOrderWithItems was never updated when Task 19 [G3] added modifiers -
+// so the parameter type omitted optionDelta/selectedOptions while the body
+// read them. Declaring it once removes the chance of that drifting again.
+type PreparedOrderItem = {
+  basePrice: number;
+  id: string;
+  name: string;
+  optionDelta?: number | null;
+  price: number;
+  quantity: number;
+  restaurantId: string;
+  restaurantName: string;
+  selectedOptions?: JsonObject[] | null;
+};
+
 type PreparedRestaurantOrderDraft = {
-  items: Array<{
-    basePrice: number;
-    id: string;
-    name: string;
-    optionDelta?: number | null;
-    price: number;
-    quantity: number;
-    restaurantId: string;
-    restaurantName: string;
-    selectedOptions?: JsonObject[] | null;
-  }>;
+  items: PreparedOrderItem[];
   orderId: string;
   pricing: JsonObject;
   restaurant: RestaurantRecordRow;
@@ -936,15 +943,7 @@ const createOrderWithItems = async ({
   customerId: string;
   deliveryLocation: JsonObject | null;
   fulfillmentType: string;
-  items: Array<{
-    basePrice: number;
-    id: string;
-    name: string;
-    price: number;
-    quantity: number;
-    restaurantId: string;
-    restaurantName: string;
-  }>;
+  items: PreparedOrderItem[];
   orderId: string;
   payment: JsonObject;
   pricing: JsonObject;
@@ -1182,11 +1181,11 @@ export const buildRefundUpdate = ({
 const getCustomerCancellationRefundRate = (currentStatus: string) => {
   // Task 18 (G2): a scheduled order cancelled before release is a FULL refund —
   // the kitchen never engaged, so the customer did nothing wrong.
-  if ([ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
+  if (([ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED] as readonly string[]).includes(currentStatus)) {
     return 1;
   }
 
-  if ([ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP].includes(currentStatus)) {
+  if (([ORDER_STATUS.PREPARING, ORDER_STATUS.READY_FOR_PICKUP] as readonly string[]).includes(currentStatus)) {
     return 0.5;
   }
 
@@ -1669,7 +1668,9 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
         customerId: context.uid,
         deliveryLocation: orderDraft.deliveryLocation,
         fulfillmentType: orderDraft.fulfillmentType,
-        items: orderDraft.items,
+        // Not the grouped branch, so this draft is the single-restaurant
+        // shape and carries items. Narrowed the same way `orders` is above.
+        items: (orderDraft as { items: PreparedOrderItem[] }).items,
         orderId,
         payment,
         pricing: orderDraft.pricing,
@@ -1800,7 +1801,7 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
     rawAttributedPromoId && rawAttributedPromoId.length <= 128 ? rawAttributedPromoId : null;
   const paymentReference = buildPaystackReference(orderId, orderDraft.paymentMethod);
   const paymentSettlement = resolvePaymentSettlementSummary(
-    orderDraft.restaurant,
+    orderDraft.restaurant ?? { paystackSubaccountCode: null },
     !(groupedOrders && groupedOrders.length > 1)
   );
   const initialPayment = buildInitialPaymentSummary({
@@ -1842,7 +1843,9 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
         customerId: context.uid,
         deliveryLocation: orderDraft.deliveryLocation,
         fulfillmentType: orderDraft.fulfillmentType,
-        items: orderDraft.items,
+        // Not the grouped branch, so this draft is the single-restaurant
+        // shape and carries items. Narrowed the same way `orders` is above.
+        items: (orderDraft as { items: PreparedOrderItem[] }).items,
         orderId,
         payment: initialPayment,
         pricing: orderDraft.pricing,
@@ -2083,7 +2086,7 @@ const refreshCustomerPaymentStatus: Handler = async ({ context, data }) => {
     fail(403, 'You can only refresh payment status for your own orders.');
   }
 
-  if (!PAYSTACK_PAYMENT_METHODS.has(sanitizeText(bundle.order.payment?.method))) {
+  if (!PAYSTACK_PAYMENT_METHODS.has(sanitizeText((bundle.order.payment as JsonObject | null)?.method))) {
     return json(200, {
       data: {
         gatewayStatus: sanitizeText(bundle.order.payment?.lastEvent, 'cash_order'),
@@ -2124,7 +2127,7 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   const currentStatus = normalizeOrderStatus(bundle.order.status);
   // Cancellation is only allowed before the kitchen starts preparing — which
   // includes a scheduled order still waiting for release (Task 18 / G2).
-  if (![ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED].includes(currentStatus)) {
+  if (!([ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED] as readonly string[]).includes(currentStatus)) {
     fail(412, 'This order can no longer be cancelled.');
   }
 
