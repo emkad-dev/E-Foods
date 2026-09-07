@@ -48,11 +48,33 @@ const getAuthLoadingMode = (pathname: string | null | undefined): CustomerLoadin
   return 'auth-login';
 };
 
+const renderAuthStack = () => (
+  <Stack
+    screenOptions={{
+      headerShadowVisible: false,
+      contentStyle: { backgroundColor: customerTheme.background },
+    }}
+  >
+    <Stack.Screen name="login" options={{ headerShown: false }} />
+    <Stack.Screen
+      name="register"
+      options={{ headerTitle: () => null, headerTransparent: true, headerBackTitle: 'Back' }}
+    />
+    <Stack.Screen name="accept-policy" options={{ title: 'Terms' }} />
+    <Stack.Screen name="terms" options={{ title: 'Terms of Service' }} />
+    <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
+    <Stack.Screen name="forgot-password" options={{ title: 'Reset Password' }} />
+    <Stack.Screen name="verify-email" options={{ title: 'Verify Email' }} />
+    <Stack.Screen name="reset-password" options={{ title: 'Choose a New Password' }} />
+  </Stack>
+);
+
 export default function AuthLayout() {
   const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const pathname = usePathname();
   const { loading, policyLoading, policyAccepted, user } = useAuth();
   const redirectTo = normalizeRedirectTo(params.redirectTo);
+  const currentPath = pathname || '/login';
 
   if (loading || policyLoading) {
     return <LoadingSkeleton mode={getAuthLoadingMode(pathname)} />;
@@ -71,27 +93,12 @@ export default function AuthLayout() {
       target = redirectTo;
     }
 
+    if (currentPath === target) {
+      return renderAuthStack();
+    }
+
     return <Redirect href={target as never} />;
   }
 
-  return (
-    <Stack
-      screenOptions={{
-        headerShadowVisible: false,
-        contentStyle: { backgroundColor: customerTheme.background },
-      }}
-    >
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="register"
-        options={{ headerTitle: () => null, headerTransparent: true, headerBackTitle: 'Back' }}
-      />
-      <Stack.Screen name="accept-policy" options={{ title: 'Terms' }} />
-      <Stack.Screen name="terms" options={{ title: 'Terms of Service' }} />
-      <Stack.Screen name="privacy" options={{ title: 'Privacy Policy' }} />
-      <Stack.Screen name="forgot-password" options={{ title: 'Reset Password' }} />
-      <Stack.Screen name="verify-email" options={{ title: 'Verify Email' }} />
-      <Stack.Screen name="reset-password" options={{ title: 'Choose a New Password' }} />
-    </Stack>
-  );
+  return renderAuthStack();
 }

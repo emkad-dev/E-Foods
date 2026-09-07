@@ -16,6 +16,7 @@ import {
   signInWithEmail,
   signOutUser,
   signInWithGoogle,
+  verifyEmailOtp,
 } from '../services/supabase/auth';
 import {
   clearStoredUserProfile,
@@ -75,6 +76,7 @@ interface AuthContextType {
   updatePhoneNumber: (phoneNumber: string) => Promise<void>;
   reloadUser: () => Promise<boolean>;
   sendVerificationEmail: () => Promise<void>;
+  verifyEmailCode: (code: string) => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -861,6 +863,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const verifyEmailCode = async (code: string): Promise<boolean> => {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser?.email) {
+      const message = 'No user is currently signed in';
+      setError(message);
+      throw new Error(message);
+    }
+
+    try {
+      await verifyEmailOtp(supabase, authUser.email, code);
+      const emailVerified = await reloadUser();
+      return emailVerified;
+    } catch (err: any) {
+      const formattedError = getCustomerAuthErrorMessage(err, 'Unable to verify email code');
+      setError(formattedError);
+      throw new Error(formattedError);
+    }
+  };
+
   const clearError = useCallback((): void => {
     setError(null);
   }, []);
@@ -884,6 +908,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         updatePhoneNumber,
         reloadUser,
         sendVerificationEmail,
+        verifyEmailCode,
         clearError,
       }}
     >
