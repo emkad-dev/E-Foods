@@ -181,6 +181,16 @@ export default function CustomerLayout() {
               tabBarStyle: { display: 'none' },
             }}
           />
+          <Tabs.Screen
+            name="promo/[id]"
+            options={{
+              href: null,
+              headerShown: true,
+              title: 'Deal',
+              headerLeft: () => <CustomerHeaderBackButton href="/deals" />,
+              tabBarStyle: { display: 'none' },
+            }}
+          />
         </Tabs>
       </CoverageProvider>
     </FavoritesProvider>

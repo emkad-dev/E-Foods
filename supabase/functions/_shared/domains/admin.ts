@@ -128,6 +128,10 @@ const validatePromoComposition = (input: {
   actionUrl: unknown;
   startsAt: unknown;
   endsAt: unknown;
+  imageUrl: unknown;
+  detailBody: unknown;
+  terms: unknown;
+  ctaLabel: unknown;
 }) => {
   const actionUrlRaw = sanitizeText(input.actionUrl);
   // Only in-app deep links are allowed — an absolute/external URL in a banner
@@ -154,7 +158,20 @@ const validatePromoComposition = (input: {
   if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
     fail(400, 'endsAt must be after startsAt.');
   }
-  return { actionUrl, startsAt, endsAt };
+  const imageUrlRaw = sanitizeText(input.imageUrl);
+  // Hero image, if present, must be a Supabase Storage public URL on this
+  // project's storage host (same host we upload to) — never an arbitrary
+  // external URL, or another project's storage host, shown to every customer.
+  const storagePrefix = `${(Deno.env.get('SUPABASE_URL') ?? '').replace(/\/+$/, '')}/storage/v1/object/public/promo-assets/`;
+  if (imageUrlRaw && !imageUrlRaw.startsWith(storagePrefix)) {
+    fail(400, 'imageUrl must be an uploaded promo asset.');
+  }
+  const imageUrl = imageUrlRaw || null;
+  const detailBody = sanitizeText(input.detailBody) || null;
+  const terms = sanitizeText(input.terms) || null;
+  const ctaLabel = sanitizeText(input.ctaLabel) || null;
+
+  return { actionUrl, startsAt, endsAt, imageUrl, detailBody, terms, ctaLabel };
 };
 
 const BROADCAST_CATEGORIES = ['marketing', 'transactional'] as const;
@@ -1339,11 +1356,16 @@ const promoCreate: Handler = async ({ context, data }) => {
   if (!body) {
     fail(400, 'A body is required.');
   }
-  const { actionUrl, startsAt, endsAt } = validatePromoComposition({
-    actionUrl: data.actionUrl,
-    startsAt: data.startsAt,
-    endsAt: data.endsAt,
-  });
+  const { actionUrl, startsAt, endsAt, imageUrl, detailBody, terms, ctaLabel } =
+    validatePromoComposition({
+      actionUrl: data.actionUrl,
+      startsAt: data.startsAt,
+      endsAt: data.endsAt,
+      imageUrl: data.imageUrl,
+      detailBody: data.detailBody,
+      terms: data.terms,
+      ctaLabel: data.ctaLabel,
+    });
   const { data: promo, error } = await serviceClient
     .from('Promo')
     .insert({
@@ -1352,6 +1374,10 @@ const promoCreate: Handler = async ({ context, data }) => {
       actionUrl,
       startsAt,
       endsAt,
+      imageUrl,
+      detailBody,
+      terms,
+      ctaLabel,
       active: true,
       createdByUid: context.uid,
     })

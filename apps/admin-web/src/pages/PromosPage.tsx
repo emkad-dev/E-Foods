@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import { formatCurrency } from '../lib/format';
 import { useFeatureFlag } from '../lib/useFeatureFlag';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
+import { uploadPromoAsset } from '../services/promoAssetUpload';
 
 const isLive = (promo: Promo): boolean => {
   if (!promo.active) {
@@ -31,12 +32,17 @@ export default function PromosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [actionUrl, setActionUrl] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
+  const [detailBody, setDetailBody] = useState('');
+  const [terms, setTerms] = useState('');
+  const [ctaLabel, setCtaLabel] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -63,18 +69,44 @@ export default function PromosPage() {
         actionUrl: actionUrl.trim() || null,
         startsAt: toIso(startsAt),
         endsAt: toIso(endsAt),
+        detailBody: detailBody.trim() || null,
+        terms: terms.trim() || null,
+        ctaLabel: ctaLabel.trim() || null,
+        imageUrl: imageUrl.trim() || null,
       });
       setTitle('');
       setBody('');
       setActionUrl('');
       setStartsAt('');
       setEndsAt('');
+      setDetailBody('');
+      setTerms('');
+      setCtaLabel('');
+      setImageUrl('');
       setError(null);
       await load();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Create failed.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onPickImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await uploadPromoAsset(file);
+      setImageUrl(url);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+      event.target.value = '';
     }
   };
 
@@ -91,7 +123,7 @@ export default function PromosPage() {
     }
   };
 
-  const canSubmit = title.trim().length > 0 && body.trim().length > 0 && !busy;
+  const canSubmit = title.trim().length > 0 && body.trim().length > 0 && !busy && !uploading;
 
   return (
     <section className="page promos-page">
@@ -129,6 +161,43 @@ export default function PromosPage() {
             onChange={(event) => setActionUrl(event.target.value)}
             placeholder="/deals"
           />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-detail">Detail description (optional)</label>
+          <textarea
+            id="promo-detail"
+            rows={4}
+            value={detailBody}
+            onChange={(event) => setDetailBody(event.target.value)}
+            placeholder="Full explanation shown on the promo's landing page."
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-terms">Terms / fine print (optional)</label>
+          <textarea
+            id="promo-terms"
+            rows={2}
+            value={terms}
+            onChange={(event) => setTerms(event.target.value)}
+            placeholder="Valid 12–2pm · selected restaurants · min order ₦2000"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-cta">CTA label (optional)</label>
+          <input
+            id="promo-cta"
+            value={ctaLabel}
+            onChange={(event) => setCtaLabel(event.target.value)}
+            placeholder="Order now"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="promo-image">Hero image (optional)</label>
+          <input id="promo-image" type="file" accept="image/*" onChange={(event) => void onPickImage(event)} />
+          {uploading ? <span className="muted">Uploading…</span> : null}
+          {imageUrl ? (
+            <img src={imageUrl} alt="Promo hero preview" style={{ marginTop: 8, maxWidth: 240, borderRadius: 8 }} />
+          ) : null}
         </div>
         <div className="field">
           <label htmlFor="promo-starts">Starts (optional)</label>
