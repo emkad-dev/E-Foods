@@ -24,6 +24,9 @@ env:
   # back to app-rpc). Flipping this requires a redeploy, not just an env
   # change at runtime — see packages/domain/src/rpcRoutes.ts's resolveRpcMode.
   EXPO_PUBLIC_RPC_MODE: split
+  # Without this the web bundle bypasses the Cloudflare catalog cache and hits
+  # Supabase directly, so web and mobile read the catalog over different paths.
+  EXPO_PUBLIC_CATALOG_URL: https://api.feasty.com.ng
   EXPO_PUBLIC_APP_DOMAIN: app.feasty.com.ng
   EXPO_PUBLIC_CATALOG_URL: https://api.feasty.com.ng
   EXPO_PUBLIC_FUNCTIONS_REGION: us-central1

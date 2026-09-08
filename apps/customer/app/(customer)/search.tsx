@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Keyboard,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
+import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
@@ -134,13 +134,15 @@ export default function SearchScreen() {
 
     return (
       <TouchableOpacity style={styles.resultCard} activeOpacity={0.9} onPress={() => handleOpenResult(item)}>
-        {item.itemImage ? (
-          <Image source={{ uri: item.itemImage }} style={styles.resultImage} />
-        ) : (
-          <View style={[styles.resultImage, styles.resultImagePlaceholder]}>
-            <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
-          </View>
-        )}
+        <RemoteImage
+          uri={item.itemImage}
+          style={styles.resultImage}
+          fallback={
+            <View style={[styles.resultImage, styles.resultImagePlaceholder]}>
+              <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
+            </View>
+          }
+        />
         <View style={styles.resultInfo}>
           <Text style={styles.resultName} numberOfLines={1}>
             {item.itemName}

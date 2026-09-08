@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
@@ -153,13 +154,15 @@ export default function CustomerFavoritesScreen() {
           onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
           style={styles.card}
         >
-          {restaurant.image ? (
-            <Image source={{ uri: restaurant.image }} style={styles.cardImage} />
-          ) : (
-            <View style={styles.cardImageFallback}>
-              <Text style={styles.cardImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
-            </View>
-          )}
+          <RemoteImage
+            uri={restaurant.image}
+            style={styles.cardImage}
+            fallback={
+              <View style={styles.cardImageFallback}>
+                <Text style={styles.cardImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
+              </View>
+            }
+          />
           <RestaurantLogoBadge logoImage={restaurant.logoImage} name={restaurant.name} size={40} style={styles.logoBadge} />
           <View style={styles.cardBody}>
             <View style={styles.cardTitleRow}>

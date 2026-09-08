@@ -2,7 +2,6 @@ import { FontAwesome } from '@expo/vector-icons';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Keyboard,
   ScrollView,
   StyleSheet,
@@ -21,6 +20,7 @@ import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAp
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
+import RemoteImage from '../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
@@ -370,7 +370,7 @@ export default function HomeScreen() {
                   router.push(`/home/restaurant/${restaurant.id}`);
                 }}
               >
-                <Image source={{ uri: restaurant.image }} style={styles.nearbyImage} />
+                <RemoteImage uri={restaurant.image} style={styles.nearbyImage} />
                 <View style={styles.nearbyInfo}>
                   <View style={styles.nearbyHeader}>
                     <Text style={styles.nearbyName} numberOfLines={1}>
@@ -444,7 +444,7 @@ export default function HomeScreen() {
                     router.push(`/home/restaurant/${restaurant.id}`);
                   }}
                 >
-                  <Image source={{ uri: restaurant.image }} style={styles.unavailableImage} />
+                  <RemoteImage uri={restaurant.image} style={styles.unavailableImage} />
                   <View style={styles.unavailableInfo}>
                   <View style={styles.unavailableHeader}>
                     <Text style={styles.unavailableName}>{restaurant.name}</Text>

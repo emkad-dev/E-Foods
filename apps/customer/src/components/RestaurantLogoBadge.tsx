@@ -1,4 +1,5 @@
-import { Image, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import RemoteImage from './RemoteImage';
 import { customerTheme } from '../theme/palette';
 
 type RestaurantLogoBadgeProps = {
@@ -13,11 +14,13 @@ export default function RestaurantLogoBadge({ logoImage, name, size = 46, style 
 
   return (
     <View style={[styles.badge, { borderRadius: size / 2, height: size, width: size }, style]}>
-      {logoImage ? (
-        <Image source={{ uri: logoImage }} style={styles.image} />
-      ) : (
-        <Text style={[styles.initial, { fontSize: Math.max(14, size * 0.36) }]}>{initial}</Text>
-      )}
+      <RemoteImage
+        uri={logoImage}
+        style={styles.image}
+        fallback={
+          <Text style={[styles.initial, { fontSize: Math.max(14, size * 0.36) }]}>{initial}</Text>
+        }
+      />
     </View>
   );
 }
