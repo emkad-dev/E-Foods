@@ -2,7 +2,6 @@ import { callDispatchBackendRpc } from './backendRpc';
 
 export type DispatchRiderDraft = {
   acceptanceRate: number | null;
-  activeLoad: number;
   completedTrips: number;
   lga: string;
   name: string;

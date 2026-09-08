@@ -40,7 +40,6 @@ type ProfileSection =
 const statusOptions = ['Available', 'Delivering', 'Pickup delayed', 'Offline'];
 const createDefaultDraft = (): DispatchRiderDraft => ({
   acceptanceRate: 85,
-  activeLoad: 0,
   completedTrips: 0,
   lga: '',
   name: '',
@@ -138,7 +137,6 @@ export default function ProfileScreen() {
       setSelectedRiderId(rider.id);
       setDraft({
         acceptanceRate: 85,
-        activeLoad: rider.activeLoadCount,
         completedTrips: rider.completedTripsCount,
         lga: rider.lga ?? '',
         name: rider.name,

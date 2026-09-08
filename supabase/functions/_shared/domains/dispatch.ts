@@ -306,7 +306,6 @@ const normalizeDispatchRiderDraft = (input: Record<string, unknown>) => {
   const lga = sanitizeText(input.lga);
   const status = sanitizeText(input.status, DEFAULT_DISPATCH_STATUS);
   const vehicleType = sanitizeText(input.vehicleType, DEFAULT_DISPATCH_VEHICLE);
-  const activeLoad = parseInteger(input.activeLoad, 0);
   const completedTrips = parseInteger(input.completedTrips, 0);
   const acceptanceRateRaw = parseNumber(input.acceptanceRate, Number.NaN);
   const acceptanceRate = Number.isFinite(acceptanceRateRaw) ? acceptanceRateRaw : null;
@@ -327,8 +326,8 @@ const normalizeDispatchRiderDraft = (input: Record<string, unknown>) => {
     fail(400, 'Rider LGA is required.');
   }
 
-  if (activeLoad < 0 || completedTrips < 0) {
-    fail(400, 'Rider load and trip counters cannot be negative.');
+  if (completedTrips < 0) {
+    fail(400, 'Rider trip counter cannot be negative.');
   }
 
   const hasLatitude = latitude !== null;
@@ -342,9 +341,10 @@ const normalizeDispatchRiderDraft = (input: Record<string, unknown>) => {
     fail(400, 'Use valid numeric coordinates for the rider.');
   }
 
+  // activeLoad is deliberately absent: it is the offer ledger's field, not a
+  // profile field. See upsertDispatchRiderProfile's comment.
   return {
     acceptanceRate,
-    activeLoad,
     completedTrips,
     currentAddress: sanitizeOptionalText(input.currentAddress),
     displayName,
@@ -640,6 +640,21 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
   });
 };
 
+// activeLoad is NOT accepted from, nor written by, this handler. It is owned by
+// the offer ledger (ebuy_adjust_rider_load / the D2 claim + release paths), and
+// the single-claim invariant those four review rounds established only holds if
+// nothing else writes the column. Before Task 28 this handler wrote it twice
+// over: the admin branch took parseInteger(input.activeLoad, 0), so a request
+// that merely OMITTED the field silently reset a live counter to 0; and the
+// rider branch read the row and wrote the value back, a read-then-write window
+// as long as the profile form stayed open. Neither bought anything - the form
+// exposes no activeLoad input, so there was no operator-repair capability to
+// preserve. Omitting the key from the upsert leaves an existing rider's ledger
+// untouched and lets a new row take the column default, exactly as
+// ensureDispatchRiderRecord does (the same fix, in the sibling handler, fa1f854).
+// An audited admin reconcile-against-DeliveryAssignment action is the way to
+// repair a drifted counter if that is ever wanted; it is deliberately not built
+// here on spec.
 const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['dispatch', 'admin']);
   const requestedRiderId = sanitizeText(data.riderId);
@@ -656,7 +671,7 @@ const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
     const { data: existingRider, error } = await serviceClient
       .from('DispatchRiderRecord')
       .select(
-        'id,displayName,status,zone,vehicleType,acceptanceRate,activeLoad,completedTrips,latitude,longitude,region,lga,phoneNumber,currentAddress,createdAt,updatedAt'
+        'id,displayName,status,zone,vehicleType,acceptanceRate,completedTrips,latitude,longitude,region,lga,phoneNumber,currentAddress,createdAt,updatedAt'
       )
       .eq('id', riderId)
       .maybeSingle<DispatchRiderRow>();
@@ -667,7 +682,6 @@ const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
 
     persistedDraft = {
       acceptanceRate: existingRider?.acceptanceRate ?? 100,
-      activeLoad: existingRider?.activeLoad ?? 0,
       completedTrips: existingRider?.completedTrips ?? 0,
       currentAddress: existingRider?.currentAddress ?? draft.currentAddress ?? null,
       displayName: existingRider?.displayName ?? draft.displayName,
@@ -683,7 +697,12 @@ const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
   }
 
   const timestamp = nowIso();
-  const { error } = await serviceClient.from('DispatchRiderRecord').upsert(
+  // Returning the row makes the response report the ledger's real activeLoad
+  // instead of a value this handler no longer has. Without it the response
+  // would default the omitted column to 0 and misreport a rider mid-delivery.
+  const { data: persistedRow, error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .upsert(
     {
       id: riderId,
       displayName: persistedDraft.displayName,
@@ -691,7 +710,6 @@ const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
       zone: persistedDraft.zone,
       vehicleType: persistedDraft.vehicleType,
       acceptanceRate: persistedDraft.acceptanceRate,
-      activeLoad: persistedDraft.activeLoad,
       completedTrips: persistedDraft.completedTrips,
       latitude: persistedDraft.latitude,
       longitude: persistedDraft.longitude,
@@ -703,7 +721,9 @@ const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
       updatedAt: timestamp,
     },
     { onConflict: 'id' }
-  );
+    )
+    .select('activeLoad')
+    .maybeSingle<{ activeLoad?: number | null }>();
 
   if (error) {
     throw new Error(error.message);
@@ -722,6 +742,7 @@ const upsertDispatchRiderProfile: Handler = async ({ context, data }) => {
         id: riderId,
         updatedAt: timestamp,
         ...persistedDraft,
+        activeLoad: persistedRow?.activeLoad ?? 0,
       }),
     },
   });
