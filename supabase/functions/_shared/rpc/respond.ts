@@ -2,7 +2,7 @@
 // the error -> HTTP bridge used by the app-rpc entrypoint.
 
 import { corsHeaders } from '../cors.ts';
-import { getErrorStatus, jsonResponse } from '../observability.ts';
+import { clientErrorExtras, getErrorStatus, jsonResponse } from '../observability.ts';
 
 export class RpcError extends Error {
   status: number;
@@ -30,22 +30,21 @@ export const json = (status: number, body: unknown, headers: HeadersInit = {}) =
     ...headers,
   });
 
-// RpcError and EdgeBackpressureError both carry a numeric `.status` in the
-// 400-599 range, so getErrorStatus() resolves them the same way the old
-// per-type checks did. "This account is disabled." is thrown as a plain
-// Error with no `.status` (see _shared/request-context.ts), so it still
-// needs an explicit mapping or it would fall through to 500.
+// ClientSafeError, RpcError and EdgeBackpressureError all carry a numeric
+// `.status`, so getErrorStatus resolves them directly. The old string
+// comparison against "This account is disabled." is gone: accountAccess.ts
+// throws a ClientSafeError(403) now, so there is nothing left to special-case.
+// clientErrorExtras carries a ClientSafeError's structured code/details (e.g.
+// ACCOUNT_PENDING_DELETION plus purgeScheduledAt) out to the client.
 export const errorResponse = (error: unknown) => {
-  const status =
-    error instanceof Error && error.message === 'This account is disabled.'
-      ? 403
-      : getErrorStatus(error);
+  const status = getErrorStatus(error);
 
   return json(
     status,
     {
       error: {
         message: error instanceof Error ? error.message : 'Unexpected Edge RPC failure.',
+        ...clientErrorExtras(error),
       },
     },
     error instanceof Error && 'retryAfterSeconds' in error

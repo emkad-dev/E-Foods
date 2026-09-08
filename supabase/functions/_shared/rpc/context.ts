@@ -111,7 +111,12 @@ export const createRpcDispatch =
       return await anonymousHandler({ data, request });
     }
 
-    const context = await getAuthenticatedRequestContext(request);
+    // Restoring an account is the one thing a pending-deletion user may still
+    // do. Every other action is refused by assertAccountAccessible. Ported from
+    // the pre-split app-rpc entrypoint, which set the same exemption here.
+    const context = await getAuthenticatedRequestContext(request, {
+      allowPendingDeletion: action === 'cancelAccountDeletion',
+    });
     const handler = dispatcher.findHandler(action);
 
     if (!handler) {

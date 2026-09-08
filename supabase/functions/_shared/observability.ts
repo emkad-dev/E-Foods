@@ -75,20 +75,52 @@ export const clientErrorMessage = (
   fallback: string = GENERIC_ERROR_MESSAGE
 ): string => (isClientSafeError(error) ? (error as Error).message : fallback);
 
+export type ClientSafeErrorOptions = {
+  code?: string;
+  details?: Record<string, unknown>;
+};
+
 /**
  * Base class for deliberately user-facing errors raised in shared helpers.
  * Its message is crafted for end users and is safe to return in a response.
+ *
+ * `code` and `details` let a client branch on a specific condition instead of
+ * string-matching the message. They ride the same exposure rule as the message:
+ * 4xx and `expose` only.
  */
 export class ClientSafeError extends Error {
   readonly status: number;
   readonly expose = true;
+  readonly code?: string;
+  readonly details?: Record<string, unknown>;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, options: ClientSafeErrorOptions = {}) {
     super(message);
     this.name = 'ClientSafeError';
     this.status = status;
+    this.code = options.code;
+    this.details = options.details;
   }
 }
+
+/**
+ * The structured extras to merge into an error envelope. Deliberately separate
+ * from `clientErrorMessage`: the existing catch blocks serialize `error.message`
+ * raw, and routing that through the exposure rule here would turn every
+ * RpcError message into the generic fallback. This only ever ADDS fields.
+ */
+export const clientErrorExtras = (
+  error: unknown
+): { code?: string; details?: Record<string, unknown> } => {
+  if (!isClientSafeError(error) || !(error instanceof ClientSafeError)) {
+    return {};
+  }
+
+  return {
+    ...(error.code ? { code: error.code } : null),
+    ...(error.details ? { details: error.details } : null),
+  };
+};
 
 const inflightByKey = new Map<string, number>();
 
