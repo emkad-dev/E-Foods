@@ -28,17 +28,42 @@ export const isNetworkRequestError = (error: unknown) => {
 export const isActionCodeConfigurationError = (error: AuthError | null | undefined) =>
   Boolean(error?.code && ACTION_CODE_CONFIGURATION_ERRORS.has(error.code));
 
+/**
+ * Sign-up itself sends the confirmation email, so the redirect has to ride along here.
+ * Without it Supabase falls back to the project Site URL and every app's verification
+ * link lands on the marketing site instead of the app that asked for the address.
+ */
 export const createUserWithEmail = async (
   supabase: SupabaseClient,
   email: string,
   password: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  actionCodeSettings?: { url: string }
 ): Promise<{ user: User; session: Session | null }> => {
-  const { data, error } = await supabase.auth.signUp({
+  const buildOptions = (emailRedirectTo?: string) => {
+    if (!metadata && !emailRedirectTo) {
+      return undefined;
+    }
+
+    return {
+      ...(metadata ? { data: metadata } : {}),
+      ...(emailRedirectTo ? { emailRedirectTo } : {}),
+    };
+  };
+
+  let { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: metadata ? { data: metadata } : undefined,
+    options: buildOptions(actionCodeSettings?.url),
   });
+
+  if (error && isActionCodeConfigurationError(error)) {
+    ({ data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: buildOptions(),
+    }));
+  }
 
   if (error) {
     throw error;
