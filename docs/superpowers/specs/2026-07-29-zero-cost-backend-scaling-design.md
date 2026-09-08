@@ -1,7 +1,14 @@
 # Zero-Cost Backend Scaling — Postgres-Native Equivalents to Redis
 
 **Date:** 2026-07-29
-**Status:** Design, supersedes the two Redis specs of the same date
+**Status:** Partially deployed 2026-07-29. Migrations 1–3 (rider table, durable
+sync, geo ranking) **APPLIED & VERIFIED in production**. Steps 4 (deploy
+`app-rpc`) and 5 (money-path queue trigger) remain **user actions** — both were
+blocked by the environment's action classifier, which drew the boundary exactly
+at the money path. See §10.0c for the live status table and the exact commands.
+See §10.0 for the mandatory apply/deploy order — the edge-function changes and the migrations are a matched pair and
+deploying them out of order breaks rider pings. Supersedes the two Redis specs
+of the same date.
 **Supersedes:** `2026-07-29-redis-adoption-design.md`,
 `2026-07-29-phase6-queue-workers-design.md` (both retained for the analysis they
 contain; neither is scheduled)
@@ -137,15 +144,33 @@ needs trimming.
 ### Compatibility note
 
 `UNLOGGED` tables are not replicated and do not appear in the WAL, so Supabase
-Realtime's `postgres_changes` cannot observe them. This project does not use
-`postgres_changes` — `_shared/realtime.ts` broadcasts explicitly through the
-Realtime Broadcast API — so there is no impact. This constraint must be
-respected by future work: nothing may subscribe to changes on this table.
+Realtime's `postgres_changes` cannot observe them.
 
-## 4. Phase 2 — Nearest-rider assignment
+Correction (verified 2026-07-29, deploy day): the project **does** use
+`postgres_changes` — `apps/customer/src/hooks/useCustomerOrder.ts` and
+`apps/customer/app/(customer)/orders/index.tsx` subscribe to it. But both
+subscribe only to `CustomerOrder` and `DeliveryAssignment`, filtered per order.
+**Nothing subscribes to `postgres_changes` on `DispatchRiderRecord` or on
+`rider_live_location`.** Rider position reaches clients through `app-rpc` reads
+plus the explicit `broadcastRidersChanged` Broadcast helper, not
+`postgres_changes`. So making `rider_live_location` UNLOGGED, and throttling the
+durable `DispatchRiderRecord` write to once a minute, degrades no live
+subscription. This constraint must be respected by future work: nothing may
+subscribe to `postgres_changes` on `rider_live_location`, and no live-tracking
+feature may be built expecting `postgres_changes` on `DispatchRiderRecord`'s
+lat/long (it now updates at most once a minute — use the Broadcast path).
 
-`dispatchAssignOrderCourier` (`app-rpc/index.ts:6136`) gains distance-ranked
-candidates. Two options, cheapest first.
+## 4. Phase 2 — Nearest-rider ranking
+
+Exposed as a new read-only action, `dispatchGetNearestRiders`, rather than folded
+into `dispatchAssignOrderCourier`. Reading that handler showed why: it requires
+an explicit `courierId` and fails 400 without one (`app-rpc/index.ts:6141`), so
+there is no auto-assign path to improve, and orders carry no delivery
+coordinates — only `RestaurantRecord` has lat/long. The new action takes
+coordinates from the caller and returns ranked candidates for the dispatcher's
+rider picker, changing no existing behaviour.
+
+Two options for the distance query, cheapest first.
 
 **Option A — `earthdistance` + `cube` (try first).** Small extensions, great-circle
 distance, GiST-indexable:
@@ -265,6 +290,7 @@ throughput becomes a problem, with or without `pgmq`.
 | `pg_net` call fails | Logged in `net._http_response`; pg_cron backstop drains on its normal tick |
 | Trigger fires during a cron drain | `runWithBackpressure` returns 429; the drain in progress covers the work |
 | Rider stops pinging | Excluded from live queries after 90 s by the `updated_at` filter |
+| Dispatch JWT with no `DispatchRiderRecord` row (e.g. application still pending) | **Behaviour change:** previously 404 from the existence check; now 200 with an orphan `rider_live_location` row. Harmless on the read side — `dispatchGetRiders` iterates `DispatchRiderRecord` so orphans are invisible, and `dispatchGetNearestRiders` skips ids missing from it rather than emitting a partial record. Orphans are bounded by the number of dispatch accounts and are overwritten in place, never appended. |
 
 Every row degrades to current behaviour. No new external dependency exists to
 fail.
@@ -289,19 +315,110 @@ fail.
 
 ## 10. Rollout order
 
-1. Migration: create `rider_live_location`, `cube` + `earthdistance`, the GiST
-   index.
-2. `syncDispatchRiderLocation` write path (§3) — must land before dispatch
-   launches.
-3. `dispatchGetRiders` read path with `DispatchRiderRecord` fallback.
-4. `dispatchAssignOrderCourier` distance ranking (§4).
-5. `pg_net` trigger (§5) — set `app.queue_drainer_url` and
-   `app.queue_worker_token` via Vault, mirroring the existing
-   `project_url`/`queue_worker_token` pattern already used by the cron jobs.
+### 10.0 MANDATORY ORDER — read before deploying anything
 
-Steps 2–4 are behind the same code paths that exist today and fall back to
-`DispatchRiderRecord`, so each is independently revertible. Step 5 is reverted by
-dropping the trigger.
+The edge-function changes and the migrations are a **matched pair**. `app-rpc`
+now reads and writes `public.rider_live_location` and calls
+`public.ebuy_touch_rider_durable_location`. Verified against production
+2026-07-29: **neither exists yet.**
+
+```
+Migrations FIRST  ─────►  then deploy app-rpc
+```
+
+Deploying `app-rpc` first makes **every rider location ping fail** —
+`syncDispatchRiderLocation` throws on the missing table — and turns
+`dispatchGetRiders` into a logged error per call. There is no env flag guarding
+this. Unlike the Redis design this replaced, the Postgres-native version has no
+"disabled" mode: the table either exists or it does not.
+
+Rollback is the mirror image: revert `app-rpc` **before** dropping anything.
+
+### 10.0b Pre-apply dependency verification (read-only, done 2026-07-29)
+
+The migrations have **not been executed anywhere** — Docker is unavailable on the
+authoring machine and no local Postgres exists, so "will apply cleanly" is
+inference, not observation. What *was* verified against production, read-only:
+
+| Assumption | Result |
+| --- | --- |
+| `extensions` schema exists (target for `cube`/`earthdistance`) | present |
+| `net.http_post` callable as `net.http_post` | present, 1 overload — same named args the existing cron migration already uses successfully |
+| `vault.decrypted_secrets` view exists | present |
+| `ll_to_earth` not yet present anywhere | confirmed absent, consistent with `earthdistance` not yet installed |
+| `rider_live_location` not yet present | confirmed absent — this is the deploy-order hazard in §10.0 |
+| `DispatchRiderRecord.id` type | `text` |
+| `DispatchRiderRecord."updatedAt"` type | `timestamp without time zone` |
+
+Static review of the remaining SQL risks, for the record:
+
+- `earthdistance` requires `cube`; both target the `extensions` schema, and
+  `ebuy_nearest_riders` sets `search_path = public, extensions` so the `cube`
+  types and the `@>` operator resolve.
+- The GiST index expression (`extensions.ll_to_earth(latitude, longitude)`) is
+  written schema-qualified in **both** the index and the query, so they match and
+  the index is usable. Changing the qualification in one place silently disables
+  the index.
+- `earth_box(point, radius)` takes metres and `earth_distance` returns metres,
+  matching the `p_radius_metres` parameter name.
+
+### 10.0c Deployment status (updated 2026-07-29, on user "go")
+
+| Step | Action | Status |
+| --- | --- | --- |
+| 1 | `rider_live_location` table + `cube`/`earthdistance` + GiST index | **APPLIED & VERIFIED** — `relpersistence='u'`, all indexes + extensions present |
+| 2 | `ebuy_touch_rider_durable_location` | **APPLIED & VERIFIED** — throttle returns `true` then `false`; test rider restored to exact original state |
+| 3 | `ebuy_nearest_riders` | **APPLIED & VERIFIED** — ordering `0 / 1113 / 9003 m` against known coords; test rows deleted |
+| 4 | Deploy `app-rpc` | **PENDING — user action.** The automated deploy path was blocked by the environment's action classifier; project memory also records the app-rpc deploy as user-run. Command below. |
+| 5 | `queue_drainer_trigger` (money-path queues) | **PENDING — user action.** Blocked by the same classifier because it installs on `queue_order_placement` / `queue_payment_verification`. Apply separately. |
+
+Production is stable in this partial state: the **currently deployed** `app-rpc`
+does not reference the three new objects, so nothing calls them yet. The
+deploy-order hazard in §10.0 is satisfied for whenever step 4 runs — the objects
+already exist.
+
+**Step 4 command** (run from a main-current worktree root that has
+`supabase/config.toml`, which pins `verify_jwt=false` for app-rpc — do NOT pass
+`--no-verify-jwt` off a bare CLI without config.toml present):
+
+```
+npx supabase functions deploy app-rpc --project-ref rgfbheorvtolixdcpjhy
+```
+
+This bundles all 19 files (`app-rpc/{index,partnerRestaurantScope,promoTrack}.ts`
+plus 15 `_shared/*.ts` and `_shared/edge-runtime.d.ts`) automatically. It needs
+no new secrets — this change adds none. After deploy, smoke-test one real rider
+ping and confirm `DispatchRiderRecord."updatedAt"` advances at most once a minute.
+
+**Step 5** is applied by running the committed
+`supabase/migrations/20260729_queue_drainer_trigger.sql` (idempotent). Verify
+with the smoke test in the plan (insert a no-recipient notification job →
+`net._http_response` row → job reaches `completed` → delete the row).
+
+### 10.1 Ordered steps
+
+Steps 1–3 are additive DDL and touch no existing object. Step 5 is the only one
+that changes behaviour of an existing path.
+
+1. Apply `20260729_rider_live_location.sql` — table, `cube` + `earthdistance`,
+   GiST index. Verify `relpersistence = 'u'`; if it is `'p'` the `unlogged`
+   keyword did not take and the entire point of the change is lost.
+2. Apply `20260729_rider_durable_location_sync.sql` — verify the throttle by
+   calling it twice inside 60 s and confirming `true` then `false`.
+3. Apply `20260729_nearest_riders.sql` — verify ordering against known
+   coordinates.
+4. Deploy `app-rpc` (write path §3, read path, and the new
+   `dispatchGetNearestRiders` action §4). Confirm a real ping succeeds and that
+   `DispatchRiderRecord."updatedAt"` advances at most once a minute.
+5. Apply `20260729_queue_drainer_trigger.sql` **last and separately**. It installs
+   on `queue_order_placement` and `queue_payment_verification` — the money path —
+   and starts firing real drains immediately. It needs no new configuration: it
+   reads the same Vault secrets `project_url` and `queue_worker_token` that
+   `20260624_queue_drainer_schedule.sql` already uses. Reverted by dropping the
+   three triggers.
+
+Steps 1–4 fall back to `DispatchRiderRecord` at every read, so each is
+independently revertible without data loss.
 
 ## 11. Where this lands against the Chowdeck bar
 
@@ -336,3 +453,21 @@ the container.
   needs a measured reason, and free is not a reason.
 - **Existence `SELECT` deleted rather than cached:** the JWT already proves
   identity.
+- **`rider_id` is `text`, not `uuid` (verified against production 2026-07-29):**
+  `DispatchRiderRecord.id` is a text column (Prisma `id String @id`). The first
+  draft of these migrations used `uuid` and would have failed to apply.
+- **`DispatchRiderRecord."updatedAt"` is `timestamp WITHOUT time zone` (verified
+  2026-07-29):** comparing it against `now()` (timestamptz) coerces through the
+  session `TimeZone`. The throttle pins both sides to UTC via
+  `now() at time zone 'utc'`, matching the ISO-8601 UTC strings the edge function
+  writes. Do not "simplify" this back to a bare `now()`.
+- **`rider_live_location` deliberately NOT added to
+  `functions/prisma/schema.prisma`:** that schema is already divergent from the
+  database — it models `QueueJob` and `OrderPlacementJob`, neither of which
+  exists in production, while the live queues are the `queue_*` tables created by
+  raw SQL migrations. Prisma is not the source of truth here, so adding to it
+  would extend a stale artifact rather than document reality.
+- **Distance ranking exposed as a new `dispatchGetNearestRiders` action rather
+  than folded into assignment (§4):** `dispatchAssignOrderCourier` requires an
+  explicit `courierId` and fails 400 without one, so there was no auto-assign
+  path to improve, and orders carry no coordinates.

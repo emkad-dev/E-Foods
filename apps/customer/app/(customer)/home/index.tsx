@@ -1168,6 +1168,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   unavailableMeta: {
+
     color: '#9a312c',
     fontSize: 11,
     lineHeight: 16,

@@ -63,11 +63,15 @@ type PingRow = {
 };
 
 /**
- * Installs a fake DispatchRiderRecord table (existence check + current-
- * position update) and a fake ebuy_record_dispatch_rider_ping rpc that
- * mirrors the migration's own throttle predicate against `state.now`, a
- * clock the test advances explicitly rather than relying on real elapsed
- * time between calls.
+ * Installs a fake DispatchRiderRecord table (the admin-only existence check), a
+ * fake unlogged `rider_live_location` table (the current-position write every
+ * call now makes) and a fake ebuy_record_dispatch_rider_ping rpc that mirrors
+ * the migration's own throttle predicate against `state.now`, a clock the test
+ * advances explicitly rather than relying on real elapsed time between calls.
+ *
+ * ebuy_touch_rider_durable_location is stubbed too: the durable
+ * DispatchRiderRecord copy is throttled in SQL, so from the edge function's
+ * side it is just a fire-and-log rpc whose failure must not fail the ping.
  */
 type BroadcastMessage = { event?: string; payload?: Record<string, unknown>; topic?: string };
 
@@ -76,7 +80,8 @@ const installMocks = (options: { activeOrderIds?: string[] } = {}) => {
   const state = {
     now: Date.now(),
     pings: [] as PingRow[],
-    riderUpdates: [] as Record<string, unknown>[],
+    liveLocationUpserts: [] as Record<string, unknown>[],
+    durableSyncs: [] as Record<string, unknown>[],
     broadcasts: [] as BroadcastMessage[],
   };
 
@@ -92,12 +97,16 @@ const installMocks = (options: { activeOrderIds?: string[] } = {}) => {
             }),
           }),
         }),
-        update: (payload: Record<string, unknown>) => ({
-          eq: async (_col: string, _val: string) => {
-            state.riderUpdates.push({ ...payload });
-            return { error: null };
-          },
-        }),
+      };
+    }
+
+    // The unlogged live-position table: written on EVERY ping, unthrottled.
+    if (table === 'rider_live_location') {
+      return {
+        upsert: async (payload: Record<string, unknown>, _options?: Record<string, unknown>) => {
+          state.liveLocationUpserts.push({ ...payload });
+          return { error: null };
+        },
       };
     }
 
@@ -149,6 +158,11 @@ const installMocks = (options: { activeOrderIds?: string[] } = {}) => {
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).rpc = async (fn: string, params: Record<string, unknown>) => {
+    if (fn === 'ebuy_touch_rider_durable_location') {
+      state.durableSyncs.push({ ...params });
+      return { data: null, error: null };
+    }
+
     if (fn !== 'ebuy_record_dispatch_rider_ping') {
       throw new Error(`dispatchRiderLocation.test.ts: unexpected rpc "${fn}"`);
     }
@@ -205,14 +219,19 @@ Deno.test('syncDispatchRiderLocation: a second ping 5 seconds later (inside the 
   expectEqual(secondBody.data.pingRecorded, false, 'the response reports the history append was dropped');
   expectEqual(state.pings.length, 1, 'the second ping inside 10s produced NO new history row');
   expectEqual(
-    state.riderUpdates.length,
+    state.liveLocationUpserts.length,
     2,
-    'the CURRENT position on DispatchRiderRecord still updates on every call, unthrottled - the throttle governs only the history append'
+    'the CURRENT position on rider_live_location still writes on every call, unthrottled - the throttle governs only the history append'
   );
   expectEqual(
-    state.riderUpdates[1].latitude,
+    state.liveLocationUpserts[1].latitude,
     6.51,
-    'the current-position update reflects the latest call even though its history append was throttled'
+    'the current-position write reflects the latest call even though its history append was throttled'
+  );
+  expectEqual(
+    state.durableSyncs.length,
+    2,
+    'the durable DispatchRiderRecord sync is attempted on every call - the once-per-interval throttle is enforced in SQL, not here'
   );
 });
 

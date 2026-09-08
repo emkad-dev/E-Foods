@@ -35,6 +35,7 @@ export const DISPATCH_ACTIONS = [
   'upsertDispatchRiderProfile',
   'dispatchUpsertShiftSlots',
   'syncDispatchRiderLocation',
+  'dispatchGetNearestRiders',
   'dispatchAssignOrderCourier',
   'dispatchUpdateOrderStatus',
   'submitDispatchApplication',
