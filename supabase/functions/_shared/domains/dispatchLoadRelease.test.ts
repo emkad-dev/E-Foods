@@ -844,6 +844,193 @@ Deno.test('partnerUpdateOrderStatus: an accept racing the sweep\'s cancel+refund
   expectEqual(payment.refundAmount, 5000, 'the refund amount is intact');
 });
 
+// ---------------------------------------------------------------------------
+// Task 27 [H3]: `escalated` has an exit, and the claim is always released.
+//
+// escalate was reachable from any non-terminal status but NO handler accepted
+// `escalated` as a current status afterwards - partner needs
+// placed/accepted/preparing/ready, dispatch needs ready/picked_up/on_the_way,
+// cancel needs placed/accepted - and it is not in TERMINAL_ORDER_STATUSES. So an
+// escalated order could never reach a terminal state and its rider's activeLoad
+// claim was stranded permanently. Rare before Task 9 (a claim only existed if a
+// human had manually assigned); routine after it, since every accepted delivery
+// order auto-claims a courier.
+//
+// These extend this file rather than starting another because the invariant
+// under test is this file's invariant - "for each (order, courier) claim,
+// exactly ONE decrement ever lands" - now carried across the two new exits.
+// ---------------------------------------------------------------------------
+
+Deno.test('H3: escalate then resolve returns the order to its prior stage and releases nothing on the way', async () => {
+  const state = installHandlerMocks('on_the_way', 3);
+  const orderRow = () => state.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+
+  const escalated = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'escalate', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(escalated.status, 200, 'escalation succeeds');
+  expectEqual(orderRow()?.status, 'escalated', 'the order is escalated');
+  expectEqual(
+    (orderRow()?.timeline as Record<string, unknown>)?.escalatedFrom,
+    'on_the_way',
+    'the pre-escalation stage is recorded - this is what makes the escalation reversible'
+  );
+  expectEqual(state.load[RIDER_ID], 3, 'escalation is not an outcome, so it releases nothing');
+
+  const resolved = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'resolve_escalation', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(resolved.status, 200, 'the escalation can be resolved');
+  expectEqual(orderRow()?.status, 'on_the_way', 'the order is back on the normal flow where it left it');
+  expectEqual(state.load[RIDER_ID], 3, 'the rider still holds the claim they never lost');
+
+  // And the normal flow still terminates it, releasing exactly once.
+  const delivered = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'delivered', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(delivered.status, 200, 'the resumed order can be delivered');
+  expectEqual(state.load[RIDER_ID], 2, 'exactly one decrement across the whole escalate -> resolve -> deliver round trip');
+});
+
+Deno.test('H3: cancelling an escalated order releases the stranded claim exactly once', async () => {
+  const state = installHandlerMocks('on_the_way', 3);
+  const orderRow = () => state.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+
+  await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'escalate', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(state.load[RIDER_ID], 3, 'still claimed while escalated');
+
+  const cancelled = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'cancel_escalated', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(cancelled.status, 200, 'an escalated order can be written off');
+  expectEqual(orderRow()?.status, 'cancelled', 'it reached a real terminal state');
+  expectEqual(
+    state.rpcCalls.some((call) => call.fn === 'ebuy_release_dispatch_assignment_load'),
+    true,
+    'the release ran - this is the decrement that used to be stranded forever'
+  );
+  expectEqual(state.load[RIDER_ID], 2, 'released exactly once');
+
+  // This harness's order is cash/pending - nothing was ever captured, so there
+  // is correctly nothing to refund. buildRefundUpdate still stamps the reason,
+  // which is what reconciliation reads.
+  const payment = orderRow()?.payment as Record<string, unknown>;
+  expectEqual(
+    payment.lastEvent,
+    'dispatch_escalation_cancelled_full_refund',
+    'the write-off is recorded on the payment ledger'
+  );
+  expectEqual(payment.refundAmount, undefined, 'an uncaptured cash order refunds nothing - there is no money to return');
+
+  // A second attempt cannot double-decrement: the order is terminal now.
+  let secondStatus = 0;
+  try {
+    const again = await dispatchUpdateOrderStatus({
+      context: ADMIN_CONTEXT,
+      data: { action: 'cancel_escalated', orderId: ORDER_ID },
+      request: fakeRequest(),
+    });
+    secondStatus = again.status;
+  } catch (error) {
+    secondStatus = (error as { status?: number }).status ?? 500;
+  }
+  expectEqual(secondStatus === 200, false, 'a repeat write-off is refused');
+  expectEqual(state.load[RIDER_ID], 2, 'and the ledger is untouched by it - still exactly one decrement');
+});
+
+Deno.test('H3: cancelling an escalated PREPAID order refunds the captured amount in full', async () => {
+  const state = installHandlerMocks('on_the_way', 1);
+  const orderRow = () => state.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+
+  // A card order whose money the platform actually holds.
+  const row = orderRow();
+  if (row) {
+    row.payment = { method: 'card', status: 'paid', capturedAmount: 5000 };
+  }
+
+  await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'escalate', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  const cancelled = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'cancel_escalated', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(cancelled.status, 200, 'the write-off succeeds');
+  const payment = orderRow()?.payment as Record<string, unknown>;
+  expectEqual(payment.status, 'refunded', 'the customer is refunded - they did nothing wrong');
+  expectEqual(payment.refundAmount, 5000, 'in full, at the same rate the acceptance-deadline auto-cancel uses');
+  const cancellation = orderRow()?.cancellation as Record<string, unknown>;
+  expectEqual(cancellation?.reason, 'dispatch_escalation', 'and the cancellation is attributed');
+  expectEqual(state.load[RIDER_ID], 0, 'the claim is released exactly once');
+});
+
+Deno.test('H3: escalating and cancelling an unassigned order touches no counter', async () => {
+  const state = installHandlerMocks('accepted', 0, { assignmentCourierId: null });
+  const orderRow = () => state.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+
+  await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'escalate', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(orderRow()?.status, 'escalated', 'an unclaimed order escalates too');
+  expectEqual(state.load[RIDER_ID], 0, 'no claim exists, so nothing is held');
+
+  const cancelled = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'cancel_escalated', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(cancelled.status, 200, 'it still drains to a terminal state');
+  expectEqual(orderRow()?.status, 'cancelled', 'terminal');
+  expectEqual(state.load[RIDER_ID], 0, 'a release against no claim is a no-op, never a negative counter');
+});
+
+Deno.test('H3: an escalation with no recorded prior stage refuses to resolve rather than guessing', async () => {
+  const state = installHandlerMocks('escalated', 2);
+  const orderRow = () => state.tables.CustomerOrder.rows.find((row) => row.id === ORDER_ID);
+
+  // Orders escalated before this task carry no escalatedFrom in their timeline.
+  let status = 0;
+  try {
+    const response = await dispatchUpdateOrderStatus({
+      context: ADMIN_CONTEXT,
+      data: { action: 'resolve_escalation', orderId: ORDER_ID },
+      request: fakeRequest(),
+    });
+    status = response.status;
+  } catch (error) {
+    status = (error as { status?: number }).status ?? 500;
+  }
+  expectEqual(status, 412, 'resolving is refused - guessing a stage could resurrect the order past where it got to');
+  expectEqual(orderRow()?.status, 'escalated', 'the order is unchanged');
+
+  // But it is NOT stuck: the cancel exit still drains it and releases the claim.
+  const cancelled = await dispatchUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'cancel_escalated', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+  expectEqual(cancelled.status, 200, 'the legacy escalation still has an exit');
+  expectEqual(state.load[RIDER_ID], 1, 'and its stranded claim is released');
+});
+
 Deno.test('dispatchLoadRelease cleanup: restore shared client and fetch', () => {
   // Keep later files on the real client and fetch implementation.
   // deno-lint-ignore no-explicit-any

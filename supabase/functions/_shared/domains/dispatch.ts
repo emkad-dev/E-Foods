@@ -71,6 +71,7 @@ import {
   type CustomerOrderRow,
   type DeliveryAssignmentRow,
 } from '../orders.ts';
+import { buildRefundUpdate } from './orders.ts';
 import { loadDispatchWeights } from '../platformSettings.ts';
 import { recordPolicyAcceptance, validatePolicyAcceptancePayload } from '../policyAcceptance.ts';
 import { broadcastOrderChanged, broadcastRidersChanged } from '../realtime.ts';
@@ -230,7 +231,8 @@ const isIsoDateInWindow = (value: string | null | undefined, startsAt: string, e
 const buildDispatchStatusUpdate = (
   currentStatus: string,
   assignment: DeliveryAssignmentRow | null,
-  action: string
+  action: string,
+  timeline: JsonObject | null = null
 ) => {
   const time = nowIso();
 
@@ -292,9 +294,53 @@ const buildDispatchStatusUpdate = (
         fail(412, 'Completed or cancelled orders cannot be escalated.');
       }
 
+      if (currentStatus === ORDER_STATUS.ESCALATED) {
+        fail(412, 'This order is already escalated.');
+      }
+
       return {
         status: ORDER_STATUS.ESCALATED,
-        timelinePatch: { escalatedAt: time },
+        // escalatedFrom is what makes escalation reversible: without recording
+        // the pre-escalation status there is nothing to return the order TO, and
+        // `escalated` becomes the dead end Task 27 exists to remove.
+        timelinePatch: { escalatedAt: time, escalatedFrom: currentStatus },
+      };
+    case 'resolve_escalation': {
+      if (currentStatus !== ORDER_STATUS.ESCALATED) {
+        fail(412, 'Only an escalated order can be resolved.');
+      }
+
+      const escalatedFrom = sanitizeText(timeline?.escalatedFrom);
+      if (!escalatedFrom || TERMINAL_ORDER_STATUSES.has(escalatedFrom) || escalatedFrom === ORDER_STATUS.ESCALATED) {
+        // Orders escalated before this task carry no escalatedFrom. They are not
+        // stuck - cancel_escalated still drains them - but they cannot be put
+        // back on a flow whose position was never recorded, and guessing one
+        // risks resurrecting an order past the stage it actually reached.
+        fail(412, 'This escalation has no recorded prior stage. Cancel the order instead.');
+      }
+
+      // A courier-held stage is only restorable while the claim still exists;
+      // otherwise the order would sit in a rider-active status with no rider.
+      if (
+        ([ORDER_STATUS.PICKED_UP, ORDER_STATUS.ON_THE_WAY] as readonly string[]).includes(escalatedFrom) &&
+        !hasAssignedCourier(assignment)
+      ) {
+        fail(412, 'The rider is no longer assigned. Reassign a rider or cancel the order.');
+      }
+
+      return {
+        status: escalatedFrom,
+        timelinePatch: { escalationResolvedAt: time },
+      };
+    }
+    case 'cancel_escalated':
+      if (currentStatus !== ORDER_STATUS.ESCALATED) {
+        fail(412, 'Only an escalated order can be cancelled from dispatch.');
+      }
+
+      return {
+        status: ORDER_STATUS.CANCELLED,
+        timelinePatch: { cancelledAt: time },
       };
     default:
       fail(400, 'Unsupported dispatch order action.');
@@ -1135,12 +1181,39 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   // every valid transition on them. partner.ts:978 splits them for this reason.
   const observedStatus = sanitizeText(bundle.order.status);
   const currentStatus = normalizeOrderStatus(observedStatus);
-  const nextState = buildDispatchStatusUpdate(currentStatus, bundle.assignment, nextAction);
+  // cancel_escalated moves money (a full refund) and ends the order, so it is
+  // admin-only - a plain dispatcher can escalate and resolve, not write off.
+  if (nextAction === 'cancel_escalated') {
+    ensureRole(context.role, ['admin']);
+  }
+
+  const nextState = buildDispatchStatusUpdate(
+    currentStatus,
+    bundle.assignment,
+    nextAction,
+    (bundle.order.timeline ?? null) as JsonObject | null
+  );
   const timeline = {
     ...(bundle.order.timeline ?? {}),
     ...nextState.timelinePatch,
   };
   const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
+
+  // A full refund, matching the acceptance-deadline auto-cancel's rationale: an
+  // order that had to be escalated and then written off is not a customer
+  // cancellation, so the customer-cancellation rate table does not apply. Reuses
+  // buildRefundUpdate so the refund is recorded exactly as every other refund on
+  // this codebase is - no second money path.
+  if (nextState.status === ORDER_STATUS.CANCELLED) {
+    Object.assign(
+      payment,
+      buildRefundUpdate({
+        order: bundle.order,
+        refundRate: 1,
+        reason: 'dispatch_escalation_cancelled_full_refund',
+      })
+    );
+  }
 
   if (nextAction === 'delivered' && sanitizeText(payment.method, 'cash') === 'cash') {
     payment.capturedAmount = roundCurrency(parseNumber((bundle.order.pricing ?? {}).total, 0));
@@ -1171,6 +1244,12 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     status: nextState.status,
     timeline,
     updatedAt: nowIso(),
+    // Same shape cancelCustomerOrder writes, so the admin console and any
+    // reconciliation read one cancellation record regardless of which path
+    // ended the order.
+    ...(nextState.status === ORDER_STATUS.CANCELLED
+      ? { cancellation: { actor: 'admin', reason: 'dispatch_escalation', refundRate: 1 } }
+      : {}),
   });
 
   if (!applied) {
@@ -1205,7 +1284,15 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   // guard form: an order whose snapshot showed no courier may have been
   // claimed by automatic assignment in the meantime, and skipping the
   // release on that basis stranded the claim forever.
-  const dispatchReleaseEligibleStatuses: readonly string[] = [ORDER_STATUS.DELIVERED, ORDER_STATUS.FAILED_DELIVERY];
+  // CANCELLED joins the two delivery outcomes here for Task 27: cancel_escalated
+  // is a terminal exit, so the rider carrying the order must get their capacity
+  // back. releaseDispatchAssignmentLoad is loadReleasedAt-guarded, so this stays
+  // exactly-once even though several paths can reach a release for one claim.
+  const dispatchReleaseEligibleStatuses: readonly string[] = [
+    ORDER_STATUS.DELIVERED,
+    ORDER_STATUS.FAILED_DELIVERY,
+    ORDER_STATUS.CANCELLED,
+  ];
   if (dispatchReleaseEligibleStatuses.includes(nextState.status)) {
     try {
       await releaseDispatchAssignmentLoad(orderId);
