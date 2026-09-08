@@ -11,6 +11,7 @@ import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRou
 import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { customerTheme } from '../src/theme/palette';
+import { useFeastyFonts } from '@feasty/design-system';
 
 const initializeSentry = createSentryInitializer({
   loadNativeSdk: () => import('@sentry/react-native'),
@@ -97,6 +98,7 @@ function FEASTYLaunchScreen() {
 
 function RootLayoutNav() {
   const { user, loading, policyAccepted, policyLoading } = useAuth();
+  const { fontsReady } = useFeastyFonts();
   const router = useRouter();
   const pathname = usePathname();
   const [showLaunch, setShowLaunch] = useState(false);
@@ -206,7 +208,10 @@ function RootLayoutNav() {
     return () => clearTimeout(timer);
   }, [loading, policyAccepted, policyLoading, user?.emailVerified, user?.role, user?.uid]);
 
-  if (loading || policyLoading) {
+  // Holding on `fontsReady` here avoids a flash of unstyled text. `useFeastyFonts`
+  // reports ready even on a load failure, so a font error degrades to the system
+  // face instead of hanging the app on the skeleton.
+  if (!fontsReady || loading || policyLoading) {
     return <LoadingSkeleton mode={getCustomerLoadingMode(pathname)} />;
   }
 

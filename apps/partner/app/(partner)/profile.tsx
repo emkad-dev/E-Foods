@@ -735,7 +735,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   warningTitle: {
-    color: partnerTheme.warning,
+    color: partnerTheme.warningText,
     fontSize: 15,
     fontWeight: '800',
   },
@@ -848,7 +848,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   approvalNoticeTitle: {
-    color: partnerTheme.warning,
+    color: partnerTheme.warningText,
     fontSize: 14,
     fontWeight: '800',
   },
