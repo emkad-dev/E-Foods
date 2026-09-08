@@ -31,10 +31,18 @@ import {
 } from '../orders.ts';
 import { resolvePartnerSubmitOutcome } from '../partnerApplicationTransitions.ts';
 import {
+  buildPartnerVerificationUploadRequest,
+  derivePartnerDocumentHash,
+  derivePartnerDocumentLast4,
+  normalizePartnerOnboardingDocumentType,
+  validatePartnerOnboardingSubmission,
+} from '../partnerOnboarding.ts';
+import {
   canClaimRestaurantLink,
   dedupeRestaurantRowsById,
   resolvePartnerRestaurantScope,
 } from '../partnerRestaurantScope.ts';
+import { assertPaystackConfigured, resolvePaystackBankAccount } from '../paystack.ts';
 import { validatePolicyAcceptancePayload, recordPolicyAcceptance } from '../policyAcceptance.ts';
 import { loadDispatchWeights } from '../platformSettings.ts';
 import { broadcastRestaurantsChanged } from '../realtime.ts';
@@ -1254,6 +1262,277 @@ const submitPartnerApplication: Handler = async ({ context, data }) => {
   });
 };
 
+const resolvePartnerBankAccount: Handler = async ({ data }) => {
+  const bankCode = sanitizeText(data.bankCode);
+  const accountNumber = sanitizeText(data.accountNumber).replace(/\s+/g, '');
+  if (!bankCode) {
+    fail(400, 'A bank code is required.');
+  }
+  if (accountNumber.length < 6) {
+    fail(400, 'A valid account number is required.');
+  }
+  assertPaystackConfigured();
+
+  let resolved: { accountName: string; accountNumber: string };
+  try {
+    resolved = await resolvePaystackBankAccount({ accountNumber, bankCode });
+  } catch (_error) {
+    fail(422, 'We could not verify that bank account. Check the number and bank, then try again.');
+  }
+  if (!resolved.accountName) {
+    fail(422, 'That bank account could not be verified. Check the details and try again.');
+  }
+
+  return json(200, {
+    data: { accountName: resolved.accountName, accountNumber: resolved.accountNumber },
+  });
+};
+
+const requestPartnerVerificationUploadUrl: Handler = async ({ context, data }) => {
+  const kind = sanitizeText(data.kind);
+  const extension = sanitizeText(data.extension, 'jpg');
+  const contentType = sanitizeText(data.contentType, 'application/octet-stream');
+  if (!kind) {
+    fail(400, 'A verification document kind is required.');
+  }
+
+  // The restaurant row does not exist until approval, so uploads are foldered
+  // under the application's allocated restaurantId when present, else the uid.
+  const existingApplication = await loadPartnerApplication(context.uid);
+  const restaurantId = sanitizeText(existingApplication?.restaurantId) || context.uid;
+
+  const uploadRequest = buildPartnerVerificationUploadRequest({
+    uid: context.uid,
+    restaurantId,
+    kind,
+    extension,
+    contentType,
+  });
+  // buildPartnerVerificationDocPath prefixes the bucket; storage.from(bucket)
+  // wants the object path relative to the bucket.
+  const objectPath = uploadRequest.path.startsWith(`${uploadRequest.bucket}/`)
+    ? uploadRequest.path.slice(uploadRequest.bucket.length + 1)
+    : uploadRequest.path;
+
+  const { data: signed, error: signError } = await serviceClient.storage
+    .from(uploadRequest.bucket)
+    .createSignedUploadUrl(objectPath, { upsert: true });
+
+  if (signError || !signed) {
+    throw new Error(signError?.message ?? 'Could not create a verification upload URL.');
+  }
+
+  return json(200, {
+    data: {
+      bucket: uploadRequest.bucket,
+      contentType: uploadRequest.contentType,
+      path: uploadRequest.path,
+      signedUrl: signed.signedUrl,
+      token: signed.token,
+    },
+  });
+};
+
+const submitPartnerOnboarding: Handler = async ({ context, data }) => {
+  let submission: ReturnType<typeof validatePartnerOnboardingSubmission>;
+  try {
+    submission = validatePartnerOnboardingSubmission({
+      accountNumber: sanitizeText(data.accountNumber),
+      address: sanitizeText(data.address),
+      bankCode: sanitizeText(data.bankCode),
+      bankName: sanitizeText(data.bankName),
+      contactName: sanitizeText(data.contactName),
+      cuisine: sanitizeText(data.cuisine),
+      deliveryRadiusKm:
+        data.deliveryRadiusKm === null || data.deliveryRadiusKm === undefined
+          ? null
+          : parseNumber(data.deliveryRadiusKm, Number.NaN),
+      deliveryTime: sanitizeText(data.deliveryTime),
+      description: sanitizeText(data.description),
+      documentBackPath: sanitizeText(data.documentBackPath),
+      documentFrontPath: sanitizeText(data.documentFrontPath),
+      documentType: sanitizeText(data.documentType),
+      email: sanitizeText(data.email, context.email),
+      latitude:
+        data.latitude === null || data.latitude === undefined
+          ? null
+          : parseNumber(data.latitude, Number.NaN),
+      legalName: sanitizeText(data.legalName),
+      longitude:
+        data.longitude === null || data.longitude === undefined
+          ? null
+          : parseNumber(data.longitude, Number.NaN),
+      phoneNumber: sanitizeText(data.phoneNumber),
+      restaurantName: sanitizeText(data.restaurantName),
+    });
+  } catch (validationError) {
+    fail(400, validationError instanceof Error ? validationError.message : 'Invalid onboarding submission.');
+  }
+
+  // The raw document number is never stored — only its hash and last four, so a
+  // leak of the row cannot reconstruct the NIN. Derived server-side.
+  const documentNumber = sanitizeText(data.documentNumber ?? data.ninNumber);
+  if (!documentNumber) {
+    fail(400, 'A verification document number is required.');
+  }
+  const ninHash = await derivePartnerDocumentHash(documentNumber);
+  const ninLast4 = derivePartnerDocumentLast4(documentNumber);
+  if (!ninHash || !ninLast4) {
+    fail(400, 'A valid verification document number is required.');
+  }
+
+  const policyAcceptance = data.policyAcceptance
+    ? validatePolicyAcceptancePayload(data.policyAcceptance, 'partner', 'partner_signup')
+    : null;
+
+  const existingApplication = await loadPartnerApplication(context.uid);
+  const submitOutcome = resolvePartnerSubmitOutcome(existingApplication?.status);
+  if (!submitOutcome.allowed) {
+    fail(submitOutcome.httpStatus, submitOutcome.message);
+  }
+
+  assertPaystackConfigured();
+  let resolvedAccountName: string;
+  try {
+    const resolved = await resolvePaystackBankAccount({
+      accountNumber: submission.accountNumber,
+      bankCode: submission.bankCode,
+    });
+    resolvedAccountName = resolved.accountName;
+  } catch (_error) {
+    fail(422, 'We could not verify that bank account. Check the number and bank, then try again.');
+  }
+  if (!resolvedAccountName) {
+    fail(422, 'That bank account could not be verified. Check the details and try again.');
+  }
+
+  const submittedAt = existingApplication?.submittedAt ?? nowIso();
+  const updatedAt = nowIso();
+  const restaurantId = existingApplication?.restaurantId ?? crypto.randomUUID();
+  const documentType = normalizePartnerOnboardingDocumentType(submission.documentType);
+
+  const { error: applicationError } = await serviceClient.from('PartnerApplicationRecord').upsert(
+    {
+      id: context.uid,
+      uid: context.uid,
+      email: context.email,
+      contactName: submission.contactName,
+      phoneNumber: submission.phoneNumber,
+      restaurantName: submission.restaurantName,
+      cuisine: submission.cuisine,
+      address: submission.address,
+      description: submission.description || null,
+      latitude: submission.latitude,
+      longitude: submission.longitude,
+      deliveryTime: submission.deliveryTime,
+      // Kept at PENDING so the existing admin review -> approve path is unchanged;
+      // KYC/payout readiness lives in the dedicated rows written below.
+      status: PARTNER_APPLICATION_STATUS.PENDING,
+      restaurantId,
+      submittedAt,
+      reviewedAt: null,
+      approvedByUid: null,
+      rejectionReason: null,
+      updatedAt,
+    },
+    { onConflict: 'id' }
+  );
+  if (applicationError) {
+    throw new Error(applicationError.message);
+  }
+
+  const { error: kycError } = await serviceClient.from('RestaurantKyc').upsert(
+    {
+      id: `kyc_${context.uid}`,
+      uid: context.uid,
+      restaurantId,
+      legalName: submission.legalName,
+      ninNumber: null,
+      ninLast4,
+      ninHash,
+      ninFrontPath: submission.documentFrontPath,
+      ninBackPath: submission.documentBackPath || '',
+      verification: 'manual',
+      verifiedByUid: null,
+      verifiedAt: null,
+      reviewNotes: documentType === 'tax_id' ? 'Document type: tax_id' : null,
+      updatedAt,
+    },
+    { onConflict: 'uid' }
+  );
+  if (kycError) {
+    throw new Error(kycError.message);
+  }
+
+  const { error: payoutError } = await serviceClient.from('RestaurantPayout').upsert(
+    {
+      id: `payout_${context.uid}`,
+      uid: context.uid,
+      restaurantId,
+      bankCode: submission.bankCode,
+      bankName: submission.bankName,
+      accountNumber: submission.accountNumber,
+      accountLast4: submission.accountNumber.slice(-4),
+      resolvedAccountName,
+      // Subaccount is created at approval, not now. Resolved but not yet active.
+      paystackSubaccountCode: null,
+      status: 'resolved',
+      lastError: null,
+      updatedAt,
+    },
+    { onConflict: 'uid' }
+  );
+  if (payoutError) {
+    throw new Error(payoutError.message);
+  }
+
+  const currentAccount = await loadUserAccount(context.uid);
+  await upsertUserAccount({
+    uid: context.uid,
+    email: context.email,
+    displayName: submission.contactName,
+    phoneNumber: submission.phoneNumber,
+    emailVerified: true,
+    roleDisplay: 'customer',
+    partnerApplicationStatus: PARTNER_APPLICATION_STATUS.PENDING,
+    partnerApplicationReviewedAt: null,
+    partnerApplicationRejectionReason: null,
+    createdAt: currentAccount?.createdAt ?? updatedAt,
+    updatedAt,
+  });
+
+  if (policyAcceptance) {
+    await recordPolicyAcceptance(context.uid, context.email, policyAcceptance);
+  }
+
+  await createAuditEntry(context.uid, 'partner_onboarding_submitted', 'partner_application', context.uid, {
+    restaurantName: submission.restaurantName,
+    bankName: submission.bankName,
+    documentType,
+  });
+  await notifyAdmins({
+    title: 'New restaurant application',
+    body: `${submission.restaurantName} submitted onboarding and is waiting for review.`,
+    data: buildNotificationData({
+      app: 'admin',
+      extra: { applicationId: context.uid },
+      routeKey: 'admin_approvals',
+      type: 'application_submitted',
+    }),
+  });
+
+  return json(200, {
+    data: {
+      status: PARTNER_APPLICATION_STATUS.PENDING,
+      submittedAt,
+      restaurantId,
+      payoutStatus: 'resolved',
+      resolvedAccountName,
+      targetUid: context.uid,
+    },
+  });
+};
+
 export const partnerDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: PARTNER_ACTIONS,
   name: 'partner',
@@ -1265,7 +1544,10 @@ export const partnerDomain = defineRpcDomain<AuthenticatedRequestContext>({
     partnerSetMenuItemAvailability,
     partnerSetStorePause,
     partnerUpdateOrderStatus,
+    requestPartnerVerificationUploadUrl,
+    resolvePartnerBankAccount,
     submitPartnerApplication,
+    submitPartnerOnboarding,
     upsertPartnerRestaurantMenu,
     upsertPartnerRestaurantProfile,
   },

@@ -16,6 +16,27 @@ export interface AddressRecord extends DocumentData {
   isDefault?: boolean;
 }
 
+export type PartnerPayoutStatus = 'pending' | 'resolved' | 'active' | 'failed' | string;
+
+/** Non-sensitive payout state for partner/admin reads. Never carries the full
+ *  account number — only the resolved name and last four. */
+export interface RestaurantPayoutSummary {
+  status?: PartnerPayoutStatus;
+  bankName?: string | null;
+  accountLast4?: string | null;
+  resolvedAccountName?: string | null;
+  paystackSubaccountCode?: string | null;
+}
+
+/** Non-sensitive KYC state for partner/admin reads. Never carries the raw
+ *  document number — only its last four and verification state. */
+export interface RestaurantKycSummary {
+  status?: 'pending' | 'manual' | 'verified' | 'rejected' | string;
+  legalName?: string | null;
+  documentLast4?: string | null;
+  verifiedAt?: string | null;
+}
+
 export interface UserDocument extends DocumentData {
   uid: string;
   email: string;
@@ -23,9 +44,12 @@ export interface UserDocument extends DocumentData {
   emailVerified: boolean;
   displayName?: string;
   phoneNumber?: string;
-  partnerApplicationStatus?: 'pending' | 'approved' | 'rejected' | string;
+  partnerApplicationStatus?: 'pending' | 'pending_verification' | 'verification_failed' | 'approved' | 'rejected' | string;
   partnerApplicationReviewedAt?: string | null;
   partnerApplicationRejectionReason?: string | null;
+  /** Populated for partner/admin onboarding reads; absent for other roles. */
+  partnerPayout?: RestaurantPayoutSummary | null;
+  partnerKyc?: RestaurantKycSummary | null;
   dispatchApplicationStatus?: 'pending' | 'approved' | 'rejected' | string;
   dispatchApplicationReviewedAt?: string | null;
   dispatchApplicationRejectionReason?: string | null;
@@ -129,6 +153,8 @@ export interface RestaurantDocument extends DocumentData {
   approvalStatus?: 'pending' | 'approved' | 'unpublished' | string;
   approvedAt?: string | null;
   approvedByUid?: string | null;
+  /** Paystack subaccount that receives this restaurant's settlement split. */
+  paystackSubaccountCode?: string | null;
   menu?: MenuCategoryDocument[] | null;
   // Task 16 (F2): set only via partnerSetStorePause. Paused while this is a
   // still-future timestamp; auto-resumes with no write once it passes (see
@@ -282,6 +308,29 @@ export interface RestaurantApprovalRecord {
   approvedByUid?: string | null;
 }
 
+/** Admin review block for a partner application: KYC/payout summaries plus short-lived
+ *  signed URLs for the private verification documents. Never carries raw NIN or the full
+ *  account number. Absent for legacy applications submitted before the onboarding flow. */
+export interface PartnerOnboardingReview {
+  kyc: {
+    status: string;
+    legalName: string | null;
+    documentLast4: string | null;
+    verifiedAt: string | null;
+  } | null;
+  payout: {
+    status: PartnerPayoutStatus;
+    bankName: string | null;
+    accountLast4: string | null;
+    resolvedAccountName: string | null;
+    paystackSubaccountCode: string | null;
+  } | null;
+  documents: {
+    frontUrl: string | null;
+    backUrl: string | null;
+  };
+}
+
 export interface PartnerApplicationDocument extends DocumentData {
   id: string;
   uid: string;
@@ -301,6 +350,7 @@ export interface PartnerApplicationDocument extends DocumentData {
   reviewedAt?: string | null;
   approvedByUid?: string | null;
   rejectionReason?: string | null;
+  onboarding?: PartnerOnboardingReview | null;
 }
 
 export interface DispatchApplicationDocument extends DocumentData {

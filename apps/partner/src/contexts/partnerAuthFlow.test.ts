@@ -5,8 +5,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   MISSING_PROFILE_ERROR,
-  PARTNER_APPLICATION_PENDING_MESSAGE,
-  PARTNER_APPLICATION_REJECTED_FALLBACK,
   PARTNER_RESTAURANT_COMPLETION_TIMEOUT_MESSAGE,
   resolvePartnerRestaurantCompletionState,
   resolvePartnerAccessState,
@@ -29,7 +27,7 @@ test('treats an approved partner application as restaurant access even when the 
   );
 });
 
-test('blocks pending partner applications with the pending message', () => {
+test('keeps pending partner applications signed in for the pending screen', () => {
   assert.deepEqual(
     resolvePartnerAccessState({
       claimRole: 'customer',
@@ -39,13 +37,13 @@ test('blocks pending partner applications with the pending message', () => {
       },
     }),
     {
-      kind: 'blocked',
-      message: PARTNER_APPLICATION_PENDING_MESSAGE,
+      kind: 'complete-profile',
+      userRole: 'customer',
     }
   );
 });
 
-test('blocks rejected partner applications with the rejection fallback', () => {
+test('keeps rejected partner applications signed in so they can resubmit', () => {
   assert.deepEqual(
     resolvePartnerAccessState({
       claimRole: 'customer',
@@ -56,8 +54,8 @@ test('blocks rejected partner applications with the rejection fallback', () => {
       },
     }),
     {
-      kind: 'blocked',
-      message: PARTNER_APPLICATION_REJECTED_FALLBACK,
+      kind: 'complete-profile',
+      userRole: 'customer',
     }
   );
 });
@@ -132,9 +130,23 @@ test('a pending applicant waits on the under-review screen', () => {
   );
 });
 
+test('a pending verification applicant waits on the under-review screen', () => {
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'customer', applicationStatus: 'pending_verification' }),
+    'under-review'
+  );
+});
+
 test('a rejected applicant is sent back to the form to fix and resubmit', () => {
   assert.equal(
     resolvePartnerLandingRoute({ role: 'customer', applicationStatus: 'rejected' }),
+    'apply'
+  );
+});
+
+test('a verification failure is sent back to the form to fix and resubmit', () => {
+  assert.equal(
+    resolvePartnerLandingRoute({ role: 'customer', applicationStatus: 'verification_failed' }),
     'apply'
   );
 });

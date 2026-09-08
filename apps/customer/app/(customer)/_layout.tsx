@@ -46,9 +46,12 @@ export default function CustomerLayout() {
   const { width } = useWindowDimensions();
   usePushNotifications();
 
-  // Keep the floating bar off the screen edges, and stop it stretching across wide web viewports.
+  // Keep the floating bar off the screen edges, and stop it stretching across wide web
+  // viewports. Insetting both edges by the same amount centres the pill against whatever
+  // the navigator actually measures, so it stays centred even when `width` (the window)
+  // is wider than the container, e.g. while a scrollbar is showing on web.
   const tabBarWidth = Math.min(width - TAB_BAR_SIDE_INSET * 2, TAB_BAR_MAX_WIDTH);
-  const tabBarLeft = Math.max((width - tabBarWidth) / 2, TAB_BAR_SIDE_INSET);
+  const tabBarSideInset = Math.max((width - tabBarWidth) / 2, TAB_BAR_SIDE_INSET);
 
   if (loading) {
     return <LoadingSkeleton mode={getCustomerShellLoadingMode(pathname)} />;
@@ -80,8 +83,11 @@ export default function CustomerLayout() {
               // gesture bar) on mobile; falls back to 12 on web where the inset is 0.
               bottom: Math.max(insets.bottom, 12),
               elevation: 8,
+              // BottomTabBar pins itself with `start: 0` / `end: 0`, and those logical edges
+              // beat `left`/`right` in Yoga, so the inset has to be written the same way or
+              // the pill snaps back to the screen edge instead of sitting centred.
+              end: tabBarSideInset,
               height: 58,
-              left: tabBarLeft,
               paddingBottom: 6,
               paddingTop: 6,
               position: 'absolute',
@@ -89,7 +95,7 @@ export default function CustomerLayout() {
               shadowOffset: { width: 0, height: 8 },
               shadowOpacity: 0.14,
               shadowRadius: 14,
-              width: tabBarWidth,
+              start: tabBarSideInset,
             },
             headerShown: false,
           }}

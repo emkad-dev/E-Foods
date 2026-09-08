@@ -55,6 +55,12 @@ export const PARTNER_ACTIONS = [
   // the whole store unavailable is "two taps", not a full-menu re-upload.
   'partnerSetMenuItemAvailability',
   'partnerSetStorePause',
+  // Partner onboarding single flow (KYC + payout bank): a live bank-account
+  // name check, signed upload URLs for verification documents, and the single
+  // submit that writes the application, KYC and payout rows together.
+  'resolvePartnerBankAccount',
+  'requestPartnerVerificationUploadUrl',
+  'submitPartnerOnboarding',
 ] as const;
 
 export const ADMIN_ACTIONS = [

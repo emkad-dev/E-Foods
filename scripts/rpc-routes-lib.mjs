@@ -51,12 +51,12 @@ export const LEGACY_RPC_FUNCTION = 'app-rpc';
 export const EXPECTED_DOMAIN_ACTION_COUNTS = {
   ORDER_ACTIONS: 13,
   DISPATCH_ACTIONS: 13,
-  PARTNER_ACTIONS: 10,
+  PARTNER_ACTIONS: 13,
   ADMIN_ACTIONS: 28,
   ACCOUNT_ACTIONS: 13,
 };
 
-export const EXPECTED_TOTAL_ACTION_COUNT = 77;
+export const EXPECTED_TOTAL_ACTION_COUNT = 80;
 
 /**
  * Extracts a `export const NAME = ['a', 'b'] as const;` string-literal array

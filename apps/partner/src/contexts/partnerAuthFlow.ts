@@ -65,20 +65,6 @@ export const resolvePartnerAccessState = ({
     };
   }
 
-  if (userDocument.partnerApplicationStatus === 'pending') {
-    return {
-      kind: 'blocked',
-      message: PARTNER_APPLICATION_PENDING_MESSAGE,
-    };
-  }
-
-  if (userDocument.partnerApplicationStatus === 'rejected') {
-    return {
-      kind: 'blocked',
-      message: userDocument.partnerApplicationRejectionReason ?? PARTNER_APPLICATION_REJECTED_FALLBACK,
-    };
-  }
-
   if (claimRole === 'restaurant' || userDocument.role === 'restaurant' || userDocument.partnerApplicationStatus === 'approved') {
     return {
       kind: 'restaurant',
@@ -134,9 +120,19 @@ export const resolvePartnerLandingRoute = ({
   role: string | null | undefined;
   applicationStatus: string | null | undefined;
 }): PartnerLandingRoute => {
-  if (role === 'restaurant') {
+  const status = (applicationStatus ?? '').trim().toLowerCase();
+
+  if (role === 'restaurant' || status === 'approved') {
     return 'dashboard';
   }
 
-  return (applicationStatus ?? '').trim().toLowerCase() === 'pending' ? 'under-review' : 'apply';
+  if (status === 'pending' || status === 'pending_verification' || status === 'pending-verification') {
+    return 'under-review';
+  }
+
+  if (status === 'rejected' || status === 'verification_failed' || status === 'verification-failed') {
+    return 'apply';
+  }
+
+  return 'apply';
 };

@@ -168,6 +168,27 @@ export const initializePaystackTransaction = async ({
   })) as JsonObject;
 };
 
+// Resolves the human-readable account name for a bank account. Read-only Paystack
+// call; used both during onboarding submission and as a live client check.
+export const resolvePaystackBankAccount = async ({
+  accountNumber,
+  bankCode,
+}: {
+  accountNumber: string;
+  bankCode: string;
+}) => {
+  const query = `account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`;
+  const data = (await fetchPaystackJson({
+    method: 'GET',
+    path: `/bank/resolve?${query}`,
+  })) as JsonObject | null;
+
+  return {
+    accountName: sanitizeText(data?.account_name),
+    accountNumber: sanitizeText(data?.account_number, accountNumber),
+  };
+};
+
 export const verifyPaystackTransaction = async (reference: string) =>
   (await fetchPaystackJson({
     method: 'GET',
