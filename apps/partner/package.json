@@ -20,6 +20,7 @@
     "expo-audio": "~1.1.1",
     "expo-constants": "~18.0.13",
     "expo-device": "~8.0.10",
+    "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "~17.0.10",
     "expo-keep-awake": "~15.0.8",
     "expo-notifications": "~0.32.16",
