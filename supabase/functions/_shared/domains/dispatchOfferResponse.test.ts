@@ -164,6 +164,18 @@ const createTable = (initialRows: Row[]) => {
           filters.push([col, val]);
           return builder;
         },
+        // PostgREST's `.update(...).eq(...).select('id')`, which is how
+        // updateOrderRecordIfStatus learns whether its compare-and-swap
+        // actually matched a row (Task 29 [H5] routed dispatchUpdateOrderStatus
+        // through it). Returns the rows the qual matched AFTER applying the
+        // patch, so a lost CAS resolves to an empty array and the handler 409s.
+        select(_columns?: string) {
+          const matched = rows.filter((row) => filters.every(([col, val]) => row[col] === val));
+          for (const row of matched) {
+            Object.assign(row, payload);
+          }
+          return Promise.resolve({ data: matched.map((row) => ({ id: row.id })), error: null });
+        },
         then(resolve: (value: { error: null }) => unknown, reject?: (reason: unknown) => unknown) {
           for (const row of rows) {
             if (filters.every(([col, val]) => row[col] === val)) {
@@ -1224,5 +1236,108 @@ Deno.test('Defect 2: escalate is refused on an order still under a live offer', 
     await callSafely(dispatchUpdateOrderStatus, riderContext(RIDER_A), { action: 'escalate', orderId: ORDER_ID }),
     403,
     'escalate is gated on the manual queue too - a live-offered order is off-limits'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 29 [H5]: dispatchUpdateOrderStatus is compare-and-swap at write time.
+//
+// The handler validated its transition against a lock-free loadOrderBundle
+// snapshot and then wrote unconditionally - the same read-then-write shape
+// Task 14 fixed on the partner path, where it resurrected a refunded order.
+// These two tests pin both halves of the fix: that the guard quals on the
+// RIGHT value, and that a lost race fails cleanly instead of mis-transitioning.
+//
+// Both drive `escalate`, deliberately: it is the one dispatch transition that
+// needs no courier and releases no load, so it exercises the status write in
+// isolation without the ledger rpcs this harness does not mirror.
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs `mutate()` the moment the handler's first CustomerOrder read resolves -
+ * i.e. after loadOrderBundle has its snapshot but before the write. The table's
+ * reads hand back `snapshot()` copies, so the bundle the handler is holding is
+ * unaffected by the mutation: exactly the stale-snapshot window under test.
+ */
+const mutateAfterFirstOrderRead = (
+  // deno-lint-ignore no-explicit-any
+  state: any,
+  mutate: () => void
+) => {
+  const table = state.tables.CustomerOrder;
+  const originalSelect = table.select.bind(table);
+  let fired = false;
+  const fire = () => {
+    if (!fired) {
+      fired = true;
+      mutate();
+    }
+  };
+
+  table.select = (columns?: string) => {
+    const builder = originalSelect(columns);
+    const originalMaybeSingle = builder.maybeSingle.bind(builder);
+    const originalThen = builder.then.bind(builder);
+    builder.maybeSingle = async () => {
+      const result = await originalMaybeSingle();
+      fire();
+      return result;
+    };
+    // deno-lint-ignore no-explicit-any
+    builder.then = (resolve: any, reject: any) =>
+      originalThen((value: unknown) => {
+        fire();
+        return resolve(value);
+      }, reject);
+    return builder;
+  };
+};
+
+// The wrong-constant guard. normalizeOrderStatus folds 'ready' into
+// 'ready_for_pickup', so an order STORED as 'ready' has a raw column value the
+// normalized constant never matches. Qualling the CAS on currentStatus (the
+// normalized value) instead of observedStatus (the raw one) would match zero
+// rows here and 409 a perfectly valid transition. This is the mutation Task 29
+// asks to be catchable, and it is: flip observedStatus -> currentStatus in
+// dispatch.ts and this test reddens while everything else stays green.
+Deno.test('H5: the CAS quals on the stored status, so a transition on a non-normalized row still lands', async () => {
+  const state = installMocks('ready');
+
+  const response = await dispatchUpdateOrderStatus({
+    context: adminContext('admin-1'),
+    data: { action: 'escalate', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'the transition is valid and must succeed');
+  expectEqual(state.order()?.status, 'escalated', 'the order actually moved');
+});
+
+// The race itself: a concurrent writer commits between the bundle read and the
+// write. Pre-fix the handler wrote unconditionally and would have dragged a
+// cancelled order back to 'escalated'.
+Deno.test('H5: a status change landing between the read and the write is refused with 409, not mis-transitioned', async () => {
+  const state = installMocks('accepted');
+
+  mutateAfterFirstOrderRead(state, () => {
+    // Someone else cancels the order while this request is in flight.
+    const row = state.tables.CustomerOrder.rows.find((entry: Row) => entry.id === ORDER_ID);
+    if (row) {
+      row.status = 'cancelled';
+    }
+  });
+
+  expectEqual(
+    await callSafely(dispatchUpdateOrderStatus, adminContext('admin-1'), {
+      action: 'escalate',
+      orderId: ORDER_ID,
+    }),
+    409,
+    'the lost compare-and-swap surfaces as a conflict rather than a silent overwrite'
+  );
+  expectEqual(
+    state.order()?.status,
+    'cancelled',
+    'the committed cancellation stands - the stale snapshot did not resurrect the order'
   );
 });

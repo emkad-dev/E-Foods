@@ -67,6 +67,7 @@ import {
   normalizeOrderStatus,
   toOrderSnapshotResponse,
   updateOrderRecord,
+  updateOrderRecordIfStatus,
   type CustomerOrderRow,
   type DeliveryAssignmentRow,
 } from '../orders.ts';
@@ -1125,7 +1126,15 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     fail(412, 'Dispatch actions are only available for delivery orders.');
   }
 
-  const currentStatus = normalizeOrderStatus(bundle.order.status);
+  // Two derefs of ONE snapshot read, and they are not interchangeable.
+  // observedStatus is the raw column value and is what the compare-and-swap
+  // below quals on; currentStatus is normalizeOrderStatus'd and is what the FSM
+  // validates against. They differ for real rows - normalizeOrderStatus folds
+  // 'pending'/'confirmed' into 'placed' and 'ready' into 'ready_for_pickup' - so
+  // qualling on the normalized value would never match those rows and would 409
+  // every valid transition on them. partner.ts:978 splits them for this reason.
+  const observedStatus = sanitizeText(bundle.order.status);
+  const currentStatus = normalizeOrderStatus(observedStatus);
   const nextState = buildDispatchStatusUpdate(currentStatus, bundle.assignment, nextAction);
   const timeline = {
     ...(bundle.order.timeline ?? {}),
@@ -1142,12 +1151,31 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     payment.status = PAYMENT_STATUS.PAID;
   }
 
-  await updateOrderRecord(orderId, {
+  // Compare-and-swap on the status this transition was validated against,
+  // symmetric with the partner path (Task 14). loadOrderBundle is a plain read
+  // with no FOR UPDATE, so everything above is computed from a snapshot that a
+  // concurrent writer can invalidate before this line lands. Task 14's re-review
+  // established this is not a LIVE race today - the acceptance-deadline sweep
+  // only cancels `placed` orders while dispatch transitions act on
+  // picked_up/on_the_way, so the two writers cannot currently contend - but the
+  // shape is the same read-then-unconditional-write that resurrected refunded
+  // orders on the partner path, and any future writer that can move an order out
+  // of a dispatch-held status concurrently (customer-cancel-in-transit, an admin
+  // force-cancel, a refund flow) would hit it for real. Guarding costs one qual.
+  //
+  // The 409 returns BEFORE the load release and the delivery event below: on a
+  // lost CAS this request's snapshot is stale, no row changed, and firing either
+  // side effect would attribute work to a transition that never happened.
+  const applied = await updateOrderRecordIfStatus(orderId, observedStatus, {
     payment,
     status: nextState.status,
     timeline,
     updatedAt: nowIso(),
   });
+
+  if (!applied) {
+    fail(409, 'This order changed while you were updating it. Reload the order and try again.');
+  }
 
   // Routed through releaseDispatchAssignmentLoad, not the plain
   // adjustDispatchRiderLoad(-1) this used to call: this is the
