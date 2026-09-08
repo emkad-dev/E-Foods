@@ -140,6 +140,19 @@ export interface RestaurantDocument extends DocumentData {
   deliveryTime?: string | number | null;
   openingTime?: string | null;
   closingTime?: string | null;
+  /**
+   * Per-day opening hours, surfaced on the restaurant DETAIL projection only
+   * (Task 30 [H6]). RestaurantHours is service-role-only, so this is the
+   * customer app's sole read path for it, and the checkout slot picker needs it
+   * to avoid offering slots the server would reject. Absent on card
+   * projections and on any older cached detail response.
+   */
+  hours?: Array<{
+    dayOfWeek: number;
+    isClosed?: boolean | null;
+    opensAt?: string | null;
+    closesAt?: string | null;
+  }> | null;
   minOrder?: number | null;
   deliveryFee?: number | null;
   address?: string | null;

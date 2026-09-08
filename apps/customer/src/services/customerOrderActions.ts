@@ -17,6 +17,13 @@ type PlaceCustomerOrderInput = {
   paymentMethod: CheckoutPaymentMethod;
   promoCode?: string | null;
   restaurantId: string;
+  /**
+   * ISO instant for a scheduled order (Task 30 [H6]), or null/absent for
+   * "order now" - which stays byte-for-byte the request it always was. The
+   * server re-validates this against RestaurantHours and 412s an invalid slot;
+   * the picker only ever offers ones it should accept.
+   */
+  scheduledFor?: string | null;
   tipAmount: number;
 };
 
@@ -73,6 +80,7 @@ export const initializeCustomerPayment = async ({
   paymentMethod,
   promoCode,
   restaurantId,
+  scheduledFor,
   tipAmount,
 }: PlaceCustomerOrderInput): Promise<InitializeCustomerPaymentResult> => {
   if (!['card', 'bank_transfer'].includes(paymentMethod)) {
@@ -98,6 +106,9 @@ export const initializeCustomerPayment = async ({
     // Server re-validates and redeems; the client's previewed discount is never trusted.
     ...(promoCode ? { promoCode } : {}),
     ...(attributedPromoId ? { attributedPromoId } : {}),
+    // Omitted entirely for "order now", so an immediate order sends exactly the
+    // payload it sent before scheduling existed.
+    ...(scheduledFor ? { scheduledFor } : {}),
   }).then((result) => {
     clearCustomerReadCache();
     trackAnalyticsEvent('customer_payment_initialized', {
@@ -105,6 +116,7 @@ export const initializeCustomerPayment = async ({
       items_count: items.length,
       payment_method: paymentMethod,
       restaurant_id: restaurantId,
+      scheduled: Boolean(scheduledFor),
       tip_amount: tipAmount,
       total: result.total,
     });

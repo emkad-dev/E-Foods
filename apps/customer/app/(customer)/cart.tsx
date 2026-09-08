@@ -23,6 +23,7 @@ import {
   type PromoCodePreview,
 } from '../../src/services/customerOrderActions';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
+import { WAT_OFFSET_MS, buildScheduleSlots, type ScheduleSlotDay } from '../../src/domain/scheduleSlots';
 import { getRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
@@ -53,6 +54,29 @@ type RestaurantCheckoutSummary = {
   warning: string | null;
 };
 
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Labels a restaurant-local (WAT) day key. Presentation only - the slot rules
+ * live in src/domain/scheduleSlots.ts. Deliberately not the device's locale
+ * calendar: a customer in another timezone must still read the restaurant's day.
+ */
+const formatScheduleDayLabel = (dayKey: string) => {
+  const todayKey = new Date(Date.now() + WAT_OFFSET_MS).toISOString().slice(0, 10);
+  if (dayKey === todayKey) {
+    return 'Today';
+  }
+  const tomorrowKey = new Date(Date.now() + WAT_OFFSET_MS + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (dayKey === tomorrowKey) {
+    return 'Tomorrow';
+  }
+  const parsed = Date.parse(`${dayKey}T00:00:00.000Z`);
+  if (Number.isNaN(parsed)) {
+    return dayKey;
+  }
+  return `${WEEKDAY_LABELS[new Date(parsed).getUTCDay()]} ${dayKey.slice(8, 10)}/${dayKey.slice(5, 7)}`;
+};
+
 export default function CartScreen() {
   const {
     deliveryLocation,
@@ -80,10 +104,14 @@ export default function CartScreen() {
   const [autoOffers, setAutoOffers] = useState<PromoCodePreview['automaticOffers']>([]);
   const [restaurantsById, setRestaurantsById] = useState<Record<string, RestaurantDocument | null>>({});
   const [restaurantsLoading, setRestaurantsLoading] = useState(false);
+  // Task 30 [H6]. 'now' is the default and leaves checkout exactly as it was.
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
+  const [selectedSlotIso, setSelectedSlotIso] = useState<string | null>(null);
   const router = useRouter();
   const isMountedRef = useRef(true);
   const isCheckoutScreenFocusedRef = useRef(false);
   const safeTipAmount = tipOptions.includes(tipAmount as (typeof tipOptions)[number]) ? tipAmount : DEFAULT_TIP_AMOUNT;
+
   const restaurantGroups = useMemo(() => groupCartItemsByRestaurant(items), [items]);
   const restaurantIds = useMemo(
     () => Array.from(new Set(restaurantGroups.map((group) => group.restaurantId))),
@@ -92,6 +120,37 @@ export default function CartScreen() {
   const restaurantIdsKey = restaurantIds.join('|');
   const isMixedBasket = restaurantIds.length > 1;
   const primaryRestaurantId = restaurantGroups[0]?.restaurantId ?? restaurantId;
+
+  // Slots come from the primary restaurant's per-day hours, which only the
+  // DETAIL projection carries. No hours (older cached response, or a restaurant
+  // with none configured) means scheduling is simply not offered - never an
+  // unrestricted picker whose slots the server would then reject.
+  const scheduleDays: ScheduleSlotDay[] = useMemo(() => {
+    if (isMixedBasket || !primaryRestaurantId) {
+      return [];
+    }
+    const hours = restaurantsById[primaryRestaurantId]?.hours;
+    if (!Array.isArray(hours) || hours.length === 0) {
+      return [];
+    }
+    return buildScheduleSlots({ hours, now: Date.now() });
+  }, [isMixedBasket, primaryRestaurantId, restaurantsById]);
+
+  const schedulingAvailable = scheduleDays.length > 0;
+
+  // If the offer set changes underneath a chosen slot (restaurant swapped, hours
+  // refreshed, or the slot simply aged past the lead time) drop the selection
+  // rather than submitting one the server will now refuse.
+  useEffect(() => {
+    if (!schedulingAvailable) {
+      setScheduleMode('now');
+      setSelectedSlotIso(null);
+      return;
+    }
+    if (selectedSlotIso && !scheduleDays.some((day) => day.slots.some((slot) => slot.iso === selectedSlotIso))) {
+      setSelectedSlotIso(null);
+    }
+  }, [scheduleDays, schedulingAvailable, selectedSlotIso]);
   const primaryRestaurantName = restaurantGroups[0]?.restaurantName ?? restaurantName;
   const allRestaurantsLoaded = restaurantIds.length > 0 && restaurantIds.every((id) => Boolean(restaurantsById[id]));
 
@@ -407,6 +466,11 @@ export default function CartScreen() {
       has_delivery_location: Boolean(deliveryLocation),
     });
 
+    if (scheduleMode === 'later' && !selectedSlotIso) {
+      setCheckoutError('Pick a delivery time, or switch back to ordering now.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const checkoutPayload = {
@@ -422,6 +486,9 @@ export default function CartScreen() {
         paymentMethod,
         promoCode: promoEligible && appliedPromo?.valid ? appliedPromo.code : promoEligible ? promoCodeInput.trim() || null : null,
         restaurantId: primaryRestaurantId,
+        // Omitted for "order now", so an immediate order sends the payload it
+        // always sent. The server re-validates this and 412s an invalid slot.
+        scheduledFor: scheduleMode === 'later' ? selectedSlotIso : null,
         tipAmount: safeTipAmount,
       };
 
@@ -721,6 +788,63 @@ export default function CartScreen() {
                 })}
               </View>
             </View>
+
+            {schedulingAvailable ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionLabel}>When</Text>
+                <View style={styles.tipRow}>
+                  {(['now', 'later'] as const).map((mode) => {
+                    const isActive = scheduleMode === mode;
+                    return (
+                      <TouchableOpacity
+                        key={mode}
+                        style={[styles.tipChip, isActive ? styles.tipChipActive : null]}
+                        onPress={() => {
+                          setCheckoutError(null);
+                          setScheduleMode(mode);
+                          if (mode === 'now') {
+                            setSelectedSlotIso(null);
+                          }
+                        }}
+                      >
+                        <Text style={[styles.tipChipText, isActive ? styles.tipChipTextActive : null]}>
+                          {mode === 'now' ? 'Order now' : 'Schedule for later'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {scheduleMode === 'later' ? (
+                  <View style={styles.scheduleDayList}>
+                    {scheduleDays.map((day) => (
+                      <View key={day.dayKey} style={styles.scheduleDay}>
+                        <Text style={styles.scheduleDayLabel}>{formatScheduleDayLabel(day.dayKey)}</Text>
+                        <View style={styles.tipRow}>
+                          {day.slots.map((slot) => {
+                            const isActive = selectedSlotIso === slot.iso;
+                            return (
+                              <TouchableOpacity
+                                key={slot.iso}
+                                style={[styles.tipChip, isActive ? styles.tipChipActive : null]}
+                                onPress={() => {
+                                  setCheckoutError(null);
+                                  setSelectedSlotIso(slot.iso);
+                                }}
+                              >
+                                <Text style={[styles.tipChipText, isActive ? styles.tipChipTextActive : null]}>
+                                  {slot.timeLabel}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
             <View style={styles.summaryCard}>
               {checkoutError ? (
@@ -1196,6 +1320,18 @@ const styles = StyleSheet.create({
   },
   optionCopyActive: {
     color: customerTheme.textSoft,
+  },
+  scheduleDayList: {
+    gap: 12,
+    marginTop: 12,
+  },
+  scheduleDay: {
+    gap: 6,
+  },
+  scheduleDayLabel: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
   },
   tipRow: {
     flexDirection: 'row',

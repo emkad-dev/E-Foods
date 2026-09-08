@@ -189,8 +189,31 @@ const withDisplayMenuPrices = (menu: unknown[], config: PricingConfig) =>
     };
   });
 
-/** Full restaurant projection (incl. priced menu) for customerGetRestaurantDetail. */
-export const toRestaurantDetail = (restaurant: RestaurantRow, pricingConfig: PricingConfig) => ({
+/** Per-day opening hours, as the scheduled-order validator consumes them. */
+export type RestaurantHoursProjection = {
+  dayOfWeek: number;
+  isClosed: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+};
+
+/**
+ * Full restaurant projection (incl. priced menu) for customerGetRestaurantDetail.
+ *
+ * `hours` exists for Task 30 [H6]. RestaurantHours is RLS-on / no-policies
+ * (service-role only), so the customer app cannot read it directly, and without
+ * it the checkout slot picker cannot tell a closed day from an open one - it
+ * would offer slots the server then 412s. This function runs under the service
+ * role, so surfacing the per-day rows here is the only read path the client has.
+ * Opening hours are not private data: the flat openingTime/closingTime strings
+ * beside them have always been public.
+ */
+export const toRestaurantDetail = (
+  restaurant: RestaurantRow,
+  pricingConfig: PricingConfig,
+  hours: RestaurantHoursProjection[] = []
+) => ({
+  hours,
   address: sanitizeOptionalText(restaurant.address),
   approvalStatus: restaurant.isPublished ? 'approved' : 'pending',
   approvedAt: null,

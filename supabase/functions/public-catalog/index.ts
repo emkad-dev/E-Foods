@@ -19,6 +19,7 @@ import {
   sortRestaurantsByLocation,
   toRestaurantCard,
   toRestaurantDetail,
+  type RestaurantHoursProjection,
   type GeoCoords,
   type RestaurantRow,
 } from './catalog.ts';
@@ -136,6 +137,34 @@ const handleGetRestaurantList = async (data: Record<string, unknown> | undefined
   };
 };
 
+/**
+ * Per-day opening hours for one restaurant (Task 30 [H6]).
+ *
+ * Never throws: the slot picker is an enhancement on top of checkout, so a
+ * hours read that fails degrades to "no schedulable slots offered" rather than
+ * failing the whole restaurant detail request. The server remains the authority
+ * either way - placeCustomerOrder re-validates any scheduledFor it is sent.
+ */
+const loadRestaurantHoursFor = async (restaurantId: string): Promise<RestaurantHoursProjection[]> => {
+  const { data, error } = await serviceClient
+    .from('RestaurantHours')
+    .select('dayOfWeek,isClosed,opensAt,closesAt')
+    .eq('restaurantId', restaurantId);
+
+  if (error || !Array.isArray(data)) {
+    return [];
+  }
+
+  return data
+    .map((row) => ({
+      closesAt: sanitizeText((row as Record<string, unknown>).closesAt) || null,
+      dayOfWeek: Number((row as Record<string, unknown>).dayOfWeek),
+      isClosed: (row as Record<string, unknown>).isClosed === true,
+      opensAt: sanitizeText((row as Record<string, unknown>).opensAt) || null,
+    }))
+    .filter((row) => Number.isInteger(row.dayOfWeek) && row.dayOfWeek >= 0 && row.dayOfWeek <= 6);
+};
+
 // --- customerGetRestaurantDetail: single row queried by id, not a full-catalog .find() ---
 const handleGetRestaurantDetail = async (restaurantId: string) => {
   const row = await loadRestaurantRowById(DETAIL_COLUMNS, restaurantId);
@@ -143,8 +172,11 @@ const handleGetRestaurantDetail = async (restaurantId: string) => {
     return { restaurant: null };
   }
 
-  const pricingConfig = await loadPricingConfig();
-  return { restaurant: toRestaurantDetail(row, pricingConfig) };
+  const [pricingConfig, hours] = await Promise.all([
+    loadPricingConfig(),
+    loadRestaurantHoursFor(restaurantId),
+  ]);
+  return { restaurant: toRestaurantDetail(row, pricingConfig, hours) };
 };
 
 Deno.serve(async (request) => {
