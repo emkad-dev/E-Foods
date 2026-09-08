@@ -14,6 +14,11 @@ The source spec (`docs/superpowers/specs/2026-08-07-partner-onboarding-single-fl
 
 - **Partner wizard UI** (spec §1, §8) — single-flow signup, resume-after-email-confirm, rejection/resubmit routing, folding `complete-restaurant-details.tsx` into the wizard.
 - **Payment split at checkout** (spec §6) — attaching the subaccount to Paystack transaction init. Note `_shared/orders.ts:76` declares `splitSubaccountCode` but **nothing reads it** — it is dead today.
+- **The KYC half of the approval gate.** Approval here gates on the payout profile only. It does not check that a `RestaurantKyc` row exists, and it never transitions `RestaurantKyc.status` `pending` → `verified` or stamps `verifiedByUid` / `verifiedAt`. The spec's approval gate lists the KYC row alongside the payout condition; the wizard plan owns that half, since it owns document capture.
+
+**Deliberate deviation from spec §5 — record this before writing the wizard plan.** The spec describes creating the Paystack subaccount at *apply* time, with the payout row staying `pending` until approval. This plan creates it at *approval* time instead. That is a considered improvement: no Paystack subaccount is ever minted for an applicant who is later rejected. The wizard plan must not re-implement apply-time creation.
+
+**The payout row is looked up by `uid`, not `restaurantId`.** `RestaurantPayout.restaurantId` is nullable (the spec defines it as "set on approval") while `uid` is `NOT NULL UNIQUE`, so keying on `restaurantId` would silently 412 forever if the wizard wrote a null. Approval stamps `restaurantId` onto the row as part of the activation write. The wizard must write the payout row with `uid` = the partner's uid.
 
 **The spec's "Current state being replaced" section is stale.** Verified against `feature/parity` at `396fa7c`, these are already done and must NOT be rebuilt:
 
@@ -44,7 +49,7 @@ The source spec (`docs/superpowers/specs/2026-08-07-partner-onboarding-single-fl
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `RestaurantKyc.documentType TEXT NOT NULL DEFAULT 'nin'`, `RestaurantKyc.status TEXT NOT NULL DEFAULT 'pending'`. Task 4 writes both.
+- Produces: `RestaurantKyc.documentType TEXT NOT NULL DEFAULT 'nin'`, `RestaurantKyc.status TEXT NOT NULL DEFAULT 'pending'`. **Nothing in this plan reads or writes either column** — they are written by the wizard plan, which owns document capture and the KYC review transitions. This task ships the schema ahead of its consumer on purpose, so the wizard plan does not also carry a migration.
 
 - [ ] **Step 1: Write the migration**
 
@@ -256,6 +261,16 @@ git commit -m "feat(backend): add pure payout activation rule"
 - Consumes: the existing private `fetchPaystackJson({ method, path, body })` in the same file, and `sanitizeText` already imported there.
 - Produces: `resolveBankAccount({ accountNumber, bankCode })` → `Promise<{ accountName: string }>`; `createPaystackSubaccount({ accountNumber, bankCode, businessName })` → `Promise<{ subaccountCode: string }>`. Task 5 calls both.
 
+**Critical — what `fetchPaystackJson` returns.** Verified at `supabase/functions/_shared/paystack.ts:122`, its final statement is:
+
+```ts
+return (payload?.data ?? null) as JsonObject | null;
+```
+
+It returns Paystack's **`data` object already unwrapped**, not the full envelope. So read fields directly off the return value (`result.account_name`), never `result.data.account_name` — the latter is always `undefined`. Do **not** change this function's return value; `initializePaystackTransaction` and the other existing callers depend on it exactly as-is.
+
+**`fetchPaystackJson` must strip the query string from its error messages.** `resolveBankAccount` is the first caller to put PII in a path — it sends the real account number as a query parameter. Both of this helper's error paths interpolate `path` into a message that reaches the HTTP response (`rpc/respond.ts` returns `error.message` verbatim), `RestaurantPayout.lastError`, and the edge logs, which would violate two Global Constraints at once. So the helper derives `const safePath = path.split('?')[0];` and uses `safePath` in the 504 timeout message and the 500 failure fallback, while the real `path` is still used for the fetch itself. This is a deliberate edit to the shared helper rather than to the caller: fixing it at the source means no future caller can reintroduce the leak. Do not "restore" the query string for debuggability.
+
 - [ ] **Step 1: Append the two functions**
 
 ```ts
@@ -269,11 +284,17 @@ export const resolveBankAccount = async ({
   accountNumber: string;
   bankCode: string;
 }): Promise<{ accountName: string }> => {
-  const payload = await fetchPaystackJson({
+  // fetchPaystackJson already unwraps `data` — this IS the data object.
+  const data = await fetchPaystackJson({
     path: `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
   });
 
-  return { accountName: sanitizeText((payload?.data as { account_name?: string } | null)?.account_name) };
+  const accountName = sanitizeText((data as { account_name?: string } | null)?.account_name);
+  if (!accountName) {
+    fail(500, 'Paystack resolved the bank account but returned no account name.');
+  }
+
+  return { accountName };
 };
 
 // percentage_charge is 0 on purpose: the platform's revenue is the embedded
@@ -288,18 +309,18 @@ export const createPaystackSubaccount = async ({
   bankCode: string;
   businessName: string;
 }): Promise<{ subaccountCode: string }> => {
-  const payload = await fetchPaystackJson({
+  const data = await fetchPaystackJson({
     method: 'POST',
     path: '/subaccount',
     body: {
       account_number: accountNumber,
-      bank_code: bankCode,
+      settlement_bank: bankCode,
       business_name: businessName,
       percentage_charge: 0,
     },
   });
 
-  const subaccountCode = sanitizeText((payload?.data as { subaccount_code?: string } | null)?.subaccount_code);
+  const subaccountCode = sanitizeText((data as { subaccount_code?: string } | null)?.subaccount_code);
   if (!subaccountCode) {
     fail(500, 'Paystack created the subaccount but returned no subaccount code.');
   }
@@ -308,12 +329,10 @@ export const createPaystackSubaccount = async ({
 };
 ```
 
-- [ ] **Step 2: Confirm `fetchPaystackJson` returns its payload**
-
-Read `supabase/functions/_shared/paystack.ts` lines 109-125. If `fetchPaystackJson` does not `return payload`, add `return payload;` as its final statement — the existing callers ignore the return value, so this is additive and safe.
+- [ ] **Step 2: Confirm the existing callers still compile**
 
 Run: `npx deno check supabase/functions/_shared/paystack.ts`
-Expected: no new errors beyond the repo's known baseline.
+Expected: no new errors beyond the repo's known baseline. `fetchPaystackJson`'s return value and fetch behaviour must be unchanged — the only edit to it is the `safePath` redaction described above.
 
 - [ ] **Step 3: Verify the type baseline is unchanged**
 
@@ -347,16 +366,38 @@ import { resolvePayoutActivationPlan } from '../partnerPayoutActivation.ts';
 import { createPaystackSubaccount, resolveBankAccount } from '../paystack.ts';
 ```
 
-- [ ] **Step 2: Insert payout activation at the top of the approve branch**
+- [ ] **Step 2: Insert payout activation between `restaurantId` assignment and the role grant**
 
-Place this immediately inside `if (decision === 'approve') {`, **before** the existing `RestaurantRecord` upsert, so a payout failure aborts before anything goes live:
+**Exact insertion point — this matters more than anything else in this task.** The approve branch currently reads:
+
+```
+508  if (decision === 'approve') {
+509    restaurantId = sanitizeText(application.restaurantId) || crypto.randomUUID();
+510    await syncUserRoleState(applicationId, 'restaurant', context.uid, {   <-- grants the restaurant role
+520    await updateUserAccount(applicationId, {                              <-- sets status APPROVED
+529    const { error: restaurantError } = await serviceClient.from('RestaurantRecord').upsert(
+```
+
+Insert the block below **after line 509 and before line 510**.
+
+Not at the top of the branch: `restaurantId` is not assigned until 509, so inserting above it reads `null`. Not after 510/520 either: `syncUserRoleState` grants the restaurant role and `updateUserAccount` writes `partnerApplicationStatus: APPROVED`, and neither is rolled back when a later `throw` unwinds. Activating after them would leave a partner approved and role-bearing with a failed payout — exactly the posture this plan's Global Constraints forbid and the reason parity Task 7 [C1]'s failure bullet was amended. Activation must be the first thing that can fail in this branch.
 
 ```ts
-  const { data: payoutRow } = await serviceClient
+  // Keyed on uid, not restaurantId: restaurantId is nullable ("set on
+  // approval" per the KYC spec) while uid is NOT NULL UNIQUE, so keying on
+  // restaurantId would 412 forever if the wizard ever wrote a null — and that
+  // is indistinguishable from the intended fail-closed behaviour.
+  const { data: payoutRow, error: payoutLookupError } = await serviceClient
     .from('RestaurantPayout')
     .select('id,restaurantId,bankCode,accountNumber,paystackSubaccountCode,status')
-    .eq('restaurantId', restaurantId)
+    .eq('uid', applicationId)
     .maybeSingle();
+
+  // Without this, a failed select surfaces as a misleading "no payout details
+  // on file" 412 instead of a 500.
+  if (payoutLookupError) {
+    throw new Error(payoutLookupError.message);
+  }
 
   const activationPlan = resolvePayoutActivationPlan(payoutRow);
   if (activationPlan.action === 'blocked') {
@@ -364,6 +405,8 @@ Place this immediately inside `if (decision === 'approve') {`, **before** the ex
   }
 
   let subaccountCode: string;
+  let resolvedAccountName: string | null = null;
+
   if (activationPlan.action === 'reuse') {
     subaccountCode = activationPlan.subaccountCode;
   } else {
@@ -379,43 +422,57 @@ Place this immediately inside `if (decision === 'approve') {`, **before** the ex
         businessName: sanitizeText(application.restaurantName, 'FEASTY partner'),
       });
       subaccountCode = created.subaccountCode;
-
-      await serviceClient
+      resolvedAccountName = resolved.accountName;
+    } catch (error) {
+      // Record the real failure reason on the payout row so the admin
+      // reviewer can see why activation failed, then let the throw unwind
+      // before the role grant. Never log payoutRow itself — it carries the
+      // full account number.
+      const { error: payoutFailureError } = await serviceClient
         .from('RestaurantPayout')
         .update({
-          paystackSubaccountCode: subaccountCode,
-          resolvedAccountName: resolved.accountName,
-          status: 'active',
-          lastError: null,
+          status: 'failed',
+          lastError: error instanceof Error ? error.message : String(error),
           updatedAt: reviewedAt,
         })
         .eq('id', payoutRow!.id);
-    } catch (error) {
-      // Record the failure and leave the application unapproved. clientErrorMessage
-      // keeps the raw Paystack error server-side; never log payoutRow itself, it
-      // carries the full account number.
-      await serviceClient
-        .from('RestaurantPayout')
-        .update({ status: 'failed', lastError: clientErrorMessage(error), updatedAt: reviewedAt })
-        .eq('id', payoutRow!.id);
+      if (payoutFailureError) {
+        // Don't let a failed DB write mask the original Paystack error —
+        // log it separately and still throw the original below.
+        console.error('Failed to record payout activation failure.', payoutFailureError);
+      }
       throw error;
     }
   }
 
-  if (activationPlan.action === 'reuse') {
-    await serviceClient
-      .from('RestaurantPayout')
-      .update({ status: 'active', lastError: null, updatedAt: reviewedAt })
-      .eq('id', payoutRow!.id);
+  // One activation write serves both paths — a reused code re-asserts 'active'
+  // (a prior run may have left the row 'failed' after minting the code), and a
+  // freshly created one is persisted here rather than inside the try block.
+  // restaurantId is stamped here too: the row is no longer looked up by it, so
+  // this is the only place the spec's "set on approval" actually happens.
+  const { error: payoutActivationError } = await serviceClient
+    .from('RestaurantPayout')
+    .update({
+      paystackSubaccountCode: subaccountCode,
+      status: 'active',
+      lastError: null,
+      restaurantId,
+      updatedAt: reviewedAt,
+      ...(resolvedAccountName ? { resolvedAccountName } : {}),
+    })
+    .eq('id', payoutRow!.id);
+
+  // This check is load-bearing. Without it a failed activation write lets
+  // execution continue into the role grant and the APPROVED write, producing
+  // exactly the approved-partner-with-dead-payout state this task prevents —
+  // and since the payout row is the sole idempotency source, a later retry
+  // would mint a SECOND Paystack subaccount.
+  if (payoutActivationError) {
+    throw new Error(payoutActivationError.message);
   }
 ```
 
 Then add `paystackSubaccountCode: subaccountCode,` to the existing `RestaurantRecord` upsert object.
-
-- [ ] **Step 3: Confirm `clientErrorMessage` is imported**
-
-Run: `grep -n "clientErrorMessage" supabase/functions/_shared/domains/admin.ts`
-Expected: an existing import from `../observability.ts`. If absent, add `import { clientErrorMessage } from '../observability.ts';`.
 
 - [ ] **Step 4: Verify types and the full suite**
 
@@ -439,12 +496,12 @@ Spec §3 requires submit to write the `RestaurantKyc` and `RestaurantPayout` row
 
 The agent cannot run these — its safety classifier blocks `supabase` deploys, and both are live-surface changes:
 
-1. Apply `20260807_kyc_document_type_status.sql` and `20260807_kyc_private_bucket.sql` to the Frankfurt project.
+1. Apply `20260807_kyc_document_type_status.sql` and `20260807_kyc_private_bucket.sql` to the Frankfurt project. **Do this BEFORE step 2, not after.** `deploy-feasty-admin.yml` is path-filtered on `_shared/**`, so merging this branch to `main` triggers the deploy automatically — the schema must already be there when the handler lands. Today the handler only writes `RestaurantPayout`, whose columns already exist, so the ordering risk is latent rather than live; it becomes live the moment the wizard plan starts writing the new `RestaurantKyc` columns.
 2. Deploy `feasty-admin` (the domain function carrying `adminReviewPartnerApplication`). Note `deploy-feasty-admin.yml` is path-filtered on `supabase/functions/feasty-admin/**`, `_shared/**`, and `supabase/config.toml` — Task 5 edits `_shared/domains/admin.ts`, so a push to `main` triggers it automatically.
 3. Confirm `PAYSTACK_SECRET_KEY` is the live key before the first real approval. Per `feasty-paystack-config`, the deploy script syncs `functions/.env` → secrets on every run and has clobbered real keys with placeholders before.
 
 ## Self-review
 
-- **Spec coverage:** §2 lifecycle → Task 5. §3 data model → Tasks 1, 2 (KYC columns, private bucket); the row *writes* are deferred above with a reason. §4 activation sequence → Tasks 3, 4, 5. §7 security → Global Constraints + Task 2's no-policy posture + Task 5's `clientErrorMessage`. §9 idempotency → Task 3. §1, §8 (wizard) and §6 (payment split) are out of scope by the scope note. §5 publishing is already enforced — `RestaurantRecord` is created `isPublished=false`.
+- **Spec coverage:** §2 lifecycle → Task 5. §3 data model → Tasks 1, 2 (KYC columns, private bucket); the row *writes* are deferred above with a reason. §4 activation sequence → Tasks 3, 4, 5. §7 security → Global Constraints + Task 2's no-policy posture + Task 4 stripping the query string from Paystack error messages so the account number cannot reach a client, the DB, or the logs. §9 idempotency → Task 3. §1, §8 (wizard) and §6 (payment split) are out of scope by the scope note. §5 publishing is already enforced — `RestaurantRecord` is created `isPublished=false`.
 - **Placeholders:** none — every step carries runnable SQL, TypeScript, or an exact command.
 - **Type consistency:** `resolvePayoutActivationPlan` returns the same three-variant `PayoutActivationPlan` in Task 3's test, Task 3's implementation, and Task 5's consumption. `subaccountCode` is spelled identically in Task 4's return type and Task 5's use. Column names (`resolvedAccountName`, `accountLast4`, `ninHash`) match the live schema read from `20260731_partner_kyc_payout_hours.sql`, not the spec's aspirational names.

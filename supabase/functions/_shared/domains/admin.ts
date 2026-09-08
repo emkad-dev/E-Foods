@@ -50,6 +50,8 @@ import {
   toOrderSnapshotResponse,
   type CustomerOrderRow,
 } from '../orders.ts';
+import { resolvePayoutActivationPlan } from '../partnerPayoutActivation.ts';
+import { createPaystackSubaccount, resolvePaystackBankAccount } from '../paystack.ts';
 import { loadRiskEvents, type RiskEventRow } from '../riskEvents.ts';
 import {
   broadcastPromosChanged,
@@ -551,6 +553,91 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
   let restaurantId: string | null = null;
   if (decision === 'approve') {
     restaurantId = sanitizeText(application.restaurantId) || crypto.randomUUID();
+
+    const { data: payoutRow, error: payoutLookupError } = await serviceClient
+      .from('RestaurantPayout')
+      .select('id,restaurantId,bankCode,accountNumber,paystackSubaccountCode,status')
+      .eq('uid', applicationId)
+      .maybeSingle();
+
+    if (payoutLookupError) {
+      throw new Error(payoutLookupError.message);
+    }
+
+    const activationPlan = resolvePayoutActivationPlan(payoutRow);
+    if (activationPlan.action === 'blocked') {
+      fail(activationPlan.httpStatus, activationPlan.message);
+    }
+
+    let subaccountCode: string;
+    let resolvedAccountName: string | null = null;
+
+    if (activationPlan.action === 'reuse') {
+      subaccountCode = activationPlan.subaccountCode;
+    } else {
+      try {
+        // Resolve first: a bad account number must fail before a subaccount exists.
+        const resolved = await resolvePaystackBankAccount({
+          accountNumber: payoutRow!.accountNumber,
+          bankCode: payoutRow!.bankCode,
+        });
+        // The shared helper reports a missing name rather than throwing, so the
+        // partner-facing onboarding path can answer 422. Approval wants the hard
+        // failure resolveBankAccount used to raise before it was consolidated.
+        if (!resolved.accountName) {
+          fail(500, 'Paystack resolved the bank account but returned no account name.');
+        }
+        const created = await createPaystackSubaccount({
+          accountNumber: payoutRow!.accountNumber,
+          bankCode: payoutRow!.bankCode,
+          businessName: sanitizeText(application.restaurantName, 'FEASTY partner'),
+        });
+        subaccountCode = created.subaccountCode;
+        resolvedAccountName = resolved.accountName;
+      } catch (error) {
+        // Record the real failure reason on the payout row so the admin
+        // reviewer can see why activation failed, then let the throw unwind
+        // before the role grant. Never log payoutRow itself — it carries the
+        // full account number.
+        const { error: payoutFailureError } = await serviceClient
+          .from('RestaurantPayout')
+          .update({
+            status: 'failed',
+            lastError: error instanceof Error ? error.message : String(error),
+            updatedAt: reviewedAt,
+          })
+          .eq('id', payoutRow!.id);
+        if (payoutFailureError) {
+          // Don't let a failed DB write mask the original Paystack error —
+          // log it separately and still throw the original below.
+          console.error('Failed to record payout activation failure.', payoutFailureError);
+        }
+        throw error;
+      }
+    }
+
+    // One activation write serves both paths — a reused code re-asserts 'active'
+    // (a prior run may have left the row 'failed' after minting the code), and a
+    // freshly created one is persisted here rather than inside the try block.
+    // restaurantId is set here too — the KYC spec defines it as "set on
+    // approval", and this row is no longer looked up by restaurantId, so this
+    // write is the only place it lands on RestaurantPayout.
+    const { error: payoutActivationError } = await serviceClient
+      .from('RestaurantPayout')
+      .update({
+        paystackSubaccountCode: subaccountCode,
+        status: 'active',
+        lastError: null,
+        restaurantId,
+        updatedAt: reviewedAt,
+        ...(resolvedAccountName ? { resolvedAccountName } : {}),
+      })
+      .eq('id', payoutRow!.id);
+
+    if (payoutActivationError) {
+      throw new Error(payoutActivationError.message);
+    }
+
     await syncUserRoleState(applicationId, 'restaurant', context.uid, {
       accountDisabled: false,
       disabledAt: null,
@@ -593,6 +680,7 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
         supportsPickup: true,
         isOpen: true,
         isPublished: false,
+        paystackSubaccountCode: subaccountCode,
         updatedAt: reviewedAt,
       },
       { onConflict: 'id' }
