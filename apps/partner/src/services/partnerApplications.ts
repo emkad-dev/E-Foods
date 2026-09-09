@@ -75,3 +75,43 @@ export const requestPartnerVerificationUploadUrl = async (input: {
  *  before submitting. */
 export const resolvePartnerBankAccount = async (input: { bankCode: string; accountNumber: string }) =>
   callPartnerBackendRpc<{ accountName: string; accountNumber: string }>('resolvePartnerBankAccount', input);
+
+/**
+ * Uploads one KYC document and returns the storage PATH to submit with the
+ * onboarding payload.
+ *
+ * The bucket is private (service-role only), so the client never gets a public
+ * URL and never touches the bucket directly - it PUTs to a short-lived signed
+ * URL minted by the server, then submits only the path. The file bytes are read
+ * from the local picker URI, which on native is a file:// URI fetch() can read.
+ */
+export const uploadPartnerVerificationDocument = async ({
+  contentType = 'image/jpeg',
+  extension = 'jpg',
+  fileUri,
+  kind,
+}: {
+  contentType?: string;
+  extension?: string;
+  fileUri: string;
+  kind: 'front' | 'back';
+}): Promise<string> => {
+  const target = await requestPartnerVerificationUploadUrl({ contentType, extension, kind });
+
+  const file = await fetch(fileUri);
+  if (!file.ok) {
+    throw new Error('We could not read that image. Pick it again.');
+  }
+  const body = await file.arrayBuffer();
+
+  const uploaded = await fetch(target.signedUrl, {
+    body,
+    headers: { 'Content-Type': target.contentType },
+    method: 'PUT',
+  });
+  if (!uploaded.ok) {
+    throw new Error('We could not upload that document. Check your connection and try again.');
+  }
+
+  return target.path;
+};

@@ -1,10 +1,59 @@
-import { useMemo, useState } from 'react';
+/**
+ * Partner onboarding — the single-flow wizard.
+ *
+ * WHY THIS REPLACED THE ONE-PAGE FORM. The old screen called
+ * `submitPartnerApplication`, which writes only PartnerApplicationRecord. But
+ * admin approval (Task 7 [C1]) reads RestaurantPayout by uid and 412s when the
+ * row is missing — so a partner who signed up through that form could never be
+ * approved. `submitPartnerOnboarding` writes all three rows
+ * (PartnerApplicationRecord + RestaurantKyc + RestaurantPayout); this wizard is
+ * what finally calls it.
+ *
+ * The gating rules live in src/domain/partnerOnboardingSteps.ts, mirrored from
+ * the server's validatePartnerOnboardingSubmission so a partner cannot fill five
+ * steps and then fail on submit. The server stays the authority.
+ *
+ * The payout step will not advance until Paystack has resolved the account
+ * holder's name: approval later mints a subaccount from this pair, and a bad
+ * account cannot be settled to.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { submitPartnerApplication } from '../../src/services/partnerApplications.js';
+import { NIGERIA_BANKS, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
+import {
+  PARTNER_ONBOARDING_STEPS,
+  canSubmitPartnerOnboarding,
+  firstIncompleteStep,
+  isStepComplete,
+  isValidDeliveryRadius,
+  shouldInvalidateBankVerification,
+  type PartnerOnboardingFormState,
+  type PartnerOnboardingStepId,
+} from '../../src/domain/partnerOnboardingSteps';
+import {
+  resolvePartnerBankAccount,
+  submitPartnerOnboarding,
+  uploadPartnerVerificationDocument,
+} from '../../src/services/partnerApplications';
+import {
+  clearPartnerOnboardingDraft,
+  loadPartnerOnboardingDraft,
+  savePartnerOnboardingDraft,
+} from '../../src/services/partnerOnboardingDraft';
 import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { supabase } from '../../src/services/supabase/config';
@@ -12,116 +61,278 @@ import { partnerTheme } from '../../src/theme/palette';
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
 const deliveryTimeOptions = ['15-25 min', '25-35 min', '35-45 min', '45-60 min'] as const;
+const documentTypeOptions = [
+  { label: 'NIN', value: 'nin' },
+  { label: 'Tax ID (TIN)', value: 'tax_id' },
+] as const;
+
+const emptyForm = (email: string): PartnerOnboardingFormState => ({
+  accountNumber: '',
+  address: '',
+  bankCode: '',
+  bankName: '',
+  bankVerifiedAccountName: null,
+  contactName: '',
+  cuisine: 'Nigerian',
+  deliveryRadiusKm: '5',
+  deliveryTime: '25-35 min',
+  description: '',
+  documentBackPath: null,
+  documentFrontPath: null,
+  documentNumber: '',
+  documentType: 'nin',
+  email,
+  latitude: '',
+  legalName: '',
+  logoImage: null,
+  longitude: '',
+  phoneNumber: '',
+  restaurantName: '',
+});
 
 export default function CompleteRestaurantDetailsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { clearError, error, loading, signOut, user } = useAuth();
-  const [restaurantName, setRestaurantName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [cuisine, setCuisine] = useState<(typeof cuisineOptions)[number]>('Nigerian');
-  const [address, setAddress] = useState('');
-  const [description, setDescription] = useState('');
-  const [deliveryTime, setDeliveryTime] = useState<(typeof deliveryTimeOptions)[number]>('25-35 min');
-  const [logoImage, setLogoImage] = useState<string | null>(null);
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const { loading, signOut, user } = useAuth();
 
-  const contactName = useMemo(
+  const [form, setForm] = useState<PartnerOnboardingFormState>(() => emptyForm(user?.email ?? ''));
+  const [stepId, setStepId] = useState<PartnerOnboardingStepId>('restaurant');
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [verifyingBank, setVerifyingBank] = useState(false);
+  const [uploadingKind, setUploadingKind] = useState<'front' | 'back' | null>(null);
+  const [bankPickerOpen, setBankPickerOpen] = useState(false);
+  // The (code, number) pair the resolved name actually belongs to.
+  const [verifiedPair, setVerifiedPair] = useState<{ accountNumber: string; bankCode: string } | null>(null);
+
+  const stepIndex = PARTNER_ONBOARDING_STEPS.findIndex((step) => step.id === stepId);
+  const step = PARTNER_ONBOARDING_STEPS[stepIndex] ?? PARTNER_ONBOARDING_STEPS[0];
+
+  const setField = useCallback(<K extends keyof PartnerOnboardingFormState>(key: K, value: PartnerOnboardingFormState[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  }, []);
+
+  // Resume a saved draft, and land on the first thing still missing rather than
+  // on step 1. Document paths survive because the file is already uploaded.
+  useEffect(() => {
+    let cancelled = false;
+    loadPartnerOnboardingDraft()
+      .then((draft) => {
+        if (cancelled) {
+          return;
+        }
+        if (draft) {
+          const restored: PartnerOnboardingFormState = {
+            ...emptyForm(user?.email ?? ''),
+            accountNumber: draft.accountNumber ?? '',
+            address: draft.address ?? '',
+            bankCode: draft.bankCode ?? '',
+            bankName: draft.bankName ?? '',
+            contactName: draft.contactName ?? '',
+            cuisine: draft.cuisine ?? 'Nigerian',
+            deliveryRadiusKm: draft.deliveryRadiusKm != null ? String(draft.deliveryRadiusKm) : '5',
+            deliveryTime: draft.deliveryTime ?? '25-35 min',
+            description: draft.description ?? '',
+            documentBackPath: draft.documentBackPath ?? null,
+            documentFrontPath: draft.documentFrontPath ?? null,
+            documentType: draft.documentType ?? 'nin',
+            email: draft.email ?? user?.email ?? '',
+            latitude: draft.latitude != null ? String(draft.latitude) : '',
+            legalName: draft.legalName ?? '',
+            longitude: draft.longitude != null ? String(draft.longitude) : '',
+            phoneNumber: draft.phoneNumber ?? '',
+            restaurantName: draft.restaurantName ?? '',
+          };
+          setForm(restored);
+          // The bank verification is deliberately NOT restored: the resolve
+          // proved a pair at a point in time and is cheap to redo, so the
+          // partner re-verifies rather than submitting on stale evidence.
+          setStepId(firstIncompleteStep(restored));
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setDraftLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email]);
+
+  // Persist whatever is filled so far, so a partner who leaves mid-flow (to
+  // find their account number, typically) does not start over.
+  useEffect(() => {
+    if (!draftLoaded) {
+      return;
+    }
+    void savePartnerOnboardingDraft({
+      accountNumber: form.accountNumber,
+      address: form.address,
+      bankCode: form.bankCode,
+      bankName: form.bankName,
+      contactName: form.contactName,
+      cuisine: form.cuisine,
+      deliveryRadiusKm: Number.parseFloat(form.deliveryRadiusKm) || null,
+      deliveryTime: form.deliveryTime,
+      description: form.description,
+      documentBackPath: form.documentBackPath,
+      documentFrontPath: form.documentFrontPath,
+      documentType: form.documentType,
+      email: form.email,
+      latitude: form.latitude ? Number.parseFloat(form.latitude) : null,
+      legalName: form.legalName,
+      longitude: form.longitude ? Number.parseFloat(form.longitude) : null,
+      phoneNumber: form.phoneNumber,
+      restaurantName: form.restaurantName,
+    }).catch(() => undefined);
+  }, [draftLoaded, form]);
+
+  // A changed pair invalidates the resolved name — it proved that pair, not this one.
+  useEffect(() => {
+    if (
+      form.bankVerifiedAccountName &&
+      shouldInvalidateBankVerification({
+        nextAccountNumber: form.accountNumber,
+        nextBankCode: form.bankCode,
+        verifiedAccountNumber: verifiedPair?.accountNumber ?? null,
+        verifiedBankCode: verifiedPair?.bankCode ?? null,
+      })
+    ) {
+      setForm((current) => ({ ...current, bankVerifiedAccountName: null }));
+      setVerifiedPair(null);
+    }
+  }, [form.accountNumber, form.bankCode, form.bankVerifiedAccountName, verifiedPair]);
+
+  const displayName = useMemo(
     () => user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'Partner',
     [user?.displayName, user?.email]
   );
 
-  const handleFieldChange = (setter: (value: string) => void) => (value: string) => {
-    if (error) {
-      clearError();
+  const pickImage = async (onPicked: (uri: string) => void) => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo access to attach an image.');
+      return;
     }
-
-    setter(value);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: false,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      onPicked(result.assets[0].uri);
+    }
   };
 
-  const handlePickLogo = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert('Logo access blocked', 'Allow photo access to upload a logo.');
+  const handleVerifyBank = async () => {
+    if (verifyingBank) {
+      return;
+    }
+    if (!form.bankCode) {
+      Alert.alert('Pick a bank', 'Select your bank before verifying the account.');
+      return;
+    }
+    if (!isPlausibleNubanAccountNumber(form.accountNumber)) {
+      Alert.alert('Check the account number', 'A Nigerian account number is exactly 10 digits.');
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      mediaTypes: ['images'],
-      quality: 0.82,
-    });
-
-    if (!result.canceled && result.assets[0]?.uri) {
-      setLogoImage(result.assets[0].uri);
+    setVerifyingBank(true);
+    try {
+      const resolved = await resolvePartnerBankAccount({
+        accountNumber: form.accountNumber.trim(),
+        bankCode: form.bankCode.trim(),
+      });
+      setForm((current) => ({ ...current, bankVerifiedAccountName: resolved.accountName }));
+      setVerifiedPair({ accountNumber: form.accountNumber.trim(), bankCode: form.bankCode.trim() });
+    } catch (error: any) {
+      setForm((current) => ({ ...current, bankVerifiedAccountName: null }));
+      setVerifiedPair(null);
+      Alert.alert('Could not verify', error?.message ?? 'Check the account number and bank, then try again.');
+    } finally {
+      setVerifyingBank(false);
     }
+  };
+
+  const handlePickDocument = async (kind: 'front' | 'back') => {
+    await pickImage(async (uri) => {
+      setUploadingKind(kind);
+      try {
+        const path = await uploadPartnerVerificationDocument({ fileUri: uri, kind });
+        setField(kind === 'front' ? 'documentFrontPath' : 'documentBackPath', path);
+      } catch (error: any) {
+        Alert.alert('Upload failed', error?.message ?? 'Please try again.');
+      } finally {
+        setUploadingKind(null);
+      }
+    });
   };
 
   const handleSubmit = async () => {
-    if (loading || submitting) {
-      return;
-    }
-
-    const hasLatitude = latitude.trim().length > 0;
-    const hasLongitude = longitude.trim().length > 0;
-    const parsedLatitude = hasLatitude ? Number.parseFloat(latitude) : null;
-    const parsedLongitude = hasLongitude ? Number.parseFloat(longitude) : null;
-
-    if (!restaurantName.trim() || !phoneNumber.trim() || !address.trim()) {
-      Alert.alert('Missing details', 'Complete the restaurant name, phone number, and address before continuing.');
-      return;
-    }
-
-    if (hasLatitude !== hasLongitude) {
-      Alert.alert('Incomplete coordinates', 'Provide both latitude and longitude together, or leave both empty for now.');
-      return;
-    }
-
-    if ((hasLatitude && !Number.isFinite(parsedLatitude)) || (hasLongitude && !Number.isFinite(parsedLongitude))) {
-      Alert.alert('Invalid location', 'Use valid numeric coordinates for the restaurant location.');
+    if (loading || submitting || !canSubmitPartnerOnboarding(form)) {
       return;
     }
 
     setSubmitting(true);
-
     try {
-      const logoUpload = logoImage
-        ? await uploadRestaurantAsset({
-            kind: 'logos',
-            ownerId: user?.uid ?? '',
-            uri: logoImage,
-          })
+      const logoUpload = form.logoImage
+        ? await uploadRestaurantAsset({ kind: 'logos', ownerId: user?.uid ?? '', uri: form.logoImage })
         : null;
 
-      await submitPartnerApplication({
-        address: address.trim(),
-        contactName,
-        cuisine,
-        deliveryTime: deliveryTime?.trim() || undefined,
-        description: description.trim() || undefined,
-        latitude: hasLatitude ? parsedLatitude : null,
+      await submitPartnerOnboarding({
+        accountNumber: form.accountNumber.trim(),
+        address: form.address.trim(),
+        bankCode: form.bankCode.trim(),
+        bankName: form.bankName.trim(),
+        contactName: form.contactName.trim(),
+        cuisine: form.cuisine,
+        deliveryRadiusKm: Number.parseFloat(form.deliveryRadiusKm),
+        deliveryTime: form.deliveryTime,
+        description: form.description.trim() || undefined,
+        documentBackPath: form.documentBackPath,
+        documentFrontPath: form.documentFrontPath as string,
+        documentNumber: form.documentNumber.trim(),
+        documentType: form.documentType,
+        email: form.email.trim(),
+        latitude: form.latitude ? Number.parseFloat(form.latitude) : null,
+        legalName: form.legalName.trim(),
         logoImage: logoUpload,
-        longitude: hasLongitude ? parsedLongitude : null,
-        phoneNumber: phoneNumber.trim(),
-        restaurantName: restaurantName.trim(),
+        longitude: form.longitude ? Number.parseFloat(form.longitude) : null,
+        phoneNumber: form.phoneNumber.trim(),
         policyAcceptance: buildPartnerPolicyAcceptance('partner_signup'),
+        restaurantName: form.restaurantName.trim(),
       });
 
-      // Submitting no longer grants the restaurant role -- an admin has to
-      // approve first. Refresh so the account's pending status is picked up,
-      // then let the layout route to the under-review screen.
+      await clearPartnerOnboardingDraft().catch(() => undefined);
+      // Submitting does not grant the restaurant role — an admin approves
+      // first. Refresh so the pending status is picked up, then let the layout
+      // route to the under-review screen.
       await supabase.auth.refreshSession().catch(() => undefined);
       router.replace('/(partner)/application-under-review' as never);
-    } catch (nextError: any) {
-      Alert.alert('Unable to save details', nextError.message ?? 'Please try again.');
+    } catch (error: any) {
+      Alert.alert('Unable to submit', error?.message ?? 'Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
+
+  const goNext = () => {
+    const next = PARTNER_ONBOARDING_STEPS[stepIndex + 1];
+    if (next) {
+      setStepId(next.id);
+    }
+  };
+
+  const goBack = () => {
+    const previous = PARTNER_ONBOARDING_STEPS[stepIndex - 1];
+    if (previous) {
+      setStepId(previous.id);
+    }
+  };
+
+  const currentStepComplete = stepId === 'review' ? canSubmitPartnerOnboarding(form) : isStepComplete(stepId, form);
 
   return (
     <ScrollView
@@ -131,141 +342,364 @@ export default function CompleteRestaurantDetailsScreen() {
     >
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>FEASTY Partner</Text>
-        <Text style={styles.title}>Complete your restaurant details</Text>
-        <Text style={styles.copy}>
-          Add your restaurant profile. Once you submit, our team reviews your application and emails you when it is approved.
-        </Text>
+        <Text style={styles.title}>{step.title}</Text>
+        <Text style={styles.copy}>{step.blurb}</Text>
       </View>
 
-      <View style={styles.card}>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      <View style={styles.progressRow}>
+        {PARTNER_ONBOARDING_STEPS.map((entry, index) => (
+          <View
+            key={entry.id}
+            style={[
+              styles.progressSegment,
+              index <= stepIndex ? styles.progressSegmentActive : null,
+            ]}
+          />
+        ))}
+      </View>
+      <Text style={styles.progressLabel}>
+        Step {stepIndex + 1} of {PARTNER_ONBOARDING_STEPS.length}
+      </Text>
 
+      <View style={styles.card}>
         <View style={styles.identityRow}>
           <View style={styles.identityBubble}>
-            <Text style={styles.identityBubbleText}>{contactName.charAt(0).toUpperCase()}</Text>
+            <Text style={styles.identityBubbleText}>{displayName.slice(0, 1).toUpperCase()}</Text>
           </View>
           <View style={styles.identityCopy}>
-            <Text style={styles.identityName}>{contactName}</Text>
+            <Text style={styles.identityName}>{displayName}</Text>
             <Text style={styles.identityEmail}>{user?.email ?? 'Signed in'}</Text>
           </View>
         </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Restaurant name"
-          placeholderTextColor="#8e8e8e"
-          value={restaurantName}
-          onChangeText={handleFieldChange(setRestaurantName)}
-          editable={!loading && !submitting}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Phone number"
-          placeholderTextColor="#8e8e8e"
-          keyboardType="phone-pad"
-          value={phoneNumber}
-          onChangeText={handleFieldChange(setPhoneNumber)}
-          editable={!loading && !submitting}
-        />
+        {stepId === 'restaurant' ? (
+          <>
+            <Text style={styles.sectionLabel}>Restaurant name</Text>
+            <TextInput
+              style={styles.input}
+              onChangeText={(value) => setField('restaurantName', value)}
+              placeholder="Ada Obi Kitchen"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.restaurantName}
+            />
 
-        <View style={styles.logoRow}>
-          <View style={styles.logoPreview}>
-            {logoImage ? <Image source={{ uri: logoImage }} style={styles.logoImage} /> : <Text style={styles.logoPreviewText}>Logo</Text>}
-          </View>
-          <View style={styles.logoActions}>
-            <TouchableOpacity style={styles.logoButton} onPress={handlePickLogo} disabled={loading || submitting}>
-              <Text style={styles.logoButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
+            <Text style={styles.sectionLabel}>Registered legal name</Text>
+            <TextInput
+              style={styles.input}
+              onChangeText={(value) => setField('legalName', value)}
+              placeholder="Ada Obi Foods Ltd"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.legalName}
+            />
+            <Text style={styles.hint}>The name on your bank account and tax records.</Text>
+
+            <Text style={styles.sectionLabel}>Contact name</Text>
+            <TextInput
+              style={styles.input}
+              onChangeText={(value) => setField('contactName', value)}
+              placeholder="Ada Obi"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.contactName}
+            />
+
+            <Text style={styles.sectionLabel}>Phone number</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="phone-pad"
+              onChangeText={(value) => setField('phoneNumber', value)}
+              placeholder="08012345678"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.phoneNumber}
+            />
+
+            <Text style={styles.sectionLabel}>Cuisine</Text>
+            <View style={styles.optionRow}>
+              {cuisineOptions.map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  onPress={() => setField('cuisine', option)}
+                  style={[styles.chip, form.cuisine === option ? styles.chipActive : null]}
+                >
+                  <Text style={[styles.chipText, form.cuisine === option ? styles.chipTextActive : null]}>{option}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.sectionLabel}>Typical prep + delivery time</Text>
+            <View style={styles.optionRow}>
+              {deliveryTimeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  onPress={() => setField('deliveryTime', option)}
+                  style={[styles.chip, form.deliveryTime === option ? styles.chipActive : null]}
+                >
+                  <Text style={[styles.chipText, form.deliveryTime === option ? styles.chipTextActive : null]}>
+                    {option}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.sectionLabel}>Short description</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              multiline
+              onChangeText={(value) => setField('description', value)}
+              placeholder="Home-style Nigerian cooking, generous portions."
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.description}
+            />
+
+            <Text style={styles.sectionLabel}>Logo (optional)</Text>
+            <View style={styles.logoRow}>
+              <View style={styles.logoPreview}>
+                {form.logoImage ? (
+                  <Image source={{ uri: form.logoImage }} style={styles.logoImage} />
+                ) : (
+                  <Text style={styles.logoPreviewText}>No logo</Text>
+                )}
+              </View>
+              <View style={styles.logoActions}>
+                <TouchableOpacity onPress={() => pickImage((uri) => setField('logoImage', uri))} style={styles.logoButton}>
+                  <Text style={styles.logoButtonText}>{form.logoImage ? 'Change' : 'Add logo'}</Text>
+                </TouchableOpacity>
+                {form.logoImage ? (
+                  <TouchableOpacity onPress={() => setField('logoImage', null)}>
+                    <Text style={styles.removeLogoText}>Remove</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          </>
+        ) : null}
+
+        {stepId === 'location' ? (
+          <>
+            <Text style={styles.sectionLabel}>Restaurant address</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              multiline
+              onChangeText={(value) => setField('address', value)}
+              placeholder="12 Admiralty Way, Lekki Phase 1, Lagos"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.address}
+            />
+
+            <Text style={styles.sectionLabel}>Delivery radius (km)</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="decimal-pad"
+              onChangeText={(value) => setField('deliveryRadiusKm', value)}
+              placeholder="5"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.deliveryRadiusKm}
+            />
+            {isValidDeliveryRadius(form.deliveryRadiusKm) ? (
+              <Text style={styles.hint}>Orders outside this radius will not reach you.</Text>
+            ) : (
+              <Text style={styles.errorText}>Enter a delivery radius greater than zero.</Text>
+            )}
+
+            <Text style={styles.sectionLabel}>Coordinates (optional)</Text>
+            <View style={styles.coordinatesRow}>
+              <TextInput
+                style={[styles.input, styles.coordinateInput]}
+                keyboardType="numbers-and-punctuation"
+                onChangeText={(value) => setField('latitude', value)}
+                placeholder="Latitude"
+                placeholderTextColor={partnerTheme.textSoft}
+                value={form.latitude}
+              />
+              <TextInput
+                style={[styles.input, styles.coordinateInput]}
+                keyboardType="numbers-and-punctuation"
+                onChangeText={(value) => setField('longitude', value)}
+                placeholder="Longitude"
+                placeholderTextColor={partnerTheme.textSoft}
+                value={form.longitude}
+              />
+            </View>
+            <Text style={styles.hint}>Leave both empty if you are not sure — add them together or not at all.</Text>
+          </>
+        ) : null}
+
+        {stepId === 'payout' ? (
+          <>
+            <Text style={styles.sectionLabel}>Bank</Text>
+            <TouchableOpacity onPress={() => setBankPickerOpen((open) => !open)} style={styles.input}>
+              <Text style={form.bankName ? styles.pickerValue : styles.pickerPlaceholder}>
+                {form.bankName || 'Select your bank'}
+              </Text>
             </TouchableOpacity>
-            {logoImage ? (
-              <TouchableOpacity onPress={() => setLogoImage(null)} disabled={loading || submitting}>
-                <Text style={styles.removeLogoText}>Remove</Text>
-              </TouchableOpacity>
+            {bankPickerOpen ? (
+              <View style={styles.bankList}>
+                {NIGERIA_BANKS.map((bank) => (
+                  <TouchableOpacity
+                    key={bank.code}
+                    onPress={() => {
+                      setForm((current) => ({ ...current, bankCode: bank.code, bankName: bank.name }));
+                      setBankPickerOpen(false);
+                    }}
+                    style={styles.bankRow}
+                  >
+                    <Text style={styles.bankRowText}>{bank.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ) : null}
-          </View>
-        </View>
 
-        <Text style={styles.sectionLabel}>Cuisine focus</Text>
-        <View style={styles.optionRow}>
-          {cuisineOptions.map((option) => (
+            <Text style={styles.sectionLabel}>Account number</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              maxLength={10}
+              onChangeText={(value) => setField('accountNumber', value.replace(/\D/g, ''))}
+              placeholder="0123456789"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.accountNumber}
+            />
+
+            {form.bankVerifiedAccountName ? (
+              <View style={styles.verifiedCard}>
+                <Text style={styles.verifiedLabel}>Account verified</Text>
+                <Text style={styles.verifiedName}>{form.bankVerifiedAccountName}</Text>
+                <Text style={styles.hint}>Payouts for this restaurant will land here.</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                disabled={verifyingBank}
+                onPress={handleVerifyBank}
+                style={[styles.secondaryButton, verifyingBank ? styles.buttonDisabled : null]}
+              >
+                {verifyingBank ? (
+                  <ActivityIndicator color={partnerTheme.accentStrong} />
+                ) : (
+                  <Text style={styles.secondaryButtonText}>Verify account</Text>
+                )}
+              </TouchableOpacity>
+            )}
+            <Text style={styles.hint}>
+              We confirm the account with your bank before you can continue. Nothing is charged.
+            </Text>
+          </>
+        ) : null}
+
+        {stepId === 'verification' ? (
+          <>
+            <Text style={styles.sectionLabel}>Document type</Text>
+            <View style={styles.optionRow}>
+              {documentTypeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  onPress={() => setField('documentType', option.value)}
+                  style={[styles.chip, form.documentType === option.value ? styles.chipActive : null]}
+                >
+                  <Text style={[styles.chipText, form.documentType === option.value ? styles.chipTextActive : null]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.sectionLabel}>Document number</Text>
+            <TextInput
+              style={styles.input}
+              onChangeText={(value) => setField('documentNumber', value)}
+              placeholder="12345678901"
+              placeholderTextColor={partnerTheme.textSoft}
+              value={form.documentNumber}
+            />
+            <Text style={styles.hint}>Stored as a one-way hash — we keep only the last 4 digits for reference.</Text>
+
+            <Text style={styles.sectionLabel}>Front of document</Text>
             <TouchableOpacity
-              key={option}
-              style={[styles.chip, cuisine === option ? styles.chipActive : null]}
-              onPress={() => setCuisine(option)}
-              disabled={loading || submitting}
+              disabled={uploadingKind === 'front'}
+              onPress={() => handlePickDocument('front')}
+              style={[styles.uploadButton, form.documentFrontPath ? styles.uploadButtonDone : null]}
             >
-              <Text style={[styles.chipText, cuisine === option ? styles.chipTextActive : null]}>{option}</Text>
+              {uploadingKind === 'front' ? (
+                <ActivityIndicator color={partnerTheme.accentStrong} />
+              ) : (
+                <Text style={styles.uploadButtonText}>{form.documentFrontPath ? 'Front uploaded — replace' : 'Upload front'}</Text>
+              )}
             </TouchableOpacity>
-          ))}
-        </View>
 
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Restaurant address"
-          placeholderTextColor="#8e8e8e"
-          multiline
-          value={address}
-          onChangeText={handleFieldChange(setAddress)}
-          editable={!loading && !submitting}
-        />
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Short description (optional)"
-          placeholderTextColor="#8e8e8e"
-          multiline
-          value={description}
-          onChangeText={handleFieldChange(setDescription)}
-          editable={!loading && !submitting}
-        />
-
-        <Text style={styles.sectionLabel}>Typical delivery time</Text>
-        <View style={styles.optionRow}>
-          {deliveryTimeOptions.map((option) => (
+            <Text style={styles.sectionLabel}>Back of document (optional)</Text>
             <TouchableOpacity
-              key={option}
-              style={[styles.chip, deliveryTime === option ? styles.chipActive : null]}
-              onPress={() => setDeliveryTime(option)}
-              disabled={loading || submitting}
+              disabled={uploadingKind === 'back'}
+              onPress={() => handlePickDocument('back')}
+              style={[styles.uploadButton, form.documentBackPath ? styles.uploadButtonDone : null]}
             >
-              <Text style={[styles.chipText, deliveryTime === option ? styles.chipTextActive : null]}>{option}</Text>
+              {uploadingKind === 'back' ? (
+                <ActivityIndicator color={partnerTheme.accentStrong} />
+              ) : (
+                <Text style={styles.uploadButtonText}>{form.documentBackPath ? 'Back uploaded — replace' : 'Upload back'}</Text>
+              )}
             </TouchableOpacity>
-          ))}
-        </View>
+            <Text style={styles.hint}>Documents go to private storage. They are never shown publicly.</Text>
+          </>
+        ) : null}
 
-        <View style={styles.coordinatesRow}>
-          <TextInput
-            style={[styles.input, styles.coordinateInput]}
-            placeholder="Latitude (optional)"
-            placeholderTextColor="#8e8e8e"
-            keyboardType="decimal-pad"
-            value={latitude}
-            onChangeText={handleFieldChange(setLatitude)}
-            editable={!loading && !submitting}
-          />
-          <TextInput
-            style={[styles.input, styles.coordinateInput]}
-            placeholder="Longitude (optional)"
-            placeholderTextColor="#8e8e8e"
-            keyboardType="decimal-pad"
-            value={longitude}
-            onChangeText={handleFieldChange(setLongitude)}
-            editable={!loading && !submitting}
-          />
-        </View>
+        {stepId === 'review' ? (
+          <>
+            {PARTNER_ONBOARDING_STEPS.filter((entry) => entry.id !== 'review').map((entry) => (
+              <TouchableOpacity key={entry.id} onPress={() => setStepId(entry.id)} style={styles.reviewRow}>
+                <View style={styles.reviewCopy}>
+                  <Text style={styles.reviewTitle}>{entry.title}</Text>
+                  <Text style={isStepComplete(entry.id, form) ? styles.reviewDone : styles.reviewMissing}>
+                    {isStepComplete(entry.id, form) ? 'Complete' : 'Still needs something'}
+                  </Text>
+                </View>
+                <Text style={styles.reviewEdit}>Edit</Text>
+              </TouchableOpacity>
+            ))}
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading || submitting}>
-          <Text style={styles.primaryButtonText}>
-            {loading || submitting ? 'Saving details...' : 'Submit for review'}
-          </Text>
-        </TouchableOpacity>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLine}>{form.restaurantName || '—'}</Text>
+              <Text style={styles.summaryMuted}>{form.address || '—'}</Text>
+              <Text style={styles.summaryMuted}>
+                {form.bankName ? `${form.bankName} • ${form.bankVerifiedAccountName ?? 'unverified'}` : '—'}
+              </Text>
+            </View>
 
-        <Text style={styles.handoffNote}>
-          We review new restaurants before they go live. This usually takes 1-2 business days.
-        </Text>
-
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading || submitting}>
-          <Text style={styles.secondaryButtonText}>Sign out</Text>
-        </TouchableOpacity>
+            <Text style={styles.hint}>
+              An admin reviews your details and verifies your payout account before your restaurant goes live.
+            </Text>
+          </>
+        ) : null}
       </View>
+
+      {stepId === 'review' ? (
+        <TouchableOpacity
+          disabled={submitting || !currentStepComplete}
+          onPress={handleSubmit}
+          style={[styles.primaryButton, submitting || !currentStepComplete ? styles.buttonDisabled : null]}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <Text style={styles.primaryButtonText}>Submit for review</Text>
+          )}
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          disabled={!currentStepComplete}
+          onPress={goNext}
+          style={[styles.primaryButton, !currentStepComplete ? styles.buttonDisabled : null]}
+        >
+          <Text style={styles.primaryButtonText}>Continue</Text>
+        </TouchableOpacity>
+      )}
+
+      {stepIndex > 0 ? (
+        <TouchableOpacity onPress={goBack} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>Back</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      <TouchableOpacity onPress={() => void signOut()} style={styles.secondaryButton}>
+        <Text style={styles.secondaryButtonText}>Sign out</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -279,157 +713,230 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   hero: {
-    backgroundColor: partnerTheme.hero,
-    borderColor: partnerTheme.hero,
-    borderRadius: 28,
-    borderWidth: 1,
-    padding: 24,
+    marginBottom: 16,
   },
   eyebrow: {
-    color: partnerTheme.heroSoft,
-    fontSize: 13,
-    fontWeight: '700',
+    color: partnerTheme.accentText,
+    fontSize: 12,
+    fontWeight: '900',
     letterSpacing: 1,
-    marginBottom: 10,
     textTransform: 'uppercase',
   },
   title: {
-    color: '#fffdf8',
-    fontSize: 31,
-    fontWeight: '800',
+    color: partnerTheme.text,
+    fontSize: 26,
+    fontWeight: '900',
+    marginTop: 6,
   },
   copy: {
-    color: '#e7dbc7',
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 10,
+    color: partnerTheme.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 8,
+  },
+  progressSegment: {
+    backgroundColor: partnerTheme.border,
+    borderRadius: 999,
+    flex: 1,
+    height: 5,
+  },
+  progressSegmentActive: {
+    backgroundColor: partnerTheme.accent,
+  },
+  progressLabel: {
+    color: partnerTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 14,
   },
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 26,
+    borderRadius: 22,
     borderWidth: 1,
-    marginTop: 16,
-    padding: 20,
+    padding: 18,
   },
   errorText: {
     color: partnerTheme.danger,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 10,
+    fontSize: 13,
+    marginTop: 6,
+  },
+  hint: {
+    color: partnerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
   },
   identityRow: {
     alignItems: 'center',
-    backgroundColor: partnerTheme.cream,
-    borderColor: partnerTheme.border,
-    borderRadius: 20,
-    borderWidth: 1,
     flexDirection: 'row',
-    marginBottom: 14,
-    padding: 14,
+    marginBottom: 8,
   },
   identityBubble: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accentSoft,
     borderRadius: 999,
-    height: 46,
+    height: 44,
     justifyContent: 'center',
-    width: 46,
+    width: 44,
   },
   identityBubbleText: {
     color: partnerTheme.accentStrong,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   identityCopy: {
-    flex: 1,
     marginLeft: 12,
   },
   identityName: {
     color: partnerTheme.text,
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '900',
   },
   identityEmail: {
     color: partnerTheme.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     marginTop: 2,
   },
   input: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 15,
-    marginTop: 14,
-    minHeight: 54,
-    paddingHorizontal: 16,
+    justifyContent: 'center',
+    minHeight: 52,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   textArea: {
-    minHeight: 90,
-    paddingTop: 14,
+    minHeight: 92,
     textAlignVertical: 'top',
+  },
+  pickerValue: {
+    color: partnerTheme.text,
+    fontSize: 15,
+  },
+  pickerPlaceholder: {
+    color: partnerTheme.textSoft,
+    fontSize: 15,
+  },
+  bankList: {
+    borderColor: partnerTheme.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 8,
+    maxHeight: 260,
+    overflow: 'hidden',
+  },
+  bankRow: {
+    borderBottomColor: partnerTheme.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  bankRowText: {
+    color: partnerTheme.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  verifiedCard: {
+    backgroundColor: partnerTheme.successSoft,
+    borderRadius: 14,
+    marginTop: 12,
+    padding: 14,
+  },
+  verifiedLabel: {
+    color: partnerTheme.success,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  verifiedName: {
+    color: partnerTheme.text,
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 4,
+  },
+  uploadButton: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.accentSoft,
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  uploadButtonDone: {
+    backgroundColor: partnerTheme.successSoft,
+  },
+  uploadButtonText: {
+    color: partnerTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '900',
   },
   logoRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    marginTop: 16,
+    marginTop: 4,
   },
   logoPreview: {
     alignItems: 'center',
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
-    height: 84,
+    height: 72,
     justifyContent: 'center',
     overflow: 'hidden',
-    width: 84,
+    width: 72,
   },
   logoPreviewText: {
-    color: partnerTheme.textMuted,
-    fontSize: 14,
-    fontWeight: '700',
+    color: partnerTheme.textSoft,
+    fontSize: 11,
   },
   logoImage: {
     height: '100%',
     width: '100%',
   },
   logoActions: {
-    flex: 1,
-    marginLeft: 16,
+    marginLeft: 14,
   },
   logoButton: {
-    alignItems: 'center',
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 16,
-    paddingVertical: 12,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   logoButtonText: {
     color: partnerTheme.accentStrong,
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '900',
   },
   removeLogoText: {
-    color: partnerTheme.textMuted,
-    fontSize: 13,
+    color: partnerTheme.danger,
+    fontSize: 12,
+    fontWeight: '800',
     marginTop: 8,
     textAlign: 'center',
   },
   sectionLabel: {
-    color: partnerTheme.textSoft,
+    color: partnerTheme.textMuted,
     fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginTop: 18,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+    marginTop: 16,
     textTransform: 'uppercase',
   },
   optionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
   },
   chip: {
     backgroundColor: partnerTheme.cream,
@@ -440,55 +947,96 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   chipActive: {
-    backgroundColor: partnerTheme.accentSoft,
+    backgroundColor: partnerTheme.accent,
     borderColor: partnerTheme.accent,
   },
   chipText: {
     color: partnerTheme.textMuted,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   chipTextActive: {
-    color: partnerTheme.accentStrong,
+    color: '#ffffff',
   },
   coordinatesRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   coordinateInput: {
     flex: 1,
   },
+  reviewRow: {
+    alignItems: 'center',
+    borderBottomColor: partnerTheme.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+  },
+  reviewCopy: {
+    flex: 1,
+  },
+  reviewTitle: {
+    color: partnerTheme.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  reviewDone: {
+    color: partnerTheme.success,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 3,
+  },
+  reviewMissing: {
+    color: partnerTheme.danger,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 3,
+  },
+  reviewEdit: {
+    color: partnerTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  summaryCard: {
+    backgroundColor: partnerTheme.cream,
+    borderRadius: 14,
+    marginTop: 14,
+    padding: 14,
+  },
+  summaryLine: {
+    color: partnerTheme.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  summaryMuted: {
+    color: partnerTheme.textMuted,
+    fontSize: 13,
+    marginTop: 4,
+  },
   primaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 18,
+    borderRadius: 16,
     marginTop: 18,
     paddingVertical: 16,
   },
   primaryButtonText: {
     color: '#ffffff',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '900',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   secondaryButton: {
     alignItems: 'center',
-    backgroundColor: partnerTheme.cream,
-    borderColor: partnerTheme.border,
-    borderRadius: 18,
-    borderWidth: 1,
     marginTop: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   secondaryButtonText: {
-    color: partnerTheme.textMuted,
+    color: partnerTheme.accentStrong,
     fontSize: 14,
-    fontWeight: '700',
-  },
-  handoffNote: {
-    color: partnerTheme.textSoft,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
-    textAlign: 'center',
+    fontWeight: '900',
   },
 });
