@@ -1,5 +1,5 @@
 import { FontAwesome } from '@expo/vector-icons';
-import { Redirect, Tabs, usePathname } from 'expo-router';
+import { Tabs, usePathname } from 'expo-router';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
@@ -40,7 +40,7 @@ const getCustomerShellLoadingMode = (pathname: string | null | undefined): Custo
 };
 
 export default function CustomerLayout() {
-  const { loading, user } = useAuth();
+  const { loading } = useAuth();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -57,11 +57,13 @@ export default function CustomerLayout() {
     return <LoadingSkeleton mode={getCustomerShellLoadingMode(pathname)} />;
   }
 
-  if (!user) {
-    const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
-
-    return <Redirect href={{ pathname: '/login', params: { redirectTo } } as never} />;
-  }
+  // No auth gate here on purpose: signed-out visitors browse the catalogue, and
+  // sign-in is prompted at the point of action instead. Every screen behind this
+  // shell already handles a null user - cart offers "Sign in to check out",
+  // profile offers "Sign in to manage your account", orders guards its reads,
+  // and FavoritesProvider, RatingPromptCard and usePushNotifications all no-op
+  // without one. A redirect here contradicted all of that and made the front
+  // door a wall.
 
   return (
     <FavoritesProvider>
