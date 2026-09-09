@@ -9,6 +9,13 @@ import {
   DISPATCH_APPLICATION_PENDING_MESSAGE,
   DISPATCH_APPLICATION_REJECTED_FALLBACK,
 } from '../../src/contexts/dispatchAuthFlow';
+import {
+  DISPATCH_ONBOARDING_STEPS,
+  canSubmitDispatchOnboarding,
+  isStepComplete,
+  type DispatchOnboardingFormState,
+  type DispatchOnboardingStepId,
+} from '../../src/domain/dispatchOnboardingSteps';
 import { submitDispatchApplication } from '../../src/services/dispatchApplications';
 import { buildDispatchPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { dispatchTheme } from '../../src/theme/palette';
@@ -37,8 +44,44 @@ export default function CompleteRiderDetailsScreen() {
   const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
   const [submissionStatus, setSubmissionStatus] = useState<'pending' | 'rejected' | 'approved' | null>(null);
   const [submissionSubmittedAt, setSubmissionSubmittedAt] = useState<string | null>(null);
+  const [stepId, setStepId] = useState<DispatchOnboardingStepId>('area');
 
   const lgaOptions = useMemo(() => getLgaOptionsForState(region), [region]);
+
+  // The shape the pure step rules read. Documents collapse to booleans: the
+  // rules care whether a side was captured, not what is in it.
+  const onboardingForm: DispatchOnboardingFormState = {
+    currentAddress,
+    hasLicenceBack: Boolean(licenceBack),
+    hasLicenceFront: Boolean(licenceFront),
+    lga,
+    licenseNumber,
+    region,
+    vehicleMake,
+    vehicleModel,
+    vehiclePlateNumber,
+    vehicleType,
+  };
+  const stepIndex = DISPATCH_ONBOARDING_STEPS.findIndex((entry) => entry.id === stepId);
+  const step = DISPATCH_ONBOARDING_STEPS[stepIndex] ?? DISPATCH_ONBOARDING_STEPS[0];
+  const currentStepComplete =
+    stepId === 'review' ? canSubmitDispatchOnboarding(onboardingForm) : isStepComplete(stepId, onboardingForm);
+
+  const goNext = () => {
+    const next = DISPATCH_ONBOARDING_STEPS[stepIndex + 1];
+    if (next) {
+      setOpenPicker(null);
+      setStepId(next.id);
+    }
+  };
+
+  const goBack = () => {
+    const previous = DISPATCH_ONBOARDING_STEPS[stepIndex - 1];
+    if (previous) {
+      setOpenPicker(null);
+      setStepId(previous.id);
+    }
+  };
   const contactName = useMemo(
     () => user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || 'Rider',
     [user?.displayName, user?.email]
@@ -185,11 +228,21 @@ export default function CompleteRiderDetailsScreen() {
     >
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
-        <Text style={styles.title}>Complete your rider details</Text>
-        <Text style={styles.copy}>
-          Add the vehicle, licence, and base details ops needs before your courier account is verified.
-        </Text>
+        <Text style={styles.title}>{step.title}</Text>
+        <Text style={styles.copy}>{step.blurb}</Text>
       </View>
+
+      <View style={styles.progressRow}>
+        {DISPATCH_ONBOARDING_STEPS.map((entry, index) => (
+          <View
+            key={entry.id}
+            style={[styles.progressSegment, index <= stepIndex ? styles.progressSegmentActive : null]}
+          />
+        ))}
+      </View>
+      <Text style={styles.progressLabel}>
+        Step {stepIndex + 1} of {DISPATCH_ONBOARDING_STEPS.length}
+      </Text>
 
       <View style={styles.card}>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -205,6 +258,8 @@ export default function CompleteRiderDetailsScreen() {
 
         {renderStatusBanner()}
 
+        {stepId === 'area' ? (
+          <>
         <Text style={styles.sectionLabel}>Dispatch state</Text>
         <CompactOptionPicker
           label="Dispatch state"
@@ -233,6 +288,21 @@ export default function CompleteRiderDetailsScreen() {
           disabled={loading}
         />
 
+        <Text style={styles.sectionLabel}>Base address</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder="Your current base, landmark, or pickup address"
+          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+          multiline
+          value={currentAddress}
+          onChangeText={handleFieldChange(setCurrentAddress)}
+          editable={!loading}
+        />
+          </>
+        ) : null}
+
+        {stepId === 'vehicle' ? (
+          <>
         <Text style={styles.sectionLabel}>Vehicle type</Text>
         <View style={styles.optionRow}>
           {vehicleOptions.map((option) => (
@@ -273,6 +343,12 @@ export default function CompleteRiderDetailsScreen() {
           editable={!loading}
           autoCapitalize="characters"
         />
+          </>
+        ) : null}
+
+        {stepId === 'licence' ? (
+          <>
+        <Text style={styles.sectionLabel}>Licence number</Text>
         <TextInput
           style={styles.input}
           placeholder="Licence number"
@@ -291,23 +367,62 @@ export default function CompleteRiderDetailsScreen() {
           <Text style={styles.documentButtonText}>{licenceBack ? 'Replace back image' : 'Capture back image'}</Text>
         </TouchableOpacity>
         <Text style={styles.documentNote}>Images are stored privately and never exposed as public URLs.</Text>
+          </>
+        ) : null}
 
-        <Text style={styles.sectionLabel}>Base address</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Your current base, landmark, or pickup address"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          multiline
-          value={currentAddress}
-          onChangeText={handleFieldChange(setCurrentAddress)}
-          editable={!loading}
-        />
+        {stepId === 'review' ? (
+          <>
+            {DISPATCH_ONBOARDING_STEPS.filter((entry) => entry.id !== 'review').map((entry) => (
+              <TouchableOpacity key={entry.id} onPress={() => setStepId(entry.id)} style={styles.reviewRow}>
+                <View style={styles.reviewCopy}>
+                  <Text style={styles.reviewTitle}>{entry.title}</Text>
+                  <Text
+                    style={isStepComplete(entry.id, onboardingForm) ? styles.reviewDone : styles.reviewMissing}
+                  >
+                    {isStepComplete(entry.id, onboardingForm) ? 'Complete' : 'Still needs something'}
+                  </Text>
+                </View>
+                <Text style={styles.reviewEdit}>Edit</Text>
+              </TouchableOpacity>
+            ))}
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Submitting...' : 'Submit for review'}</Text>
-        </TouchableOpacity>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLine}>{`${vehicleType} • ${vehiclePlateNumber || '—'}`}</Text>
+              <Text style={styles.summaryMuted}>{`${lga || '—'}, ${region}`}</Text>
+              <Text style={styles.summaryMuted}>{currentAddress || '—'}</Text>
+            </View>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()} disabled={loading}>
+            <Text style={styles.documentNote}>
+              Ops verifies your licence before your courier account goes live.
+            </Text>
+          </>
+        ) : null}
+
+        {stepId === 'review' ? (
+          <TouchableOpacity
+            style={[styles.primaryButton, loading || !currentStepComplete ? styles.buttonDisabled : null]}
+            onPress={handleSubmit}
+            disabled={loading || !currentStepComplete}
+          >
+            <Text style={styles.primaryButtonText}>{loading ? 'Submitting...' : 'Submit for review'}</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.primaryButton, !currentStepComplete ? styles.buttonDisabled : null]}
+            onPress={goNext}
+            disabled={!currentStepComplete}
+          >
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </TouchableOpacity>
+        )}
+
+        {stepIndex > 0 ? (
+          <TouchableOpacity style={styles.secondaryButton} onPress={goBack}>
+            <Text style={styles.secondaryButtonText}>Back</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleSignOut()} disabled={loading}>
           <Text style={styles.secondaryButtonText}>Sign out</Text>
         </TouchableOpacity>
       </View>
@@ -326,6 +441,79 @@ const formatDateTime = (value: string) =>
   }).format(new Date(value));
 
 const styles = StyleSheet.create({
+  progressRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 16,
+  },
+  progressSegment: {
+    backgroundColor: dispatchTheme.border,
+    borderRadius: 999,
+    flex: 1,
+    height: 5,
+  },
+  progressSegmentActive: {
+    backgroundColor: dispatchTheme.accent,
+  },
+  progressLabel: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  reviewRow: {
+    alignItems: 'center',
+    borderBottomColor: dispatchTheme.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+  },
+  reviewCopy: {
+    flex: 1,
+  },
+  reviewTitle: {
+    color: dispatchTheme.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  reviewDone: {
+    color: dispatchTheme.success,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 3,
+  },
+  reviewMissing: {
+    color: dispatchTheme.danger,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 3,
+  },
+  reviewEdit: {
+    color: dispatchTheme.accent,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  summaryCard: {
+    backgroundColor: dispatchTheme.surfaceMuted,
+    borderRadius: 14,
+    marginTop: 14,
+    padding: 14,
+  },
+  summaryLine: {
+    color: dispatchTheme.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  summaryMuted: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    marginTop: 4,
+  },
   screen: {
     backgroundColor: dispatchTheme.background,
     flex: 1,
