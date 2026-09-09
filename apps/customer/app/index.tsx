@@ -1,12 +1,40 @@
+import { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { useAuth } from '../src/contexts/AuthContext';
+import { useCart } from '../src/contexts/CartContext';
+import { shouldShowLocationOnboarding } from '../src/domain/customerOnboarding';
+import { hasSeenLocationStep } from '../src/services/customerOnboardingState';
 import { customerTheme } from '../src/theme/palette';
 
 export default function Index() {
   const { loading, policyLoading, policyAccepted, user } = useAuth();
+  const { deliveryLocation } = useCart();
+  // null while the flag is still being read — routing must not flash the feed
+  // and then bounce to onboarding.
+  const [seenLocationStep, setSeenLocationStep] = useState<boolean | null>(null);
 
-  if (loading || policyLoading) {
+  useEffect(() => {
+    let cancelled = false;
+    hasSeenLocationStep()
+      .then((seen) => {
+        if (!cancelled) {
+          setSeenLocationStep(seen);
+        }
+      })
+      .catch(() => {
+        // The service already fails closed to `true`; this is belt-and-braces
+        // so a rejected promise can never leave routing stuck on the spinner.
+        if (!cancelled) {
+          setSeenLocationStep(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading || policyLoading || seenLocationStep === null) {
     return (
       <View
         style={{
@@ -35,6 +63,18 @@ export default function Index() {
     } else {
       target = '/home';
     }
+  }
+
+  // The location step only ever displaces the feed, never an account step: a
+  // half-verified account has something more urgent to finish first.
+  if (
+    target === '/home' &&
+    shouldShowLocationOnboarding({
+      hasDeliveryLocation: Boolean(deliveryLocation),
+      hasSeenLocationStep: seenLocationStep,
+    })
+  ) {
+    target = '/onboarding';
   }
 
   return <Redirect href={target as never} />;
