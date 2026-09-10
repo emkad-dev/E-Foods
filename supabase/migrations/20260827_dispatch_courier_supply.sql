@@ -133,6 +133,20 @@ end $$;
 -- =====================================================================
 -- Courier earning accrual on delivery
 -- =====================================================================
+-- Best-effort by construction. This runs INSIDE the transaction that marks an
+-- order delivered, so anything it raises would roll that update back and make
+-- the order undeliverable. Two layers stop that:
+--
+--   1. The pricing/timeline values are parsed defensively. They are jsonb text
+--      and nothing constrains them to be numeric or a timestamp, so a bare
+--      `::numeric` cast on a value like "N/A" or "" throws 22P02 and takes the
+--      delivery down with it. A regex test picks the first genuinely numeric
+--      candidate instead of casting hopefully.
+--   2. The whole recording block is wrapped so that ANY unexpected error - a
+--      constraint, a missing column, a future schema change - degrades to a
+--      warning and a skipped earning row rather than a failed delivery. An
+--      earnings ledger entry can be backfilled; a driver stuck unable to
+--      complete a delivery cannot.
 create or replace function public.ebuy_record_courier_earning_on_delivery()
 returns trigger
 language plpgsql
@@ -142,65 +156,79 @@ declare
   v_amount numeric(12, 2);
   v_currency text;
   v_delivered_at timestamptz;
+  v_numeric constant text := '^[[:space:]]*-?[0-9]+(\.[0-9]+)?[[:space:]]*$';
 begin
-  if new."status" <> 'delivered' or old."status" = 'delivered' then
+  if coalesce(new."status", '') <> 'delivered' or coalesce(old."status", '') = 'delivered' then
     return new;
   end if;
 
-  select da."courierId"
-    into v_courier_id
-    from public."DeliveryAssignment" da
-   where da."orderId" = new."id"
-   limit 1;
+  begin
+    select da."courierId"
+      into v_courier_id
+      from public."DeliveryAssignment" da
+     where da."orderId" = new."id"
+     limit 1;
 
-  if v_courier_id is null or btrim(v_courier_id) = '' then
-    return new;
-  end if;
+    if v_courier_id is null or btrim(v_courier_id) = '' then
+      return new;
+    end if;
 
-  v_amount := coalesce(
-    nullif(new."pricing"->>'dispatchFee', '')::numeric,
-    nullif(new."pricing"->>'deliveryFee', '')::numeric,
-    0
-  );
-  v_currency := coalesce(new."pricing"->>'currency', 'NGN');
-  v_delivered_at := coalesce(
-    nullif(new."timeline"->>'deliveredAt', '')::timestamptz,
-    new."updatedAt",
-    new."createdAt",
-    now()
-  );
+    -- First value that actually looks like a number wins; otherwise 0.
+    v_amount := coalesce(
+      (case when (new."pricing"->>'dispatchFee') ~ v_numeric
+            then (new."pricing"->>'dispatchFee')::numeric end),
+      (case when (new."pricing"->>'deliveryFee') ~ v_numeric
+            then (new."pricing"->>'deliveryFee')::numeric end),
+      0
+    );
 
-  insert into public."CourierEarning" (
-    "id",
-    "courierId",
-    "orderId",
-    "amount",
-    "currency",
-    "deliveredAt",
-    "restaurantId",
-    "restaurantName",
-    "createdAt",
-    "updatedAt"
-  ) values (
-    'earning_' || new."id",
-    v_courier_id,
-    new."id",
-    round(v_amount::numeric, 2),
-    v_currency,
-    v_delivered_at,
-    new."restaurantId",
-    new."restaurantName",
-    coalesce(new."updatedAt", now()),
-    coalesce(new."updatedAt", now())
-  )
-  on conflict ("orderId") do update set
-    "courierId" = excluded."courierId",
-    "amount" = excluded."amount",
-    "currency" = excluded."currency",
-    "deliveredAt" = excluded."deliveredAt",
-    "restaurantId" = excluded."restaurantId",
-    "restaurantName" = excluded."restaurantName",
-    "updatedAt" = excluded."updatedAt";
+    v_currency := coalesce(nullif(btrim(coalesce(new."pricing"->>'currency', '')), ''), 'NGN');
+
+    -- No safe regex for a timestamp, so try the cast in its own block and fall
+    -- back to the row's own timestamps.
+    begin
+      v_delivered_at := nullif(btrim(coalesce(new."timeline"->>'deliveredAt', '')), '')::timestamptz;
+    exception
+      when others then
+        v_delivered_at := null;
+    end;
+    v_delivered_at := coalesce(v_delivered_at, new."updatedAt", new."createdAt", now());
+
+    insert into public."CourierEarning" (
+      "id",
+      "courierId",
+      "orderId",
+      "amount",
+      "currency",
+      "deliveredAt",
+      "restaurantId",
+      "restaurantName",
+      "createdAt",
+      "updatedAt"
+    ) values (
+      'earning_' || new."id",
+      v_courier_id,
+      new."id",
+      round(v_amount::numeric, 2),
+      v_currency,
+      v_delivered_at,
+      new."restaurantId",
+      new."restaurantName",
+      coalesce(new."updatedAt", now()),
+      coalesce(new."updatedAt", now())
+    )
+    on conflict ("orderId") do update set
+      "courierId" = excluded."courierId",
+      "amount" = excluded."amount",
+      "currency" = excluded."currency",
+      "deliveredAt" = excluded."deliveredAt",
+      "restaurantId" = excluded."restaurantId",
+      "restaurantName" = excluded."restaurantName",
+      "updatedAt" = excluded."updatedAt";
+  exception
+    when others then
+      raise warning 'courier earning not recorded for order %: %', new."id", sqlerrm;
+  end;
 
   return new;
 end;
