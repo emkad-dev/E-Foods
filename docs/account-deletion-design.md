@@ -190,5 +190,41 @@ never mistaken for each other. `canDeleteUserAccountOnRequest` in
 only — the restaurant-linked and active-delivery 412s depend on state the
 access overview does not carry, so those refusals are surfaced verbatim.
 
+## Survey: are there other dangling action names?
+
+The `cancelAccountDeletion` bug was a string literal compared against `action`
+that named nothing — no entry in `ALL_RPC_ACTIONS`, no handler. Since that shape
+can hide anywhere a name is written as a bare literal, the whole RPC layer was
+swept for it on 2026-09-11. **Nothing else dangling was found.** Sites checked:
+
+| Site | Names | Verdict |
+|---|---|---|
+| `rpc/context.ts` `HOT_WRITE_ACTIONS` | `placeCustomerOrder`, `initializeCustomerPayment`, `refreshCustomerPaymentStatus`, `cancelCustomerOrder` | All 4 in `ALL_RPC_ACTIONS`. |
+| `rpc/context.ts` `HOT_WRITE_BACKPRESSURE_LIMITS` | same 4 | All 4 in `ALL_RPC_ACTIONS`; keys and the Set match exactly, so no limit is orphaned and no hot action silently falls back. |
+| `rpc/context.ts` `PENDING_DELETION_EXEMPT_ACTIONS` | (empty) | Guarded by `rpc/actionReferences.test.ts`. |
+| `domains/admin.ts:585,592` | `'blocked'`, `'reuse'` | Not RPC actions — `activationPlan.action`, the payout activation plan. |
+| `domains/dispatch.ts:1557` | `'accept'` | Not an RPC action — the local accept/decline parameter of an offer response. |
+
+These four matter most because they are the money path: had a name here drifted,
+`HOT_WRITE_ACTIONS.has(action)` would quietly return false and checkout would run
+with no backpressure at all. The failure would be invisible until load.
+
+### The one structural gap left, deliberately
+
+`supabase/functions/public-catalog/index.ts` dispatches on four bare literals —
+`customerGetRestaurantList`, `customerGetRestaurantDetail`,
+`customerGetPublishedRestaurants`, `customerGetPublishedRestaurantDetail` — with
+no declared list and no test guarding them. Nothing is broken: `public-catalog`
+is a standalone function outside the split-RPC registry, reached by a dedicated
+transport (`appEnv.catalogUrl` / `supabase.functions.invoke('public-catalog')` in
+`apps/customer/src/services/publicRestaurantReadModel.ts`), never through
+`resolveRpcRoute`. Their absence from `packages/domain/src/rpcRoutes.ts` is
+correct, not a gap.
+
+But one file both declares and consumes them, so a typo in either half is caught
+only by the request failing. That is the same *shape* as the bug this document
+exists because of, minus the blast radius. Worth a declared list plus a test if
+that file ever grows a second reader.
+
 Related: [pending-deletion gates plan](superpowers/plans/2026-08-07-pending-deletion-gates.md),
 [RLS posture](rls-posture.md).
