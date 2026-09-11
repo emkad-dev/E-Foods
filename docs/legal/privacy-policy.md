@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: June 23, 2026
+Last updated: September 11, 2026
 
 This Privacy Policy explains how FEASTY collects, uses, shares, and protects personal information for users in Nigeria.
 
@@ -44,10 +44,18 @@ We keep personal information only as long as needed for account management, orde
 ## Your Choices and Rights
 
 - Access and update your account information in the app
-- Request deletion of your account in the app
+- Delete your account and its associated data — in the app, or by email if you cannot open the app. See [How to delete your FEASTY account](https://feasty.com.ng/account-deletion).
 - Contact us for help with account or privacy issues
 
-If you request deletion, we will remove or deactivate your account subject to legal, security, and operational retention needs.
+### What deletion does
+
+Deleting your account is immediate and irreversible, and signing in stops working at once.
+
+**Removed immediately:** your sign-in credentials; your profile (name, email address, phone number, photo and saved delivery addresses); your saved favourite restaurants; your policy-acceptance records; your role assignments; any partner or dispatch application record; and any rider profile, courier payout and courier shift records.
+
+**Kept:** past order records — the order id, items, amounts, timestamps and the delivery address on the order — retained to meet our tax, accounting, fraud-prevention and dispute-resolution obligations. They are no longer linked to a sign-in account. Internal administrative audit entries are also kept, with the acting user's identifier removed.
+
+Some accounts cannot be deleted from the app and need our support team to act first: a partner account still linked to a restaurant, a dispatch or rider account with an active delivery or open assignment, and administrator accounts. [The account deletion page](https://feasty.com.ng/account-deletion) explains each case and how to ask us to handle it.
 
 ## Children's Privacy
 

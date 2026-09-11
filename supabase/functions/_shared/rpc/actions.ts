@@ -129,3 +129,36 @@ export const ALL_RPC_ACTIONS = [
 ] as const;
 
 export type RpcActionName = (typeof ALL_RPC_ACTIONS)[number];
+
+/**
+ * Actions a caller may still invoke while their account is pending deletion.
+ *
+ * **This list is empty, and that is correct as of 2026-09-11.** FEASTY ships
+ * IMMEDIATE account deletion (`deleteOwnAccount` in
+ * `_shared/domains/account.ts`): audit, ban, cascade cleanup, delete the auth
+ * user, roll back to 409 if cleanup fails. Nothing in this repository ever
+ * writes `UserAccount.deletionRequestedAt`, so in practice no caller is ever
+ * in the pending-deletion state and nothing needs an exemption.
+ *
+ * The 30-day grace period this list belongs to is ENFORCED but DORMANT: the
+ * columns, the `ebuy_account_pending_deletion()` predicate, the
+ * `ebuy_guard_useraccount_sensitive_update` freeze and five RLS policies are
+ * all live in production, and `assertAccountAccessible` 403s with
+ * `ACCOUNT_PENDING_DELETION` the moment `deletionRequestedAt` is set. What is
+ * missing is every writer and every way back out.
+ *
+ * So: setting `deletionRequestedAt` on a real account today PERMANENTLY LOCKS
+ * THAT ACCOUNT OUT of every authenticated action, and the RLS freeze stops the
+ * user clearing it themselves. Read `docs/account-deletion-design.md` BEFORE
+ * you add a writer.
+ *
+ * This is deliberately `readonly string[]` and not `readonly RpcActionName[]`:
+ * the guarantee that every entry is a real, dispatchable action is enforced at
+ * RUNTIME by `actionReferences.test.ts`, which also covers the `--no-check`
+ * half of `test:deno` where a type annotation would buy nothing. An earlier
+ * version of this exemption was the bare literal
+ * `action === 'cancelAccountDeletion'` — an action that has never existed in
+ * any action list and has never had a handler — which is exactly the drift
+ * that test now makes impossible.
+ */
+export const PENDING_DELETION_EXEMPT_ACTIONS: readonly string[] = [];

@@ -1105,3 +1105,71 @@ button {
     animation: none;
   }
 }
+
+/* ---------- Confirm dialog ---------- */
+
+.confirm-dialog {
+  margin: auto;
+  padding: 0;
+  width: min(440px, calc(100vw - 32px));
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.confirm-dialog::backdrop {
+  background: rgba(9, 15, 29, 0.45);
+}
+
+.confirm-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+}
+
+.confirm-dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.confirm-dialog-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.confirm-dialog-text p {
+  margin: 0 0 8px;
+}
+
+.confirm-dialog-text p:last-child {
+  margin-bottom: 0;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.confirm-dialog-cancel {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.confirm-dialog-confirm {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: var(--danger);
+}
+
+.confirm-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -1,6 +1,6 @@
 # Terms of Service
 
-Last updated: June 23, 2026
+Last updated: September 11, 2026
 
 These Terms of Service govern your use of FEASTY for users in Nigeria.
 
@@ -20,7 +20,7 @@ By using FEASTY, you agree to these terms. If you do not agree, do not use the s
 
 - You are responsible for your account activity and for keeping your information accurate.
 - You must keep your login credentials secure.
-- You may request account deletion in the app.
+- You may delete your account in the app, or ask us to delete it if you cannot open the app. See [How to delete your FEASTY account](https://feasty.com.ng/account-deletion).
 
 ## Orders and Payments
 

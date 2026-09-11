@@ -10,6 +10,20 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// Imported by module path, not from the '@feasty/design-system' barrel, on
+// purpose: the barrel re-exports useFeastyFonts, which pulls expo-font and six
+// @expo-google-fonts faces into the bundle. This app has not adopted the design
+// system and does not declare those dependencies, so it takes the one primitive
+// it needs. Customer and partner, which already load the fonts, import it by
+// package name.
+import { useConfirm } from '../../../../packages/design-system/src/primitives/ConfirmDialog';
+import {
+  ACCOUNT_DELETION_CANCEL_LABEL,
+  ACCOUNT_DELETION_CONFIRM_LABEL,
+  ACCOUNT_DELETION_TITLE,
+  accountDeletionErrorMessage,
+  accountDeletionParagraphs,
+} from '../../../../packages/domain/src/accountDeletion';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import DispatchLiveMap from '../../src/components/DispatchLiveMap';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
@@ -90,6 +104,10 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { error, riders } = useDispatchRiders();
+  const { confirm, confirmDialog } = useConfirm();
+  // Separate from `error` above, which belongs to useDispatchRiders and renders
+  // inside the profile editor; this one sits beside the delete button.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { error: earningsError, loading: earningsLoading, refresh: refreshEarnings, refreshing, report } = useWeeklyEarnings();
   const { error: shiftSlotsError, loading: shiftSlotsLoading, refresh: refreshShiftSlots, slots } = useDispatchShiftSlots();
   const [selectedSection, setSelectedSection] = useState<ProfileSection>('profile');
@@ -219,21 +237,27 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleDeleteAccount = () => {
-    Alert.alert('Delete rider account', 'Admin offboarding is required while assignments exist.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete account',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteAccount();
-          } catch (nextError: any) {
-            Alert.alert('Delete blocked', nextError.message ?? 'Unable to delete this account right now.');
-          }
-        },
-      },
-    ]);
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+
+    try {
+      await confirm({
+        title: ACCOUNT_DELETION_TITLE,
+        paragraphs: accountDeletionParagraphs('dispatch'),
+        confirmLabel: ACCOUNT_DELETION_CONFIRM_LABEL,
+        cancelLabel: ACCOUNT_DELETION_CANCEL_LABEL,
+        destructive: true,
+        // Held inside the dialog so both buttons stay disabled for the whole
+        // round trip; a second tap cannot fire a second delete.
+        onConfirm: deleteAccount,
+      });
+    } catch (nextError) {
+      // The backend's 412 ("Dispatch accounts with active delivery work...") is
+      // the whole point of this path, so it is shown in the screen. Alert is a
+      // no-op under react-native-web, and this app is one web export away from
+      // inheriting that bug.
+      setDeleteError(accountDeletionErrorMessage(nextError));
+    }
   };
 
   const renderHeader = () => (
@@ -453,6 +477,11 @@ export default function ProfileScreen() {
       <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} disabled={authLoading}>
         <Text style={styles.deleteButtonText}>Delete account</Text>
       </TouchableOpacity>
+      {deleteError ? (
+        <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
+          {deleteError}
+        </Text>
+      ) : null}
     </View>
   );
 
@@ -497,6 +526,7 @@ export default function ProfileScreen() {
       {renderHeader()}
       {renderMenu()}
       {renderDetail()}
+      {confirmDialog}
     </ScrollView>
   );
 }

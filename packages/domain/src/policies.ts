@@ -69,6 +69,16 @@ const sharedPrivacy: PolicySection[] = [
     ],
   },
   {
+    title: 'Deleting your account',
+    bullets: [
+      'You can delete your account from the Profile tab. Deletion is immediate and irreversible, and signing in stops working at once.',
+      'Removed immediately: your sign-in, profile details, saved addresses, favourites, role assignments, and any application, rider, payout or shift records.',
+      'Kept: past order records, which we retain for tax, accounting, fraud-prevention and dispute-resolution obligations. They are no longer linked to a sign-in account.',
+      'A partner account still linked to a restaurant, a rider account with an active delivery, and administrator accounts must be offboarded by support first.',
+      'Full details, including how to ask us to delete your account if you cannot open the app: https://feasty.com.ng/account-deletion',
+    ],
+  },
+  {
     title: 'Policy updates',
     bullets: [
       'We may update these policies as the platform changes.',
@@ -98,7 +108,7 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
         bullets: [
           'You are responsible for your account activity and for keeping your information accurate.',
           'You must keep your login credentials secure.',
-          'You may request account deletion in the app.',
+          'You may delete your account from the Profile tab in the app. Deletion is immediate and cannot be undone.',
         ],
       },
       {
@@ -199,9 +209,10 @@ export const policyCopy: Record<PolicyApp, { privacy: PolicySection[]; terms: Po
         title: 'Your Choices and Rights',
         bullets: [
           'Access and update your account information in the app',
-          'Request deletion of your account in the app',
+          'Delete your account and its data from the Profile tab, or by email if you cannot open the app',
           'Contact us for help with account or privacy issues',
-          'If you request deletion, we will remove or deactivate your account subject to legal, security, and operational retention needs.',
+          'Deletion is immediate and irreversible: your sign-in, profile, saved addresses and favourites are removed at once. Past order records are kept, no longer linked to a sign-in account, to meet tax, accounting, fraud-prevention and dispute-resolution obligations.',
+          'How to delete your account, including if you cannot open the app: https://feasty.com.ng/account-deletion',
         ],
       },
       {

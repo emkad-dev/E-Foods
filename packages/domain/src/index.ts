@@ -1,3 +1,4 @@
+export * from './accountDeletion';
 export * from './entities';
 export * from './notifications';
 export * from './orders';

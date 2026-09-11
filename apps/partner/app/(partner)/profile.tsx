@@ -12,6 +12,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useConfirm } from '@feasty/design-system';
+import {
+  ACCOUNT_DELETION_CANCEL_LABEL,
+  ACCOUNT_DELETION_CONFIRM_LABEL,
+  ACCOUNT_DELETION_TITLE,
+  accountDeletionErrorMessage,
+  accountDeletionParagraphs,
+} from '../../../../packages/domain/src/accountDeletion';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { savePartnerRestaurantProfile, setPartnerStorePause } from '../../src/services/partnerRestaurantActions';
@@ -62,6 +70,10 @@ export default function PartnerProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, linkRestaurant, loading: authLoading, signOut, user } = useAuth();
   const { error, loading, restaurant, restaurants, requiresVerifiedLink } = usePartnerRestaurant();
+  const { confirm, confirmDialog } = useConfirm();
+  // Separate from `error` above, which belongs to usePartnerRestaurant and is
+  // rendered at the top of the screen; this one sits beside the delete button.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
   const [pauseActionPending, setPauseActionPending] = useState(false);
   const [name, setName] = useState('');
@@ -322,25 +334,27 @@ export default function PartnerProfileScreen() {
     }
   };
 
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete partner account',
-      'Partner accounts tied to a restaurant may need admin offboarding instead of self-removal so ownership and order history stay traceable.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete account',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAccount();
-            } catch (nextError: any) {
-              Alert.alert('Delete blocked', nextError.message ?? 'Unable to delete this account right now.');
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+
+    try {
+      await confirm({
+        title: ACCOUNT_DELETION_TITLE,
+        paragraphs: accountDeletionParagraphs('partner'),
+        confirmLabel: ACCOUNT_DELETION_CONFIRM_LABEL,
+        cancelLabel: ACCOUNT_DELETION_CANCEL_LABEL,
+        destructive: true,
+        // Held inside the dialog so both buttons stay disabled for the whole
+        // round trip; a second tap cannot fire a second delete.
+        onConfirm: deleteAccount,
+      });
+    } catch (nextError) {
+      // The backend's 412 ("Partner accounts linked to a restaurant must be
+      // offboarded by admin...") is the whole point of this path, so it is shown
+      // in the screen rather than through Alert, which is inert on the web build
+      // at partner.feasty.com.ng.
+      setDeleteError(accountDeletionErrorMessage(nextError));
+    }
   };
 
   return (
@@ -693,7 +707,14 @@ export default function PartnerProfileScreen() {
         >
           <Text style={styles.deleteButtonText}>Delete account</Text>
         </TouchableOpacity>
+        {deleteError ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
+            {deleteError}
+          </Text>
+        ) : null}
       </View>
+
+      {confirmDialog}
     </ScrollView>
   );
 }

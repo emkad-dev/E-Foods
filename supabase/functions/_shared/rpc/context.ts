@@ -10,6 +10,7 @@ import {
   getAuthenticatedRequestContext,
   type AuthenticatedRequestContext,
 } from '../request-context.ts';
+import { PENDING_DELETION_EXEMPT_ACTIONS } from './actions.ts';
 import { nowIso } from './coercion.ts';
 import type { RpcDispatcher } from './registry.ts';
 import { fail } from './respond.ts';
@@ -111,11 +112,18 @@ export const createRpcDispatch =
       return await anonymousHandler({ data, request });
     }
 
-    // Restoring an account is the one thing a pending-deletion user may still
-    // do. Every other action is refused by assertAccountAccessible. Ported from
-    // the pre-split app-rpc entrypoint, which set the same exemption here.
+    // Actions exempt from the pending-deletion refusal. The list is currently
+    // EMPTY: there is no restore path, because nothing in this repository ever
+    // puts an account into the pending-deletion state (FEASTY ships immediate
+    // deletion via `deleteOwnAccount`). Every action is therefore refused by
+    // assertAccountAccessible if `deletionRequestedAt` is ever set.
+    //
+    // This used to read `action === 'cancelAccountDeletion'` — a name with no
+    // entry in any action list and no handler, i.e. a promise of a way out
+    // that did not exist. See PENDING_DELETION_EXEMPT_ACTIONS in actions.ts
+    // and docs/account-deletion-design.md before adding anything here.
     const context = await getAuthenticatedRequestContext(request, {
-      allowPendingDeletion: action === 'cancelAccountDeletion',
+      allowPendingDeletion: PENDING_DELETION_EXEMPT_ACTIONS.includes(action),
     });
     const handler = dispatcher.findHandler(action);
 

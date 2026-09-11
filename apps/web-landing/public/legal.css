@@ -1,0 +1,167 @@
+/* FEASTY legal + compliance pages.
+   Same palette and type as the landing page; tuned for reading, not for show. */
+
+:root {
+  --paper: #fffcf4;
+  --paper-edge: #f6f0e2;
+  --ink: #14180f;
+  --ink-soft: #5f6656;
+  --green: #2e7d32;
+  --green-deep: #1b5e20;
+  --green-tint: #e8f5e9;
+  --orange: #f57c00;
+  --orange-soft: #ffe0b2;
+  --stamp: #c0392b;
+  --rule: #dcd5c2;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Karla', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .wordmark {
+  font-family: 'Bricolage Grotesque', 'Karla', sans-serif;
+  letter-spacing: -0.02em;
+}
+.mono { font-family: 'Azeret Mono', ui-monospace, monospace; }
+
+a { color: var(--green-deep); }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; border-radius: 4px; }
+
+.shell { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+/* ---------- nav ---------- */
+nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand img { width: 36px; height: auto; }
+.wordmark { font-weight: 800; font-size: 1.35rem; letter-spacing: 0.04em; color: var(--green-deep); }
+.wordmark span { color: var(--orange); }
+.nav-link {
+  font-family: 'Azeret Mono', monospace;
+  font-weight: 500; text-decoration: none; font-size: 0.78rem;
+  letter-spacing: 0.04em; color: var(--green-deep);
+  border: 1.5px solid var(--rule); border-radius: 999px; padding: 8px 16px;
+  transition: border-color .15s ease, background .15s ease;
+}
+.nav-link:hover, .nav-link:focus-visible { border-color: var(--green); background: var(--green-tint); }
+
+/* ---------- document ---------- */
+.doc { max-width: 760px; margin: 0 auto; padding: 0 24px 72px; }
+
+.eyebrow {
+  font-family: 'Azeret Mono', monospace;
+  display: inline-block; font-weight: 500; font-size: 0.7rem;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft);
+  padding-bottom: 10px; margin-bottom: 16px;
+  border-bottom: 1.5px dashed var(--rule);
+}
+
+.doc h1 {
+  font-size: clamp(2rem, 6vw, 2.9rem);
+  font-weight: 800; line-height: 1.08; margin-bottom: 14px;
+}
+.doc .updated {
+  font-family: 'Azeret Mono', monospace;
+  font-size: 0.78rem; color: var(--ink-soft); letter-spacing: 0.02em;
+  margin-bottom: 30px;
+}
+.doc .lede { font-size: 1.08rem; color: var(--ink-soft); margin-bottom: 8px; }
+
+.doc h2 {
+  font-size: clamp(1.25rem, 3.6vw, 1.55rem);
+  font-weight: 700; line-height: 1.2;
+  margin: 42px 0 12px; padding-top: 18px;
+  border-top: 1.5px solid var(--rule);
+}
+.doc h3 {
+  font-size: 1.05rem; font-weight: 700;
+  margin: 26px 0 8px;
+}
+.doc p { margin-bottom: 14px; }
+.doc ul, .doc ol { margin: 0 0 16px 1.15rem; }
+.doc li { margin-bottom: 8px; }
+.doc li::marker { color: var(--green); }
+.doc strong { font-weight: 700; }
+
+/* Numbered how-to steps — scannable for a reviewer. */
+.steps { list-style: none; margin: 0 0 20px; counter-reset: step; }
+.steps li {
+  position: relative; counter-increment: step;
+  padding-left: 44px; margin-bottom: 14px;
+}
+.steps li::before {
+  content: counter(step);
+  position: absolute; left: 0; top: 1px;
+  width: 28px; height: 28px; border-radius: 999px;
+  background: var(--green-tint); color: var(--green-deep);
+  border: 1.5px solid var(--green);
+  font-family: 'Azeret Mono', monospace; font-size: 0.8rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Callouts */
+.card {
+  border: 1.5px solid var(--rule); border-radius: 12px;
+  background: var(--paper-edge);
+  padding: 20px 22px; margin: 0 0 22px;
+}
+.card > :last-child { margin-bottom: 0; }
+.card.warn { background: #fdf1ef; border-color: var(--stamp); }
+.card.warn h3, .card.warn strong { color: #8e2a1f; }
+
+.card h3 { margin-top: 0; }
+
+/* Verbatim in-app dialog copy */
+blockquote.dialog {
+  border-left: 4px solid var(--orange);
+  background: #fff;
+  border-radius: 0 10px 10px 0;
+  padding: 16px 20px; margin: 0 0 22px;
+  font-size: 0.97rem;
+}
+blockquote.dialog p { margin-bottom: 12px; }
+blockquote.dialog p:last-child { margin-bottom: 0; }
+
+/* Kept / removed split */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 22px; }
+.split .card { margin-bottom: 0; }
+
+.tag {
+  font-family: 'Azeret Mono', monospace;
+  display: inline-block; font-size: 0.66rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  border-radius: 5px; padding: 4px 9px; margin-bottom: 10px;
+}
+.tag.gone { background: var(--stamp); color: #fff; }
+.tag.kept { background: var(--green); color: #fff; }
+
+.mailto {
+  font-family: 'Azeret Mono', monospace;
+  font-size: 0.95rem; font-weight: 700; overflow-wrap: anywhere;
+}
+
+.backlink {
+  display: inline-block; margin-top: 8px;
+  font-family: 'Azeret Mono', monospace; font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- footer ---------- */
+footer { background: var(--green-deep); color: #cfe3d1; padding: 26px 0; font-size: 0.9rem; }
+footer .shell { display: flex; flex-wrap: wrap; gap: 12px 20px; justify-content: space-between; align-items: center; }
+footer a { color: #fff; font-weight: 700; text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+footer nav.legal-links { display: flex; flex-wrap: wrap; gap: 10px 16px; padding: 0; }
+
+@media (max-width: 700px) {
+  .split { grid-template-columns: 1fr; }
+  .doc { padding-bottom: 56px; }
+  nav { flex-wrap: wrap; }
+}

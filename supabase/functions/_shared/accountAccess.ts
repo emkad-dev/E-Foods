@@ -11,8 +11,17 @@ export type AccountAccessProfile = {
 
 export type AccountAccessOptions = {
   /**
-   * Only `cancelAccountDeletion` sets this. Everything else must be refused
-   * while a deletion is pending, including all of the notifications function.
+   * Escape hatch for actions a pending-deletion caller may still invoke.
+   *
+   * NOTHING IN PRODUCTION SETS THIS. The RPC dispatcher derives it from
+   * `PENDING_DELETION_EXEMPT_ACTIONS` (rpc/actions.ts), which is empty, so
+   * every action — including all of the notifications function — is refused
+   * while a deletion is pending. The parameter is kept because the database
+   * side of the 30-day grace period is live, and whoever activates it will
+   * need this hook; see docs/account-deletion-design.md.
+   *
+   * (This doc comment previously claimed `cancelAccountDeletion` sets it.
+   * That action has never existed.)
    */
   allowPendingDeletion?: boolean;
 };

@@ -1,14 +1,17 @@
 import { useMemo, useState, type FormEvent } from 'react';
+import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
-import type { AppRole } from '../../../../packages/domain/src';
+import type { AppRole, UserDocument } from '../../../../packages/domain/src';
+import { canDeleteAdminAccess } from '../lib/adminOffboarding';
 import { formatDateTime } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import {
   assignUserRole,
+  deleteAdminAccess,
   disableUserAccess,
   enableUserAccess,
   provisionStaffAccount,
@@ -28,6 +31,7 @@ export default function AccessPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, AppRole>>({});
   const [restaurantDrafts, setRestaurantDrafts] = useState<Record<string, string>>({});
+  const [deleteTarget, setDeleteTarget] = useState<UserDocument | null>(null);
 
   const [provisionEmail, setProvisionEmail] = useState('');
   const [provisionPassword, setProvisionPassword] = useState('');
@@ -54,6 +58,18 @@ export default function AccessPage() {
     } finally {
       setPendingUid(null);
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    const target = deleteTarget;
+    if (!target) {
+      return;
+    }
+
+    // runAction swallows the rejection into actionError, so the refusal text
+    // from a 412/404 is already on screen by the time the dialog closes.
+    await runAction(target.uid, () => deleteAdminAccess(target.uid));
+    setDeleteTarget(null);
   };
 
   const handleProvision = async (event: FormEvent) => {
@@ -180,6 +196,13 @@ export default function AccessPage() {
                   const busy = pendingUid === user.uid;
                   const roleDraft = roleDrafts[user.uid] ?? (user.role as AppRole);
                   const restaurantDraft = restaurantDrafts[user.uid] ?? (user.restaurantId ?? '');
+                  // Mirrors both of the server's 412 guards: admin rows only,
+                  // and never the signed-in admin's own row.
+                  const canDeleteAdmin = canDeleteAdminAccess({
+                    role: user.role,
+                    signedInUid: session?.user.id ?? null,
+                    targetUid: user.uid,
+                  });
 
                   return (
                     <tr key={user.uid}>
@@ -270,25 +293,40 @@ export default function AccessPage() {
                         )}
                       </td>
                       <td>
-                        {user.accountDisabled ? (
-                          <button
-                            type="button"
-                            className="btn btn-success btn-sm"
-                            disabled={busy || isSelf}
-                            onClick={() => void runAction(user.uid, () => enableUserAccess(user.uid))}
-                          >
-                            Enable
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            disabled={busy || isSelf}
-                            onClick={() => void runAction(user.uid, () => disableUserAccess(user.uid))}
-                          >
-                            Disable
-                          </button>
-                        )}
+                        <div className="row-actions">
+                          {user.accountDisabled ? (
+                            <button
+                              type="button"
+                              className="btn btn-success btn-sm"
+                              disabled={busy || isSelf}
+                              onClick={() => void runAction(user.uid, () => enableUserAccess(user.uid))}
+                            >
+                              Enable
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              disabled={busy || isSelf}
+                              onClick={() => void runAction(user.uid, () => disableUserAccess(user.uid))}
+                            >
+                              Disable
+                            </button>
+                          )}
+                          {canDeleteAdmin ? (
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              disabled={busy}
+                              onClick={() => {
+                                setActionError(null);
+                                setDeleteTarget(user);
+                              }}
+                            >
+                              Delete admin
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -298,6 +336,34 @@ export default function AccessPage() {
           </div>
         )}
       </div>
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete this admin account?"
+          body={
+            <>
+              <p>
+                <strong>{deleteTarget.displayName || deleteTarget.email || deleteTarget.uid}</strong>
+                {deleteTarget.displayName && deleteTarget.email ? ` (${deleteTarget.email})` : null} will be permanently
+                deleted from the platform.
+              </p>
+              <p>
+                UID <code>{deleteTarget.uid}</code>
+              </p>
+              <p>
+                This cannot be undone. The account and its access are removed for good — only the offboarding audit
+                entry remains. Disable access instead if you only need to lock the account out temporarily.
+              </p>
+            </>
+          }
+          busy={pendingUid === deleteTarget.uid}
+          busyLabel="Deleting…"
+          cancelLabel="Cancel"
+          confirmLabel="Delete admin account"
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void handleConfirmDelete()}
+        />
+      ) : null}
     </div>
   );
 }

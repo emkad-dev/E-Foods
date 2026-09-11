@@ -2,6 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { useConfirm } from '@feasty/design-system';
+import {
+  ACCOUNT_DELETION_CANCEL_LABEL,
+  ACCOUNT_DELETION_CONFIRM_LABEL,
+  ACCOUNT_DELETION_TITLE,
+  accountDeletionErrorMessage,
+  accountDeletionParagraphs,
+} from '../../../../../packages/domain/src/accountDeletion';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import SuccessBanner from '../../../src/components/SuccessBanner';
 import { useAuth } from '../../../src/contexts/AuthContext';
@@ -47,9 +55,13 @@ function ProfileRow({ destructive = false, icon, label, onPress, value }: Profil
 
 export default function ProfileScreen() {
   const { deleteAccount, loading, signOut, updateDisplayName, updatePhoneNumber, user } = useAuth();
+  const { confirm, confirmDialog } = useConfirm();
   const [usernameDraft, setUsernameDraft] = useState('');
   const [phoneDraft, setPhoneDraft] = useState('');
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
+  // Rendered inline rather than through Alert: `Alert` is a no-op on the web
+  // build (app.feasty.com.ng), so a server refusal used to vanish entirely.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     setUsernameDraft(user?.displayName?.trim() ?? '');
@@ -64,25 +76,23 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete account',
-      'This removes your customer sign-in and profile from the app. Order history already tied to past orders can still remain in operations records.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete account',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteAccount();
-            } catch (nextError: any) {
-              Alert.alert('Delete failed', nextError.message ?? 'Unable to delete this account right now.');
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+
+    try {
+      await confirm({
+        title: ACCOUNT_DELETION_TITLE,
+        paragraphs: accountDeletionParagraphs('customer'),
+        confirmLabel: ACCOUNT_DELETION_CONFIRM_LABEL,
+        cancelLabel: ACCOUNT_DELETION_CANCEL_LABEL,
+        destructive: true,
+        // Held inside the dialog so both buttons stay disabled for the whole
+        // round trip; a second tap cannot fire a second delete.
+        onConfirm: deleteAccount,
+      });
+    } catch (nextError) {
+      setDeleteError(accountDeletionErrorMessage(nextError));
+    }
   };
 
   const handleSaveUsername = async () => {
@@ -217,7 +227,14 @@ export default function ProfileScreen() {
         <Text style={styles.groupTitle}>Access</Text>
         <ProfileRow icon="sign-out" label={loading ? 'Working...' : 'Sign out'} onPress={handleSignOut} />
         <ProfileRow destructive icon="trash-o" label="Delete my account and data" onPress={handleDeleteAccount} />
+        {deleteError ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
+            {deleteError}
+          </Text>
+        ) : null}
       </View>
+
+      {confirmDialog}
     </ScrollView>
   );
 }
@@ -235,6 +252,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
+  },
+  errorText: {
+    color: customerTheme.danger,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   heroCard: {
     backgroundColor: customerTheme.surface,

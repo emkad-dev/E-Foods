@@ -12,4 +12,9 @@ export {
   type SkeletonProps,
 } from './Skeleton';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
+export {
+  useConfirm,
+  type ConfirmRequest,
+  type UseConfirmResult,
+} from './ConfirmDialog';
 export { elevation } from './elevation';
