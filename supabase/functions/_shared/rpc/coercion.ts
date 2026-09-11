@@ -68,6 +68,13 @@ export const parseInteger = (value: unknown, fallback = 0) => {
 
 // Identical to the local helper app-rpc used to declare; re-exported from the
 // pricing module so the money rounding rule has exactly one definition.
+//
+// NOTE: this makes a cycle -- pricing.ts imports parseNumber from here. It is
+// safe only because neither side touches the other at module-evaluation time:
+// this is a re-exported binding, never a call, and every parseNumber/
+// roundCurrency use in pricing.ts sits inside a function body. Introducing a
+// top-level CALL on either side would fail at import with a TDZ error, inside
+// an edge function, on the money path. Keep both sides call-free at eval time.
 export { roundCurrency } from '../pricing.ts';
 
 export const buildNameKey = (value: string) =>

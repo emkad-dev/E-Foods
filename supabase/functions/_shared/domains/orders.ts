@@ -1701,11 +1701,26 @@ const placeCustomerOrder: Handler = async ({ context, data }) => {
     },
   });
 
-  await captureOrderPlacementRiskSignals({
-    customerId: context.uid,
-    deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
-    orderId,
-  });
+  // BEST-EFFORT -- never allowed to fail the placement. By this point the order
+  // row and its audit entry are already written, so a throw here would report
+  // failure for an order that actually exists: the customer retries and places a
+  // duplicate, and on a prepaid method pays twice. Risk capture reads
+  // CustomerOrder and writes RiskEvent, and loadRecentCustomerOrders turns any
+  // PostgREST error into a throw, so an ordinary transient blip was enough.
+  // Signals are observability; they do not get to take down a paid order.
+  // Same discipline as releasePromoRedemption in _shared/orders.ts.
+  try {
+    await captureOrderPlacementRiskSignals({
+      customerId: context.uid,
+      deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
+      orderId,
+    });
+  } catch (error) {
+    logEdgeEvent('error', 'order placement risk signal capture failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
 
   const response = {
     orderId,

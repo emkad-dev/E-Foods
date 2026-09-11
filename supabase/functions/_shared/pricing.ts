@@ -6,6 +6,8 @@
 // restaurant commission.
 // Spec: docs/superpowers/specs/2026-07-17-pricing-v2-embedded-markup-design.md
 
+import { parseNumber } from './rpc/coercion.ts';
+
 export interface PricingConfig {
   markupRate: number;
   markupFlat: number;
@@ -32,9 +34,31 @@ export const parsePricingConfig = (raw: unknown): PricingConfig => {
   }
 
   const record = raw as Record<string, unknown>;
-  const markupRate = Number(record.markupRate);
-  const markupFlat = Number(record.markupFlat);
-  const partnerServiceRate = Number(record.partnerServiceRate);
+  // Read each field through parseNumber rather than `Number(...)`, and use NaN
+  // as the miss sentinel so the existing Number.isFinite guard below rejects it.
+  //
+  // `Number(null)`, `Number('')`, `Number(false)` and `Number([])` are all 0 -
+  // finite and in range - so a bare `Number(record.markupFlat)` reads an ABSENT
+  // field as a deliberately-configured zero and calls the whole record valid,
+  // which skips the DEFAULT_PRICING_CONFIG fallback entirely. A PlatformSettings
+  // row of `{"markupRate":0.2,"markupFlat":null,"partnerServiceRate":0}` would
+  // therefore drop the flat ₦100/unit platform markup on every order once the
+  // cache TTL expired, and nothing would surface it: the menu and checkout agree
+  // on the same wrong price, the restaurant is still settled in full, and
+  // settlementBalanceResidual still returns 0.
+  //
+  // parseNumber accepts only a real finite number or a non-blank numeric string,
+  // so nullish/empty/boolean/array fields miss and the defaults are used. A
+  // genuine configured 0 still passes - partnerServiceRate is deliberately 0
+  // today. The bug is *absent* being read as zero, not zero being wrong.
+  //
+  // dispatchWeights.ts solves the same hazard with a stricter `typeof === number`
+  // test and explains why (a mistyped weight changes who gets paid). This file
+  // keeps numeric-string tolerance because it already had it; the only behaviour
+  // that changes here is that a missing field now falls back instead of reading 0.
+  const markupRate = parseNumber(record.markupRate, Number.NaN);
+  const markupFlat = parseNumber(record.markupFlat, Number.NaN);
+  const partnerServiceRate = parseNumber(record.partnerServiceRate, Number.NaN);
 
   const valid =
     Number.isFinite(markupRate) && markupRate >= 0 && markupRate <= 1 &&

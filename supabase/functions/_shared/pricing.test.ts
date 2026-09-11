@@ -37,12 +37,59 @@ Deno.test('parsePricingConfig accepts a valid record', () => {
 });
 
 Deno.test('parsePricingConfig falls back to defaults on garbage', () => {
-  for (const raw of [null, undefined, 'x', 42, {}, { markupRate: 'a' }, { markupRate: -1, markupFlat: 100, partnerServiceRate: 0.03 }, { markupRate: 0.2, markupFlat: 100, partnerServiceRate: 0.9 }]) {
+  for (
+    const raw of [
+      null,
+      undefined,
+      'x',
+      42,
+      {},
+      { markupRate: 'a' },
+      { markupRate: -1, markupFlat: 100, partnerServiceRate: 0.03 },
+      { markupRate: 0.2, markupFlat: 100, partnerServiceRate: 0.9 },
+      // Nullish/empty/boolean/array FIELDS. Number(x) is 0 - and therefore
+      // finite and in range - for every one of these, so a Number()-based guard
+      // reads them as a configured zero and skips this fallback entirely. The
+      // first entry is the live-shaped row that would silently erase the flat
+      // ₦100/unit platform markup on every order.
+      { markupRate: 0.2, markupFlat: null, partnerServiceRate: 0 },
+      { markupRate: null, markupFlat: null, partnerServiceRate: null },
+      { markupRate: null, markupFlat: 100, partnerServiceRate: 0 },
+      { markupRate: 0.2, markupFlat: '', partnerServiceRate: 0 },
+      { markupRate: 0.2, markupFlat: '   ', partnerServiceRate: 0 },
+      { markupRate: 0.2, markupFlat: 100, partnerServiceRate: null },
+      { markupRate: false, markupFlat: 100, partnerServiceRate: 0 },
+      { markupRate: 0.2, markupFlat: [], partnerServiceRate: 0 },
+      { markupRate: 0.2, markupFlat: 100 },
+      { markupFlat: 100, partnerServiceRate: 0 },
+    ]
+  ) {
     const parsed = parsePricingConfig(raw);
     expectEqual(parsed.markupRate, DEFAULT_PRICING_CONFIG.markupRate, `markupRate for ${JSON.stringify(raw)}`);
     expectEqual(parsed.markupFlat, DEFAULT_PRICING_CONFIG.markupFlat, `markupFlat for ${JSON.stringify(raw)}`);
     expectEqual(parsed.partnerServiceRate, DEFAULT_PRICING_CONFIG.partnerServiceRate, `partnerServiceRate for ${JSON.stringify(raw)}`);
   }
+});
+
+// The guard above must reject ABSENT, not zero: partnerServiceRate is a
+// deliberately-configured 0 in production today, so a fix that treats every 0
+// as "missing" would be its own outage.
+Deno.test('parsePricingConfig keeps a genuinely configured zero', () => {
+  const zeroed = parsePricingConfig({ markupRate: 0, markupFlat: 0, partnerServiceRate: 0 });
+  expectEqual(zeroed.markupRate, 0, 'explicit zero markupRate is honoured');
+  expectEqual(zeroed.markupFlat, 0, 'explicit zero markupFlat is honoured');
+  expectEqual(zeroed.partnerServiceRate, 0, 'explicit zero partnerServiceRate is honoured');
+
+  const live = parsePricingConfig({ markupRate: 0.2, markupFlat: 100, partnerServiceRate: 0 });
+  expectEqual(live.markupFlat, 100, 'the live config still parses');
+  expectEqual(live.partnerServiceRate, 0, 'the live zero partner rate still parses');
+});
+
+Deno.test('parsePricingConfig still accepts numeric strings', () => {
+  const parsed = parsePricingConfig({ markupRate: '0.25', markupFlat: '50', partnerServiceRate: '0' });
+  expectEqual(parsed.markupRate, 0.25, 'string markupRate');
+  expectEqual(parsed.markupFlat, 50, 'string markupFlat');
+  expectEqual(parsed.partnerServiceRate, 0, 'string partnerServiceRate');
 });
 
 Deno.test('calculateOrderPricing matches the spec worked example (2 × ₦5,000 item)', () => {

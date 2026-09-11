@@ -124,6 +124,28 @@ const installMocks = () => {
           state.orderInserts.push(payload);
           return { error: null };
         },
+        // Placement also runs risk-signal lookups over the customer's recent
+        // orders (riskSignals.ts -> loadRecentCustomerOrders), which reads this
+        // same table. They only need a query-shaped empty response. This mirrors
+        // the CustomerOrder mock in orderModifiers.test.ts, which grew the same
+        // builder when risk signals landed; this file missed it because it was
+        // registered in no test list and so never ran.
+        select: () => {
+          // deno-lint-ignore no-explicit-any
+          const builder: any = {
+            eq: () => builder,
+            gte: () => builder,
+            lt: () => builder,
+            order: () => builder,
+            limit: () => builder,
+            returns: () => builder,
+            maybeSingle: async () => ({ data: null, error: null }),
+            single: async () => ({ data: null, error: null }),
+            then: (resolve: (v: { data: Row[]; error: null }) => unknown, reject?: (r: unknown) => unknown) =>
+              Promise.resolve({ data: [], error: null }).then(resolve, reject),
+          };
+          return builder;
+        },
       };
     }
 
