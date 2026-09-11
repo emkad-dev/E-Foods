@@ -83,15 +83,16 @@ export default function PartnerResetPasswordScreen() {
       }
 
       await supabase.auth.signOut().catch(() => undefined);
-      Alert.alert('Password updated', 'Your password has been updated. Sign in to open your dashboard.', [
-        {
-          text: 'Back to sign in',
-          onPress: () =>
-            router.replace(
-              redirectTo ? ({ pathname: '/(auth)/login', params: { redirectTo } } as never) : ('/(auth)/login' as never)
-            ),
-        },
-      ]);
+      // Navigate unconditionally and carry the confirmation to the login screen
+      // as a route param, the way the customer reset flow does. This used to
+      // hang off an `Alert.alert` button callback, which never fires on the web
+      // build (`Alert` is an empty function in react-native-web) — so the
+      // partner was left stranded on this form, already signed out, with the
+      // recovery code spent and no confirmation that anything had happened.
+      router.replace({
+        pathname: '/(auth)/login',
+        params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },
+      } as never);
     } catch (nextError: any) {
       const formattedError = formatAuthError(nextError);
       setError(formattedError);

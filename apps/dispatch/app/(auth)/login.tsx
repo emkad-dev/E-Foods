@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
@@ -8,9 +8,15 @@ import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchLoginScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ notice?: string | string[] }>();
   const { clearError, error, loading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Confirmations that have to outlive a navigation. Reset-password lands here
+  // with `notice=password-updated` rather than relying on an Alert callback,
+  // which would be an empty function the day dispatch gains a web build.
+  const noticeKey = Array.isArray(params.notice) ? params.notice[0] : params.notice;
+  const notice = noticeKey === 'password-updated' ? 'Password updated. Sign in with your new password.' : null;
 
   const handleEmailChange = (value: string) => {
     if (error) {
@@ -57,6 +63,11 @@ export default function DispatchLoginScreen() {
 
       <View style={styles.formCard}>
 
+        {notice ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+            {notice}
+          </Text>
+        ) : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TextInput
@@ -139,6 +150,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: dispatchTheme.danger,
     fontSize: 14,
+    lineHeight: 20,
+    marginTop: 14,
+  },
+  noticeText: {
+    color: dispatchTheme.success,
+    fontSize: 14,
+    fontWeight: '700',
     lineHeight: 20,
     marginTop: 14,
   },

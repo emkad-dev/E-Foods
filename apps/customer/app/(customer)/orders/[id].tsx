@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
+import { useConfirm } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
@@ -73,7 +74,13 @@ export default function OrderTracking() {
   const { id } = useLocalSearchParams();
   const { user } = useAuth();
   const { order, loading, error } = useCustomerOrder(id as string, user?.uid ?? null);
+  const { confirm, confirmDialog } = useConfirm();
   const [cancelling, setCancelling] = useState(false);
+  // Rendered inline rather than through Alert: `Alert` is a no-op on the web
+  // build (app.feasty.com.ng), so the cancellation outcome — including the
+  // refund percentage actually applied — used to vanish entirely there.
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [refreshingPayment, setRefreshingPayment] = useState(false);
   // Live rider position pushed over the order-<id> broadcast. Subscribed only
   // while the order is out for delivery (picked_up / on_the_way); the hook is
@@ -188,28 +195,40 @@ export default function OrderTracking() {
       return;
     }
 
-    Alert.alert('Cancel order?', refundCopy, [
-      { text: 'Keep order', style: 'cancel' },
-      {
-        text: cancelling ? 'Cancelling...' : 'Cancel order',
-        style: 'destructive',
-        onPress: async () => {
+    setCancelNotice(null);
+    setCancelError(null);
+
+    try {
+      await confirm({
+        title: 'Cancel order?',
+        // The refund policy verbatim: this dialog is the money disclosure, so
+        // the copy shown here must stay identical to the policy card's.
+        paragraphs: [refundCopy],
+        confirmLabel: 'Cancel order',
+        cancelLabel: 'Keep order',
+        destructive: true,
+        // Held inside the dialog so both buttons stay disabled for the whole
+        // round trip; a double tap cannot fire two cancellations against a
+        // live order.
+        onConfirm: async () => {
+          setCancelling(true);
+
           try {
-            setCancelling(true);
             const result = await cancelCustomerOrder(order.id);
             const refundPercent = Math.round(result.refundRate * 100);
-            Alert.alert(
-              'Order cancelled',
-              refundPercent > 0 ? `Your refund policy is ${refundPercent}%.` : 'No refund was due for this cancellation.'
+            setCancelNotice(
+              refundPercent > 0
+                ? `Order cancelled. Your refund policy is ${refundPercent}%.`
+                : 'Order cancelled. No refund was due for this cancellation.'
             );
-          } catch (nextError: any) {
-            Alert.alert('Cancellation failed', nextError.message ?? 'We could not cancel this order right now.');
           } finally {
             setCancelling(false);
           }
         },
-      },
-    ]);
+      });
+    } catch (nextError: any) {
+      setCancelError(nextError?.message ?? 'We could not cancel this order right now.');
+    }
   };
 
   const handleRefreshPayment = async () => {
@@ -436,6 +455,16 @@ export default function OrderTracking() {
         >
           <Text style={styles.cancelButtonText}>{cancelling ? 'Cancelling...' : 'Cancel order'}</Text>
         </TouchableOpacity>
+        {cancelNotice ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.cancelNoticeText}>
+            {cancelNotice}
+          </Text>
+        ) : null}
+        {cancelError ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.cancelErrorText}>
+            {cancelError}
+          </Text>
+        ) : null}
       </View>
 
       {normalizedStatus === 'delivered' ? (
@@ -444,6 +473,8 @@ export default function OrderTracking() {
           <Text style={styles.deliveryCopy}>Enjoy your meal.</Text>
         </Animated.View>
       ) : null}
+
+      {confirmDialog}
     </ScrollView>
   );
 }
@@ -867,6 +898,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '800',
+  },
+  cancelNoticeText: {
+    color: customerTheme.text,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+    marginTop: 10,
+  },
+  cancelErrorText: {
+    color: customerTheme.danger,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
   },
   deliveryCard: {
     alignItems: 'center',

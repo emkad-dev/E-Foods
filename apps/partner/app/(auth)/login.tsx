@@ -8,11 +8,16 @@ import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerLoginScreen() {
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const params = useLocalSearchParams<{ notice?: string | string[]; redirectTo?: string | string[] }>();
   const { clearError, error, loading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
+  // Confirmations that have to outlive a navigation. Reset-password lands here
+  // with `notice=password-updated` instead of relying on an Alert callback,
+  // which never fires on the web build (partner.feasty.com.ng).
+  const noticeKey = Array.isArray(params.notice) ? params.notice[0] : params.notice;
+  const notice = noticeKey === 'password-updated' ? 'Password updated. Sign in to open your dashboard.' : null;
 
   const handleEmailChange = (value: string) => {
     if (error) {
@@ -59,6 +64,11 @@ export default function PartnerLoginScreen() {
       </View>
 
       <View style={styles.formCard}>
+        {notice ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+            {notice}
+          </Text>
+        ) : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TextInput
@@ -150,6 +160,13 @@ const styles = StyleSheet.create({
   errorText: {
     color: partnerTheme.danger,
     fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  noticeText: {
+    color: partnerTheme.success,
+    fontSize: 14,
+    fontWeight: '700',
     lineHeight: 20,
     marginBottom: 10,
   },

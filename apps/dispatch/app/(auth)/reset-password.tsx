@@ -78,12 +78,15 @@ export default function DispatchResetPasswordScreen() {
       }
 
       await supabase.auth.signOut().catch(() => undefined);
-      Alert.alert('Password updated', 'You can now sign in with your new password.', [
-        {
-          text: 'Continue to sign in',
-          onPress: () => router.replace('/(auth)/login'),
-        },
-      ]);
+      // Navigate unconditionally and carry the confirmation to the login screen
+      // as a route param, the way the customer reset flow does. Hanging this off
+      // an `Alert.alert` button callback would strand the rider on this form the
+      // day dispatch gains a web build: `Alert` is an empty function in
+      // react-native-web, so the callback never runs.
+      router.replace({
+        pathname: '/(auth)/login',
+        params: { notice: 'password-updated' },
+      } as never);
     } catch (nextError: any) {
       const formattedError = formatAuthError(nextError);
       setError(formattedError);
