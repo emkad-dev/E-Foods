@@ -155,5 +155,40 @@ wired into `apps/admin-web` `AccessPage`, gated by
 `apps/admin-web/src/lib/adminOffboarding.ts`, which mirrors both 412 conditions
 client-side so the button is never offered when the server would refuse it.
 
+## Deletion on request (non-admin accounts)
+
+`https://feasty.com.ng/account-deletion` is the Play Store "Data deletion" URL.
+It tells a user who cannot open the app — uninstalled, locked out — to email
+`feastyfooders@gmail.com`, and promises a response within 30 days.
+`deleteUserAccountOnRequest` is how that promise is kept: an admin-only action
+that deletes a NON-admin account on the holder's behalf. Without it the only
+delete paths were `deleteOwnAccount` (self-service, 403 for admins) and
+`deleteAdminAccess` (admin targets only), leaving raw SQL as the operator's
+only option.
+
+It is the exact mirror of `deleteAdminAccess`: 412 on self, 412 if the target's
+resolved primary role IS `admin`, then the same `offboardUserAccount` path with
+a third audit action, `assisted_account_deleted`, so the three deletion paths
+stay separable in `AdminAuditLog`. Between the two admin actions every role is
+covered exactly once, with no overlap.
+
+Two things are deliberate:
+
+- **The `validateOffboardingEligibility` gates are kept, and there is no force
+  flag.** A partner still linked to a restaurant would orphan the store
+  (`RestaurantRecord.ownerId` is ON DELETE SET NULL); a rider with live work
+  would strand a delivery. The 412 text names the blocker, the admin clears it
+  first (`updateUserRestaurantLink`, or clearing the assignment), then deletes.
+- **An optional free-text `reason` (capped at 500 chars) is recorded in the
+  audit details.** A deletion done on someone else's say-so needs a record of
+  why; that record is the compliance evidence that the request existed.
+
+In the console it is a separate `Deletion request` column in `AccessPage`, not
+another button beside `Delete admin` in the `Access` column, so the two are
+never mistaken for each other. `canDeleteUserAccountOnRequest` in
+`apps/admin-web/src/lib/adminOffboarding.ts` mirrors the self and is-admin 412s
+only — the restaurant-linked and active-delivery 412s depend on state the
+access overview does not carry, so those refusals are surfaced verbatim.
+
 Related: [pending-deletion gates plan](superpowers/plans/2026-08-07-pending-deletion-gates.md),
 [RLS posture](rls-posture.md).

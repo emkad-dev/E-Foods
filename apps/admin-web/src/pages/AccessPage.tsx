@@ -6,12 +6,13 @@ import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
 import type { AppRole, UserDocument } from '../../../../packages/domain/src';
-import { canDeleteAdminAccess } from '../lib/adminOffboarding';
+import { canDeleteAdminAccess, canDeleteUserAccountOnRequest } from '../lib/adminOffboarding';
 import { formatDateTime } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import {
   assignUserRole,
   deleteAdminAccess,
+  deleteUserAccountOnRequest,
   disableUserAccess,
   enableUserAccess,
   provisionStaffAccount,
@@ -32,6 +33,11 @@ export default function AccessPage() {
   const [roleDrafts, setRoleDrafts] = useState<Record<string, AppRole>>({});
   const [restaurantDrafts, setRestaurantDrafts] = useState<Record<string, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<UserDocument | null>(null);
+  // Deliberately separate state from `deleteTarget`: the two deletion flows are
+  // different actions with different server guards, and sharing one "target"
+  // would make it possible to open one dialog and fire the other.
+  const [requestDeleteTarget, setRequestDeleteTarget] = useState<UserDocument | null>(null);
+  const [deletionReason, setDeletionReason] = useState('');
 
   const [provisionEmail, setProvisionEmail] = useState('');
   const [provisionPassword, setProvisionPassword] = useState('');
@@ -70,6 +76,21 @@ export default function AccessPage() {
     // from a 412/404 is already on screen by the time the dialog closes.
     await runAction(target.uid, () => deleteAdminAccess(target.uid));
     setDeleteTarget(null);
+  };
+
+  const handleConfirmRequestedDelete = async () => {
+    const target = requestDeleteTarget;
+    if (!target) {
+      return;
+    }
+
+    // Same as above: runAction turns a rejection into actionError, so the
+    // server's verbatim 412 — "Partner accounts linked to a restaurant must be
+    // offboarded…" / "Dispatch accounts with active delivery work…" — is on
+    // screen once the dialog closes, telling the operator what to clear first.
+    await runAction(target.uid, () => deleteUserAccountOnRequest(target.uid, deletionReason));
+    setRequestDeleteTarget(null);
+    setDeletionReason('');
   };
 
   const handleProvision = async (event: FormEvent) => {
@@ -188,6 +209,13 @@ export default function AccessPage() {
                   <th>Manage role</th>
                   <th>Restaurant link</th>
                   <th>Access</th>
+                  {/* Its own column, not another button in "Access": deleting a
+                      user account on their emailed request is a different job
+                      from revoking an admin's access, and the two must never
+                      look like alternatives sitting next to each other. */}
+                  <th title="Honour a deletion request from an account holder who cannot use the in-app delete (feasty.com.ng/account-deletion).">
+                    Deletion request
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -199,6 +227,17 @@ export default function AccessPage() {
                   // Mirrors both of the server's 412 guards: admin rows only,
                   // and never the signed-in admin's own row.
                   const canDeleteAdmin = canDeleteAdminAccess({
+                    role: user.role,
+                    signedInUid: session?.user.id ?? null,
+                    targetUid: user.uid,
+                  });
+                  // The mirror image: every row that is NOT an admin, and never
+                  // the signed-in admin's own row. Exactly one of the two
+                  // controls is ever offered, so there is nothing to choose
+                  // between. The server's restaurant-linked / active-delivery
+                  // 412s are NOT mirrored here — they depend on state this list
+                  // does not carry, so the refusal text is surfaced instead.
+                  const canDeleteOnRequest = canDeleteUserAccountOnRequest({
                     role: user.role,
                     signedInUid: session?.user.id ?? null,
                     targetUid: user.uid,
@@ -318,6 +357,7 @@ export default function AccessPage() {
                               type="button"
                               className="btn btn-danger btn-sm"
                               disabled={busy}
+                              title="Admin offboarding: permanently deletes this admin account."
                               onClick={() => {
                                 setActionError(null);
                                 setDeleteTarget(user);
@@ -327,6 +367,27 @@ export default function AccessPage() {
                             </button>
                           ) : null}
                         </div>
+                      </td>
+                      <td>
+                        {canDeleteOnRequest ? (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            disabled={busy}
+                            title="Delete this user's account because they asked us to — for someone who cannot use the in-app delete."
+                            onClick={() => {
+                              setActionError(null);
+                              setDeletionReason('');
+                              setRequestDeleteTarget(user);
+                            }}
+                          >
+                            Delete account on request
+                          </button>
+                        ) : (
+                          <span className="muted" title="Admin accounts are offboarded from the Access column instead.">
+                            —
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -362,6 +423,61 @@ export default function AccessPage() {
           confirmLabel="Delete admin account"
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => void handleConfirmDelete()}
+        />
+      ) : null}
+
+      {requestDeleteTarget ? (
+        <ConfirmDialog
+          title="Delete this account on the user's request?"
+          body={
+            <>
+              <p>
+                <strong>
+                  {requestDeleteTarget.displayName || requestDeleteTarget.email || requestDeleteTarget.uid}
+                </strong>
+                {requestDeleteTarget.displayName && requestDeleteTarget.email
+                  ? ` (${requestDeleteTarget.email})`
+                  : null}{' '}
+                will be permanently deleted from the platform, on their behalf.
+              </p>
+              <p>
+                UID <code>{requestDeleteTarget.uid}</code> · role <code>{requestDeleteTarget.role}</code>
+              </p>
+              <p>
+                This cannot be undone. Only do this for an account holder who actually asked — the in-app delete is the
+                normal route, and this one exists for people who cannot reach it. Confirm you are talking to the account
+                owner before you continue.
+              </p>
+              <div className="field">
+                <label htmlFor="deletion-reason">Reason (recorded in the audit log)</label>
+                <textarea
+                  id="deletion-reason"
+                  rows={3}
+                  maxLength={500}
+                  value={deletionReason}
+                  placeholder="e.g. emailed feastyfooders@gmail.com 2026-09-11, identity confirmed against order history"
+                  onChange={(event) => setDeletionReason(event.target.value)}
+                  style={{
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: 10,
+                    padding: '9px 12px',
+                    font: 'inherit',
+                    fontSize: 13,
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+            </>
+          }
+          busy={pendingUid === requestDeleteTarget.uid}
+          busyLabel="Deleting…"
+          cancelLabel="Cancel"
+          confirmLabel="Delete account on request"
+          onCancel={() => {
+            setRequestDeleteTarget(null);
+            setDeletionReason('');
+          }}
+          onConfirm={() => void handleConfirmRequestedDelete()}
         />
       ) : null}
     </div>

@@ -111,6 +111,12 @@ export const ACCOUNT_ACTIONS = [
   'syncUserClaims',
   'deleteOwnAccount',
   'deleteAdminAccess',
+  // The admin-side counterpart to deleteAdminAccess, covering every NON-admin
+  // role: it is how an emailed deletion request from the published
+  // feasty.com.ng/account-deletion page is actually honoured, instead of with
+  // raw SQL. deleteAdminAccess refuses non-admin targets and this one refuses
+  // admin targets, so the two partition the role space exactly.
+  'deleteUserAccountOnRequest',
 ] as const;
 
 // The two actions that must run before authentication:

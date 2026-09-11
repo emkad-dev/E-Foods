@@ -68,3 +68,15 @@ export const enableUserAccess = (targetUid: string) =>
 
 export const deleteAdminAccess = (targetUid: string) =>
   callAdminRpc<DeleteAdminAccessResult>('deleteAdminAccess', { targetUid });
+
+/**
+ * Honours a deletion request from a NON-admin account holder who cannot reach
+ * the in-app flow (see https://feasty.com.ng/account-deletion). `reason` is
+ * recorded in the audit entry and is the compliance evidence that the request
+ * existed, so it is sent whenever the operator supplied one.
+ */
+export const deleteUserAccountOnRequest = (targetUid: string, reason?: string | null) =>
+  callAdminRpc<DeleteAdminAccessResult>('deleteUserAccountOnRequest', {
+    reason: reason?.trim() ? reason.trim() : null,
+    targetUid,
+  });

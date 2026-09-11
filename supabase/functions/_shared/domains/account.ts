@@ -51,6 +51,14 @@ import {
 type Handler = RpcHandler<AuthenticatedRequestContext>;
 
 /**
+ * Cap on the free-text `reason` recorded against an on-request account
+ * deletion. Long enough for "emailed feastyfooders@gmail.com 2026-09-11,
+ * identity confirmed against the order history", short enough that a paste of
+ * the whole email thread cannot bloat the audit row.
+ */
+const DELETION_REASON_MAX_LENGTH = 500;
+
+/**
  * Refuses self-service deletion for accounts that still own platform state.
  * Deleting them would orphan a restaurant or strand an in-flight delivery, so
  * they are pushed to the admin offboarding path where the state is untangled
@@ -783,6 +791,80 @@ const deleteAdminAccess: Handler = async ({ context, data }) => {
   });
 };
 
+/**
+ * Deletes a NON-admin account on the account holder's behalf, for the person
+ * who cannot reach the in-app flow: they uninstalled, they are locked out, or
+ * they wrote to the address published on https://feasty.com.ng/account-deletion
+ * (the Play Store "Data deletion" URL, which promises a response in 30 days).
+ * Before this action existed the only delete paths were `deleteOwnAccount`
+ * (self-service only, and 403 for admins) and `deleteAdminAccess` (admin
+ * targets only), so honouring an emailed request meant raw SQL against
+ * production.
+ *
+ * This is the exact mirror of `deleteAdminAccess`: that one refuses every
+ * non-admin target, this one refuses every admin target. Between them every
+ * role is covered exactly once, with no overlap and no gap.
+ *
+ * The `validateOffboardingEligibility` gates are kept deliberately, and there
+ * is NO force/override flag by design. A partner still linked to a restaurant
+ * would silently orphan the store (`RestaurantRecord.ownerId` is ON DELETE SET
+ * NULL) and a rider with live work would strand a delivery — an override switch
+ * would just make that one click away. The 412 text names what is blocking, and
+ * the admin resolves it first (`updateUserRestaurantLink` to unlink the
+ * restaurant, clearing the assignment for the rider) and then deletes.
+ *
+ * `reason` is free text and optional, but a deletion performed on someone
+ * else's say-so needs a record of why: that audit detail is the compliance
+ * evidence that the request existed.
+ */
+const deleteUserAccountOnRequest: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+  const targetUid = sanitizeText(data.targetUid);
+  if (!targetUid) {
+    fail(400, 'A target uid is required.');
+  }
+  if (targetUid === context.uid) {
+    fail(412, 'Delete your own account from the signed-in account settings, not from this console.');
+  }
+
+  const account = await loadUserAccount(targetUid);
+  if (!account) {
+    fail(404, 'The selected user could not be found.');
+  }
+
+  const roles = Array.from((await loadUserRoles([targetUid])).get(targetUid) ?? []);
+  const resolvedRole = resolvePrimaryRole(account, roles);
+  if (resolvedRole === 'admin') {
+    fail(412, 'Admin accounts are removed with delete admin access, not with the on-request deletion flow.');
+  }
+
+  if (resolvedRole === 'restaurant' || resolvedRole === 'dispatch') {
+    await validateOffboardingEligibility(targetUid, resolvedRole, account);
+  }
+
+  const reason = sanitizeOptionalText(data.reason)?.slice(0, DELETION_REASON_MAX_LENGTH) ?? null;
+
+  // A third, distinct audit action so `self_account_deleted` (the user did it),
+  // `admin_account_deleted` (an admin account was removed) and this one (an
+  // admin did it for a non-admin user) stay separable in AdminAuditLog. Not
+  // named "requested_*": `UserAccount.deletionRequestedAt` is the dormant
+  // 30-day grace-period flag (see PENDING_DELETION_EXEMPT_ACTIONS in
+  // rpc/actions.ts) and this path has nothing to do with it — it deletes now.
+  await offboardUserAccount(targetUid, context.uid, 'assisted_account_deleted', {
+    email: account.email,
+    reason,
+    role: resolvedRole,
+  });
+
+  return json(200, {
+    data: {
+      deleted: true,
+      role: resolvedRole,
+      targetUid,
+    },
+  });
+};
+
 export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: ACCOUNT_ACTIONS,
   name: 'account',
@@ -793,6 +875,7 @@ export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
     assignUserRole,
     deleteAdminAccess,
     deleteOwnAccount,
+    deleteUserAccountOnRequest,
     disableUserAccess,
     enableUserAccess,
     getFeatureFlags,

@@ -147,6 +147,7 @@ const EXPECTED_ACCOUNT_ACTIONS = [
   'syncUserClaims',
   'deleteOwnAccount',
   'deleteAdminAccess',
+  'deleteUserAccountOnRequest',
 ];
 
 const EXPECTED_ANONYMOUS_ACTIONS = ['promoTrack', 'bootstrapFirstAdmin'];
@@ -181,7 +182,7 @@ const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['dispatch', DISPATCH_ACTIONS, 14],
   ['partner', PARTNER_ACTIONS, 13],
   ['admin', ADMIN_ACTIONS, 28],
-  ['account', ACCOUNT_ACTIONS, 13],
+  ['account', ACCOUNT_ACTIONS, 14],
 ];
 
 for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
@@ -212,7 +213,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 81-action surface', () => {
+Deno.test('the five domains together cover exactly the 82-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -221,14 +222,14 @@ Deno.test('the five domains together cover exactly the 81-action surface', () =>
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 81, 'total action count');
-  expectEqual(new Set(union).size, 81, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 81, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 82, 'total action count');
+  expectEqual(new Set(union).size, 82, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 82, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 81, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 82, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {
