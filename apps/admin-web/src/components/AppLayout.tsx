@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
+import { resolveViewState } from '../lib/viewState';
 
 const ADMIN_NAV = [
   { to: '/', label: 'Dashboard', end: true },
@@ -19,9 +20,15 @@ const SUPPORT_NAV = [{ to: '/inbox', label: 'Inbox', end: true }];
 
 export default function AppLayout() {
   const { session, role, signOut } = useAuth();
-  const { lastUpdated } = useSnapshot();
+  const { lastUpdated, error, hasData } = useSnapshot();
 
   const navItems = role === 'support' ? SUPPORT_NAV : ADMIN_NAV;
+
+  // Same defect as the three dashboards had, in one line: with no snapshot the
+  // freshness label claimed a load was still running, so a failed fetch sat
+  // under a permanent 'Loading data...' that contradicted the error banner on
+  // the page below it.
+  const snapshotState = resolveViewState({ hasData, error });
 
   const rawName = session?.user.user_metadata?.display_name || session?.user.email?.split('@')[0] || 'Admin';
   const greetingName = String(rawName).slice(0, 24);
@@ -54,7 +61,13 @@ export default function AppLayout() {
         <header className="topbar">
           <h1 className="topbar-title">Hello, {greetingName}!</h1>
           <div className="topbar-meta">
-            {lastUpdated ? <span>Updated {lastUpdated.toLocaleTimeString()}</span> : <span>Loading data...</span>}
+            {lastUpdated ? (
+              <span>Updated {lastUpdated.toLocaleTimeString()}</span>
+            ) : snapshotState === 'error' ? (
+              <span>Not updated</span>
+            ) : (
+              <span>Loading data...</span>
+            )}
             <span className="badge badge-primary">{session?.user.email}</span>
           </div>
         </header>

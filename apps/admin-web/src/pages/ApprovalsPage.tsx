@@ -11,6 +11,7 @@ import {
   setRestaurantPublished,
 } from '../services/approvalActions';
 import { getAdminApprovalQueue } from '../services/platformReads';
+import { resolveViewState } from '../lib/viewState';
 import { getApplicationTone, getApprovalTone } from '../theme/tones';
 
 const formatVehicleLine = (application: {
@@ -24,7 +25,7 @@ const formatVehicleLine = (application: {
 };
 
 export default function ApprovalsPage() {
-  const { data, loading, error, refresh } = usePolledRpc(getAdminApprovalQueue);
+  const { data, error, refresh } = usePolledRpc(getAdminApprovalQueue);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -67,6 +68,15 @@ export default function ApprovalsPage() {
     }
   };
 
+  // This screen's entire job is to report whether work is waiting, so
+  // "No pending partner applications" is the most expensive sentence in the
+  // console to get wrong: an admin who reads it during the 120s poll's first
+  // fetch, or after one that failed, walks away from a queue that may be
+  // full. `usePolledRpc` leaves `data` as null in both cases, which is the
+  // honest signal -- the three `?? []` fallbacks below are what turned it
+  // into "nothing to review". Nothing renders until the queue really arrives.
+  const dataState = resolveViewState({ hasData: data !== null, error });
+
   const rejectWithReason = (id: string, review: (reason?: string) => Promise<unknown>) => {
     const reason = window.prompt('Rejection reason (optional):') ?? undefined;
     void runAction(id, () => review(reason?.trim() ? reason.trim() : undefined));
@@ -76,164 +86,168 @@ export default function ApprovalsPage() {
     <div className="page">
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
       {actionError ? <ErrorBanner message={actionError} /> : null}
-      {loading ? <SkeletonRows count={5} /> : null}
+      {dataState === 'loading' ? <SkeletonRows count={5} /> : null}
 
-      <div className="card">
-        <div className="card-title-row">
-          <h3 className="card-title">Partner applications</h3>
-          <span className="badge badge-warning">{partnerApplications.length} pending</span>
-        </div>
-        {partnerApplications.length === 0 ? (
-          <EmptyState title="No pending partner applications" body="New restaurant partner requests will land here." />
-        ) : (
-          partnerApplications.map((application) => (
-            <div key={application.id} className="list-row">
-              <div>
-                <div className="list-row-title">{application.restaurantName}</div>
-                <div className="list-row-sub">
-                  {application.contactName} Â· {application.email} Â· {application.cuisine}
-                </div>
-                <div className="list-row-sub">{application.address}</div>
-                <PartnerOnboardingReview review={application.onboarding} />
-              </div>
-              <div className="row-actions">
-                <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm"
-                  disabled={pendingId === application.id}
-                  onClick={() =>
-                    void runAction(application.id, () =>
-                      reviewPartnerApplication({ applicationId: application.id, decision: 'approve' })
-                    )
-                  }
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm"
-                  disabled={pendingId === application.id}
-                  onClick={() =>
-                    rejectWithReason(application.id, (rejectionReason) =>
-                      reviewPartnerApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
-                    )
-                  }
-                >
-                  Reject
-                </button>
-              </div>
+      {dataState === 'ready' ? (
+        <>
+          <div className="card">
+            <div className="card-title-row">
+              <h3 className="card-title">Partner applications</h3>
+              <span className="badge badge-warning">{partnerApplications.length} pending</span>
             </div>
-          ))
-        )}
-      </div>
+            {partnerApplications.length === 0 ? (
+              <EmptyState title="No pending partner applications" body="New restaurant partner requests will land here." />
+            ) : (
+              partnerApplications.map((application) => (
+                <div key={application.id} className="list-row">
+                  <div>
+                    <div className="list-row-title">{application.restaurantName}</div>
+                    <div className="list-row-sub">
+                      {application.contactName} Â· {application.email} Â· {application.cuisine}
+                    </div>
+                    <div className="list-row-sub">{application.address}</div>
+                    <PartnerOnboardingReview review={application.onboarding} />
+                  </div>
+                  <div className="row-actions">
+                    <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
+                    <button
+                      type="button"
+                      className="btn btn-success btn-sm"
+                      disabled={pendingId === application.id}
+                      onClick={() =>
+                        void runAction(application.id, () =>
+                          reviewPartnerApplication({ applicationId: application.id, decision: 'approve' })
+                        )
+                      }
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={pendingId === application.id}
+                      onClick={() =>
+                        rejectWithReason(application.id, (rejectionReason) =>
+                          reviewPartnerApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
+                        )
+                      }
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-      <div className="card">
-        <div className="card-title-row">
-          <h3 className="card-title">Dispatch applications</h3>
-          <span className="badge badge-warning">{dispatchApplications.length} pending</span>
-        </div>
-        {dispatchApplications.length === 0 ? (
-          <EmptyState title="No pending dispatch applications" body="New rider applications will land here." />
-        ) : (
-          dispatchApplications.map((application) => (
-            <div key={application.id} className="list-row">
-              <div>
-                <div className="list-row-title">{application.displayName}</div>
-                <div className="list-row-sub">
-                  {application.email} Â· {application.vehicleType} Â· {application.region} / {application.lga}
-                </div>
-                <div className="list-row-sub">{formatVehicleLine(application)}</div>
-                <div className="list-row-sub">
-                  Licence {application.licenseNumber ?? 'pending'} · Docs{' '}
-                  {application.licenceFrontPath && application.licenceBackPath ? 'captured' : 'missing'}
-                </div>
-              </div>
-              <div className="row-actions">
-                <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm"
-                  disabled={pendingId === application.id}
-                  onClick={() =>
-                    void runAction(application.id, () =>
-                      reviewDispatchApplication({ applicationId: application.id, decision: 'approve' })
-                    )
-                  }
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm"
-                  disabled={pendingId === application.id}
-                  onClick={() =>
-                    rejectWithReason(application.id, (rejectionReason) =>
-                      reviewDispatchApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
-                    )
-                  }
-                >
-                  Reject
-                </button>
-              </div>
+          <div className="card">
+            <div className="card-title-row">
+              <h3 className="card-title">Dispatch applications</h3>
+              <span className="badge badge-warning">{dispatchApplications.length} pending</span>
             </div>
-          ))
-        )}
-      </div>
+            {dispatchApplications.length === 0 ? (
+              <EmptyState title="No pending dispatch applications" body="New rider applications will land here." />
+            ) : (
+              dispatchApplications.map((application) => (
+                <div key={application.id} className="list-row">
+                  <div>
+                    <div className="list-row-title">{application.displayName}</div>
+                    <div className="list-row-sub">
+                      {application.email} Â· {application.vehicleType} Â· {application.region} / {application.lga}
+                    </div>
+                    <div className="list-row-sub">{formatVehicleLine(application)}</div>
+                    <div className="list-row-sub">
+                      Licence {application.licenseNumber ?? 'pending'} · Docs{' '}
+                      {application.licenceFrontPath && application.licenceBackPath ? 'captured' : 'missing'}
+                    </div>
+                  </div>
+                  <div className="row-actions">
+                    <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
+                    <button
+                      type="button"
+                      className="btn btn-success btn-sm"
+                      disabled={pendingId === application.id}
+                      onClick={() =>
+                        void runAction(application.id, () =>
+                          reviewDispatchApplication({ applicationId: application.id, decision: 'approve' })
+                        )
+                      }
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={pendingId === application.id}
+                      onClick={() =>
+                        rejectWithReason(application.id, (rejectionReason) =>
+                          reviewDispatchApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
+                        )
+                      }
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-      <div className="card">
-        <div className="card-title-row">
-          <h3 className="card-title">Restaurant publishing</h3>
-          <span className="badge badge-warning">
-            {restaurants.filter((restaurant) => restaurant.isPublished !== true).length} unpublished
-          </span>
-        </div>
-        {restaurants.length === 0 ? (
-          <EmptyState title="No restaurants yet" body="Partner restaurants will appear here once created." />
-        ) : (
-          restaurants.map((restaurant) => (
-            <div key={restaurant.id} className="list-row">
-              <div>
-                <div className="list-row-title">{restaurant.name}</div>
-                <div className="list-row-sub">{restaurant.address ?? 'Address pending'}</div>
-              </div>
-              <div className="row-actions">
-                <StatusBadge
-                  label={restaurant.approvalStatus ?? (restaurant.isPublished === true ? 'approved' : 'pending')}
-                  tone={getApprovalTone(restaurant.approvalStatus, restaurant.isPublished)}
-                />
-                {restaurant.isPublished === true ? (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    disabled={pendingId === restaurant.id}
-                    onClick={() =>
-                      void runAction(restaurant.id, () =>
-                        setRestaurantPublished({ restaurantId: restaurant.id, isPublished: false })
-                      )
-                    }
-                  >
-                    Unpublish
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-success btn-sm"
-                    disabled={pendingId === restaurant.id}
-                    onClick={() =>
-                      void runAction(restaurant.id, () =>
-                        setRestaurantPublished({ restaurantId: restaurant.id, isPublished: true })
-                      )
-                    }
-                  >
-                    Publish
-                  </button>
-                )}
-              </div>
+          <div className="card">
+            <div className="card-title-row">
+              <h3 className="card-title">Restaurant publishing</h3>
+              <span className="badge badge-warning">
+                {restaurants.filter((restaurant) => restaurant.isPublished !== true).length} unpublished
+              </span>
             </div>
-          ))
-        )}
-      </div>
+            {restaurants.length === 0 ? (
+              <EmptyState title="No restaurants yet" body="Partner restaurants will appear here once created." />
+            ) : (
+              restaurants.map((restaurant) => (
+                <div key={restaurant.id} className="list-row">
+                  <div>
+                    <div className="list-row-title">{restaurant.name}</div>
+                    <div className="list-row-sub">{restaurant.address ?? 'Address pending'}</div>
+                  </div>
+                  <div className="row-actions">
+                    <StatusBadge
+                      label={restaurant.approvalStatus ?? (restaurant.isPublished === true ? 'approved' : 'pending')}
+                      tone={getApprovalTone(restaurant.approvalStatus, restaurant.isPublished)}
+                    />
+                    {restaurant.isPublished === true ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={pendingId === restaurant.id}
+                        onClick={() =>
+                          void runAction(restaurant.id, () =>
+                            setRestaurantPublished({ restaurantId: restaurant.id, isPublished: false })
+                          )
+                        }
+                      >
+                        Unpublish
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm"
+                        disabled={pendingId === restaurant.id}
+                        onClick={() =>
+                          void runAction(restaurant.id, () =>
+                            setRestaurantPublished({ restaurantId: restaurant.id, isPublished: true })
+                          )
+                        }
+                      >
+                        Publish
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

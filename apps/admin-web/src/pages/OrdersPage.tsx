@@ -10,7 +10,7 @@ import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '..
 import { getOrderTone, getPaymentTone } from '../theme/tones';
 
 export default function OrdersPage() {
-  const { snapshot, loading, error, refresh } = useSnapshot();
+  const { snapshot, loading, error, hasData, refresh } = useSnapshot();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
@@ -109,9 +109,16 @@ export default function OrdersPage() {
             ))}
           </select>
         </div>
-        <div className="muted">
-          {formatNumber(filteredOrders.length)} orders · {formatCurrency(totalValue, currency)}
-        </div>
+        {/* A count and a money total are claims about the business, so they may
+            only be made about data that actually arrived. Ungated, this read
+            "0 orders · NGN 0" during every load and permanently after a failed
+            fetch, because SnapshotContext keeps its EMPTY_SNAPSHOT on the catch
+            path. Same defect the three dashboard screens had. */}
+        {hasData ? (
+          <div className="muted">
+            {formatNumber(filteredOrders.length)} orders · {formatCurrency(totalValue, currency)}
+          </div>
+        ) : null}
       </div>
 
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}

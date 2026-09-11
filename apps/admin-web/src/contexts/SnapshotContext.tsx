@@ -28,6 +28,16 @@ interface SnapshotContextValue {
   snapshot: AdminDashboardSnapshot;
   loading: boolean;
   error: string | null;
+  /**
+   * False until a read actually succeeds. `snapshot` is seeded with -- and
+   * retained as -- EMPTY_SNAPSHOT on the catch path below, so on its own it
+   * cannot tell "the platform has no orders" from "we never managed to ask".
+   * Consumers must gate any claim about the data (KPI numbers, empty states)
+   * on this rather than on `!loading`, which settles to false either way.
+   * Deliberately not `error === null`: once real data has arrived a later
+   * failed poll must leave the dashboard standing, with the banner above it.
+   */
+  hasData: boolean;
   lastUpdated: Date | null;
   refresh: () => Promise<void>;
 }
@@ -79,8 +89,11 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
   // immediate catch-up read.
   useVisiblePolling(() => void refresh(), POLL_INTERVAL_MS, isVisible);
 
+  // `lastUpdated` is stamped only on the success path and never cleared, so it
+  // is exactly the "a real snapshot has landed" signal -- no extra state to
+  // keep in sync with it.
   const value = useMemo(
-    () => ({ snapshot, loading, error, lastUpdated, refresh }),
+    () => ({ snapshot, loading, error, hasData: lastUpdated !== null, lastUpdated, refresh }),
     [snapshot, loading, error, lastUpdated, refresh]
   );
 
