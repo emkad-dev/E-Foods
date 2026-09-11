@@ -29,6 +29,7 @@ import { trackAnalyticsEvent } from '../../../../../packages/observability/src/a
 import {
   type DiscoveryRestaurant,
   getDiscoveryEmptyState,
+  getDiscoverySections,
   getRestaurantAvailability,
   getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
@@ -217,6 +218,16 @@ export default function HomeScreen() {
   const nearbyVisible = toShelfEntries(nearbyRestaurants, expandedShelf === 'nearby' ? undefined : 4);
   const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
 
+  // One source for both gates. The shelf and the empty state are complements by
+  // construction here -- previously the shelf was gated on `deliveryLocation` and
+  // the empty state on `availableRestaurants.length === 0`, so a visitor with no
+  // pinned address and a non-empty catalogue satisfied neither and got a blank
+  // screen with no explanation.
+  const { showShelf, shelfTitle, showEmptyState } = getDiscoverySections({
+    availableCount: availableRestaurants.length,
+    hasDeliveryLocation: Boolean(deliveryLocation),
+  });
+
   const emptyState = getDiscoveryEmptyState({
     availableCount: availableRestaurants.length,
     matchedCount: discoveryResults.length,
@@ -330,11 +341,11 @@ export default function HomeScreen() {
         </Animated.View>
       ) : null}
 
-      {deliveryLocation ? (
+      {showShelf ? (
         <Animated.View entering={FadeInDown.delay(360).duration(500)} style={styles.sectionBlock}>
           <View style={styles.sectionHeader}>
             <View>
-              <Text style={styles.sectionTitle}>Near your delivery point</Text>
+              <Text style={styles.sectionTitle}>{shelfTitle}</Text>
             </View>
             {nearbyRestaurants.length > 4 ? (
               <TouchableOpacity style={styles.sectionAction} onPress={() => setExpandedShelf(expandedShelf === 'nearby' ? null : 'nearby')}>
@@ -393,8 +404,11 @@ export default function HomeScreen() {
                         // "Within your zone" only makes sense when we actually have coverage
                         // here — in browse-only (out-of-coverage) mode this card can sit right
                         // under the "not delivering here" banner, so say nothing rather than
-                        // contradict it.
-                        : isCovered
+                        // contradict it. It equally needs a location to be inside a zone OF:
+                        // getPlatformCoverage fails open to isCovered=true when nothing is
+                        // pinned, so without this check every card told a visitor who had set
+                        // no address that they were inside a delivery zone.
+                        : isCovered && deliveryLocation
                           ? 'Within your zone'
                           : null,
                       restaurant.deliveryTime ?? '25-35 min',
@@ -415,7 +429,7 @@ export default function HomeScreen() {
         </Animated.View>
       ) : null}
 
-      {availableRestaurants.length === 0 ? (
+      {showEmptyState ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>{emptyState.title}</Text>
           <Text style={styles.emptyCopy}>{emptyState.copy}</Text>

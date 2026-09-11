@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  getDiscoverySections,
   getPlatformCoverage,
   getRestaurantAvailability,
   getRestaurantRatingLabel,
@@ -299,4 +300,50 @@ test('a real pin inside the radius is unaffected by the null handling', () => {
   const availability = getRestaurantAvailability(restaurant(), PINNED);
   assert.equal(availability.isAvailable, true);
   assert.ok(availability.distanceKm !== null && availability.distanceKm < 5);
+});
+
+// The blank-home-screen regression. The shelf and the empty state were guarded by
+// two unrelated predicates, so a visitor with no pinned address and a non-empty
+// catalogue satisfied NEITHER and saw header chrome and nothing else.
+test('a non-empty catalogue always renders the shelf, with or without a pinned address', () => {
+  const pinned = getDiscoverySections({ availableCount: 2, hasDeliveryLocation: true });
+  const unpinned = getDiscoverySections({ availableCount: 2, hasDeliveryLocation: false });
+
+  assert.equal(pinned.showShelf, true);
+  assert.equal(
+    unpinned.showShelf,
+    true,
+    'no delivery location is not a reason to hide restaurants -- this is the blank-screen defect'
+  );
+});
+
+test('the heading only claims proximity when there is a location to be near', () => {
+  assert.equal(
+    getDiscoverySections({ availableCount: 2, hasDeliveryLocation: true }).shelfTitle,
+    'Near your delivery point'
+  );
+  assert.equal(
+    getDiscoverySections({ availableCount: 2, hasDeliveryLocation: false }).shelfTitle,
+    'All restaurants'
+  );
+});
+
+test('an empty list renders the empty state instead of the shelf', () => {
+  const sections = getDiscoverySections({ availableCount: 0, hasDeliveryLocation: false });
+  assert.equal(sections.showShelf, false);
+  assert.equal(sections.showEmptyState, true);
+});
+
+test('THE INVARIANT: exactly one of the shelf and the empty state ever renders', () => {
+  for (const availableCount of [0, 1, 2, 50]) {
+    for (const hasDeliveryLocation of [true, false]) {
+      const { showShelf, showEmptyState } = getDiscoverySections({ availableCount, hasDeliveryLocation });
+      assert.notEqual(
+        showShelf,
+        showEmptyState,
+        `both gates agreed for availableCount=${availableCount} hasDeliveryLocation=${hasDeliveryLocation};` +
+          ' that is the hole that rendered a blank screen'
+      );
+    }
+  }
 });

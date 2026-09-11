@@ -286,6 +286,39 @@ export const getRestaurantAvailability = (
   };
 };
 
+/**
+ * Decides, for the discovery feed, whether the restaurant shelf renders, what it
+ * is called, and whether the empty state renders instead.
+ *
+ * WHY THIS EXISTS: the shelf and the empty state used to be guarded by two
+ * unrelated predicates -- the shelf on `deliveryLocation`, the empty state on
+ * `availableCount === 0`. A visitor with no pinned address and a non-empty
+ * catalogue satisfied neither: the shelf was switched off, and the empty state
+ * correctly decided the list was not empty. The screen rendered header chrome
+ * and nothing else -- no restaurants, no message, no error. Skipping the
+ * first-run location step (which is remembered, so it never re-prompts) landed
+ * every visitor there permanently.
+ *
+ * Returning both flags from one function makes them complements by construction
+ * rather than by coincidence, so "nothing on screen" and "nothing to show" can
+ * never disagree again. The invariant is asserted in the tests.
+ */
+export const getDiscoverySections = (params: {
+  availableCount: number;
+  hasDeliveryLocation: boolean;
+}) => {
+  const showShelf = params.availableCount > 0;
+
+  return {
+    showShelf,
+    // Never claim proximity without a location to be near: the feed is the same
+    // list either way, and a heading that promises "near you" to someone who has
+    // pinned nothing reads as broken the moment it is noticed.
+    shelfTitle: params.hasDeliveryLocation ? 'Near your delivery point' : 'All restaurants',
+    showEmptyState: !showShelf,
+  };
+};
+
 export const getDiscoveryEmptyState = (params: {
   availableCount: number;
   matchedCount: number;
