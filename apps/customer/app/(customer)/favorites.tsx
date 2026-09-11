@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import AuthPromptCard from '../../src/components/AuthPromptCard';
 import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getRestaurantList } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
@@ -18,6 +20,7 @@ type FavoriteRestaurant = DiscoveryRestaurant & {
 
 export default function CustomerFavoritesScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const { favoriteRestaurantIds, loading: favoritesLoading, refreshFavorites } = useFavorites();
   const [restaurants, setRestaurants] = useState<FavoriteRestaurant[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -119,6 +122,22 @@ export default function CustomerFavoritesScreen() {
   // the effect's own timing.
   const catalogPending = favoriteRestaurantIds.length > 0 && !catalogSettled;
 
+  // Signed-out visitors used to land on "No favorites yet / Tap the heart on
+  // any restaurant" — advice that could not work, since favorites are a
+  // signed-in feature. Checked before the loading branch: there is nothing to
+  // load for a visitor with no session, so a skeleton here would only delay the
+  // one thing worth showing.
+  if (!user) {
+    return (
+      <View style={styles.promptContainer}>
+        <AuthPromptCard
+          title="Sign in to save favorites"
+          message="Your favorite kitchens live here once you sign in. Browsing stays open either way."
+        />
+      </View>
+    );
+  }
+
   if (loadingCatalog || favoritesLoading || catalogPending) {
     return (
       <SkeletonScreen>
@@ -199,6 +218,12 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.background,
     flex: 1,
     justifyContent: 'center',
+  },
+  promptContainer: {
+    backgroundColor: customerTheme.background,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 16,
   },
   card: {
     backgroundColor: customerTheme.surface,

@@ -17,4 +17,15 @@ export {
   type ConfirmRequest,
   type UseConfirmResult,
 } from './ConfirmDialog';
+export {
+  useAuthPrompt,
+  type AuthPromptRequest,
+  type UseAuthPromptResult,
+} from './AuthPromptDialog';
+export {
+  buildAuthPromptHref,
+  AUTH_PROMPT_PATHNAMES,
+  type AuthPromptHref,
+  type AuthPromptTarget,
+} from './authPromptRoute';
 export { elevation } from './elevation';

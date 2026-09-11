@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 
 import {
   getPlatformCoverage,
+  getRestaurantAvailability,
   getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
   NEW_RESTAURANT_RATING_THRESHOLD,
@@ -267,4 +268,35 @@ test('zero eligible candidates because no restaurant has coordinates, but the ca
   ];
   const coverage = getPlatformCoverage(restaurants, PINNED);
   assert.deepEqual(coverage, { isCovered: true, nearestOrderableKm: null });
+});
+
+// Regression: a typed address is stored with null coordinates on purpose
+// (app/onboarding.tsx keeps the text and leaves geocoding to checkout). The
+// guard used to read them with Number(), and Number(null) is 0 -- which is
+// finite, so the unknown-location branch was skipped and the customer was
+// placed at 0N 0E. Every restaurant with a real pin and a sane radius then
+// reported 'does not deliver to your pinned address'.
+const TYPED_ONLY = {
+  address: '12 Roundabout Road, Badagry',
+  latitude: null,
+  longitude: null,
+} as unknown as AddressRecord;
+
+test('a typed address with no coordinates is unknown, not the origin of the coordinate system', () => {
+  const availability = getRestaurantAvailability(restaurant(), TYPED_ONLY);
+  assert.equal(availability.isAvailable, true, 'null coordinates must fail open, not place the customer at 0N 0E');
+  assert.equal(availability.distanceKm, null);
+  assert.equal(availability.radiusKm, null);
+});
+
+test('an explicit 0,0 pin is still honoured as a real coordinate', () => {
+  const atOrigin = { address: 'Null Island', latitude: 0, longitude: 0 } as unknown as AddressRecord;
+  const availability = getRestaurantAvailability(restaurant(), atOrigin);
+  assert.equal(availability.isAvailable, false, 'Lagos is ~700km from 0,0, well outside a 5km radius');
+});
+
+test('a real pin inside the radius is unaffected by the null handling', () => {
+  const availability = getRestaurantAvailability(restaurant(), PINNED);
+  assert.equal(availability.isAvailable, true);
+  assert.ok(availability.distanceKm !== null && availability.distanceKm < 5);
 });

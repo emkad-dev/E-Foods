@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { usePathname, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
+import { useAuthPrompt } from '@feasty/design-system';
 import { useFocusEffect } from '@react-navigation/native';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
-import AuthPromptCard from '../../src/components/AuthPromptCard';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
 import { useCoverage } from '../../src/contexts/CoverageContext';
@@ -27,7 +27,7 @@ import { WAT_OFFSET_MS, buildScheduleSlots, type ScheduleSlotDay } from '../../s
 import { getRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
-import { promptForAuth } from '../../src/utils/authPrompt';
+import { resolveAuthRedirectTo } from '../../src/utils/authPrompt';
 import { groupCartItemsByRestaurant } from '../../src/utils/checkoutGrouping';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
@@ -108,6 +108,11 @@ export default function CartScreen() {
   const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
   const [selectedSlotIso, setSelectedSlotIso] = useState<string | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
+  // Real cross-platform Modal. The old `promptForAuth` wrapped `Alert.alert`,
+  // which react-native-web implements as an empty static method - so on
+  // app.feasty.com.ng the sign-in demand at the end of checkout was silence.
+  const { promptForAuth, authPromptDialog } = useAuthPrompt();
   const isMountedRef = useRef(true);
   const isCheckoutScreenFocusedRef = useRef(false);
   const safeTipAmount = tipOptions.includes(tipAmount as (typeof tipOptions)[number]) ? tipAmount : DEFAULT_TIP_AMOUNT;
@@ -225,7 +230,15 @@ export default function CartScreen() {
   const checkoutSubtitle = isMixedBasket
     ? 'Orders are grouped by restaurant. One payment completes the basket.'
     : 'Review your order before checkout.';
-  const checkoutDisabled = submitting || Boolean(checkoutBlockedReason) || (fulfillmentType === 'delivery' && !deliveryLocation) || !primaryRestaurantId;
+  const needsDeliveryLocation = fulfillmentType === 'delivery' && !deliveryLocation;
+  // A missing delivery address is deliberately NOT a disable reason: the button
+  // labels itself "Choose delivery location" in that state and `handlePlaceOrder`
+  // routes to the map, so disabling it made its own label a lie and left the
+  // `router.push('/delivery-location')` branch below unreachable. The button is
+  // disabled only for reasons that hold for signed-in and signed-out visitors
+  // alike - already submitting, a blocked basket (closed, unpublished, out of
+  // coverage, below minimum, still loading), or no restaurant at all.
+  const checkoutDisabled = submitting || Boolean(checkoutBlockedReason) || !primaryRestaurantId;
 
   useEffect(() => {
     setDeliveryNote(deliveryLocation?.note ?? '');
@@ -437,21 +450,28 @@ export default function CartScreen() {
 
     setCheckoutError(null);
 
+    // Belt and braces: the button is already disabled while this is set, and the
+    // reason itself is rendered inline in the Fulfillment card. No Alert here -
+    // Alert is inert on web, which is how the whole prompt path went silent.
+    if (checkoutBlockedReason) {
+      return;
+    }
+
+    // Before the sign-in demand, and for signed-out visitors too: picking where
+    // the food goes needs no account (the cart, address included, is device-local),
+    // and asking someone to sign in only to bounce them to a map afterwards is the
+    // dead end this screen used to be.
+    if (needsDeliveryLocation) {
+      router.push('/delivery-location');
+      return;
+    }
+
     if (!user) {
       promptForAuth({
         title: 'Sign in to place your order',
         message: 'You can browse freely, but checkout starts after you sign in or create an account.',
+        redirectTo: resolveAuthRedirectTo(pathname),
       });
-      return;
-    }
-
-    if (checkoutBlockedReason) {
-      Alert.alert('Checkout unavailable', checkoutBlockedReason);
-      return;
-    }
-
-    if (fulfillmentType === 'delivery' && !deliveryLocation) {
-      router.push('/delivery-location');
       return;
     }
 
@@ -674,65 +694,61 @@ export default function CartScreen() {
               {checkoutBlockedReason ? <Text style={styles.warningText}>{checkoutBlockedReason}</Text> : null}
             </View>
 
-            {user ? (
-              fulfillmentType === 'delivery' ? (
-                <View style={styles.sectionCard}>
-                  <Text style={styles.sectionLabel}>Delivery location</Text>
-                  {deliveryLocation ? (
-                    <TouchableOpacity style={styles.locationCard} onPress={() => router.push('/delivery-location')} activeOpacity={0.9}>
-                      <View style={styles.locationIconWrap}>
-                        <FontAwesome name="map-marker" size={20} color="#ef4444" />
-                      </View>
-                      <View style={styles.locationCopy}>
-                        <Text style={styles.locationTitle}>{deliveryLocation.shortAddress ?? 'Pinned delivery spot'}</Text>
-                        <Text style={styles.locationAddress}>{deliveryLocation.address}</Text>
-                      </View>
-                      <Text style={styles.locationAction}>Change</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity style={styles.locationEmptyCard} onPress={() => router.push('/delivery-location')} activeOpacity={0.9}>
-                      <View style={styles.locationEmptyIcon}>
-                        <FontAwesome name="crosshairs" size={17} color={customerTheme.accentStrong} />
-                      </View>
-                      <View style={styles.locationCopy}>
-                        <Text style={styles.locationTitle}>Choose where we should deliver</Text>
-                        <Text style={styles.locationAddress}>Drop a pin on the map to set your exact delivery spot.</Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
-
-                  <TextInput
-                    style={styles.noteInput}
-                    placeholder="Apartment, suite, or landmark (optional)"
-                    placeholderTextColor={customerTheme.textSoft}
-                    value={deliveryNote}
-                    onChangeText={handleDeliveryNoteChange}
-                  />
-                </View>
-              ) : (
-                <View style={styles.sectionCard}>
-                  <Text style={styles.sectionLabel}>Pickup</Text>
-                  <View style={styles.pickupCard}>
-                    <View style={styles.pickupIcon}>
-                      <FontAwesome name="shopping-bag" size={17} color={customerTheme.accentStrong} />
+            {/* No `user ?` gate. Setting a delivery spot is a device-local decision
+                (CartContext persists it to AsyncStorage), so hiding this section behind
+                sign-in left signed-out visitors unable to see a delivery fee, unable to
+                get coverage feedback, and - because a missing address disabled the
+                button - unable to press the one control that offered them sign-in. */}
+            {fulfillmentType === 'delivery' ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionLabel}>Delivery location</Text>
+                {deliveryLocation ? (
+                  <TouchableOpacity style={styles.locationCard} onPress={() => router.push('/delivery-location')} activeOpacity={0.9}>
+                    <View style={styles.locationIconWrap}>
+                      <FontAwesome name="map-marker" size={20} color="#ef4444" />
                     </View>
                     <View style={styles.locationCopy}>
-                      <Text style={styles.locationTitle}>
-                        Pickup from {isMixedBasket ? `${restaurantSummaries.length} restaurants` : restaurantSummaries[0]?.restaurantName ?? primaryRestaurantName}
-                      </Text>
-                      <Text style={styles.locationAddress}>
-                        We will keep each order ready for collection once the restaurant marks it prepared.
-                      </Text>
+                      <Text style={styles.locationTitle}>{deliveryLocation.shortAddress ?? 'Pinned delivery spot'}</Text>
+                      <Text style={styles.locationAddress}>{deliveryLocation.address}</Text>
                     </View>
+                    <Text style={styles.locationAction}>Change</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={styles.locationEmptyCard} onPress={() => router.push('/delivery-location')} activeOpacity={0.9}>
+                    <View style={styles.locationEmptyIcon}>
+                      <FontAwesome name="crosshairs" size={17} color={customerTheme.accentStrong} />
+                    </View>
+                    <View style={styles.locationCopy}>
+                      <Text style={styles.locationTitle}>Choose where we should deliver</Text>
+                      <Text style={styles.locationAddress}>Drop a pin on the map to set your exact delivery spot.</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+                <TextInput
+                  style={styles.noteInput}
+                  placeholder="Apartment, suite, or landmark (optional)"
+                  placeholderTextColor={customerTheme.textSoft}
+                  value={deliveryNote}
+                  onChangeText={handleDeliveryNoteChange}
+                />
+              </View>
+            ) : (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionLabel}>Pickup</Text>
+                <View style={styles.pickupCard}>
+                  <View style={styles.pickupIcon}>
+                    <FontAwesome name="shopping-bag" size={17} color={customerTheme.accentStrong} />
+                  </View>
+                  <View style={styles.locationCopy}>
+                    <Text style={styles.locationTitle}>
+                      Pickup from {isMixedBasket ? `${restaurantSummaries.length} restaurants` : restaurantSummaries[0]?.restaurantName ?? primaryRestaurantName}
+                    </Text>
+                    <Text style={styles.locationAddress}>
+                      We will keep each order ready for collection once the restaurant marks it prepared.
+                    </Text>
                   </View>
                 </View>
-              )
-            ) : (
-              <View style={styles.guestPromptWrapper}>
-                <AuthPromptCard
-                  title="Sign in to check out"
-                  message="Your cart is ready. Sign in or create an account before you place the order."
-                />
               </View>
             )}
 
@@ -915,20 +931,19 @@ export default function CartScreen() {
                 onPress={handlePlaceOrder}
                 disabled={checkoutDisabled}
               >
+                {/* Ordered exactly like handlePlaceOrder's guards, so the label always
+                    names what the next press will actually do. Sign-in is named last:
+                    it is the final step of checkout, not the price of using the screen. */}
                 <Text style={styles.checkoutButtonText}>
-                  {user
-                    ? checkoutBlockedReason
-                      ? 'Checkout unavailable'
-                      : fulfillmentType === 'delivery'
-                        ? deliveryLocation
-                          ? submitting
-                            ? 'Opening payment...'
-                            : 'Pay and place order'
-                          : 'Choose delivery location'
+                  {checkoutBlockedReason
+                    ? 'Checkout unavailable'
+                    : needsDeliveryLocation
+                      ? 'Choose delivery location'
+                      : !user
+                        ? 'Sign in to place order'
                         : submitting
                           ? 'Opening payment...'
-                          : 'Pay and place order'
-                    : 'Sign in to place order'}
+                          : 'Pay and place order'}
                 </Text>
               </TouchableOpacity>
               <Text style={styles.paymentHint}>
@@ -939,6 +954,7 @@ export default function CartScreen() {
         }
         contentContainerStyle={styles.listContent}
       />
+      {authPromptDialog}
     </View>
   );
 }
@@ -1056,9 +1072,6 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingTop: 4,
-  },
-  guestPromptWrapper: {
-    marginBottom: 12,
   },
   mixedBasketCard: {
     backgroundColor: '#f8fbff',

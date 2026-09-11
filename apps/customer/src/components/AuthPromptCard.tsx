@@ -1,6 +1,7 @@
 import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { customerTheme } from '../theme/palette';
+import { resolveAuthRedirectTo } from '../utils/authPrompt';
 
 type AuthPromptCardProps = {
   title: string;
@@ -10,7 +11,7 @@ type AuthPromptCardProps = {
 export default function AuthPromptCard({ title, message }: AuthPromptCardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
+  const redirectTo = resolveAuthRedirectTo(pathname);
 
   return (
     <View style={styles.card}>

@@ -14,8 +14,13 @@ export default function NotFoundScreen() {
     );
   }
 
+  // A signed-out visitor who hits a dead URL is browsing, not authenticating:
+  // a typo, a stale share link, or a slug that no longer exists. Sending them
+  // to /login was the last of the removed login wall -- it turned every 404 on
+  // app.feasty.com.ng into a sign-in demand. They go to the feed, exactly as
+  // the root route already sends them (see app/index.tsx).
   if (!user) {
-    return <Redirect href="/login" />;
+    return <Redirect href="/home" />;
   }
 
   if (!user.emailVerified) {

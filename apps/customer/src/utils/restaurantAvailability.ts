@@ -244,10 +244,20 @@ export const getRestaurantAvailability = (
   }
 
   const restaurantCoordinates = extractRestaurantCoordinates(restaurant);
-  const latitude = Number(deliveryLocation.latitude);
-  const longitude = Number(deliveryLocation.longitude);
+  // Read through extractCoordinatePoint, the same helper getPlatformCoverage
+  // uses, rather than a bare Number(). Number(null) is 0 and 0 is finite, so
+  // the old guard did NOT treat a missing pin as unknown: it placed the
+  // customer at 0N 0E in the Gulf of Guinea and every restaurant with a sane
+  // radius then reported "does not deliver to your pinned address". A typed
+  // address is stored with null coordinates deliberately (app/onboarding.tsx
+  // keeps the text and leaves geocoding to checkout), so this silently put
+  // every customer who typed instead of sharing GPS out of range everywhere.
+  const customerCoordinates = extractCoordinatePoint({
+    latitude: deliveryLocation.latitude,
+    longitude: deliveryLocation.longitude,
+  });
 
-  if (!restaurantCoordinates || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  if (!restaurantCoordinates || !customerCoordinates) {
     return {
       isAvailable: true,
       reason: 'available',
@@ -256,10 +266,6 @@ export const getRestaurantAvailability = (
     };
   }
 
-  const customerCoordinates = {
-    latitude,
-    longitude,
-  };
   const distanceKm = calculateDistanceKm(restaurantCoordinates, customerCoordinates);
   const radiusKm = getRestaurantServiceRadiusKm(restaurant);
 

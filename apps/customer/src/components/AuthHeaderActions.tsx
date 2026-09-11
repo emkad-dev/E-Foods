@@ -2,12 +2,13 @@ import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { customerTheme } from '../theme/palette';
+import { resolveAuthRedirectTo } from '../utils/authPrompt';
 
 export default function AuthHeaderActions() {
   const { user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const redirectTo = pathname && pathname !== '/login' ? pathname : '/home';
+  const redirectTo = resolveAuthRedirectTo(pathname);
 
   if (user) {
     return null;
