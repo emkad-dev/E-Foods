@@ -23,6 +23,20 @@ export {
   type UseAuthPromptResult,
 } from './AuthPromptDialog';
 export {
+  useNotice,
+  type NoticeRequest,
+  type NoticeTone,
+  type UseNoticeOptions,
+  type UseNoticeResult,
+} from './Notice';
+export {
+  noticeLiveRegion,
+  noticeRole,
+  resolveNoticeDurationMs,
+  NOTICE_DEFAULT_DURATION_MS,
+  NOTICE_MIN_ERROR_DURATION_MS,
+} from './noticePolicy';
+export {
   buildAuthPromptHref,
   AUTH_PROMPT_PATHNAMES,
   type AuthPromptHref,

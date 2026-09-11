@@ -8,9 +8,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
+import { useNotice } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../../../packages/runtime/src';
@@ -22,6 +23,10 @@ import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge'
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { useCoverage } from '../../../../src/contexts/CoverageContext';
+import {
+  resolveDeliveryFeeAmount,
+  resolveSelectedCategory,
+} from '../../../../src/domain/restaurantMenuView';
 import { customerTheme } from '../../../../src/theme/palette';
 import { getRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../../src/services/supabase/config';
@@ -66,12 +71,20 @@ export default function RestaurantDetail() {
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [addedToCartVisible, setAddedToCartVisible] = useState(false);
   const { addItem, deliveryLocation, items } = useCart();
   const { isCovered } = useCoverage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const addedToCartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const totalItemsInCart = items.reduce((sum, item) => sum + item.quantity, 0);
+  // Floating rather than inline: Add lives on an arbitrary row of a long menu,
+  // so an inline notice would land wherever that row happens to be. See the
+  // PLACEMENT note in `Notice.tsx`. The offset clears the floating tab bar, and
+  // the cart button on top of it once there is something in the cart — a notice
+  // hidden behind chrome would be the same silence this replaces.
+  const { notice, showNotice } = useNotice({
+    placement: 'floating',
+    offsetBottom: insets.bottom + 92 + (totalItemsInCart > 0 ? 76 : 0),
+  });
 
   const [cartButtonScale, setCartButtonScale] = useState(1);
   const cartButtonStyle = useAnimatedStyle(() => ({
@@ -125,11 +138,15 @@ export default function RestaurantDetail() {
       const highlightedCategory = highlightId
         ? filteredMenu.find((category) => category.items.some((item) => item.id === highlightId))?.category ?? null
         : null;
-      const fallbackCategory = filteredMenu.length > 0 ? filteredMenu[0].category : null;
 
       setRestaurant(nextRestaurant as DiscoveryRestaurant);
       setMenu(filteredMenu);
-      setSelectedCategory((current) => current ?? highlightedCategory ?? fallbackCategory);
+      // Re-validated against the menu that just arrived, not merely defaulted:
+      // a partner renaming or emptying the open category used to leave a stale
+      // selection that filtered the menu down to nothing.
+      setSelectedCategory((current) =>
+        resolveSelectedCategory(current, filteredMenu, highlightedCategory)
+      );
     } catch (error) {
       console.error('Error fetching restaurant:', error);
       Alert.alert('Error', 'Could not load restaurant details');
@@ -169,29 +186,18 @@ export default function RestaurantDetail() {
     enabled: hasValidId,
   });
 
-  useEffect(() => {
-    return () => {
-      if (addedToCartTimerRef.current) {
-        clearTimeout(addedToCartTimerRef.current);
-      }
-    };
-  }, []);
-
-  const triggerAddedToCartToast = () => {
-    if (addedToCartTimerRef.current) {
-      clearTimeout(addedToCartTimerRef.current);
-    }
-
-    setAddedToCartVisible(true);
-    addedToCartTimerRef.current = setTimeout(() => {
-      setAddedToCartVisible(false);
-      addedToCartTimerRef.current = null;
-    }, 1500);
-  };
-
   const handleAddToCart = (item: MenuItem) => {
     if (!isCovered) {
-      Alert.alert(COVERAGE_COMING_SOON_TITLE, COVERAGE_COMING_SOON_COPY);
+      // Was `Alert.alert`, i.e. nothing at all on app.feasty.com.ng: the tap
+      // added no item, moved no cart badge and explained nothing, so Add read
+      // as a broken button. Sticky, because this is the only explanation the
+      // customer gets and it is longer than a glance.
+      showNotice({
+        tone: 'info',
+        title: COVERAGE_COMING_SOON_TITLE,
+        message: COVERAGE_COMING_SOON_COPY,
+        durationMs: null,
+      });
       return;
     }
 
@@ -209,7 +215,11 @@ export default function RestaurantDetail() {
     );
     setCartButtonScale(1.25);
     setTimeout(() => setCartButtonScale(1), 180);
-    triggerAddedToCartToast();
+    showNotice({
+      tone: 'success',
+      title: 'Added to cart',
+      message: 'Item saved. You can keep browsing or open your cart.',
+    });
   };
 
   const visibleMenu = useMemo(() => {
@@ -220,10 +230,13 @@ export default function RestaurantDetail() {
     return menu.filter((category) => category.category === selectedCategory);
   }, [menu, selectedCategory]);
 
-  const totalItemsInCart = items.reduce((sum, item) => sum + item.quantity, 0);
   const availability = restaurant ? getRestaurantAvailability(restaurant, deliveryLocation) : null;
   const availabilityBadge = availability ? getRestaurantAvailabilityBadge(availability) : null;
   const operatingHoursLabel = restaurant ? getRestaurantOperatingHoursLabel(restaurant) : null;
+  // Parsed, not truthiness-tested: a restaurant offering FREE delivery has a
+  // deliveryFee of 0, which the old `deliveryFee ? … : 'Pending'` rendered as
+  // "Delivery Pending" while the cart and the server both charged nothing.
+  const deliveryFeeAmount = restaurant ? resolveDeliveryFeeAmount(restaurant.deliveryFee) : null;
   const cartFooterBottom = insets.bottom + 92;
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -302,7 +315,7 @@ export default function RestaurantDetail() {
                   </Text>
                   <Text style={styles.factPill}>
                     {restaurant.supportsDelivery === true
-                      ? `Delivery ${restaurant.deliveryFee ? formatMoney(Number(restaurant.deliveryFee)) : 'Pending'}`
+                      ? `Delivery ${deliveryFeeAmount === null ? 'Pending' : formatMoney(deliveryFeeAmount)}`
                       : 'Delivery coming soon'}
                   </Text>
                 </View>
@@ -419,19 +432,7 @@ export default function RestaurantDetail() {
         </Animated.View>
       ) : null}
 
-      {addedToCartVisible ? (
-        <Animated.View
-          entering={FadeIn.duration(160)}
-          exiting={FadeOut.duration(140)}
-          pointerEvents="none"
-          style={styles.toastOverlay}
-        >
-          <View style={styles.toastCard}>
-            <Text style={styles.toastTitle}>Added to cart</Text>
-            <Text style={styles.toastCopy}>Item saved. You can keep browsing or open your cart.</Text>
-          </View>
-        </Animated.View>
-      ) : null}
+      {notice}
     </View>
   );
 }
@@ -440,33 +441,6 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: customerTheme.background,
     flex: 1,
-  },
-  toastOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    zIndex: 30,
-  },
-  toastCard: {
-    backgroundColor: 'rgba(15, 23, 42, 0.94)',
-    borderRadius: 22,
-    maxWidth: 280,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  toastTitle: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  toastCopy: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 6,
-    textAlign: 'center',
   },
   container: {
     paddingBottom: 220,

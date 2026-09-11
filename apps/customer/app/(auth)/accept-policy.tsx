@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router } from 'expo-router';
 import { policyCopy } from '../../../../packages/domain/src';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -48,7 +48,7 @@ function PolicyAccordion({
 }
 
 export default function AcceptPolicyScreen() {
-  const { acceptCurrentPolicies, policyLoading, user } = useAuth();
+  const { acceptCurrentPolicies, error, policyLoading, user } = useAuth();
   const [expandedSection, setExpandedSection] = useState<'terms' | 'privacy' | null>('terms');
   const policySections = useMemo(
     () => ({
@@ -62,8 +62,11 @@ export default function AcceptPolicyScreen() {
     try {
       await acceptCurrentPolicies('customer_policy_gate');
       router.replace((user?.phoneNumber ? '/home' : '/complete-profile') as never);
-    } catch (error: any) {
-      Alert.alert('Policy acceptance failed', error.message ?? 'Unable to save your acceptance right now.');
+    } catch {
+      // `acceptCurrentPolicies` sets `AuthContext`'s `error` before it throws,
+      // and the slot below renders it. Previously the only report was an
+      // `Alert`, which is an empty function on the web build — so a failure
+      // here dead-ended the signup funnel with a button that looked inert.
     }
   };
 
@@ -93,6 +96,11 @@ export default function AcceptPolicyScreen() {
             linkLabel="Open full Privacy page"
           />
         </View>
+        {error ? (
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+            {error}
+          </Text>
+        ) : null}
         <Pressable style={styles.button} onPress={handleAccept} disabled={policyLoading}>
           <Text style={styles.buttonText}>{policyLoading ? 'Saving...' : 'I agree'}</Text>
         </Pressable>
@@ -115,6 +123,7 @@ const styles = StyleSheet.create({
   title: { color: customerTheme.text, fontSize: 28, fontWeight: '900', marginTop: 8 },
   copy: { color: customerTheme.textMuted, fontSize: 15, lineHeight: 22, marginTop: 8 },
   sectionList: { gap: 10, marginTop: 16 },
+  errorText: { color: customerTheme.danger, fontSize: 14, lineHeight: 20, marginTop: 16 },
   sectionButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.background,

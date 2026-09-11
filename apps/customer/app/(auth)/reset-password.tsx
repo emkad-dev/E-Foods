@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { customerTheme } from '../../src/theme/palette';
@@ -36,23 +37,17 @@ export default function ResetPasswordScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const handleResetPassword = async () => {
-    if (!accessToken && !refreshToken && !recoveryCode) {
-      Alert.alert('Invalid link', 'This reset link is missing the required reset code.');
-      return;
-    }
+    // All four checks used to `Alert` and return, i.e. do nothing at all on the
+    // web build. They now write into the same `error` slot the screen already
+    // renders for server failures.
+    const invalid = validateResetPasswordForm({
+      hasResetCredential: Boolean(accessToken || refreshToken || recoveryCode),
+      password,
+      confirmPassword,
+    });
 
-    if (!password.trim() || !confirmPassword.trim()) {
-      Alert.alert('Missing information', 'Please enter both passwords to continue.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Enter matching passwords to continue.');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters long.');
+    if (invalid) {
+      setError(invalid);
       return;
     }
 
@@ -87,9 +82,9 @@ export default function ResetPasswordScreen() {
         params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },
       } as never);
     } catch (err: any) {
-      const formattedError = formatAuthError(err);
-      setError(formattedError);
-      Alert.alert('Unable to reset password', formattedError);
+      // `setError` alone: the slot above renders it. The `Alert` that used to
+      // follow was a duplicate on native and silence on web.
+      setError(formatAuthError(err));
     } finally {
       setSubmitting(false);
     }
@@ -104,13 +99,20 @@ export default function ResetPasswordScreen() {
       <Text style={styles.title}>Choose a new password</Text>
       <Text style={styles.copy}>Set a fresh password for your account and then sign back in.</Text>
 
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {error ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : null}
 
       <TextInput
         style={styles.input}
         placeholder="New password"
         value={password}
-        onChangeText={setPassword}
+        onChangeText={(value) => {
+          setError(null);
+          setPassword(value);
+        }}
         secureTextEntry
         editable={!submitting}
       />
@@ -118,7 +120,10 @@ export default function ResetPasswordScreen() {
         style={styles.input}
         placeholder="Confirm new password"
         value={confirmPassword}
-        onChangeText={setConfirmPassword}
+        onChangeText={(value) => {
+          setError(null);
+          setConfirmPassword(value);
+        }}
         secureTextEntry
         editable={!submitting}
       />

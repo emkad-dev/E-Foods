@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -9,6 +9,7 @@ import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShe
 import AuthTextField from '../../src/components/AuthTextField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import SuccessBanner from '../../src/components/SuccessBanner';
+import { validateRegisterForm } from '../../src/domain/authFormValidation';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { customerTheme } from '../../src/theme/palette';
 
@@ -25,52 +26,60 @@ export default function RegisterScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const { loading, signUp, error, clearError } = useAuth();
+  // Every one of the four checks below used to `Alert` and return. `Alert` is an
+  // empty function on the web build, so an incomplete form, a password typo or
+  // an unticked terms box made Create account do nothing visible at all. Held
+  // locally because `AuthContext` exposes no setter, and rendered through the
+  // SAME slot as the context's `error`, so there is one error surface.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleNicknameChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setNickname(value);
   };
 
   const handleEmailChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setEmail(value);
   };
 
   const handlePasswordChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setPassword(value);
   };
 
   const handleConfirmPasswordChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setConfirmPassword(value);
   };
 
   const handlePhoneNumberChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setPhoneNumber(value);
   };
 
   const handleRegister = async () => {
-    if (!nickname.trim() || !email.trim() || !password.trim() || !phoneNumber.trim()) {
-      Alert.alert('Missing information', 'Please complete all fields before continuing.');
+    const invalid = validateRegisterForm({
+      nickname,
+      email,
+      password,
+      confirmPassword,
+      phoneNumber,
+      acceptedPolicies,
+    });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
-    if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Your passwords must match.');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters long.');
-      return;
-    }
-
-    if (!acceptedPolicies) {
-      Alert.alert('Terms required', 'Accept the Terms and Privacy Policy before creating an account.');
-      return;
-    }
+    setValidationError(null);
 
     try {
       const { verificationEmailSent } = await signUp(email.trim(), password, {
@@ -90,8 +99,9 @@ export default function RegisterScreen() {
       setPendingNotice(
         'Your account was created, but the verification email could not be sent yet. Open the verify email screen and resend it from there.'
       );
-    } catch (error: any) {
-      Alert.alert('Registration failed', error.message);
+    } catch {
+      // `signUp` has already pushed the formatted message into `AuthContext`'s
+      // `error`, which the slot above renders.
     }
   };
 
@@ -107,7 +117,11 @@ export default function RegisterScreen() {
         onDismiss={() => setPendingNotice(null)}
       />
 
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {formError ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {formError}
+        </Text>
+      ) : null}
 
       <AuthTextField
         placeholder="Nickname or username"
@@ -156,7 +170,10 @@ export default function RegisterScreen() {
 
       <TouchableOpacity
         style={styles.policyRow}
-        onPress={() => setAcceptedPolicies((current) => !current)}
+        onPress={() => {
+          setValidationError(null);
+          setAcceptedPolicies((current) => !current);
+        }}
         activeOpacity={0.82}
         disabled={loading}
       >

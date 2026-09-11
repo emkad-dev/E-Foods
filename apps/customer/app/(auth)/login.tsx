@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
@@ -8,6 +8,7 @@ import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShe
 import AuthTextField from '../../src/components/AuthTextField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import SuccessBanner from '../../src/components/SuccessBanner';
+import { validateLoginForm } from '../../src/domain/authFormValidation';
 import { resolveSuccessNotice } from '../../src/utils/successNotices';
 import { customerTheme } from '../../src/theme/palette';
 
@@ -19,27 +20,42 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { signIn, loading, error, clearError } = useAuth();
+  // Client-side validation used to go to `Alert`, which is an empty function on
+  // the web build, so an empty submit looked like a dead button. It is held
+  // locally because `AuthContext` exposes no setter, and rendered through the
+  // SAME slot as the context's `error` below, so the screen keeps exactly one
+  // error surface.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleEmailChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setEmail(value);
   };
 
   const handlePasswordChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setPassword(value);
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Missing information', 'Please enter both email and password');
+    const invalid = validateLoginForm({ email, password });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
+    setValidationError(null);
+
     try {
       await signIn(email.trim(), password);
-    } catch (error: any) {
-      Alert.alert('Login Failed', error.message);
+    } catch {
+      // `signIn` has already pushed the formatted message into `AuthContext`'s
+      // `error`, which the slot above renders; the dead `Alert` that used to
+      // sit here added nothing on native and nothing at all on web.
     }
   };
 
@@ -51,7 +67,11 @@ export default function LoginScreen() {
         onDismiss={() => setDismissedNotice(true)}
       />
 
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {formError ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {formError}
+        </Text>
+      ) : null}
 
       <AuthTextField
         placeholder="name@email.com"

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateEmailCode } from '../../src/domain/authFormValidation';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { updateUserDocument } from '../../src/services/supabase/profile';
@@ -22,6 +23,13 @@ export default function VerifyEmailScreen() {
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const [code, setCode] = useState('');
   const [confirmingCode, setConfirmingCode] = useState(false);
+  // Three failures on this screen never reached `AuthContext`'s `error`: the
+  // link exchange below talks to `supabase.auth` directly, and the two local
+  // checks are client-side. All three reported only through `Alert`, which is
+  // an empty function on the web build — so a broken or expired verification
+  // link produced a completely blank screen. They are held here and rendered
+  // through the SAME slot as the context's `error`, keeping one error surface.
+  const [screenError, setScreenError] = useState<string | null>(null);
   const router = useRouter();
   const accessToken = useMemo(() => {
     if (Array.isArray(params.access_token)) return params.access_token[0];
@@ -77,7 +85,7 @@ export default function VerifyEmailScreen() {
         await reloadUser().catch(() => undefined);
       } catch (nextError: any) {
         if (!cancelled) {
-          Alert.alert('Unable to verify email', formatAuthError(nextError));
+          setScreenError(formatAuthError(nextError));
         }
       } finally {
         if (!cancelled) {
@@ -101,12 +109,14 @@ export default function VerifyEmailScreen() {
 
   const handleConfirmCode = async () => {
     const trimmed = code.trim();
+    const invalid = validateEmailCode({ value: code });
 
-    if (trimmed.length < 6) {
-      Alert.alert('Enter the full code', 'The code in your email is 6 digits.');
+    if (invalid) {
+      setScreenError(invalid);
       return;
     }
 
+    setScreenError(null);
     setConfirmingCode(true);
     try {
       const verified = await verifyEmailCode(trimmed);
@@ -118,14 +128,16 @@ export default function VerifyEmailScreen() {
         });
         setCode('');
       }
-    } catch (codeError: any) {
-      Alert.alert('Could not confirm code', codeError.message);
+    } catch {
+      // `verifyEmailCode` set `AuthContext`'s `error` before throwing; the slot
+      // below renders it.
     } finally {
       setConfirmingCode(false);
     }
   };
 
   const handleRefreshStatus = async () => {
+    setScreenError(null);
     setChecking(true);
     try {
       const emailVerified = await reloadUser();
@@ -135,36 +147,38 @@ export default function VerifyEmailScreen() {
           message: 'Your email has been confirmed. You can continue to the customer app.',
         });
       } else {
-        Alert.alert(
-          'Not verified yet',
-          'Please open the verification link we sent and come back here after confirming it.'
+        setScreenError(
+          'Not verified yet. Open the verification link we sent, then come back here after confirming it.'
         );
       }
-    } catch (error: any) {
-      Alert.alert('Unable to refresh status', error.message);
+    } catch {
+      // `reloadUser` set `AuthContext`'s `error` before throwing.
     } finally {
       setChecking(false);
     }
   };
 
   const handleResendEmail = async () => {
+    setScreenError(null);
     setResending(true);
     try {
       await sendVerificationEmail();
       setNotice({ title: 'Verification link sent', message: 'Please check your inbox for the new link.' });
-    } catch (error: any) {
-      Alert.alert('Unable to resend email', error.message);
+    } catch {
+      // `sendVerificationEmail` set `AuthContext`'s `error` before throwing.
     } finally {
       setResending(false);
     }
   };
 
+  const displayError = screenError ?? error;
+
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
       await signOut();
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
+    } catch {
+      // `signOut` set `AuthContext`'s `error` before throwing.
     } finally {
       setSigningOut(false);
     }
@@ -181,14 +195,21 @@ export default function VerifyEmailScreen() {
 
       <SuccessBanner title={notice?.title} message={notice?.message} onDismiss={() => setNotice(null)} />
 
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {displayError ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {displayError}
+        </Text>
+      ) : null}
 
       <TextInput
         style={styles.codeInput}
         placeholder="000000"
         placeholderTextColor={customerTheme.textMuted}
         value={code}
-        onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+        onChangeText={(value) => {
+          setScreenError(null);
+          setCode(value.replace(/\D/g, '').slice(0, 6));
+        }}
         keyboardType="number-pad"
         textContentType="oneTimeCode"
         autoComplete="one-time-code"

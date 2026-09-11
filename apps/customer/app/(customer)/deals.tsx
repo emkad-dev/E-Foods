@@ -11,6 +11,10 @@ const PROMO_SELECT = 'id, title, body, actionUrl, imageUrl, detailBody, terms, c
 export default function DealsScreen() {
   const [promos, setPromos] = useState<PromoContent[]>([]);
   const [loading, setLoading] = useState(true);
+  // The screen had no error state at all: a failed query left `promos` empty
+  // and fell through to "No deals right now", presenting a service failure as
+  // fact. Modelled on promo/[id].tsx, which already distinguishes the two.
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     // RLS returns only active, in-window promos.
@@ -20,11 +24,21 @@ export default function DealsScreen() {
       .order('createdAt', { ascending: false })
       .limit(50)
       .returns<PromoContent[]>();
-    if (!error && data) {
-      setPromos(data);
+    if (error) {
+      setFailed(true);
+    } else {
+      setPromos(data ?? []);
+      setFailed(false);
     }
     setLoading(false);
   }, []);
+
+  const retry = useCallback(() => {
+    // Only the explicit retry shows the spinner again. Refocusing the tab
+    // re-runs `load` silently, so the list does not flash on every return.
+    setLoading(true);
+    void load();
+  }, [load]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -37,6 +51,18 @@ export default function DealsScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={customerTheme.accent} />
+      </View>
+    );
+  }
+
+  if (failed) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.emptyTitle}>Couldn&apos;t load deals</Text>
+        <Text style={styles.emptyBody}>Check your connection and try again.</Text>
+        <Pressable style={styles.retry} onPress={retry} accessibilityRole="button">
+          <Text style={styles.retryText}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -75,6 +101,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: customerTheme.background, gap: 6, padding: 24 },
   emptyTitle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
   emptyBody: { color: customerTheme.textMuted, fontSize: 14, textAlign: 'center' },
+  retry: {
+    marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center',
+  },
+  retryText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
   card: { backgroundColor: customerTheme.surface, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: customerTheme.border },
   image: { width: '100%', height: 150 },
   imagePlaceholder: { backgroundColor: customerTheme.accentSoft },

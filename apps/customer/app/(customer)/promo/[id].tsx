@@ -12,13 +12,21 @@ export default function PromoDetailScreen() {
   const [promo, setPromo] = useState<PromoContent | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  // A deep link with no id (app.feasty.com.ng/promo/) used to fall through to
+  // "This deal has ended" — a verdict on a request that was never made. It is
+  // not a failed fetch either, so it gets its own state: retrying a link with
+  // no id in it can never succeed, and offering a Retry would be a lie.
+  const [invalidLink, setInvalidLink] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     if (!id) {
+      setInvalidLink(true);
       setLoading(false);
       return;
     }
+
+    setInvalidLink(false);
     const { data, error } = await supabase
       .from('Promo')
       .select(PROMO_SELECT)
@@ -48,6 +56,17 @@ export default function PromoDetailScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={customerTheme.accent} />
+      </View>
+    );
+  }
+
+  if (invalidLink) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.emptyTitle}>This deal link is incomplete</Text>
+        <Text style={styles.emptyBody}>
+          The link you opened is missing its deal reference. Open the deal again from the Deals tab.
+        </Text>
       </View>
     );
   }

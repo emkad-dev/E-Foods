@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useNotice } from '@feasty/design-system';
 import { FontAwesome } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase/config';
@@ -13,6 +14,16 @@ export default function GoogleSignInButton() {
   const { signInWithGoogle, loading } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
   const unavailableMessage = getGoogleSignInUnavailableMessage();
+  // Inline: this button is part of a short auth form, so a notice rendered
+  // directly under it is exactly where the user is already looking.
+  //
+  // Web reaches the catch below through `signInWithGoogleOAuth`, and reported
+  // the failure only through `Alert` — an empty function on the web build — so
+  // a failed Google sign-in on app.feasty.com.ng was pure silence. The two
+  // native-only branches (`unavailableMessage` and the Play redirect-URI
+  // mismatch) keep `Alert`: they are unreachable on web, where
+  // `Platform.OS === 'web'` returns before either can run.
+  const { notice, showNotice } = useNotice();
 
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
@@ -38,7 +49,11 @@ export default function GoogleSignInButton() {
           'Please ensure your redirect URI is configured correctly in the Google Cloud Console.'
         );
       } else if (error.code !== 'CANCELED') {
-        Alert.alert('Google Sign-In Failed', error.message || 'An error occurred');
+        showNotice({
+          tone: 'error',
+          title: 'Google sign-in failed',
+          message: error.message || 'Something went wrong. Try again, or sign in with your email.',
+        });
       }
     } finally {
       setSigningIn(false);
@@ -48,34 +63,40 @@ export default function GoogleSignInButton() {
   const isBusy = loading || signingIn;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Continue with Google"
-      onPress={handleGoogleSignIn}
-      disabled={isBusy}
-      style={({ pressed }) => [
-        styles.button,
-        pressed && !isBusy ? styles.buttonPressed : null,
-        isBusy ? styles.buttonDisabled : null,
-      ]}
-    >
-      <View style={styles.content}>
-        <View style={styles.iconWrap}>
-          {signingIn ? (
-            <ActivityIndicator size="small" color={GOOGLE_BLUE} />
-          ) : (
-            <FontAwesome name="google" size={18} color={GOOGLE_BLUE} />
-          )}
+    <View style={styles.shell}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Continue with Google"
+        onPress={handleGoogleSignIn}
+        disabled={isBusy}
+        style={({ pressed }) => [
+          styles.button,
+          pressed && !isBusy ? styles.buttonPressed : null,
+          isBusy ? styles.buttonDisabled : null,
+        ]}
+      >
+        <View style={styles.content}>
+          <View style={styles.iconWrap}>
+            {signingIn ? (
+              <ActivityIndicator size="small" color={GOOGLE_BLUE} />
+            ) : (
+              <FontAwesome name="google" size={18} color={GOOGLE_BLUE} />
+            )}
+          </View>
+          <Text style={styles.buttonText}>{signingIn ? 'Signing in...' : 'Google'}</Text>
         </View>
-        <Text style={styles.buttonText}>{signingIn ? 'Signing in...' : 'Google'}</Text>
-      </View>
-    </Pressable>
+      </Pressable>
+      {notice}
+    </View>
   );
 }
 
 const GOOGLE_BLUE = '#4285F4';
 
 const styles = StyleSheet.create({
+  shell: {
+    width: '100%',
+  },
   button: {
     backgroundColor: '#FFFFFF',
     borderColor: '#DADCE0',

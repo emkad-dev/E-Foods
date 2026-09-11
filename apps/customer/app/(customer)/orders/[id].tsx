@@ -82,6 +82,11 @@ export default function OrderTracking() {
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [refreshingPayment, setRefreshingPayment] = useState(false);
+  // Same inline treatment as the cancellation pair above, and for the same
+  // reason: this button exists only to report an answer, and through `Alert`
+  // that answer was invisible on app.feasty.com.ng.
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   // Live rider position pushed over the order-<id> broadcast. Subscribed only
   // while the order is out for delivery (picked_up / on_the_way); the hook is
   // a no-op when passed a null orderId. Called before the early returns below
@@ -236,15 +241,20 @@ export default function OrderTracking() {
       return;
     }
 
+    setPaymentNotice(null);
+    setPaymentError(null);
+
     try {
       setRefreshingPayment(true);
       const result = await refreshCustomerPaymentStatus(order.id);
-      Alert.alert(
-        'Payment status updated',
-        `Current payment state: ${formatPaymentStatusLabel(result.paymentStatus, order.payment?.method)}.`
+      setPaymentNotice(
+        `Payment status updated. Current payment state: ${formatPaymentStatusLabel(
+          result.paymentStatus,
+          order.payment?.method
+        )}.`
       );
     } catch (nextError: any) {
-      Alert.alert('Refresh failed', nextError.message ?? 'We could not verify this payment right now.');
+      setPaymentError(nextError?.message ?? 'We could not verify this payment right now.');
     } finally {
       setRefreshingPayment(false);
     }
@@ -390,6 +400,16 @@ export default function OrderTracking() {
               {refreshingPayment ? 'Refreshing payment...' : 'Refresh payment status'}
             </Text>
           </TouchableOpacity>
+        ) : null}
+        {paymentNotice ? (
+          <Text accessibilityLiveRegion="polite" role="status" style={styles.cancelNoticeText}>
+            {paymentNotice}
+          </Text>
+        ) : null}
+        {paymentError ? (
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.cancelErrorText}>
+            {paymentError}
+          </Text>
         ) : null}
       </View>
 

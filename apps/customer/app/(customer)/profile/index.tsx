@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import { useConfirm } from '@feasty/design-system';
+import { useConfirm, useNotice } from '@feasty/design-system';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -11,8 +11,8 @@ import {
   accountDeletionParagraphs,
 } from '../../../../../packages/domain/src/accountDeletion';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
-import SuccessBanner from '../../../src/components/SuccessBanner';
 import { useAuth } from '../../../src/contexts/AuthContext';
+import { validatePhoneNumber, validateUsername } from '../../../src/domain/authFormValidation';
 import { customerTheme } from '../../../src/theme/palette';
 
 type ProfileRowProps = {
@@ -56,12 +56,18 @@ function ProfileRow({ destructive = false, icon, label, onPress, value }: Profil
 export default function ProfileScreen() {
   const { deleteAccount, loading, signOut, updateDisplayName, updatePhoneNumber, user } = useAuth();
   const { confirm, confirmDialog } = useConfirm();
+  // ONE feedback surface for the whole screen. Before this the screen had two —
+  // a SuccessBanner pinned to the top for the saves that worked, and a separate
+  // inline `deleteError` line down in the Access group — while the username and
+  // phone FAILURES went to `Alert`, which is an empty function on the web build
+  // (app.feasty.com.ng) and so said nothing at all. Floating rather than inline
+  // because the controls are spread down a scrolling page: the Save buttons sit
+  // in the Account group and Delete sits at the very bottom, so no single
+  // in-layout slot is visible from both. The profile tab hides the tab bar, so
+  // the card needs no bottom offset here.
+  const { dismissNotice, notice, showNotice } = useNotice({ placement: 'floating' });
   const [usernameDraft, setUsernameDraft] = useState('');
   const [phoneDraft, setPhoneDraft] = useState('');
-  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
-  // Rendered inline rather than through Alert: `Alert` is a no-op on the web
-  // build (app.feasty.com.ng), so a server refusal used to vanish entirely.
-  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     setUsernameDraft(user?.displayName?.trim() ?? '');
@@ -72,12 +78,12 @@ export default function ProfileScreen() {
     try {
       await signOut();
     } catch {
-      Alert.alert('Error', 'Failed to sign out');
+      showNotice({ tone: 'error', title: 'Could not sign out', message: 'Check your connection and try again.' });
     }
   };
 
   const handleDeleteAccount = async () => {
-    setDeleteError(null);
+    dismissNotice();
 
     try {
       await confirm({
@@ -91,15 +97,20 @@ export default function ProfileScreen() {
         onConfirm: deleteAccount,
       });
     } catch (nextError) {
-      setDeleteError(accountDeletionErrorMessage(nextError));
+      showNotice({
+        tone: 'error',
+        title: 'Account not deleted',
+        message: accountDeletionErrorMessage(nextError),
+      });
     }
   };
 
   const handleSaveUsername = async () => {
     const nextUsername = usernameDraft.trim();
+    const invalid = validateUsername({ value: usernameDraft });
 
-    if (!nextUsername) {
-      Alert.alert('Username required', 'Add the name you want the app to greet you with.');
+    if (invalid) {
+      showNotice({ tone: 'error', title: 'Username required', message: invalid });
       return;
     }
 
@@ -109,17 +120,26 @@ export default function ProfileScreen() {
 
     try {
       await updateDisplayName(nextUsername);
-      setNotice({ title: 'Username saved', message: 'Your customer greeting has been updated.' });
+      showNotice({
+        tone: 'success',
+        title: 'Username saved',
+        message: 'Your customer greeting has been updated.',
+      });
     } catch (nextError: any) {
-      Alert.alert('Save failed', nextError.message ?? 'Unable to update username right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Username not saved',
+        message: nextError?.message ?? 'Unable to update username right now.',
+      });
     }
   };
 
   const handleSavePhoneNumber = async () => {
     const nextPhone = phoneDraft.trim();
+    const invalid = validatePhoneNumber({ value: phoneDraft });
 
-    if (!nextPhone) {
-      Alert.alert('Phone number required', 'Add the phone number you want riders and support to use.');
+    if (invalid) {
+      showNotice({ tone: 'error', title: 'Phone number required', message: invalid });
       return;
     }
 
@@ -129,9 +149,19 @@ export default function ProfileScreen() {
 
     try {
       await updatePhoneNumber(nextPhone);
-      setNotice({ title: 'Phone saved', message: 'Your customer contact number has been updated.' });
+      showNotice({
+        tone: 'success',
+        title: 'Phone saved',
+        message: 'Your customer contact number has been updated.',
+      });
     } catch (nextError: any) {
-      Alert.alert('Save failed', nextError.message ?? 'Unable to update phone number right now.');
+      // The number riders and support dial. A failure here that says nothing
+      // leaves the customer believing an unreachable number was saved.
+      showNotice({
+        tone: 'error',
+        title: 'Phone number not saved',
+        message: nextError?.message ?? 'Unable to update phone number right now.',
+      });
     }
   };
 
@@ -147,101 +177,104 @@ export default function ProfileScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <SuccessBanner title={notice?.title} message={notice?.message} onDismiss={() => setNotice(null)} />
-
-      <View style={styles.heroCard}>
-        <View style={styles.heroCopy}>
-          <Text style={styles.heroTitle}>{user.displayName ?? 'Customer account'}</Text>
-          <Text style={styles.heroMeta}>{user.email}</Text>
-        </View>
-      </View>
-
-      <View style={styles.group}>
-        <Text style={styles.groupTitle}>Orders and delivery</Text>
-        <ProfileRow icon="shopping-bag" label="Order history" onPress={() => router.push('/orders')} />
-        <ProfileRow icon="map-marker" label="Delivery location" onPress={() => router.push('/delivery-location')} />
-        <ProfileRow icon="life-ring" label="Help & Support" onPress={() => router.push('/support')} />
-      </View>
-
-      <View style={styles.group}>
-        <Text style={styles.groupTitle}>Account</Text>
-        <View style={styles.usernameRow}>
-          <Text style={styles.usernameLabel}>Username</Text>
-          <View style={styles.usernameInputRow}>
-            <TextInput
-              style={styles.usernameInput}
-              value={usernameDraft}
-              onChangeText={setUsernameDraft}
-              placeholder="Add username"
-              placeholderTextColor={customerTheme.textMuted}
-              editable={!loading}
-              maxLength={24}
-            />
-            <TouchableOpacity
-              style={[
-                styles.usernameSaveButton,
-                !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()
-                  ? styles.usernameSaveButtonDisabled
-                  : null,
-              ]}
-              onPress={handleSaveUsername}
-              disabled={loading || !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()}
-            >
-              <Text style={styles.usernameSaveText}>Save</Text>
-            </TouchableOpacity>
+    // The ScrollView is wrapped rather than used as the root because the
+    // floating notice positions itself absolutely: inside a ScrollView that
+    // would anchor it to the bottom of the CONTENT and let it scroll away,
+    // instead of pinning it to the bottom of the screen.
+    <View style={styles.screen}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+        <View style={styles.heroCard}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroTitle}>{user.displayName ?? 'Customer account'}</Text>
+            <Text style={styles.heroMeta}>{user.email}</Text>
           </View>
         </View>
-        <View style={styles.usernameRow}>
-          <Text style={styles.usernameLabel}>Phone number</Text>
-          <View style={styles.usernameInputRow}>
-            <TextInput
-              style={styles.usernameInput}
-              value={phoneDraft}
-              onChangeText={setPhoneDraft}
-              placeholder="Add phone number"
-              placeholderTextColor={customerTheme.textMuted}
-              editable={!loading}
-              keyboardType="phone-pad"
-            />
-            <TouchableOpacity
-              style={[
-                styles.usernameSaveButton,
-                !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()
-                  ? styles.usernameSaveButtonDisabled
-                  : null,
-              ]}
-              onPress={handleSavePhoneNumber}
-              disabled={loading || !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()}
-            >
-              <Text style={styles.usernameSaveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
+
+        <View style={styles.group}>
+          <Text style={styles.groupTitle}>Orders and delivery</Text>
+          <ProfileRow icon="shopping-bag" label="Order history" onPress={() => router.push('/orders')} />
+          <ProfileRow icon="map-marker" label="Delivery location" onPress={() => router.push('/delivery-location')} />
+          <ProfileRow icon="life-ring" label="Help & Support" onPress={() => router.push('/support')} />
         </View>
-        <ProfileRow icon="user-o" label="Email" value={user.email} />
-        <ProfileRow icon="check-circle-o" label="Email verified" value={user.emailVerified ? 'Yes' : 'No'} />
-        <ProfileRow icon="mobile" label="Session" value={user.activeSessionId ? 'Active on this device' : 'Idle'} />
-      </View>
 
-      <View style={styles.group}>
-        <Text style={styles.groupTitle}>Access</Text>
-        <ProfileRow icon="sign-out" label={loading ? 'Working...' : 'Sign out'} onPress={handleSignOut} />
-        <ProfileRow destructive icon="trash-o" label="Delete my account and data" onPress={handleDeleteAccount} />
-        {deleteError ? (
-          <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
-            {deleteError}
-          </Text>
-        ) : null}
-      </View>
+        <View style={styles.group}>
+          <Text style={styles.groupTitle}>Account</Text>
+          <View style={styles.usernameRow}>
+            <Text style={styles.usernameLabel}>Username</Text>
+            <View style={styles.usernameInputRow}>
+              <TextInput
+                style={styles.usernameInput}
+                value={usernameDraft}
+                onChangeText={setUsernameDraft}
+                placeholder="Add username"
+                placeholderTextColor={customerTheme.textMuted}
+                editable={!loading}
+                maxLength={24}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.usernameSaveButton,
+                  !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()
+                    ? styles.usernameSaveButtonDisabled
+                    : null,
+                ]}
+                onPress={handleSaveUsername}
+                disabled={loading || !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()}
+              >
+                <Text style={styles.usernameSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <View style={styles.usernameRow}>
+            <Text style={styles.usernameLabel}>Phone number</Text>
+            <View style={styles.usernameInputRow}>
+              <TextInput
+                style={styles.usernameInput}
+                value={phoneDraft}
+                onChangeText={setPhoneDraft}
+                placeholder="Add phone number"
+                placeholderTextColor={customerTheme.textMuted}
+                editable={!loading}
+                keyboardType="phone-pad"
+              />
+              <TouchableOpacity
+                style={[
+                  styles.usernameSaveButton,
+                  !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()
+                    ? styles.usernameSaveButtonDisabled
+                    : null,
+                ]}
+                onPress={handleSavePhoneNumber}
+                disabled={loading || !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()}
+              >
+                <Text style={styles.usernameSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <ProfileRow icon="user-o" label="Email" value={user.email} />
+          <ProfileRow icon="check-circle-o" label="Email verified" value={user.emailVerified ? 'Yes' : 'No'} />
+          <ProfileRow icon="mobile" label="Session" value={user.activeSessionId ? 'Active on this device' : 'Idle'} />
+        </View>
 
-      {confirmDialog}
-    </ScrollView>
+        <View style={styles.group}>
+          <Text style={styles.groupTitle}>Access</Text>
+          <ProfileRow icon="sign-out" label={loading ? 'Working...' : 'Sign out'} onPress={handleSignOut} />
+          <ProfileRow destructive icon="trash-o" label="Delete my account and data" onPress={handleDeleteAccount} />
+        </View>
+
+        {confirmDialog}
+      </ScrollView>
+      {notice}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: customerTheme.background,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   container: {
@@ -252,13 +285,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-  },
-  errorText: {
-    color: customerTheme.danger,
-    fontSize: 13,
-    lineHeight: 19,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
   },
   heroCard: {
     backgroundColor: customerTheme.surface,

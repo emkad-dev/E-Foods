@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
 import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
 import AuthScreenShell from '../../src/components/AuthScreenShell';
 import AuthTextField from '../../src/components/AuthTextField';
@@ -14,18 +15,26 @@ export default function ForgotPasswordScreen() {
   const [submitting, setSubmitting] = useState(false);
   const { resetPassword, error, clearError } = useAuth();
   const router = useRouter();
+  // Held locally and rendered through the same slot as `AuthContext`'s error —
+  // see the note in login.tsx.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleEmailChange = (value: string) => {
     if (error) clearError();
+    setValidationError(null);
     setEmail(value);
   };
 
   const handleResetPassword = async () => {
-    if (!email.trim()) {
-      Alert.alert('Email required', 'Enter the email address linked to your account.');
+    const invalid = validateForgotPasswordForm({ email });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
+    setValidationError(null);
     setSubmitting(true);
     try {
       await resetPassword(email.trim());
@@ -33,8 +42,8 @@ export default function ForgotPasswordScreen() {
         pathname: '/login',
         params: { notice: 'reset-email-sent', ...(redirectTo ? { redirectTo } : null) },
       } as never);
-    } catch (error: any) {
-      Alert.alert('Unable to send reset email', error.message);
+    } catch {
+      // `resetPassword` already set `AuthContext`'s `error`, rendered above.
     } finally {
       setSubmitting(false);
     }
@@ -45,7 +54,11 @@ export default function ForgotPasswordScreen() {
       title="Reset your password"
       subtitle="We will email you a secure link to finish resetting your password."
     >
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {formError ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {formError}
+        </Text>
+      ) : null}
 
       <AuthTextField
         placeholder="name@email.com"
