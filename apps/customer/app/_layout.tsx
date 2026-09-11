@@ -102,16 +102,43 @@ function RootLayoutNav() {
   const router = useRouter();
   const pathname = usePathname();
   const [showLaunch, setShowLaunch] = useState(false);
+  // Live pathname for the deep-link guard below, held in a ref so the listener
+  // does not resubscribe on every navigation.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   const launchShownForUserRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Read the live pathname without making it a dependency: adding it here
+    // would resubscribe the listener on every navigation.
     const handleDeepLink = ({ url }: { url: string }) => {
       const { hostname, path, queryParams } = Linking.parse(url);
       const targetPath =
         typeof path === 'string' && path.trim() ? path.trim() : typeof hostname === 'string' ? hostname.trim() : '';
       const normalizedPaymentPath = normalizeCustomerPaymentCallbackPath(url);
 
+      // On web `Linking.getInitialURL()` resolves to the page we are ALREADY on,
+      // so parsing it and dispatching a navigation to that same route re-enters
+      // this effect and loops. /reset-password and /verify-email spun the whole
+      // app -- app_opened fired every ~20ms and the main thread never yielded, so
+      // the two screens reachable only from an email link were dead on the web
+      // build. /payment/callback (where Paystack returns a paying customer) and
+      // /orders/<id> deep links had the same shape. /login never showed it only
+      // because it matches no branch here.
+      //
+      // A ref-once guard would not have been enough: each replace remounted the
+      // root, which resets refs. Comparing against the current path is what
+      // actually breaks the cycle, and it stays correct on native, where the
+      // initial URL is a custom scheme and the pathname is never already the
+      // target. Params are unaffected on web because they are already in the URL
+      // the screen reads.
+      const isAlreadyOn = (target: string) => pathnameRef.current === target;
+
       if (targetPath === 'verify-email') {
+        if (isAlreadyOn('/verify-email')) {
+          return;
+        }
+
         router.replace({
           pathname: '/verify-email',
           params: {
@@ -121,6 +148,10 @@ function RootLayoutNav() {
           },
         });
       } else if (targetPath === 'reset-password') {
+        if (isAlreadyOn('/reset-password')) {
+          return;
+        }
+
         router.replace({
           pathname: '/reset-password',
           params: {
@@ -130,6 +161,10 @@ function RootLayoutNav() {
           },
         });
       } else if (targetPath === 'payment/callback' || normalizedPaymentPath === 'payment/callback') {
+        if (isAlreadyOn('/payment/callback')) {
+          return;
+        }
+
         router.replace(
           {
             pathname: '/payment/callback',
@@ -143,6 +178,9 @@ function RootLayoutNav() {
         );
       } else if (targetPath.startsWith('order/')) {
         const orderId = targetPath.split('/')[1];
+        if (isAlreadyOn(`/orders/${orderId}`)) {
+          return;
+        }
         router.push(`/orders/${orderId}`);
       }
     };
