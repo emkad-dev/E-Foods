@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import {
@@ -20,7 +20,11 @@ import {
 } from '../../../src/services/dispatchOrderActions';
 import { dispatchTheme } from '../../../src/theme/palette';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
-import { openPhoneDialer } from '../../../src/utils/phoneLinking';
+import { toDialablePhoneNumber } from '../../../src/utils/phoneLinking';
+import {
+  describeExternalLinkFailure,
+  openExternalLink,
+} from '../../../../../packages/runtime/src/externalLink';
 
 const formatRelativeAge = (value?: string | null) => {
   if (!value) {
@@ -188,15 +192,28 @@ export default function DispatchDeliveryDetailScreen() {
     }
   };
 
+  // These used to catch a rejection from Linking.openURL, which for a blocked
+  // popup never comes -- react-native-web resolves regardless, because it never
+  // checks what window.open returned. The catch was therefore dead code on web.
+  // openExternalLink returns the outcome instead. Alert is kept here ONLY
+  // because this app is native-only today (no build:web script, no workflow
+  // builds it) and Alert does work on native; the day dispatch ships to web,
+  // these two need the same inline surface the customer and partner apps now
+  // use, along with the rest of this app's Alert sites.
   const handleCallCustomer = async () => {
     if (!order?.customerPhone) {
       return;
     }
 
-    try {
-      await openPhoneDialer(order.customerPhone);
-    } catch (nextError: any) {
-      Alert.alert('Call failed', nextError.message ?? 'Could not open the phone app.');
+    const dialable = toDialablePhoneNumber(order.customerPhone);
+    if (!dialable) {
+      Alert.alert('Call failed', `That number is not dialable: ${order.customerPhone}`);
+      return;
+    }
+
+    const result = await openExternalLink(`tel:${dialable}`);
+    if (!result.ok) {
+      Alert.alert('Call failed', describeExternalLinkFailure(result.reason, 'the phone app'));
     }
   };
 
@@ -205,14 +222,14 @@ export default function DispatchDeliveryDetailScreen() {
       return;
     }
 
-    try {
-      await Linking.openURL(
-        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-          `${courierLatitude},${courierLongitude}`
-        )}`
-      );
-    } catch (nextError: any) {
-      Alert.alert('Map unavailable', nextError.message ?? 'Could not open maps right now.');
+    const result = await openExternalLink(
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        `${courierLatitude},${courierLongitude}`
+      )}`
+    );
+
+    if (!result.ok) {
+      Alert.alert('Map unavailable', describeExternalLinkFailure(result.reason, 'the map'));
     }
   };
 

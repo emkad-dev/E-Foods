@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
 import { useConfirm } from '@feasty/design-system';
@@ -23,7 +23,11 @@ import {
 import { useCustomerOrder } from '../../../src/hooks/useCustomerOrder';
 import { cancelCustomerOrder, refreshCustomerPaymentStatus } from '../../../src/services/customerOrderActions';
 import { customerTheme } from '../../../src/theme/palette';
-import { openPhoneDialer } from '../../../src/utils/phoneLinking';
+import { toDialablePhoneNumber } from '../../../src/utils/phoneLinking';
+import {
+  describeExternalLinkFailure,
+  openExternalLink,
+} from '../../../../../packages/runtime/src/externalLink';
 import { buildOrderTrackingSummary } from '../../../src/utils/orderTrackingSummary';
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
@@ -87,6 +91,9 @@ export default function OrderTracking() {
   // that answer was invisible on app.feasty.com.ng.
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  // Failure of an external hand-off (phone app, maps). Rendered beside the
+  // buttons that raise it, because Alert shows nothing on the web build.
+  const [linkError, setLinkError] = useState<string | null>(null);
   // Live rider position pushed over the order-<id> broadcast. Subscribed only
   // while the order is out for delivery (picked_up / on_the_way); the hook is
   // a no-op when passed a null orderId. Called before the early returns below
@@ -260,15 +267,30 @@ export default function OrderTracking() {
     }
   };
 
+  // Both of these used to report failure through Alert, which is an empty
+  // function under react-native-web -- and the map one could not report failure
+  // at all, because Linking.openURL resolves even when the browser blocks the
+  // popup (react-native-web never checks what window.open returned). So a
+  // blocked map window was completely silent. openExternalLink returns the
+  // result instead of throwing; see packages/runtime/src/externalLinkPolicy.ts.
   const handleCallRider = async () => {
     if (!courierPhone) {
       return;
     }
 
-    try {
-      await openPhoneDialer(courierPhone);
-    } catch (nextError: any) {
-      Alert.alert('Call failed', nextError.message ?? 'Could not open the phone app.');
+    setLinkError(null);
+
+    const dialable = toDialablePhoneNumber(courierPhone);
+    if (!dialable) {
+      // A stored value like "N/A" passes the truthiness check above but strips
+      // to nothing, which is the one case the old guard missed.
+      setLinkError(`The rider's number is not dialable. Shown on this page: ${courierPhone}`);
+      return;
+    }
+
+    const result = await openExternalLink(`tel:${dialable}`);
+    if (!result.ok) {
+      setLinkError(describeExternalLinkFailure(result.reason, 'the phone app'));
     }
   };
 
@@ -277,14 +299,18 @@ export default function OrderTracking() {
       return;
     }
 
-    try {
-      await Linking.openURL(
-        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-          `${courierLatitude},${courierLongitude}`
-        )}`
-      );
-    } catch (nextError: any) {
-      Alert.alert('Map unavailable', nextError.message ?? 'Could not open maps right now.');
+    setLinkError(null);
+
+    const result = await openExternalLink(
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        `${courierLatitude},${courierLongitude}`
+      )}`
+    );
+
+    if (!result.ok) {
+      // The coordinates are already on screen just above this button, so a
+      // blocked popup still leaves the customer something to work with.
+      setLinkError(describeExternalLinkFailure(result.reason, 'the map'));
     }
   };
 
@@ -461,6 +487,12 @@ export default function OrderTracking() {
             <TouchableOpacity style={[styles.callButton, styles.riderCallButton]} onPress={handleCallRider}>
               <Text style={styles.callButtonText}>Call rider</Text>
             </TouchableOpacity>
+          ) : null}
+
+          {linkError ? (
+            <Text accessibilityLiveRegion="assertive" role="alert" style={styles.cancelErrorText}>
+              {linkError}
+            </Text>
           ) : null}
         </View>
       ) : null}
