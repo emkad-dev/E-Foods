@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   heroCopy: {
-    color: '#f7ead8',
+    color: dispatchTheme.textOnInverseMuted,
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,

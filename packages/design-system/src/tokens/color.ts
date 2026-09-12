@@ -53,6 +53,31 @@ export const text = {
   onBrand: '#ffffff',
   onAccent: '#0d1522',
   onInverse: '#f3f7f6',
+  /**
+   * The muted sibling of `onInverse`, for supporting copy on a dark surface —
+   * hero body text under a full-strength `onInverse` title, and anything else
+   * that must recede without dropping below AA.
+   *
+   * It exists because its absence was being filled by invention. With only
+   * `onInverse` available, each app improvised its own muted tone and they
+   * drifted apart: partner carried #e7dbc7 (a beige left over from a brown
+   * coffee hero, still sitting on a green panel long after that hero died),
+   * dispatch #d6dfeb (blue-grey) and, on one screen, #f7ead8 (a beige so close
+   * to full strength it was not reading as muted), customer
+   * rgba(255,255,255,0.86). Four literals, four hues, one role — dispatch alone
+   * had two answers — so the role is now named here and all four are retired.
+   *
+   * A cool grey with a faint green cast, consistent with the tinted neutrals
+   * already in this file (`surface.canvas` #f3f7f6, `border.subtle` #dde7e3)
+   * rather than a fourth unrelated hue. Measurably dimmer than `onInverse`, so
+   * it reads as muted, and far clear of the 4.5:1 AA bar on both dark surfaces:
+   *   on `surface.inverse` #0d1522       10.50:1  (`onInverse`: 16.95:1)
+   *   on `surface.inverseBrand` #14331d   7.92:1  (`onInverse`: 12.78:1)
+   *
+   * Both pairings are asserted in `a11y.pairs`, so this role cannot drift out
+   * of contrast without failing the test.
+   */
+  onInverseMuted: '#bac7c3',
   /** WCAG 1.4.3 exempts disabled controls; excluded from the contrast test. */
   disabled: '#8d9c95',
 } as const;
@@ -106,6 +131,8 @@ export const a11y = {
     { fg: text.onBrand, bg: status.danger, name: 'onBrand/danger' },
     { fg: text.onInverse, bg: surface.inverse, name: 'onInverse/inverse' },
     { fg: text.onInverse, bg: surface.inverseBrand, name: 'onInverse/inverseBrand' },
+    { fg: text.onInverseMuted, bg: surface.inverse, name: 'onInverseMuted/inverse' },
+    { fg: text.onInverseMuted, bg: surface.inverseBrand, name: 'onInverseMuted/inverseBrand' },
     { fg: brand.primarySoft, bg: surface.inverseBrand, name: 'primarySoft/inverseBrand' },
     { fg: brand.accentText, bg: surface.canvas, name: 'accentText/canvas' },
     { fg: status.warningText, bg: brand.accentSoft, name: 'warningText/accentSoft' },

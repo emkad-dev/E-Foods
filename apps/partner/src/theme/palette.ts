@@ -47,8 +47,10 @@ export const partnerTheme = {
    * carries `heroSoft` (= `brand.primarySoft`, #c8e6c9) as its eyebrow text, and
    * that pairing measures 3.81:1 on #2e7d32 — under the 4.5:1 AA bar — versus
    * 5.85:1 on #1b5e20. Shipping #2e7d32 here would force the eyebrow to white at
-   * the same time; the deeper green keeps every existing hero text colour passing:
-   *   heroSoft #c8e6c9 → 5.85:1   textOnHero #f3f7f6 → 7.29:1   #e7dbc7 → 5.75:1
+   * the same time; the deeper green keeps every existing hero text colour passing
+   * (ratios on #1b5e20, with the #2e7d32 figure in brackets):
+   *   heroSoft #c8e6c9 → 5.85:1 [3.81]   textOnHero #f3f7f6 → 7.29:1 [4.75]
+   *   textOnHeroMuted #bac7c3 → 4.51:1 [2.94]
    *
    * Previous values, newest first: surface.inverse #0d1522, #0c389e (blue),
    * #4b3923 (brown), #fff0c2 (cream).
@@ -67,4 +69,12 @@ export const partnerTheme = {
    * cream (#fff0c2) panel.
    */
   textOnHero: text.onInverse,
+  /**
+   * Supporting copy on the hero, under `textOnHero`. Named for the role, like
+   * its sibling. Replaces the literal #e7dbc7 the three hero screens carried —
+   * a beige from the era when `hero` was a brown coffee panel (#4b3923), which
+   * stayed put through the blue and both green heroes and had been sitting on
+   * green for two commits by the time it was caught.
+   */
+  textOnHeroMuted: text.onInverseMuted,
 };

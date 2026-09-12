@@ -622,7 +622,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   copy: {
-    color: '#d6dfeb',
+    color: dispatchTheme.textOnInverseMuted,
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,

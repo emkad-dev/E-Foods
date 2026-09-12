@@ -69,6 +69,27 @@ describe('color tokens — contrast', () => {
     assert.ok(contrast(brand.accentText, surface.canvas) >= AA_NORMAL);
   });
 
+  /**
+   * `a11y.pairs` proves `onInverseMuted` is legible. It cannot prove it is
+   * *muted* — a role that drifted up to full strength would still pass. Both
+   * halves matter: the four literals it replaced (partner #e7dbc7, dispatch
+   * #d6dfeb and #f7ead8, customer rgba(255,255,255,0.86)) existed precisely
+   * because a dimmer-than-onInverse tone was wanted and none was on offer —
+   * and #f7ead8 had drifted back up to 15.44:1, muted in name only.
+   */
+  it('onInverseMuted is dimmer than onInverse but still clears AA', () => {
+    for (const bg of [surface.inverse, surface.inverseBrand]) {
+      const muted = contrast(text.onInverseMuted, bg);
+      const full = contrast(text.onInverse, bg);
+
+      assert.ok(
+        muted < full,
+        `onInverseMuted (${muted.toFixed(2)}:1) must read dimmer than onInverse (${full.toFixed(2)}:1) on ${bg}`,
+      );
+      assert.ok(muted >= AA_NORMAL, `onInverseMuted on ${bg} = ${muted.toFixed(2)}:1`);
+    }
+  });
+
   it('retired legacy values are absent from the palette', () => {
     const all = [
       ...Object.values(brand),

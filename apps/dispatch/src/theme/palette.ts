@@ -53,6 +53,17 @@ export const dispatchTheme = {
   textOnAccent: text.onAccent,
   /** Text on the near-black hero. */
   textOnInverse: text.onInverse,
+  /**
+   * Supporting copy on the hero, under `textOnInverse`. 10.50:1 on `hero`.
+   *
+   * Replaces two literals, both invented here because the token layer had a
+   * full-strength `onInverse` but no muted sibling: #d6dfeb (blue-grey) on the
+   * three auth heroes and complete-rider-details, and #f7ead8 (beige) on the
+   * delivery detail hero. The beige had drifted to 15.44:1 — all but
+   * indistinguishable from the title above it, so it was not reading as muted
+   * at all — and dispatch had two answers to one question.
+   */
+  textOnInverseMuted: text.onInverseMuted,
   accent: brand.primary,
   accentStrong: brand.primaryStrong,
   accentSoft: brand.primarySoft,

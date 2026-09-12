@@ -57,6 +57,14 @@ export const customerTheme = {
   textOnAccent: text.onAccent,
   /** Text on the near-black hero. */
   textOnInverse: text.onInverse,
+  /**
+   * Supporting copy on a dark surface, under `textOnInverse`. Replaces the
+   * literal rgba(255,255,255,0.86) on the home feature card's overlay copy —
+   * a translucent white invented here because the token layer had a
+   * full-strength `onInverse` but no muted sibling. Opaque, so it no longer
+   * depends on whatever happens to be behind it.
+   */
+  textOnInverseMuted: text.onInverseMuted,
   danger: status.danger,
   dangerSoft: status.dangerSoft,
   success: status.success,

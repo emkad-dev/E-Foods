@@ -743,7 +743,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   featureCopyLight: {
-    color: 'rgba(255,255,255,0.86)',
+    color: customerTheme.textOnInverseMuted,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 6,

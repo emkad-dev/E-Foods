@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: { color: partnerTheme.textOnHero, fontSize: 30, fontWeight: '800' },
-  copy: { color: '#e7dbc7', fontSize: 15, lineHeight: 22, marginTop: 10 },
+  copy: { color: partnerTheme.textOnHeroMuted, fontSize: 15, lineHeight: 22, marginTop: 10 },
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
