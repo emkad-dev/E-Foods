@@ -53,7 +53,7 @@ export const partnerTheme = {
    * Previous values, newest first: surface.inverse #0d1522, #0c389e (blue),
    * #4b3923 (brown), #fff0c2 (cream).
    */
-  hero: brand.primaryStrong,
+  hero: surface.inverseBrand,
   heroSoft: brand.primarySoft,
   cream: surface.default,
   /** White label for a brand-green or danger fill. */

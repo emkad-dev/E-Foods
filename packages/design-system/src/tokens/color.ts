@@ -34,6 +34,17 @@ export const surface = {
   muted: '#edf3f1',
   strong: '#d8e3df',
   inverse: '#0d1522',
+  /**
+   * The inverse surface with a brand-green cast, for hero panels that should
+   * read as FEASTY without becoming a slab of green. Sits between
+   * `inverse` (#0d1522, no brand at all) and `brand.primaryStrong` (#1b5e20,
+   * which at full-bleed panel size reads as too much green).
+   *
+   * Dark, so it is deliberately NOT in `a11y.lightSurfaces` -- the light-text
+   * sweep would be meaningless against it. Its real pairings are asserted
+   * explicitly in `a11y.pairs` instead.
+   */
+  inverseBrand: '#14331d',
 } as const;
 
 export const text = {
@@ -94,6 +105,8 @@ export const a11y = {
     { fg: text.onAccent, bg: brand.accent, name: 'onAccent/accent' },
     { fg: text.onBrand, bg: status.danger, name: 'onBrand/danger' },
     { fg: text.onInverse, bg: surface.inverse, name: 'onInverse/inverse' },
+    { fg: text.onInverse, bg: surface.inverseBrand, name: 'onInverse/inverseBrand' },
+    { fg: brand.primarySoft, bg: surface.inverseBrand, name: 'primarySoft/inverseBrand' },
     { fg: brand.accentText, bg: surface.canvas, name: 'accentText/canvas' },
     { fg: status.warningText, bg: brand.accentSoft, name: 'warningText/accentSoft' },
   ] as const,
