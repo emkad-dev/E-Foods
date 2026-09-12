@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as Linking from 'expo-linking';
 import { ActivityIndicator, View } from 'react-native';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Slot, usePathname, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { useDispatchOrders } from '../src/hooks/useDispatchOrders';
 import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
@@ -67,6 +67,11 @@ function RootLayoutNav() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+  const pathname = usePathname();
+  // Live pathname for the deep-link guard below, held in a ref so the listener
+  // does not resubscribe on every navigation.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
 
   useEffect(() => {
     const handleDeepLink = ({ url }: { url: string }) => {
@@ -74,7 +79,31 @@ function RootLayoutNav() {
       const targetPath =
         typeof path === 'string' && path.trim() ? path.trim() : typeof hostname === 'string' ? hostname.trim() : '';
 
+      // On web `Linking.getInitialURL()` resolves to the page we are ALREADY on,
+      // so parsing it and dispatching a navigation to that same route re-enters
+      // this effect and loops: the root remounts, getInitialURL returns the same
+      // URL, and the main thread never yields. /reset-password and /verify-email
+      // -- the two screens reachable only from an email link -- would hang the
+      // whole app. /login never showed it because it matches no branch here.
+      // Same defect and same fix as apps/customer/app/_layout.tsx.
+      //
+      // Compared against the RESOLVED url path, not the group-qualified target
+      // passed to router.replace: expo-router route groups like (auth) are not
+      // part of the URL, so usePathname() reports '/verify-email', never
+      // '/(auth)/verify-email'. Comparing against the latter would never match
+      // and the guard would silently do nothing.
+      //
+      // A ref-once guard is NOT sufficient: each replace remounts the root,
+      // which resets refs. Comparing against the current path is what breaks the
+      // cycle, and it stays correct on native, where the initial URL is a custom
+      // scheme and the pathname is never already the target.
+      const isAlreadyOn = (resolvedPath: string) => pathnameRef.current === resolvedPath;
+
       if (targetPath === 'verify-email') {
+        if (isAlreadyOn('/verify-email')) {
+          return;
+        }
+
         router.replace({
           pathname: '/(auth)/verify-email' as never,
           params: {
@@ -87,6 +116,10 @@ function RootLayoutNav() {
       }
 
       if (targetPath === 'reset-password') {
+        if (isAlreadyOn('/reset-password')) {
+          return;
+        }
+
         router.replace({
           pathname: '/(auth)/reset-password' as never,
           params: {
