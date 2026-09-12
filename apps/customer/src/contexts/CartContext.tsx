@@ -39,12 +39,43 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       try {
         const stored = await AsyncStorage.getItem(CART_STORAGE_KEY);
         if (stored) {
-          const { items, restaurantId, restaurantName, deliveryLocation, fulfillmentType } = JSON.parse(stored);
-          setItems(items);
-          setRestaurantId(restaurantId);
-          setRestaurantName(restaurantName);
-          setDeliveryLocation(deliveryLocation ?? null);
-          setFulfillmentType(fulfillmentType ?? 'delivery');
+          const parsed = JSON.parse(stored) as Partial<{
+            items: unknown;
+            restaurantId: unknown;
+            restaurantName: unknown;
+            deliveryLocation: unknown;
+            fulfillmentType: unknown;
+          }>;
+
+          // The persisted blob is unversioned, so a shape from an older build --
+          // or anything that ever wrote this key -- lands here as-is. `setItems`
+          // used to take it unchecked, and `total` reduces over `items` during
+          // RENDER, outside this try/catch. So a blob with no `items` array did
+          // not fail quietly: it threw while rendering CartProvider, which wraps
+          // the whole tree, and white-screened the entire app on launch with the
+          // bad value still in storage -- unrecoverable without clearing site data.
+          // Anything unrecognised is dropped rather than trusted; a lost cart is
+          // survivable, an app that cannot start is not.
+          const storedItems = Array.isArray(parsed.items) ? parsed.items : [];
+          setItems(
+            storedItems.filter(
+              (item): item is CartItem =>
+                Boolean(item) &&
+                typeof item === 'object' &&
+                typeof (item as CartItem).price === 'number' &&
+                Number.isFinite((item as CartItem).price) &&
+                typeof (item as CartItem).quantity === 'number' &&
+                Number.isFinite((item as CartItem).quantity)
+            )
+          );
+          setRestaurantId(typeof parsed.restaurantId === 'string' ? parsed.restaurantId : null);
+          setRestaurantName(typeof parsed.restaurantName === 'string' ? parsed.restaurantName : null);
+          setDeliveryLocation(
+            parsed.deliveryLocation && typeof parsed.deliveryLocation === 'object'
+              ? (parsed.deliveryLocation as DeliveryLocation)
+              : null
+          );
+          setFulfillmentType(parsed.fulfillmentType === 'pickup' ? 'pickup' : 'delivery');
         }
       } catch (error) {
         console.error('Failed to load cart', error);
