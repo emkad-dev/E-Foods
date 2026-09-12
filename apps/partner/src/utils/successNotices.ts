@@ -16,12 +16,13 @@
 export const PARTNER_SUCCESS_NOTICES = {
   'account-created': 'Your partner login is ready. Sign in to complete your restaurant details and open your dashboard.',
   'account-created-unverified':
-    'Your account was created, but the verification email could not be confirmed from the app. Try signing in, and use "Forgot password" if you need a fresh link.',
+    'Your account was created, but the confirmation email could not be sent from the app. Try signing in, and use "Forgot password" if you need a fresh code.',
+  'email-confirmed': 'Email confirmed. Sign in to finish your restaurant setup and open your dashboard.',
   'password-updated': 'Password updated. Sign in to open your dashboard.',
-  'reset-link-sent':
-    'If this partner account exists, a reset link is on its way. Open the link in your inbox to choose a new password.',
+  'reset-code-sent':
+    'If this partner account exists, a 6-digit reset code is on its way. Enter it below to choose a new password.',
   'verification-email-sent':
-    'We sent a verification email. Confirm it, then sign in to finish your restaurant setup and open your dashboard.',
+    'We sent a 6-digit confirmation code to your email. Enter it below to confirm this account.',
 } as const;
 
 export type PartnerSuccessNoticeKey = keyof typeof PARTNER_SUCCESS_NOTICES;

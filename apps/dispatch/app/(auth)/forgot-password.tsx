@@ -37,15 +37,18 @@ export default function DispatchForgotPasswordScreen() {
     setValidationError(null);
 
     try {
-      await resetPassword(email.trim());
-      // Navigate and carry the confirmation to the login screen as a route
-      // param, the way the reset-password flow already does. The success
-      // `Alert` that used to sit here was the ONLY feedback and NOTHING
-      // followed it — not a navigation, not a state change — so on a web build
-      // the rider would submit, watch the screen sit unchanged, and re-submit,
-      // each retry burning another rate-limit slot on the reset endpoint.
-      const noticeKey: DispatchSuccessNoticeKey = 'reset-link-sent';
-      router.replace({ pathname: '/(auth)/login', params: { notice: noticeKey } } as never);
+      const trimmedEmail = email.trim();
+      await resetPassword(trimmedEmail);
+      // Reset is OTP-only now, so the next step happens in the app rather than
+      // in the inbox: go straight to the code form instead of back to sign-in.
+      // `notice` is the keyed route-param mechanism (see utils/routeNotices);
+      // the address is data, not a notice key, so it rides as its own param —
+      // that is what saves the rider retyping it on the next screen.
+      const noticeKey: DispatchSuccessNoticeKey = 'reset-code-sent';
+      router.replace({
+        pathname: '/(auth)/reset-password',
+        params: { notice: noticeKey, email: trimmedEmail },
+      } as never);
     } catch {
       // `resetPassword` already set `AuthContext`'s `error`, rendered above.
     }
@@ -61,7 +64,7 @@ export default function DispatchForgotPasswordScreen() {
         <Text style={styles.eyebrow}>FEASTY Dispatch</Text>
         <Text style={styles.title}>Reset dispatch password</Text>
         <Text style={styles.copy}>
-          Enter your dispatch email and we will send you a password reset link.
+          Enter your dispatch email and we will send you a 6-digit code to set a new password with.
         </Text>
       </View>
 
@@ -84,7 +87,7 @@ export default function DispatchForgotPasswordScreen() {
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleResetPassword} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Sending...' : 'Send reset email'}</Text>
+          <Text style={styles.primaryButtonText}>{loading ? 'Sending...' : 'Send reset code'}</Text>
         </TouchableOpacity>
 
         <Link href="/(auth)/login" style={styles.link}>

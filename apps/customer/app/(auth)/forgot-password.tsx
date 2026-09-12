@@ -37,10 +37,20 @@ export default function ForgotPasswordScreen() {
     setValidationError(null);
     setSubmitting(true);
     try {
-      await resetPassword(email.trim());
+      const trimmedEmail = email.trim();
+      await resetPassword(trimmedEmail);
+      // Reset is OTP-only now, so the next step happens in the app rather than
+      // in the inbox: go straight to the code form instead of back to login.
+      // `notice` is the keyed route-param mechanism (see utils/successNotices);
+      // the address is data, not a notice key, so it rides as its own param —
+      // that is what saves the user retyping it on the next screen.
       router.replace({
-        pathname: '/login',
-        params: { notice: 'reset-email-sent', ...(redirectTo ? { redirectTo } : null) },
+        pathname: '/reset-password',
+        params: {
+          notice: 'reset-email-sent',
+          email: trimmedEmail,
+          ...(redirectTo ? { redirectTo } : null),
+        },
       } as never);
     } catch {
       // `resetPassword` already set `AuthContext`'s `error`, rendered above.
@@ -52,7 +62,7 @@ export default function ForgotPasswordScreen() {
   return (
     <AuthScreenShell
       title="Reset your password"
-      subtitle="We will email you a secure link to finish resetting your password."
+      subtitle="We will email you a 6-digit code to finish resetting your password."
     >
       {formError ? (
         <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>

@@ -1,8 +1,7 @@
-import type { AuthError, Session, SupabaseClient, User } from '@supabase/supabase-js';
+import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
 import { getSupabaseUserRole } from './claims.js';
 import type { AuthRole } from './types';
 
-const ACTION_CODE_CONFIGURATION_ERRORS = new Set(['redirect_to_not_allowed']);
 const NETWORK_ERROR_PATTERNS = [
   'failed to fetch',
   'fetch failed',
@@ -25,45 +24,30 @@ export const isNetworkRequestError = (error: unknown) => {
   return NETWORK_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 };
 
-export const isActionCodeConfigurationError = (error: AuthError | null | undefined) =>
-  Boolean(error?.code && ACTION_CODE_CONFIGURATION_ERRORS.has(error.code));
-
 /**
- * Sign-up itself sends the confirmation email, so the redirect has to ride along here.
- * Without it Supabase falls back to the project Site URL and every app's verification
- * link lands on the marketing site instead of the app that asked for the address.
+ * Sign-up itself sends the confirmation email.
+ *
+ * No `emailRedirectTo` is passed, deliberately: email confirmation is OTP-only.
+ * The email carries a 6-digit `{{ .Token }}` the user types into the app, so
+ * there is no link whose destination would need steering, no redirect-allowlist
+ * entry to maintain, and nothing tied to the app's hostname. Confirm the code
+ * with `verifyEmailOtp` below.
+ *
+ * Whether the email body is a code or a link is decided by the Supabase email
+ * template (dashboard-only, outside this repo). This function's contract is
+ * only that the app never asks for a redirect.
  */
 export const createUserWithEmail = async (
   supabase: SupabaseClient,
   email: string,
   password: string,
-  metadata?: Record<string, unknown>,
-  actionCodeSettings?: { url: string }
+  metadata?: Record<string, unknown>
 ): Promise<{ user: User; session: Session | null }> => {
-  const buildOptions = (emailRedirectTo?: string) => {
-    if (!metadata && !emailRedirectTo) {
-      return undefined;
-    }
-
-    return {
-      ...(metadata ? { data: metadata } : {}),
-      ...(emailRedirectTo ? { emailRedirectTo } : {}),
-    };
-  };
-
-  let { data, error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: buildOptions(actionCodeSettings?.url),
+    options: metadata ? { data: metadata } : undefined,
   });
-
-  if (error && isActionCodeConfigurationError(error)) {
-    ({ data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: buildOptions(),
-    }));
-  }
 
   if (error) {
     throw error;
@@ -112,13 +96,12 @@ export const getUserRoleClaim = async (user: User): Promise<AuthRole | null> => 
 /**
  * Confirms a signup with the 6-digit code from the verification email.
  *
- * This is the redirect-free half of email confirmation: no emailRedirectTo, no
- * redirect allowlist entry, and nothing tied to the app's hostname — which is
- * why it survives a domain move that would invalidate emailed links.
+ * This is the whole of email confirmation now: no emailRedirectTo, no redirect
+ * allowlist entry, and nothing tied to the app's hostname — which is why it
+ * survives a domain move that would invalidate emailed links.
  *
- * Requires the Supabase "Confirm signup" template to expose {{ .Token }}. A
- * template carrying both the token and the confirmation URL lets the link and
- * the code work at the same time, so existing emails keep working.
+ * Requires the Supabase "Confirm signup" template to expose {{ .Token }}. That
+ * template is dashboard-only and cannot be asserted from this repo.
  */
 export const verifyEmailOtp = async (supabase: SupabaseClient, email: string, token: string) => {
   const { data, error } = await supabase.auth.verifyOtp({
@@ -134,55 +117,61 @@ export const verifyEmailOtp = async (supabase: SupabaseClient, email: string, to
   return data;
 };
 
-export const sendVerificationEmailWithFallback = async (
-  supabase: SupabaseClient,
-  email: string,
-  actionCodeSettings?: { url: string }
-) => {
+/**
+ * Confirms a password reset with the 6-digit code from the recovery email.
+ *
+ * TWO-STEP CONTRACT — this call does NOT change the password. Verifying a
+ * `recovery` OTP establishes a real, fully authenticated session for that user;
+ * `supabase.auth.updateUser({ password })` is then what actually writes the new
+ * password, authorised by the session this call just created. So the caller
+ * must do both, in this order, and treat a failure of either as "the reset did
+ * not happen". Sign out afterwards if the screen expects the user to log in
+ * again — the recovery session outlives the update.
+ *
+ * Requires the Supabase "Reset password" template to expose {{ .Token }}. That
+ * template is dashboard-only and cannot be asserted from this repo.
+ */
+export const verifyPasswordResetOtp = async (supabase: SupabaseClient, email: string, token: string) => {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token: token.trim(),
+    type: 'recovery',
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Re-sends the signup confirmation. No `emailRedirectTo`: the resent email is
+ * the same OTP email, confirmed through `verifyEmailOtp`.
+ *
+ * The `WithFallback` name is historical — it once retried without a redirect
+ * when the project rejected one. With no redirect ever sent, that branch was
+ * unreachable and has been removed.
+ */
+export const sendVerificationEmailWithFallback = async (supabase: SupabaseClient, email: string) => {
   const { error } = await supabase.auth.resend({
     type: 'signup',
     email,
-    options: actionCodeSettings?.url
-      ? {
-          emailRedirectTo: actionCodeSettings.url,
-        }
-      : undefined,
   });
-
-  if (error && isActionCodeConfigurationError(error)) {
-    const fallback = await supabase.auth.resend({
-      type: 'signup',
-      email,
-    });
-
-    if (fallback.error) {
-      throw fallback.error;
-    }
-
-    return;
-  }
 
   if (error) {
     throw error;
   }
 };
 
-export const sendPasswordResetEmailWithFallback = async (
-  supabase: SupabaseClient,
-  email: string,
-  actionCodeSettings?: { url: string }
-) => {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: actionCodeSettings?.url,
-  });
-
-  if (error && isActionCodeConfigurationError(error)) {
-    const fallback = await supabase.auth.resetPasswordForEmail(email);
-    if (fallback.error) {
-      throw fallback.error;
-    }
-    return;
-  }
+/**
+ * Sends the password-recovery email. No `redirectTo`: the email carries a
+ * 6-digit code, redeemed through `verifyPasswordResetOtp`.
+ *
+ * `WithFallback` is historical here too; see the note above.
+ */
+export const sendPasswordResetEmailWithFallback = async (supabase: SupabaseClient, email: string) => {
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
 
   if (error) {
     throw error;

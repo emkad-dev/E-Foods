@@ -1,110 +1,181 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
-import { Link, useLocalSearchParams } from 'expo-router';
-import { formatAuthError } from '../../src/services/supabase/auth';
+import { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
+import { formatAuthError, sendVerificationEmail, verifyEmailOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { updateUserDocument } from '../../src/services/supabase/profile';
+import { resolveDispatchSuccessNotice, type DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 
+const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
+/**
+ * Email confirmation is OTP-only. The confirmation email carries a 6-digit
+ * code, not a link, so this screen reads no `access_token` / `refresh_token` /
+ * `code` URL params and has no `exchangeCodeForSession` / `setSession` effect
+ * running on mount. The code field below is the only path to a confirmed email.
+ *
+ * Unlike the customer app's equivalent this screen runs SIGNED OUT - dispatch
+ * sign-up returns no session while confirmation is pending - so it cannot read
+ * the address off `AuthContext`. The email field is therefore always rendered
+ * and always editable, prefilled from the route param register sends it with.
+ *
+ * Mirrors `apps/customer/app/(auth)/verify-email.tsx`.
+ */
 export default function DispatchVerifyEmailScreen() {
   const params = useLocalSearchParams<{
-    access_token?: string | string[];
-    code?: string | string[];
-    refresh_token?: string | string[];
+    email?: string | string[];
+    notice?: string | string[];
   }>();
-  const accessToken = useMemo(() => {
-    if (Array.isArray(params.access_token)) return params.access_token[0];
-    return params.access_token;
-  }, [params.access_token]);
-  const refreshToken = useMemo(() => {
-    if (Array.isArray(params.refresh_token)) return params.refresh_token[0];
-    return params.refresh_token;
-  }, [params.refresh_token]);
-  const verificationCode = useMemo(() => {
-    if (Array.isArray(params.code)) return params.code[0];
-    return params.code;
-  }, [params.code]);
+  const router = useRouter();
+  const emailParam = useMemo(() => firstParam(params.email) ?? '', [params.email]);
 
-  const [processing, setProcessing] = useState(Boolean(verificationCode || (accessToken && refreshToken)));
+  const [dismissedNotice, setDismissedNotice] = useState(false);
+  const notice = dismissedNotice ? null : resolveDispatchSuccessNotice(params.notice);
+
+  const [email, setEmail] = useState(emailParam);
+  const [code, setCode] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const handleConfirmCode = async () => {
+    const invalid = validateVerifyEmailForm({ email, code });
 
-    const finalizeVerification = async () => {
-      if (!verificationCode && !(accessToken && refreshToken)) {
-        setProcessing(false);
-        return;
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+
+    setError(null);
+    setInfo(null);
+    setConfirming(true);
+
+    try {
+      await verifyEmailOtp(supabase, email.trim(), code);
+
+      // Confirming the code leaves a real session behind, which is what lets
+      // this write land; the profile row mirrors the auth flag for the screens
+      // that read it.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user?.id) {
+        await updateUserDocument(user.id, { emailVerified: true }).catch(() => undefined);
       }
 
-      try {
-        if (verificationCode) {
-          const exchangeResult = await supabase.auth.exchangeCodeForSession(verificationCode);
-          if (exchangeResult.error) {
-            throw exchangeResult.error;
-          }
-        } else if (accessToken && refreshToken) {
-          const sessionResult = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (sessionResult.error) {
-            throw sessionResult.error;
-          }
-        }
+      // That session outlives the confirmation and this flow ends at sign-in.
+      await supabase.auth.signOut().catch(() => undefined);
 
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+      const noticeKey: DispatchSuccessNoticeKey = 'email-confirmed';
+      router.replace({ pathname: '/(auth)/login', params: { notice: noticeKey } } as never);
+    } catch (nextError: any) {
+      // `setError` alone: the slot below renders it.
+      setError(formatAuthError(nextError));
+    } finally {
+      setConfirming(false);
+    }
+  };
 
-        if (user?.id) {
-          await updateUserDocument(user.id, { emailVerified: true }).catch(() => undefined);
-        }
+  const handleResend = async () => {
+    if (!email.trim()) {
+      setError('Enter the email address you signed up with, then ask for a new code.');
+      return;
+    }
 
-        await supabase.auth.signOut().catch(() => undefined);
+    setError(null);
+    setInfo(null);
+    setResending(true);
 
-        if (!cancelled) {
-          setConfirmed(true);
-        }
-      } catch (nextError: any) {
-        if (!cancelled) {
-          // `setError` alone: the slot below already renders it, and the
-          // `Alert` that used to follow only repeated it on native and said
-          // nothing at all on web. This screen has no button to press — the
-          // exchange runs on mount — so the slot is the only surface there is.
-          setError(formatAuthError(nextError));
-        }
-      } finally {
-        if (!cancelled) {
-          setProcessing(false);
-        }
-      }
-    };
+    try {
+      await sendVerificationEmail(supabase, email.trim());
+      setInfo('A new 6-digit code is on its way. Check your inbox.');
+    } catch (nextError: any) {
+      setError(formatAuthError(nextError));
+    } finally {
+      setResending(false);
+    }
+  };
 
-    void finalizeVerification();
+  const clearFeedbackAnd = (apply: (value: string) => void) => (value: string) => {
+    setError(null);
+    setInfo(null);
+    apply(value);
+  };
 
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, refreshToken, verificationCode]);
+  const codeIncomplete = Boolean(validateEmailCode({ value: code }));
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
-        {processing
-          ? 'Finishing your email confirmation now. Stay on this screen for a moment.'
-          : confirmed
-            ? 'Your email is confirmed. You can now sign in and continue to rider setup.'
-            : 'Open the verification link from your email on this device to confirm this account.'}
+        Enter the 6-digit code we emailed you to confirm this rider account, then sign in to finish your rider setup.
       </Text>
+
+      {notice && !error && !info ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          role="alert"
+          style={styles.noticeText}
+          onPress={() => setDismissedNotice(true)}
+        >
+          {notice}
+        </Text>
+      ) : null}
+
+      {info && !error ? (
+        <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+          {info}
+        </Text>
+      ) : null}
 
       {error ? (
         <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
           {error}
         </Text>
       ) : null}
+
+      <TextInput
+        style={styles.input}
+        placeholder="Dispatch email"
+        placeholderTextColor="#8e8e8e"
+        value={email}
+        onChangeText={clearFeedbackAnd(setEmail)}
+        autoCapitalize="none"
+        autoComplete="email"
+        keyboardType="email-address"
+        editable={!confirming && !resending}
+        accessibilityLabel="Dispatch email address"
+      />
+
+      <TextInput
+        style={styles.codeInput}
+        placeholder="000000"
+        placeholderTextColor="#8e8e8e"
+        value={code}
+        onChangeText={clearFeedbackAnd((value) => setCode(value.replace(/\D/g, '').slice(0, 6)))}
+        keyboardType="number-pad"
+        textContentType="oneTimeCode"
+        autoComplete="one-time-code"
+        maxLength={6}
+        editable={!confirming}
+        accessibilityLabel="6-digit confirmation code"
+      />
+
+      <TouchableOpacity
+        style={[styles.button, codeIncomplete ? styles.buttonDisabled : null]}
+        onPress={handleConfirmCode}
+        disabled={confirming || codeIncomplete}
+      >
+        <Text style={styles.buttonText}>{confirming ? 'Confirming...' : 'Confirm email'}</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.secondaryButton} onPress={handleResend} disabled={resending}>
+        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Send a new code'}</Text>
+      </TouchableOpacity>
 
       <Link href="/(auth)/login" style={styles.link}>
         Back to sign in
@@ -133,12 +204,70 @@ const styles = StyleSheet.create({
     color: dispatchTheme.textMuted,
     fontSize: 16,
     lineHeight: 24,
+    marginBottom: 24,
+  },
+  noticeText: {
+    color: dispatchTheme.accentStrong,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
   },
   errorText: {
     color: dispatchTheme.danger,
-    marginTop: 16,
-    textAlign: 'center',
     fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  input: {
+    backgroundColor: dispatchTheme.cream,
+    borderColor: dispatchTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    color: dispatchTheme.text,
+    height: 54,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+  },
+  codeInput: {
+    backgroundColor: dispatchTheme.cream,
+    borderColor: dispatchTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    color: dispatchTheme.text,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 10,
+    marginBottom: 14,
+    paddingVertical: 14,
+    textAlign: 'center',
+  },
+  button: {
+    alignItems: 'center',
+    backgroundColor: dispatchTheme.accent,
+    borderRadius: 18,
+    marginBottom: 12,
+    paddingVertical: 16,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.accent,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingVertical: 16,
+  },
+  secondaryText: {
+    color: dispatchTheme.accentStrong,
+    fontSize: 15,
+    fontWeight: '700',
   },
   link: {
     color: dispatchTheme.accentStrong,

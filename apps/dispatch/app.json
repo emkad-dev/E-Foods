@@ -60,9 +60,7 @@
       "autolinkingModuleResolution": true
     },
     "extra": {
-      "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch",
-      "EXPO_PUBLIC_VERIFY_EMAIL_PATH": "verify-email",
-      "EXPO_PUBLIC_RESET_PASSWORD_PATH": "reset-password"
+      "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch"
     }
   }
 }

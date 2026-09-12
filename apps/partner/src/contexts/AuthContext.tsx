@@ -1,7 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
-import { appEnv } from '../config/env';
 import {
   createUserWithEmail,
   formatAuthError,
@@ -25,7 +24,6 @@ import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import { shouldHydrateCachedUserProfile, shouldShowSignInLoading } from '../../../../packages/auth/src';
-import { buildPartnerActionCodeSettings } from '../utils/authActionUrls';
 import {
   resolvePartnerAccessState,
   type PartnerUserDocumentState,
@@ -332,23 +330,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      // The sign-up call itself sends the confirmation email, so the partner redirect goes
-      // with it. Resending here would only trip Supabase's 60s cooldown and leave the first
-      // (Site URL) email as the one the partner actually receives.
-      const { session } = await createUserWithEmail(
-        supabase,
-        email,
-        password,
-        {
-          display_name: userData.contactName.trim(),
-          phone: userData.phoneNumber.trim(),
-          role: 'customer',
-        },
-        buildPartnerActionCodeSettings(appEnv.verifyEmailPath, {
-          appScheme: appEnv.appScheme,
-          webOrigin: appEnv.partnerWebOrigin,
-        })
-      );
+      // The sign-up call itself sends the confirmation email. Resending here
+      // would only trip Supabase's 60s cooldown. No redirect is passed:
+      // confirmation is OTP-only, so the email carries a 6-digit code the
+      // partner types on /verify-email and there is no link to steer.
+      const { session } = await createUserWithEmail(supabase, email, password, {
+        display_name: userData.contactName.trim(),
+        phone: userData.phoneNumber.trim(),
+        role: 'customer',
+      });
 
       return { verificationEmailSent: true, sessionPresent: Boolean(session) };
     } catch (nextError: any) {
@@ -392,10 +382,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      await sendPasswordReset(supabase, email, buildPartnerActionCodeSettings(appEnv.resetPasswordPath, {
-        appScheme: appEnv.appScheme,
-        webOrigin: appEnv.partnerWebOrigin,
-      }));
+      // No redirect: the recovery email carries a 6-digit code redeemed on
+      // /reset-password, not a link.
+      await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);

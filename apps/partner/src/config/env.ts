@@ -38,16 +38,6 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_PARTNER_WEB_ORIGIN,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_PARTNER_WEB_ORIGIN
     ) ?? 'https://partner.feasty.com.ng',
-  verifyEmailPath:
-    getEnvValue(
-      process.env.EXPO_PUBLIC_VERIFY_EMAIL_PATH,
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_VERIFY_EMAIL_PATH
-    ) ?? 'verify-email',
-  resetPasswordPath:
-    getEnvValue(
-      process.env.EXPO_PUBLIC_RESET_PASSWORD_PATH,
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_RESET_PASSWORD_PATH
-    ) ?? 'reset-password',
   projectId: getEnvValue(
     process.env.EXPO_PUBLIC_PROJECT_ID,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID

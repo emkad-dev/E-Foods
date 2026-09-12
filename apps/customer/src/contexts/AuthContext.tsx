@@ -3,7 +3,6 @@ import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supaba
 import { router } from 'expo-router';
 import type { UserDocument } from '../domain/entities';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
-import { appEnv } from '../config/env';
 import {
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
@@ -113,17 +112,6 @@ const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) =>
   }
 
   return fallbackMessage;
-};
-
-/**
- * Get the app domain from environment variables for action code settings
- */
-const getActionCodeSettings = (path: string) => {
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-
-  return {
-    url: `https://${appEnv.appDomain}${normalizedPath}`,
-  };
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -472,20 +460,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         throw new Error('Accept the Terms and Privacy Policy before creating an account.');
       }
 
-      // The sign-up call itself sends the confirmation email, so the redirect goes with it.
-      // Resending here would only trip Supabase's 60s cooldown and leave the first
-      // (Site URL) email as the one the customer actually receives.
-      await createUserWithEmail(
-        supabase,
-        email,
-        password,
-        {
-          display_name: userData?.displayName,
-          phone: userData?.phoneNumber,
-          role: DEFAULT_APP_ROLE,
-        },
-        getActionCodeSettings(appEnv.verifyEmailPath)
-      );
+      // The sign-up call itself sends the confirmation email. Resending here
+      // would only trip Supabase's 60s cooldown. No redirect is passed:
+      // confirmation is OTP-only, so the email carries a 6-digit code the
+      // customer types on /verify-email and there is no link to steer.
+      await createUserWithEmail(supabase, email, password, {
+        display_name: userData?.displayName,
+        phone: userData?.phoneNumber,
+        role: DEFAULT_APP_ROLE,
+      });
       const policyAcceptance = userData.policyAcceptance;
       setPolicyAccepted(true);
       void storePolicyAccepted(true);
@@ -769,11 +752,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      await sendPasswordResetEmailWithFallback(
-        supabase,
-        email,
-        getActionCodeSettings(appEnv.resetPasswordPath)
-      );
+      // No redirect: the recovery email carries a 6-digit code redeemed on
+      // /reset-password, not a link.
+      await sendPasswordResetEmailWithFallback(supabase, email);
       trackAnalyticsEvent('customer_password_reset_requested', {
         email_domain: email.includes('@') ? email.split('@').pop() ?? null : null,
       });
@@ -844,11 +825,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     try {
-      await sendVerificationEmailWithFallback(
-        supabase,
-        authUser.email,
-        getActionCodeSettings(appEnv.verifyEmailPath)
-      );
+      // No redirect: the resent email is the same OTP email.
+      await sendVerificationEmailWithFallback(supabase, authUser.email);
       trackAnalyticsEvent('customer_verification_email_requested');
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to send verification email');

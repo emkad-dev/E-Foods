@@ -119,12 +119,10 @@ function RootLayoutNav() {
 
       // On web `Linking.getInitialURL()` resolves to the page we are ALREADY on,
       // so parsing it and dispatching a navigation to that same route re-enters
-      // this effect and loops. /reset-password and /verify-email spun the whole
-      // app -- app_opened fired every ~20ms and the main thread never yielded, so
-      // the two screens reachable only from an email link were dead on the web
-      // build. /payment/callback (where Paystack returns a paying customer) and
-      // /orders/<id> deep links had the same shape. /login never showed it only
-      // because it matches no branch here.
+      // this effect and loops -- app_opened fired every ~20ms and the main thread
+      // never yielded. /payment/callback (where Paystack returns a paying
+      // customer) and /orders/<id> deep links both have that shape. /login never
+      // showed it only because it matches no branch here.
       //
       // A ref-once guard would not have been enough: each replace remounted the
       // root, which resets refs. Comparing against the current path is what
@@ -132,35 +130,15 @@ function RootLayoutNav() {
       // initial URL is a custom scheme and the pathname is never already the
       // target. Params are unaffected on web because they are already in the URL
       // the screen reads.
+      //
+      // /verify-email and /reset-password used to have branches here, purely to
+      // ferry `code` / `access_token` / `refresh_token` from an emailed link into
+      // those screens. Email confirmation and password reset are OTP-only now --
+      // there is no link and no params to carry -- so the branches are gone. The
+      // guard below is still load-bearing for the two branches that remain.
       const isAlreadyOn = (target: string) => pathnameRef.current === target;
 
-      if (targetPath === 'verify-email') {
-        if (isAlreadyOn('/verify-email')) {
-          return;
-        }
-
-        router.replace({
-          pathname: '/verify-email',
-          params: {
-            ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
-            ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
-            ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
-          },
-        });
-      } else if (targetPath === 'reset-password') {
-        if (isAlreadyOn('/reset-password')) {
-          return;
-        }
-
-        router.replace({
-          pathname: '/reset-password',
-          params: {
-            ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
-            ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
-            ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
-          },
-        });
-      } else if (targetPath === 'payment/callback' || normalizedPaymentPath === 'payment/callback') {
+      if (targetPath === 'payment/callback' || normalizedPaymentPath === 'payment/callback') {
         if (isAlreadyOn('/payment/callback')) {
           return;
         }

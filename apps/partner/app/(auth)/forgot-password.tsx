@@ -39,17 +39,21 @@ export default function PartnerForgotPasswordScreen() {
     setValidationError(null);
 
     try {
-      await resetPassword(email.trim());
-      // Navigate and carry the confirmation to the login screen as a route
-      // param, the way the reset-password flow already does. The success
-      // `Alert` that used to sit here was the ONLY feedback and nothing
-      // followed it, so on the web build the partner submitted, saw the screen
-      // sit unchanged, and re-submitted — each retry burning another rate-limit
-      // slot on the reset endpoint.
-      const noticeKey: PartnerSuccessNoticeKey = 'reset-link-sent';
+      const trimmedEmail = email.trim();
+      await resetPassword(trimmedEmail);
+      // Reset is OTP-only now, so the next step happens in the app rather than
+      // in the inbox: go straight to the code form instead of back to sign-in.
+      // `notice` is the keyed route-param mechanism (see utils/successNotices);
+      // the address is data, not a notice key, so it rides as its own param —
+      // that is what saves the partner retyping it on the next screen.
+      const noticeKey: PartnerSuccessNoticeKey = 'reset-code-sent';
       router.replace({
-        pathname: '/(auth)/login',
-        params: { notice: noticeKey, ...(redirectTo ? { redirectTo } : null) },
+        pathname: '/(auth)/reset-password',
+        params: {
+          notice: noticeKey,
+          email: trimmedEmail,
+          ...(redirectTo ? { redirectTo } : null),
+        },
       } as never);
     } catch {
       // `resetPassword` already set `AuthContext`'s `error`, rendered above.
@@ -63,7 +67,9 @@ export default function PartnerForgotPasswordScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.title}>Reset your partner password</Text>
-      <Text style={styles.copy}>Enter your partner email and we will send a link to set a new password and return to your dashboard.</Text>
+      <Text style={styles.copy}>
+        Enter your partner email and we will send you a 6-digit code to set a new password with.
+      </Text>
 
       {formError ? (
         <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
@@ -83,7 +89,7 @@ export default function PartnerForgotPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Sending...' : 'Send reset link'}</Text>
+        <Text style={styles.buttonText}>{loading ? 'Sending...' : 'Send reset code'}</Text>
       </TouchableOpacity>
 
       <Link

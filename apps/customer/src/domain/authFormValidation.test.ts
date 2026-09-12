@@ -81,18 +81,27 @@ describe('validateRegisterForm', () => {
 });
 
 describe('validateResetPasswordForm', () => {
-  const valid = { hasResetCredential: true, password: 'supersecret', confirmPassword: 'supersecret' };
+  const valid = {
+    email: 'ada@example.com',
+    code: '123456',
+    password: 'supersecret',
+    confirmPassword: 'supersecret',
+  };
 
-  it('accepts a complete form on a link that carried a code', () => {
+  it('accepts a complete OTP reset form', () => {
     assert.equal(validateResetPasswordForm(valid), null);
   });
 
-  it('reports the broken link before anything the user typed', () => {
-    // No password can rescue a link with no code, so this must win even when
-    // the password fields are also empty.
+  it('asks for the email first — verifyOtp is keyed on (email, token)', () => {
+    // Everything else can be perfect; without an address there is nobody to
+    // redeem the code against, so this message must win.
+    assert.match(validateResetPasswordForm({ ...valid, email: '   ' }) ?? '', /email address you asked for/);
+  });
+
+  it('requires the full 6-digit code before looking at the passwords', () => {
     assert.match(
-      validateResetPasswordForm({ hasResetCredential: false, password: '', confirmPassword: '' }) ?? '',
-      /missing the required reset code/
+      validateResetPasswordForm({ ...valid, code: '123', password: '', confirmPassword: '' }) ?? '',
+      /6 digits/
     );
   });
 

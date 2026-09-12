@@ -45,7 +45,8 @@ export default function DispatchRegisterScreen() {
     setValidationError(null);
 
     try {
-      const result = await signUp(email.trim(), password, {
+      const trimmedEmail = email.trim();
+      const result = await signUp(trimmedEmail, password, {
         displayName: displayName.trim(),
         phoneNumber: phoneE164 ?? '',
       });
@@ -73,6 +74,20 @@ export default function DispatchRegisterScreen() {
         router.replace({
           pathname: '/(dispatch)/complete-rider-details',
           params: { notice: noticeKey },
+        } as never);
+        return;
+      }
+
+      if (result.verificationEmailSent) {
+        // Confirmation is OTP-only, so the next step is typing the 6-digit code
+        // — which happens in the app, not in the inbox. Go straight to the code
+        // screen, carrying the address as its own data param so the rider does
+        // not retype it (and so the resend button there has an address to work
+        // with). Without this, /verify-email would be reachable only by typing
+        // its URL, now that the emailed link is gone.
+        router.replace({
+          pathname: '/(auth)/verify-email',
+          params: { notice: noticeKey, email: trimmedEmail },
         } as never);
         return;
       }

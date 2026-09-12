@@ -2,36 +2,51 @@ import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
-import { formatAuthError } from '../../src/services/supabase/auth';
+import { formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
-import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
+import { resolvePartnerSuccessNotice, type PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
+const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
+/**
+ * Password reset is OTP-only. The recovery email carries a 6-digit code, not a
+ * link, so this screen no longer reads `access_token` / `refresh_token` / `code`
+ * out of the URL and never calls `exchangeCodeForSession` or `setSession`.
+ *
+ * Redeeming the code is a TWO-STEP operation, and both steps happen here:
+ *   1. `verifyPasswordResetOtp` trades (email, code) for a real session.
+ *   2. `supabase.auth.updateUser({ password })` writes the new password,
+ *      authorised by that session.
+ * A failure of either leaves the password unchanged, so both are inside one
+ * try block and report through the single `error` slot below.
+ *
+ * Mirrors `apps/customer/app/(auth)/reset-password.tsx`.
+ */
 export default function PartnerResetPasswordScreen() {
   const params = useLocalSearchParams<{
-    access_token?: string | string[];
-    code?: string | string[];
+    email?: string | string[];
+    notice?: string | string[];
     redirectTo?: string | string[];
-    refresh_token?: string | string[];
   }>();
   const router = useRouter();
-  const redirectTo = useMemo(() => {
-    if (Array.isArray(params.redirectTo)) return params.redirectTo[0];
-    return params.redirectTo;
-  }, [params.redirectTo]);
-  const accessToken = useMemo(() => {
-    if (Array.isArray(params.access_token)) return params.access_token[0];
-    return params.access_token;
-  }, [params.access_token]);
-  const refreshToken = useMemo(() => {
-    if (Array.isArray(params.refresh_token)) return params.refresh_token[0];
-    return params.refresh_token;
-  }, [params.refresh_token]);
-  const recoveryCode = useMemo(() => {
-    if (Array.isArray(params.code)) return params.code[0];
-    return params.code;
-  }, [params.code]);
+  const redirectTo = useMemo(() => firstParam(params.redirectTo), [params.redirectTo]);
+  // The address is DATA, not a notice key, so it rides as its own param.
+  const emailParam = useMemo(() => firstParam(params.email) ?? '', [params.email]);
 
+  const [dismissedNotice, setDismissedNotice] = useState(false);
+  const notice = dismissedNotice ? null : resolvePartnerSuccessNotice(params.notice);
+
+  // Seeded from the param when forgot-password sent the partner here, and still
+  // editable: someone can land on /reset-password directly (a bookmark, or a
+  // hard refresh that drops the param), and the old link flow was the only
+  // thing that ever supplied the identity. Rather than dead-ending that user,
+  // the field is always rendered - prefilled when we know the address, blank
+  // when we do not - so a missing email is an ordinary empty form field the
+  // validator asks them to fill, not a broken screen. It stays editable even
+  // when prefilled so a typo on the previous screen is correctable here.
+  const [email, setEmail] = useState(emailParam);
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -39,11 +54,11 @@ export default function PartnerResetPasswordScreen() {
 
   const handleResetPassword = async () => {
     // Client-side validation used to go to `Alert`, an empty function on the
-    // web build, so a mismatched pair or a code-less link produced no message
-    // at all. This screen already owns a local `error` rendered inline below,
-    // so these route into that same single surface.
+    // web build. This screen already owns a local `error` rendered inline
+    // below, so these route into that same single surface.
     const invalid = validateResetPasswordForm({
-      hasResetCredential: Boolean(accessToken || refreshToken || recoveryCode),
+      email,
+      code,
       password,
       confirmPassword,
     });
@@ -57,53 +72,51 @@ export default function PartnerResetPasswordScreen() {
     setError(null);
 
     try {
-      if (recoveryCode) {
-        const exchangeResult = await supabase.auth.exchangeCodeForSession(recoveryCode);
-        if (exchangeResult.error) {
-          throw exchangeResult.error;
-        }
-      } else if (accessToken && refreshToken) {
-        const sessionResult = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        if (sessionResult.error) {
-          throw sessionResult.error;
-        }
-      } else {
-        throw new Error('This reset link is missing the session tokens required to update your password.');
-      }
-
+      // Step 1: the code buys a session.
+      await verifyPasswordResetOtp(supabase, email.trim(), code);
+      // Step 2: that session authorises the password write.
       const updateResult = await supabase.auth.updateUser({ password });
       if (updateResult.error) {
         throw updateResult.error;
       }
 
+      // The recovery session outlives the update, and this flow ends at login.
       await supabase.auth.signOut().catch(() => undefined);
-      // Navigate unconditionally and carry the confirmation to the login screen
-      // as a route param, the way the customer reset flow does. This used to
-      // hang off an `Alert.alert` button callback, which never fires on the web
-      // build (`Alert` is an empty function in react-native-web) — so the
-      // partner was left stranded on this form, already signed out, with the
-      // recovery code spent and no confirmation that anything had happened.
       const noticeKey: PartnerSuccessNoticeKey = 'password-updated';
       router.replace({
         pathname: '/(auth)/login',
         params: { notice: noticeKey, ...(redirectTo ? { redirectTo } : null) },
       } as never);
     } catch (nextError: any) {
-      // `setError` alone: it renders in the inline slot above. The `Alert` that
-      // followed it said the same thing to nobody on the web build.
+      // `setError` alone: it renders in the inline slot above.
       setError(formatAuthError(nextError));
     } finally {
       setSubmitting(false);
     }
   };
 
+  const clearErrorAnd = (apply: (value: string) => void) => (value: string) => {
+    setError(null);
+    apply(value);
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Choose a new partner password</Text>
-      <Text style={styles.copy}>Set a fresh password for your partner account, then sign in to open your dashboard.</Text>
+      <Text style={styles.copy}>
+        Enter the 6-digit code we emailed you, then set a fresh password for your partner account.
+      </Text>
+
+      {notice && !error ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          role="alert"
+          style={styles.noticeText}
+          onPress={() => setDismissedNotice(true)}
+        >
+          {notice}
+        </Text>
+      ) : null}
 
       {error ? (
         <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
@@ -113,26 +126,64 @@ export default function PartnerResetPasswordScreen() {
 
       <TextInput
         style={styles.input}
+        placeholder="Partner email"
+        placeholderTextColor="#8e8e8e"
+        value={email}
+        onChangeText={clearErrorAnd(setEmail)}
+        autoCapitalize="none"
+        autoComplete="email"
+        keyboardType="email-address"
+        editable={!submitting}
+        accessibilityLabel="Partner email address"
+      />
+
+      <TextInput
+        style={styles.codeInput}
+        placeholder="000000"
+        placeholderTextColor="#8e8e8e"
+        value={code}
+        onChangeText={clearErrorAnd((value) => setCode(value.replace(/\D/g, '').slice(0, 6)))}
+        keyboardType="number-pad"
+        textContentType="oneTimeCode"
+        autoComplete="one-time-code"
+        maxLength={6}
+        editable={!submitting}
+        accessibilityLabel="6-digit reset code"
+      />
+
+      <TextInput
+        style={styles.input}
         placeholder="New password"
         placeholderTextColor="#8e8e8e"
         value={password}
-        onChangeText={setPassword}
+        onChangeText={clearErrorAnd(setPassword)}
         secureTextEntry
         editable={!submitting}
+        accessibilityLabel="New password"
       />
       <TextInput
         style={styles.input}
         placeholder="Confirm new password"
         placeholderTextColor="#8e8e8e"
         value={confirmPassword}
-        onChangeText={setConfirmPassword}
+        onChangeText={clearErrorAnd(setConfirmPassword)}
         secureTextEntry
         editable={!submitting}
+        accessibilityLabel="Confirm new password"
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
         <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Save new password'}</Text>
       </TouchableOpacity>
+
+      <Link
+        href={
+          redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'
+        }
+        style={styles.link}
+      >
+        Send me a new code
+      </Link>
 
       <Link
         href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
@@ -165,6 +216,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 24,
   },
+  noticeText: {
+    color: partnerTheme.accentStrong,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
   errorText: {
     color: partnerTheme.danger,
     marginBottom: 16,
@@ -180,6 +237,19 @@ const styles = StyleSheet.create({
     height: 54,
     marginBottom: 14,
     paddingHorizontal: 16,
+  },
+  codeInput: {
+    backgroundColor: partnerTheme.cream,
+    borderColor: partnerTheme.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    color: partnerTheme.text,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 10,
+    marginBottom: 14,
+    paddingVertical: 14,
+    textAlign: 'center',
   },
   button: {
     alignItems: 'center',

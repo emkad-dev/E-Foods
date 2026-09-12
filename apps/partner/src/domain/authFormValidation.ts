@@ -74,22 +74,75 @@ export function validateRegisterForm({
   return null;
 }
 
+export type EmailCodeInput = { value: string };
+
+/** The 6-digit code length used by both email confirmation and password reset. */
+export const EMAIL_CODE_LENGTH = 6;
+
+export function validateEmailCode({ value }: EmailCodeInput): string | null {
+  if (value.trim().length < EMAIL_CODE_LENGTH) {
+    return `The code in your email is ${EMAIL_CODE_LENGTH} digits. Enter all ${EMAIL_CODE_LENGTH}.`;
+  }
+
+  return null;
+}
+
+export type VerifyEmailFormInput = {
+  /**
+   * The address the confirmation code was sent to. Carried from register as a
+   * route param, or typed on the screen when the partner landed there directly.
+   */
+  email: string;
+  /** The 6-digit confirmation code from the email. */
+  code: string;
+};
+
+/**
+ * Email confirmation is OTP-only, and this screen runs signed out, so
+ * `verifyOtp` needs the address as well as the code — a code alone identifies
+ * nobody.
+ */
+export function validateVerifyEmailForm({ email, code }: VerifyEmailFormInput): string | null {
+  if (!email.trim()) {
+    return 'Enter the email address you signed up with.';
+  }
+
+  return validateEmailCode({ value: code });
+}
+
 export type ResetPasswordFormInput = {
-  /** True when the link carried a recovery code, or both session tokens. */
-  hasResetCredential: boolean;
+  /**
+   * The address the recovery code was sent to. Carried from forgot-password as
+   * a route param, or typed on the screen when the partner landed there
+   * directly.
+   */
+  email: string;
+  /** The 6-digit recovery code from the email. */
+  code: string;
   password: string;
   confirmPassword: string;
 };
 
+/**
+ * Password reset is OTP-only: there is no link, so the screen needs the address
+ * AND the code before any password it is given means anything. Both are checked
+ * before the password pair, in the order the fields are rendered.
+ */
 export function validateResetPasswordForm({
-  hasResetCredential,
+  email,
+  code,
   password,
   confirmPassword,
 }: ResetPasswordFormInput): string | null {
-  // Checked first: no password the partner types can rescue a link with no code
-  // in it, so telling them about the link is the only useful message.
-  if (!hasResetCredential) {
-    return 'This reset link is missing the required recovery code. Request a new reset email and open the newest link.';
+  // `verifyOtp` is keyed on (email, token) — a code alone identifies nobody, so
+  // a missing address is the first thing worth telling the partner about.
+  if (!email.trim()) {
+    return 'Enter the email address you asked for the reset code with.';
+  }
+
+  const codeError = validateEmailCode({ value: code });
+  if (codeError) {
+    return codeError;
   }
 
   if (!password.trim() || !confirmPassword.trim()) {

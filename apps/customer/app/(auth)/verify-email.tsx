@@ -1,105 +1,35 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateEmailCode } from '../../src/domain/authFormValidation';
-import { formatAuthError } from '../../src/services/supabase/auth';
-import { supabase } from '../../src/services/supabase/config';
-import { updateUserDocument } from '../../src/services/supabase/profile';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { customerTheme } from '../../src/theme/palette';
 
+/**
+ * Email confirmation is OTP-only. The confirmation email carries a 6-digit code,
+ * not a link, so this screen reads no `access_token` / `refresh_token` / `code`
+ * URL params and has no `exchangeCodeForSession` / `setSession` effect. The code
+ * field below is the only path to a confirmed email.
+ */
 export default function VerifyEmailScreen() {
   const { user, reloadUser, sendVerificationEmail, verifyEmailCode, signOut, error, clearError } = useAuth();
-  const params = useLocalSearchParams<{
-    access_token?: string | string[];
-    code?: string | string[];
-    refresh_token?: string | string[];
-  }>();
   const [checking, setChecking] = useState(false);
-  const [processingLink, setProcessingLink] = useState(false);
   const [resending, setResending] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const [code, setCode] = useState('');
   const [confirmingCode, setConfirmingCode] = useState(false);
-  // Three failures on this screen never reached `AuthContext`'s `error`: the
-  // link exchange below talks to `supabase.auth` directly, and the two local
-  // checks are client-side. All three reported only through `Alert`, which is
-  // an empty function on the web build — so a broken or expired verification
-  // link produced a completely blank screen. They are held here and rendered
-  // through the SAME slot as the context's `error`, keeping one error surface.
+  // The local checks on this screen are client-side, so they never reach
+  // `AuthContext`'s `error`. They used to report only through `Alert`, which is
+  // an empty function on the web build. They are held here and rendered through
+  // the SAME slot as the context's `error`, keeping one error surface.
   const [screenError, setScreenError] = useState<string | null>(null);
   const router = useRouter();
-  const accessToken = useMemo(() => {
-    if (Array.isArray(params.access_token)) return params.access_token[0];
-    return params.access_token;
-  }, [params.access_token]);
-  const refreshToken = useMemo(() => {
-    if (Array.isArray(params.refresh_token)) return params.refresh_token[0];
-    return params.refresh_token;
-  }, [params.refresh_token]);
-  const verificationCode = useMemo(() => {
-    if (Array.isArray(params.code)) return params.code[0];
-    return params.code;
-  }, [params.code]);
 
   useEffect(() => {
     clearError();
   }, [clearError]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const completeEmailVerification = async () => {
-      if (!verificationCode && !(accessToken && refreshToken)) {
-        return;
-      }
-
-      setProcessingLink(true);
-
-      try {
-        if (verificationCode) {
-          const exchangeResult = await supabase.auth.exchangeCodeForSession(verificationCode);
-          if (exchangeResult.error) {
-            throw exchangeResult.error;
-          }
-        } else if (accessToken && refreshToken) {
-          const sessionResult = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (sessionResult.error) {
-            throw sessionResult.error;
-          }
-        }
-
-        const {
-          data: { user: authUser },
-        } = await supabase.auth.getUser();
-
-        if (authUser?.id) {
-          await updateUserDocument(authUser.id, { emailVerified: true }).catch(() => undefined);
-        }
-
-        await reloadUser().catch(() => undefined);
-      } catch (nextError: any) {
-        if (!cancelled) {
-          setScreenError(formatAuthError(nextError));
-        }
-      } finally {
-        if (!cancelled) {
-          setProcessingLink(false);
-        }
-      }
-    };
-
-    void completeEmailVerification();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, refreshToken, reloadUser, verificationCode]);
 
   useEffect(() => {
     if (user?.emailVerified) {
@@ -147,9 +77,7 @@ export default function VerifyEmailScreen() {
           message: 'Your email has been confirmed. You can continue to the customer app.',
         });
       } else {
-        setScreenError(
-          'Not verified yet. Open the verification link we sent, then come back here after confirming it.'
-        );
+        setScreenError('Not confirmed yet. Enter the 6-digit code from your email above.');
       }
     } catch {
       // `reloadUser` set `AuthContext`'s `error` before throwing.
@@ -163,7 +91,7 @@ export default function VerifyEmailScreen() {
     setResending(true);
     try {
       await sendVerificationEmail();
-      setNotice({ title: 'Verification link sent', message: 'Please check your inbox for the new link.' });
+      setNotice({ title: 'New code sent', message: 'Check your inbox for a fresh 6-digit code.' });
     } catch {
       // `sendVerificationEmail` set `AuthContext`'s `error` before throwing.
     } finally {
@@ -188,9 +116,7 @@ export default function VerifyEmailScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
-        {processingLink
-          ? 'Confirming your email link now. Stay on this screen for a moment.'
-          : `We sent a 6-digit code to ${user?.email ?? 'your inbox'}. Enter it below to confirm your email.`}
+        {`We sent a 6-digit code to ${user?.email ?? 'your inbox'}. Enter it below to confirm your email.`}
       </Text>
 
       <SuccessBanner title={notice?.title} message={notice?.message} onDismiss={() => setNotice(null)} />
@@ -214,41 +140,29 @@ export default function VerifyEmailScreen() {
         textContentType="oneTimeCode"
         autoComplete="one-time-code"
         maxLength={6}
-        editable={!confirmingCode && !processingLink}
+        editable={!confirmingCode}
         accessibilityLabel="6-digit confirmation code"
       />
 
       <TouchableOpacity
         style={[styles.primaryButton, code.trim().length < 6 ? styles.buttonDisabled : null]}
         onPress={handleConfirmCode}
-        disabled={confirmingCode || processingLink || code.trim().length < 6}
+        disabled={confirmingCode || code.trim().length < 6}
       >
         <Text style={styles.primaryText}>{confirmingCode ? 'Confirming...' : 'Confirm email'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={handleRefreshStatus}
-        disabled={checking || processingLink}
-      >
+      <TouchableOpacity style={styles.secondaryButton} onPress={handleRefreshStatus} disabled={checking}>
         <Text style={styles.secondaryText}>
-          {processingLink ? 'Confirming...' : checking ? 'Checking...' : 'I used the link instead'}
+          {checking ? 'Checking...' : 'Refresh confirmation status'}
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={handleResendEmail}
-        disabled={resending || processingLink}
-      >
+      <TouchableOpacity style={styles.secondaryButton} onPress={handleResendEmail} disabled={resending}>
         <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Send a new code'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.signOutButton}
-        onPress={handleSignOut}
-        disabled={signingOut || processingLink}
-      >
+      <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={signingOut}>
         <Text style={styles.signOutText}>{signingOut ? 'Signing out...' : 'Sign out'}</Text>
       </TouchableOpacity>
     </ScrollView>

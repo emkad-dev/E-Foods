@@ -47,7 +47,8 @@ export default function PartnerRegisterScreen() {
     setValidationError(null);
 
     try {
-      const result = await signUp(email.trim(), password, {
+      const trimmedEmail = email.trim();
+      const result = await signUp(trimmedEmail, password, {
         contactName: contactName.trim(),
         phoneNumber: phoneE164 ?? '',
       });
@@ -58,10 +59,27 @@ export default function PartnerRegisterScreen() {
       // `Alert` — an empty function on partner.feasty.com.ng. The account was
       // created and the screen never changed, leaving the partner re-submitting
       // an email address that now already exists.
+      if (result.verificationEmailSent && !result.sessionPresent) {
+        // Confirmation is OTP-only, so the next step is typing the 6-digit code
+        // — which happens in the app, not in the inbox. Go straight to the code
+        // screen, carrying the address as its own data param so the partner
+        // does not retype it (and so the resend button there has an address to
+        // work with). Without this, /verify-email would be reachable only by
+        // typing its URL, now that the emailed link is gone.
+        const pendingNotice: PartnerSuccessNoticeKey = 'verification-email-sent';
+        router.replace({
+          pathname: '/(auth)/verify-email',
+          params: {
+            notice: pendingNotice,
+            email: trimmedEmail,
+            ...(redirectTo ? { redirectTo } : null),
+          },
+        } as never);
+        return;
+      }
+
       const noticeKey: PartnerSuccessNoticeKey = result.verificationEmailSent
-        ? result.sessionPresent
-          ? 'account-created'
-          : 'verification-email-sent'
+        ? 'account-created'
         : 'account-created-unverified';
 
       router.replace({

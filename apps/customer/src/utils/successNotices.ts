@@ -6,7 +6,7 @@
 export const SUCCESS_NOTICES = {
   'account-created': {
     title: 'Check your email',
-    message: 'We sent a verification link. Confirm it, then sign in to start ordering.',
+    message: 'We sent a 6-digit confirmation code. Enter it to confirm your email, then sign in to start ordering.',
   },
   'email-verified': {
     title: 'Email confirmed',
@@ -17,8 +17,8 @@ export const SUCCESS_NOTICES = {
     message: 'You can now sign in with your new password.',
   },
   'reset-email-sent': {
-    title: 'Reset email sent',
-    message: 'Open the link in your inbox to choose a new password.',
+    title: 'Reset code sent',
+    message: 'Enter the 6-digit code from your inbox, then choose a new password.',
   },
 } as const;
 

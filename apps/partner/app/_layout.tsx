@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
-import * as Linking from 'expo-linking';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { useFeastyFonts } from '@feasty/design-system';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
@@ -11,49 +10,14 @@ const initializeSentry = createSentryInitializer({
   loadWebSdk: () => import('@sentry/browser'),
 });
 
+// This component held a deep-link handler whose ONLY two branches ferried
+// `code` / `access_token` / `refresh_token` from an emailed link into
+// /verify-email and /reset-password. Email confirmation and password reset are
+// OTP-only now — the emails carry a 6-digit code the partner types, there is no
+// link and no params to carry — so the handler, its `expo-linking` import and
+// the router it navigated with are all gone rather than left as an empty
+// effect. expo-router still resolves those two routes from a URL on its own.
 function RootLayoutNav() {
-  const router = useRouter();
-
-  useEffect(() => {
-    const handleDeepLink = ({ url }: { url: string }) => {
-      const { hostname, path, queryParams } = Linking.parse(url);
-      const targetPath =
-        typeof path === 'string' && path.trim() ? path.trim() : typeof hostname === 'string' ? hostname.trim() : '';
-
-      if (targetPath === 'verify-email') {
-        router.replace({
-          pathname: '/(auth)/verify-email' as never,
-          params: {
-            ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
-            ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
-            ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
-          },
-        });
-        return;
-      }
-
-      if (targetPath === 'reset-password') {
-        router.replace({
-          pathname: '/(auth)/reset-password' as never,
-          params: {
-            ...(typeof queryParams?.code === 'string' ? { code: queryParams.code } : null),
-            ...(typeof queryParams?.access_token === 'string' ? { access_token: queryParams.access_token } : null),
-            ...(typeof queryParams?.refresh_token === 'string' ? { refresh_token: queryParams.refresh_token } : null),
-          },
-        });
-      }
-    };
-
-    Linking.getInitialURL().then((url) => {
-      if (url) {
-        handleDeepLink({ url });
-      }
-    });
-
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-    return () => subscription.remove();
-  }, [router]);
-
   // The navigator stays mounted across auth/loading changes. Previously this
   // returned a spinner in place of the navigator whenever `loading` toggled,
   // which unmounted the whole tree on every Supabase auth event and made the

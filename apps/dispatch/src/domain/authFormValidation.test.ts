@@ -12,10 +12,12 @@ import { describe, it } from 'node:test';
 
 import {
   MIN_PASSWORD_LENGTH,
+  validateEmailCode,
   validateForgotPasswordForm,
   validateLoginForm,
   validateRegisterForm,
   validateResetPasswordForm,
+  validateVerifyEmailForm,
 } from './authFormValidation.js';
 
 const validRegistration = {
@@ -27,7 +29,8 @@ const validRegistration = {
 };
 
 const validReset = {
-  hasResetCredential: true,
+  email: 'rider@example.com',
+  code: '123456',
   password: 'supersecret',
   confirmPassword: 'supersecret',
 };
@@ -87,16 +90,47 @@ describe('validateRegisterForm', () => {
   });
 });
 
+describe('validateEmailCode', () => {
+  it('accepts a full-length code', () => {
+    assert.equal(validateEmailCode({ value: '123456' }), null);
+  });
+
+  it('refuses a short or empty code', () => {
+    assert.match(validateEmailCode({ value: '12345' }) ?? '', /6 digits/);
+    assert.match(validateEmailCode({ value: '   ' }) ?? '', /6 digits/);
+  });
+});
+
+describe('validateVerifyEmailForm', () => {
+  it('accepts an address with a full code', () => {
+    assert.equal(validateVerifyEmailForm({ email: 'rider@example.com', code: '123456' }), null);
+  });
+
+  it('asks for the address first — verifyOtp is keyed on (email, token)', () => {
+    assert.match(validateVerifyEmailForm({ email: '  ', code: '' }) ?? '', /email address you signed up with/);
+  });
+
+  it('then asks for the whole code', () => {
+    assert.match(validateVerifyEmailForm({ email: 'rider@example.com', code: '12' }) ?? '', /6 digits/);
+  });
+});
+
 describe('validateResetPasswordForm', () => {
-  it('accepts a matching pair on a credentialed link', () => {
+  it('accepts an address, a full code and a matching pair', () => {
     assert.equal(validateResetPasswordForm(validReset), null);
   });
 
-  it('reports the missing recovery code before anything the rider typed', () => {
-    // Checked first on purpose: no password can rescue a link with no code, so
-    // complaining about the password fields would send the rider in circles.
-    const message = validateResetPasswordForm({ hasResetCredential: false, password: '', confirmPassword: '' });
-    assert.match(message ?? '', /recovery code/);
+  it('reports the missing address before anything else the rider typed', () => {
+    // Checked first on purpose: reset is OTP-only and `verifyOtp` is keyed on
+    // (email, token), so a code alone identifies nobody and complaining about
+    // the password fields would send the rider in circles.
+    const message = validateResetPasswordForm({ ...validReset, email: '   ', code: '', password: '', confirmPassword: '' });
+    assert.match(message ?? '', /email address you asked for the reset code with/);
+  });
+
+  it('reports an incomplete code before the password pair', () => {
+    const message = validateResetPasswordForm({ ...validReset, code: '123', password: '', confirmPassword: '' });
+    assert.match(message ?? '', /6 digits/);
   });
 
   it('refuses an empty field', () => {

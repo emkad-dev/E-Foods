@@ -13,8 +13,6 @@ import {
   sendPasswordReset,
 } from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
-import { appEnv } from '../config/env';
-import { buildDispatchActionCodeSettings } from '../utils/authActionUrls';
 import { deleteOwnAccount as deleteOwnDispatchAccount } from '../services/accountManagement';
 import {
   clearStoredUserProfile,
@@ -56,12 +54,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const getActionCodeSettings = (path: string) =>
-  buildDispatchActionCodeSettings(path, {
-    appScheme: appEnv.appScheme,
-    webOrigin: appEnv.dispatchWebOrigin,
-  });
-
 const isProfileOfflineError = (error: unknown) => {
   const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
   const errorMessage =
@@ -348,20 +340,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      // The sign-up call itself sends the confirmation email, so the redirect goes with it.
-      // Resending here would only trip Supabase's 60s cooldown and leave the first
-      // (Site URL) email as the one the rider actually receives.
-      const { session } = await createUserWithEmail(
-        supabase,
-        email,
-        password,
-        {
-          display_name: userData.displayName.trim(),
-          phone: userData.phoneNumber.trim(),
-          role: 'customer',
-        },
-        getActionCodeSettings(appEnv.verifyEmailPath)
-      );
+      // The sign-up call itself sends the confirmation email. Resending here
+      // would only trip Supabase's 60s cooldown. No redirect is passed:
+      // confirmation is OTP-only, so the email carries a 6-digit code the rider
+      // types on /verify-email and there is no link to steer.
+      const { session } = await createUserWithEmail(supabase, email, password, {
+        display_name: userData.displayName.trim(),
+        phone: userData.phoneNumber.trim(),
+        role: 'customer',
+      });
 
       if (!session) {
         setError('Verify your email, then sign in to finish setting up your rider account.');
@@ -408,7 +395,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      await sendPasswordReset(supabase, email, getActionCodeSettings(appEnv.resetPasswordPath));
+      // No redirect: the recovery email carries a 6-digit code redeemed on
+      // /reset-password, not a link.
+      await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to send password reset email');
       setError(nextMessage);

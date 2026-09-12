@@ -17,14 +17,15 @@
  */
 
 export const DISPATCH_SUCCESS_NOTICES = {
+  'email-confirmed': 'Email confirmed. Sign in to finish your rider setup.',
   'login-ready': 'Your rider login is ready. Complete your rider details below to finish setup.',
   'password-updated': 'Password updated. Sign in with your new password.',
-  'reset-link-sent':
-    'If this dispatch account exists, a reset link is on its way. Open the link in your inbox to choose a new password.',
+  'reset-code-sent':
+    'If this dispatch account exists, a 6-digit reset code is on its way. Enter it below to choose a new password.',
   'verification-email-sent':
-    'We sent a verification email. Confirm it, then sign in to finish your rider setup.',
+    'We sent a 6-digit confirmation code to your email. Enter it below to confirm this account.',
   'verification-email-failed':
-    'Your login was created, but the verification email could not be sent from the app. Sign in after you verify your email.',
+    'Your login was created, but the confirmation email could not be sent from the app. Sign in after you confirm your email.',
 } as const;
 
 export type DispatchSuccessNoticeKey = keyof typeof DISPATCH_SUCCESS_NOTICES;

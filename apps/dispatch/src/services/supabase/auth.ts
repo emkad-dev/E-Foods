@@ -9,4 +9,6 @@ export {
   sendVerificationEmailWithFallback as sendVerificationEmail,
   signInWithEmail,
   signOutUser,
+  verifyEmailOtp,
+  verifyPasswordResetOtp,
 } from '../../../../../packages/auth/src';
