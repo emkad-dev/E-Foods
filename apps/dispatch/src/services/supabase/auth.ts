@@ -1,4 +1,5 @@
 export {
+  clearOtpCooldown,
   createUserWithEmail,
   formatAuthError,
   getUserRoleClaim,
@@ -9,6 +10,7 @@ export {
   sendVerificationEmailWithFallback as sendVerificationEmail,
   signInWithEmail,
   signOutUser,
+  useOtpCooldown,
   verifyEmailOtp,
   verifyPasswordResetOtp,
 } from '../../../../../packages/auth/src';

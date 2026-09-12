@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
+import { useOtpCooldown } from '../../src/services/supabase/auth';
 import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -18,6 +19,11 @@ export default function PartnerForgotPasswordScreen() {
   // see the note in login.tsx.
   const [validationError, setValidationError] = useState<string | null>(null);
   const formError = validationError ?? error;
+  // Each send costs a real email, so it is throttled. Keyed on the address in
+  // the field above, so a different address is not held behind the previous
+  // one's timer, and read from storage on mount so a reload -- the obvious way
+  // to try to dodge a countdown -- keeps it.
+  const sendCooldown = useOtpCooldown('recovery', email);
 
   const handleEmailChange = (value: string) => {
     if (error) {
@@ -41,6 +47,9 @@ export default function PartnerForgotPasswordScreen() {
     try {
       const trimmedEmail = email.trim();
       await resetPassword(trimmedEmail);
+      // Recorded only here: a `resetPassword` that threw sent no email, so the
+      // user must be able to try again at once.
+      await sendCooldown.markSent();
       // Reset is OTP-only now, so the next step happens in the app rather than
       // in the inbox: go straight to the code form instead of back to sign-in.
       // `notice` is the keyed route-param mechanism (see utils/successNotices);
@@ -88,8 +97,21 @@ export default function PartnerForgotPasswordScreen() {
         editable={!loading}
       />
 
-      <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Sending...' : 'Send reset code'}</Text>
+      <TouchableOpacity
+        style={[styles.button, sendCooldown.isCoolingDown ? styles.buttonDisabled : null]}
+        onPress={handleResetPassword}
+        // `isChecking` too: the stored timestamp is read asynchronously, and
+        // until it comes back this control must not be pressable, or a reload
+        // leaves a brief window where a send goes out mid-cooldown.
+        disabled={loading || sendCooldown.isCoolingDown || sendCooldown.isChecking}
+      >
+        <Text style={styles.buttonText}>
+          {loading
+            ? 'Sending...'
+            : sendCooldown.isCoolingDown
+              ? `Send reset code in ${sendCooldown.label}`
+              : 'Send reset code'}
+        </Text>
       </TouchableOpacity>
 
       <Link
@@ -145,6 +167,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     marginTop: 18,
     paddingVertical: 16,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   buttonText: {
     color: '#ffffff',

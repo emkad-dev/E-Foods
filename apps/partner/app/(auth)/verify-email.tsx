@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
-import { formatAuthError, sendVerificationEmail, verifyEmailOtp } from '../../src/services/supabase/auth';
+import {
+  formatAuthError,
+  sendVerificationEmail,
+  useOtpCooldown,
+  verifyEmailOtp,
+} from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { updateUserDocument } from '../../src/services/supabase/profile';
 import { resolvePartnerSuccessNotice, type PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
@@ -42,6 +47,12 @@ export default function PartnerVerifyEmailScreen() {
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Every resend costs a real email, so the control is throttled. This screen
+  // runs signed out, so the address being throttled is whatever is in the email
+  // field above -- retyping a different one is therefore not held behind the
+  // previous address's timer. Read from storage on mount, which is what makes a
+  // reload keep the countdown instead of clearing it.
+  const resendCooldown = useOtpCooldown('signup', email);
 
   const handleConfirmCode = async () => {
     const invalid = validateVerifyEmailForm({ email, code });
@@ -57,6 +68,10 @@ export default function PartnerVerifyEmailScreen() {
 
     try {
       await verifyEmailOtp(supabase, email.trim(), code);
+
+      // Redeemed: this flow is over, so the resend timer for that address goes
+      // with it.
+      await resendCooldown.clear();
 
       // Confirming the code leaves a real session behind, which is what lets
       // this write land; the profile row mirrors the auth flag for the screens
@@ -97,6 +112,9 @@ export default function PartnerVerifyEmailScreen() {
 
     try {
       await sendVerificationEmail(supabase, email.trim());
+      // Only after a send that actually happened: one that threw cost no email,
+      // so the user must be able to try again immediately.
+      await resendCooldown.markSent();
       setInfo('A new 6-digit code is on its way. Check your inbox.');
     } catch (nextError: any) {
       setError(formatAuthError(nextError));
@@ -178,8 +196,21 @@ export default function PartnerVerifyEmailScreen() {
         <Text style={styles.buttonText}>{confirming ? 'Confirming...' : 'Confirm email'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleResend} disabled={resending}>
-        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Send a new code'}</Text>
+      <TouchableOpacity
+        style={[styles.secondaryButton, resendCooldown.isCoolingDown ? styles.buttonDisabled : null]}
+        onPress={handleResend}
+        // `isChecking` too: the stored timestamp is read asynchronously, and
+        // until it comes back this control must not be pressable, or a reload
+        // leaves a brief window where a send goes out mid-cooldown.
+        disabled={resending || resendCooldown.isCoolingDown || resendCooldown.isChecking}
+      >
+        <Text style={styles.secondaryText}>
+          {resending
+            ? 'Sending...'
+            : resendCooldown.isCoolingDown
+              ? `Send a new code in ${resendCooldown.label}`
+              : 'Send a new code'}
+        </Text>
       </TouchableOpacity>
 
       <Link

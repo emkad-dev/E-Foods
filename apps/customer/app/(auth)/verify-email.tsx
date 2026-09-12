@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateEmailCode } from '../../src/domain/authFormValidation';
+import { useOtpCooldown } from '../../src/services/supabase/auth';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { customerTheme } from '../../src/theme/palette';
 
@@ -26,6 +27,10 @@ export default function VerifyEmailScreen() {
   // the SAME slot as the context's `error`, keeping one error surface.
   const [screenError, setScreenError] = useState<string | null>(null);
   const router = useRouter();
+  // Every resend costs a real email, so the control is throttled. This is the
+  // only one of the three verify-email screens that runs SIGNED IN, so the
+  // address being throttled comes off the session rather than a typed field.
+  const resendCooldown = useOtpCooldown('signup', user?.email ?? '');
 
   useEffect(() => {
     clearError();
@@ -52,6 +57,9 @@ export default function VerifyEmailScreen() {
       const verified = await verifyEmailCode(trimmed);
 
       if (verified) {
+        // The code was redeemed, so this flow is over: drop the cooldown rather
+        // than hold a timer against an address that no longer needs one.
+        await resendCooldown.clear();
         setNotice({
           title: 'Email confirmed',
           message: 'Your email has been confirmed. You can continue to the customer app.',
@@ -91,6 +99,9 @@ export default function VerifyEmailScreen() {
     setResending(true);
     try {
       await sendVerificationEmail();
+      // Only now — a send that threw cost no email, so the user must be able to
+      // try again immediately.
+      await resendCooldown.markSent();
       setNotice({ title: 'New code sent', message: 'Check your inbox for a fresh 6-digit code.' });
     } catch {
       // `sendVerificationEmail` set `AuthContext`'s `error` before throwing.
@@ -158,8 +169,21 @@ export default function VerifyEmailScreen() {
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleResendEmail} disabled={resending}>
-        <Text style={styles.secondaryText}>{resending ? 'Sending...' : 'Send a new code'}</Text>
+      <TouchableOpacity
+        style={[styles.secondaryButton, resendCooldown.isCoolingDown ? styles.buttonDisabled : null]}
+        onPress={handleResendEmail}
+        // `isChecking` too: the stored timestamp is read asynchronously, and
+        // until it comes back this control must not be pressable, or a reload
+        // leaves a brief window where a send goes out mid-cooldown.
+        disabled={resending || resendCooldown.isCoolingDown || resendCooldown.isChecking}
+      >
+        <Text style={styles.secondaryText}>
+          {resending
+            ? 'Sending...'
+            : resendCooldown.isCoolingDown
+              ? `Send a new code in ${resendCooldown.label}`
+              : 'Send a new code'}
+        </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={signingOut}>

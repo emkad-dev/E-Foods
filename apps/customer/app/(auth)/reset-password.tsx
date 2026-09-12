@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
-import { formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
+import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { resolveSuccessNotice } from '../../src/utils/successNotices';
@@ -78,6 +78,12 @@ export default function ResetPasswordScreen() {
       if (updateResult.error) {
         throw updateResult.error;
       }
+
+      // The code has been redeemed and the password is written, so this flow is
+      // finished: drop the cooldown rather than hold a timer against someone who
+      // may legitimately need a second reset straight away (a mistyped new
+      // password is the ordinary case).
+      await clearOtpCooldown('recovery', email.trim());
 
       // The recovery session outlives the update, and this flow ends at login.
       await supabase.auth.signOut().catch(() => undefined);
