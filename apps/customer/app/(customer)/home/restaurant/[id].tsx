@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   FlatList,
   ScrollView,
   StyleSheet,
@@ -149,13 +148,23 @@ export default function RestaurantDetail() {
       );
     } catch (error) {
       console.error('Error fetching restaurant:', error);
-      Alert.alert('Error', 'Could not load restaurant details');
+      // Was Alert.alert, i.e. nothing at all on app.feasty.com.ng. This screen
+      // reloads itself from Realtime, so the failure that matters is a REFETCH
+      // failing while a restaurant is already on screen: the customer keeps
+      // reading stale prices and an out-of-date menu with no hint anything is
+      // wrong. Sticky, because there is no other signal and a glance would miss it.
+      showNotice({
+        tone: 'error',
+        title: 'Could not refresh this restaurant',
+        message: 'You may be seeing out-of-date prices or items. Check your connection and pull to refresh.',
+        durationMs: null,
+      });
     } finally {
       if (activeRef.current) {
         setLoading(false);
       }
     }
-  }, [id, highlightId]);
+  }, [id, highlightId, showNotice]);
 
   const subscribeToRestaurant = useCallback<RealtimeResourceSubscribe>(
     (onChanged, onStatusChange) =>
