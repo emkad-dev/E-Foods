@@ -306,6 +306,24 @@ const aggregateOrderGroupPricing = (orders: PreparedRestaurantOrderDraft[]) => {
   const serviceFee = sumCurrency(orders.map((order) => parseNumber(order.pricing.serviceFee, 0)));
   const tip = sumCurrency(orders.map((order) => parseNumber(order.pricing.tip, 0)));
   const discount = sumCurrency(orders.map((order) => parseNumber(order.pricing.discount, 0)));
+  // Derived from the member orders, the same way every other field here is.
+  // This used to read `discount > 0 ? null : null` -- a dead ternary, null on
+  // both branches -- so the group summary could never report WHO funded a group
+  // discount, which is the field deciding whether the platform or the restaurant
+  // absorbs the money. Unreachable today only because multi-store checkout hard-
+  // rejects promos (412 below), so `discount` is always 0 here; it would have
+  // started silently mis-attributing settlement the day group promos shipped.
+  // The single-order path already does this correctly in pricing.ts.
+  // Conflicting sources across members collapse to null rather than picking one:
+  // guessing an attribution is worse than declining to state one.
+  const fundingSources = Array.from(
+    new Set(
+      orders
+        .map((order) => sanitizeText(order.pricing.discountFundingSource))
+        .filter((source) => source.length > 0)
+    )
+  );
+  const discountFundingSource = discount > 0 && fundingSources.length === 1 ? fundingSources[0] : null;
   const total = sumCurrency(orders.map((order) => parseNumber(order.pricing.total, 0)));
   const restaurantBasis = sumCurrency(orders.map((order) => parseNumber(order.pricing.restaurantBasis, 0)));
   const partnerServiceFee = sumCurrency(orders.map((order) => parseNumber(order.pricing.partnerServiceFee, 0)));
@@ -327,7 +345,7 @@ const aggregateOrderGroupPricing = (orders: PreparedRestaurantOrderDraft[]) => {
     currency: template.currency ?? DEFAULT_CURRENCY,
     deliveryFee,
     discount,
-    discountFundingSource: discount > 0 ? null : null,
+    discountFundingSource,
     dispatchFee,
     netSettlement,
     partnerServiceFee,
@@ -338,7 +356,7 @@ const aggregateOrderGroupPricing = (orders: PreparedRestaurantOrderDraft[]) => {
     settlement: {
       basis: 'menu_base_prices',
       discount,
-      discountFundingSource: discount > 0 ? null : null,
+      discountFundingSource,
       dispatchFee,
       markupFlat: parseNumber(settlementTemplate.markupFlat, 0),
       markupRate: parseNumber(settlementTemplate.markupRate, 0),
