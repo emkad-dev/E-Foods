@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { FontAwesome } from '@expo/vector-icons';
 import { Tabs, usePathname } from 'expo-router';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -53,7 +54,21 @@ export default function CustomerLayout() {
   const tabBarWidth = Math.min(width - TAB_BAR_SIDE_INSET * 2, TAB_BAR_MAX_WIDTH);
   const tabBarSideInset = Math.max((width - tabBarWidth) / 2, TAB_BAR_SIDE_INSET);
 
-  if (loading) {
+  // Latched to the first paint, for the same reason as the (auth) layout: this
+  // `loading` is true for the duration of every auth ACTION, not just the initial
+  // bootstrap. Unlatched, signing in from the cart's "Sign in to check out" or the
+  // profile prompt blanked this entire tab shell mid-action -- including the
+  // basket the visitor was looking at -- and remounted it afterwards.
+  //
+  // Safe here precisely because of the note below: this shell is built to render
+  // with a null user, so keeping it mounted while one arrives is the state it
+  // already handles, not a new one.
+  const hasBootstrappedRef = useRef(false);
+  if (!loading) {
+    hasBootstrappedRef.current = true;
+  }
+
+  if (loading && !hasBootstrappedRef.current) {
     return <LoadingSkeleton mode={getCustomerShellLoadingMode(pathname)} />;
   }
 

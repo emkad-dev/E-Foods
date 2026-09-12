@@ -227,7 +227,20 @@ function RootLayoutNav() {
   // Holding on `fontsReady` here avoids a flash of unstyled text. `useFeastyFonts`
   // reports ready even on a load failure, so a font error degrades to the system
   // face instead of hanging the app on the skeleton.
-  if (!fontsReady || loading || policyLoading) {
+  //
+  // The auth half of that condition is latched to the FIRST paint. `loading` is
+  // true for the duration of every auth action, not just the initial session
+  // bootstrap, so an unlatched gate here tore the entire navigator down in the
+  // middle of a sign-up or sign-in: a failed attempt lost the screen the user
+  // was on, taking its inline error with it. Once the session has resolved once,
+  // later action-driven loading is the screens' own business -- they all render
+  // busy state themselves -- and the navigator stays mounted.
+  const hasBootstrappedRef = useRef(false);
+  if (!loading && !policyLoading) {
+    hasBootstrappedRef.current = true;
+  }
+
+  if (!fontsReady || ((loading || policyLoading) && !hasBootstrappedRef.current)) {
     return <LoadingSkeleton mode={getCustomerLoadingMode(pathname)} />;
   }
 

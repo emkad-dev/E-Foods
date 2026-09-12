@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Redirect, Stack, useLocalSearchParams, usePathname } from 'expo-router';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -76,7 +77,21 @@ export default function AuthLayout() {
   const redirectTo = normalizeRedirectTo(params.redirectTo);
   const currentPath = pathname || '/login';
 
-  if (loading || policyLoading) {
+  // `loading` is true for the duration of every auth ACTION (signUp, signIn,
+  // resetPassword), not only the initial session bootstrap. Returning the
+  // full-screen skeleton on it therefore unmounted this whole navigator
+  // mid-action: a failed sign-up tore /register down before it could set its
+  // inline error, and the stack that remounted afterwards fell back to its
+  // initial route (login) while the URL had drifted elsewhere. So latch the
+  // skeleton to the first paint only. The screens already render their own
+  // in-flight state -- disabled inputs, "Creating account..." button labels --
+  // which is what a user mid-action should see.
+  const hasBootstrappedRef = useRef(false);
+  if (!loading && !policyLoading) {
+    hasBootstrappedRef.current = true;
+  }
+
+  if ((loading || policyLoading) && !hasBootstrappedRef.current) {
     return <LoadingSkeleton mode={getAuthLoadingMode(pathname)} />;
   }
 

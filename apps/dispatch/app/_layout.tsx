@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
@@ -77,6 +77,17 @@ function RootLayoutNav() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+  // `loading` is true for the duration of every auth ACTION (signUp, signIn,
+  // resetPassword), not only the initial session bootstrap. Swapping <Slot />
+  // for the spinner on it therefore unmounted the whole navigator mid-action:
+  // a failed sign-up tore /register down before it could set its inline error,
+  // and the stack that remounted afterwards fell back to its initial route. So
+  // latch the spinner to the first paint only -- the screens already render
+  // their own in-flight state (disabled inputs, "Creating account..." labels).
+  const hasBootstrappedRef = useRef(false);
+  if (!loading) {
+    hasBootstrappedRef.current = true;
+  }
 
   useEffect(() => {
     if (loading) {
@@ -96,7 +107,7 @@ function RootLayoutNav() {
     }
   }, [loading, router, segments, user]);
 
-  if (loading) {
+  if (loading && !hasBootstrappedRef.current) {
     return (
       <View style={{ alignItems: 'center', backgroundColor: '#111315', flex: 1, justifyContent: 'center' }}>
         <ActivityIndicator size="large" color={dispatchTheme.accent} />
