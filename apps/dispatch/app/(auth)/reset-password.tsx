@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
+import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchResetPasswordScreen() {
@@ -31,23 +33,17 @@ export default function DispatchResetPasswordScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const handleResetPassword = async () => {
-    if (!accessToken && !refreshToken && !recoveryCode) {
-      Alert.alert('Invalid link', 'This reset link is missing the required recovery code.');
-      return;
-    }
+    // All four checks used to `Alert.alert` and return, leaving this screen's
+    // own `error` slot — already rendered below for submit failures — empty.
+    // They now report through it, so there is one error surface here.
+    const invalid = validateResetPasswordForm({
+      hasResetCredential: Boolean(recoveryCode || (accessToken && refreshToken)),
+      password,
+      confirmPassword,
+    });
 
-    if (!password.trim() || !confirmPassword.trim()) {
-      Alert.alert('Missing information', 'Please enter both password fields to continue.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Enter matching passwords to continue.');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters long.');
+    if (invalid) {
+      setError(invalid);
       return;
     }
 
@@ -82,15 +78,18 @@ export default function DispatchResetPasswordScreen() {
       // as a route param, the way the customer reset flow does. Hanging this off
       // an `Alert.alert` button callback would strand the rider on this form the
       // day dispatch gains a web build: `Alert` is an empty function in
-      // react-native-web, so the callback never runs.
+      // react-native-web, so the callback never runs. The key is now typed
+      // rather than a bare string (src/utils/routeNotices.ts), so a typo here
+      // is a compile error instead of a confirmation that renders nothing.
+      const noticeKey: DispatchSuccessNoticeKey = 'password-updated';
       router.replace({
         pathname: '/(auth)/login',
-        params: { notice: 'password-updated' },
+        params: { notice: noticeKey },
       } as never);
     } catch (nextError: any) {
-      const formattedError = formatAuthError(nextError);
-      setError(formattedError);
-      Alert.alert('Unable to reset password', formattedError);
+      // `setError` alone: the slot below already renders it, and the `Alert`
+      // that used to follow only repeated it on native and said nothing on web.
+      setError(formatAuthError(nextError));
     } finally {
       setSubmitting(false);
     }
@@ -101,7 +100,11 @@ export default function DispatchResetPasswordScreen() {
       <Text style={styles.title}>Choose a new dispatch password</Text>
       <Text style={styles.copy}>Set a fresh password for your dispatch account, then sign back in.</Text>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : null}
 
       <TextInput
         style={styles.input}

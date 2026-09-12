@@ -1,34 +1,53 @@
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
+import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { clearError, error, loading, resetPassword } = useAuth();
   const [email, setEmail] = useState('');
+  // Held locally and rendered through the same slot as `AuthContext`'s error —
+  // see the note in login.tsx.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleEmailChange = (value: string) => {
     if (error) {
       clearError();
     }
 
+    setValidationError(null);
     setEmail(value);
   };
 
   const handleResetPassword = async () => {
-    if (!email.trim()) {
-      Alert.alert('Missing information', 'Enter the email address linked to your dispatch account.');
+    const invalid = validateForgotPasswordForm({ email });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
+    setValidationError(null);
+
     try {
       await resetPassword(email.trim());
-      Alert.alert('Check your inbox', 'We sent a password reset email if this dispatch account exists.');
-    } catch (nextError: any) {
-      Alert.alert('Reset failed', nextError.message ?? 'Unable to send reset email right now.');
+      // Navigate and carry the confirmation to the login screen as a route
+      // param, the way the reset-password flow already does. The success
+      // `Alert` that used to sit here was the ONLY feedback and NOTHING
+      // followed it — not a navigation, not a state change — so on a web build
+      // the rider would submit, watch the screen sit unchanged, and re-submit,
+      // each retry burning another rate-limit slot on the reset endpoint.
+      const noticeKey: DispatchSuccessNoticeKey = 'reset-link-sent';
+      router.replace({ pathname: '/(auth)/login', params: { notice: noticeKey } } as never);
+    } catch {
+      // `resetPassword` already set `AuthContext`'s `error`, rendered above.
     }
   };
 
@@ -47,7 +66,11 @@ export default function DispatchForgotPasswordScreen() {
       </View>
 
       <View style={styles.formCard}>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {formError ? (
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+            {formError}
+          </Text>
+        ) : null}
 
         <TextInput
           style={styles.input}

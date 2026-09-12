@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// Imported by module path, not from the '@feasty/design-system' barrel, on
+// purpose: the barrel re-exports useFeastyFonts, which pulls expo-font and six
+// @expo-google-fonts faces into the bundle. This app has not adopted the design
+// system and does not declare those dependencies, so it takes the one primitive
+// it needs. See the same note in ./profile.tsx.
+import { useNotice } from '../../../../packages/design-system/src/primitives/Notice';
 import { useAuth } from '../../src/contexts/AuthContext';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
@@ -18,6 +25,7 @@ import {
 } from '../../src/domain/dispatchOnboardingSteps';
 import { submitDispatchApplication } from '../../src/services/dispatchApplications';
 import { buildDispatchPolicyAcceptance } from '../../src/services/policyAcceptance';
+import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 
 const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
@@ -30,7 +38,18 @@ type CapturedDocument = {
 
 export default function CompleteRiderDetailsScreen() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ notice?: string | string[] }>();
   const { clearError, error, loading, signOut, user } = useAuth();
+  // Register routes here with `notice=login-ready` when sign-up returned a
+  // session. Rendered as a static line rather than through `showNotice` below
+  // because it reports what happened on the PREVIOUS screen, not an answer to
+  // a control on this one.
+  const routeNotice = resolveDispatchSuccessNotice(params.notice);
+  // Every control on this wizard reported through `Alert`, an empty function
+  // under react-native-web. Inline rather than floating: this is a short,
+  // single-column form and each message answers one specific button the rider
+  // has just pressed, so the notice belongs in the flow right above them.
+  const { notice, showNotice } = useNotice({ placement: 'inline' });
   const [region, setRegion] = useState<(typeof nigeriaStateOptions)[number]>('Lagos');
   const [lga, setLga] = useState('');
   const [vehicleType, setVehicleType] = useState<(typeof vehicleOptions)[number]>('Bike');
@@ -120,7 +139,13 @@ export default function CompleteRiderDetailsScreen() {
   const handlePickDocument = useCallback(async (setter: (document: CapturedDocument | null) => void) => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Photo access blocked', 'Allow photo access to capture your licence documents.');
+      // Without this the Capture button does nothing and says nothing, which
+      // reads as a broken button rather than a denied OS permission.
+      showNotice({
+        tone: 'error',
+        title: 'Photo access blocked',
+        message: 'Allow photo access to capture your licence documents.',
+      });
       return;
     }
 
@@ -140,26 +165,49 @@ export default function CompleteRiderDetailsScreen() {
       mimeType: result.assets[0].mimeType ?? 'image/jpeg',
       uri: result.assets[0].uri,
     });
-  }, []);
+    // `showNotice` is a `useCallback([])` inside the primitive, so listing it
+    // keeps the identity of this callback stable rather than churning it.
+  }, [showNotice]);
 
   const handleSubmit = async () => {
     if (!user) {
-      Alert.alert('Profile unavailable', 'Sign in again before submitting your rider application.');
+      showNotice({
+        tone: 'error',
+        title: 'Profile unavailable',
+        message: 'Sign in again before submitting your rider application.',
+      });
       return;
     }
 
+    // The three checks below are defensive: the Submit button is already
+    // disabled unless `canSubmitDispatchOnboarding` passes. They stay because
+    // they are the backstop if that gate and these rules ever drift apart --
+    // but a backstop that reports through a no-op is not a backstop at all,
+    // which is what `Alert` made them.
     if (!lga.trim() || !vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlateNumber.trim() || !licenseNumber.trim()) {
-      Alert.alert('Missing details', 'Fill in your dispatch area and vehicle details before submitting.');
+      showNotice({
+        tone: 'error',
+        title: 'Missing details',
+        message: 'Fill in your dispatch area and vehicle details before submitting.',
+      });
       return;
     }
 
     if (!currentAddress.trim()) {
-      Alert.alert('Missing base address', 'Add your current base or pickup address before submitting.');
+      showNotice({
+        tone: 'error',
+        title: 'Missing base address',
+        message: 'Add your current base or pickup address before submitting.',
+      });
       return;
     }
 
     if (!licenceFront || !licenceBack) {
-      Alert.alert('Missing documents', 'Upload both sides of your licence before submitting.');
+      showNotice({
+        tone: 'error',
+        title: 'Missing documents',
+        message: 'Upload both sides of your licence before submitting.',
+      });
       return;
     }
 
@@ -184,9 +232,21 @@ export default function CompleteRiderDetailsScreen() {
 
       setSubmissionStatus(result.status);
       setSubmissionSubmittedAt(result.submittedAt);
-      Alert.alert('Application submitted', 'Your courier details are under review.');
+      showNotice({
+        tone: 'success',
+        title: 'Application submitted',
+        message: 'Your courier details are under review.',
+      });
     } catch (nextError: any) {
-      Alert.alert('Unable to submit', nextError.message ?? 'Please try again.');
+      // The one that mattered most: a failed submit changed nothing on screen,
+      // so the rider had no way to tell it from a slow upload of two licence
+      // photos and would press Submit again. Sticky, because the status banner
+      // has not appeared and this is the only thing saying why.
+      showNotice({
+        tone: 'error',
+        title: 'Unable to submit',
+        message: nextError.message ?? 'Please try again.',
+      });
     }
   };
 
@@ -194,7 +254,11 @@ export default function CompleteRiderDetailsScreen() {
     try {
       await signOut();
     } catch (nextError: any) {
-      Alert.alert('Sign out failed', nextError.message ?? 'Unable to sign out right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Sign out failed',
+        message: nextError.message ?? 'Unable to sign out right now.',
+      });
     }
   };
 
@@ -245,7 +309,16 @@ export default function CompleteRiderDetailsScreen() {
       </Text>
 
       <View style={styles.card}>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {routeNotice ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.routeNoticeText}>
+            {routeNotice}
+          </Text>
+        ) : null}
+        {error ? (
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+            {error}
+          </Text>
+        ) : null}
         <View style={styles.identityRow}>
           <View style={styles.identityBubble}>
             <Text style={styles.identityBubbleText}>{contactName.charAt(0).toUpperCase()}</Text>
@@ -397,6 +470,13 @@ export default function CompleteRiderDetailsScreen() {
             </Text>
           </>
         ) : null}
+
+        {/*
+          Directly above the button row rather than at the top of the card: every
+          message this renders answers Continue, Submit, Capture or Sign out, and
+          on the documents step the top of the card is scrolled out of view.
+        */}
+        {notice}
 
         {stepId === 'review' ? (
           <TouchableOpacity
@@ -554,6 +634,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
+  },
+  routeNoticeText: {
+    color: dispatchTheme.success,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginBottom: 10,
   },
   errorText: {
     color: dispatchTheme.danger,

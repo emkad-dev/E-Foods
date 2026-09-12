@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Link, useRouter } from 'expo-router';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateRegisterForm } from '../../src/domain/authFormValidation';
+import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchRegisterScreen() {
@@ -16,6 +18,10 @@ export default function DispatchRegisterScreen() {
   const [password, setPassword] = useState('');
   const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  // Held locally and rendered through the same slot as `AuthContext`'s error —
+  // see the note in login.tsx.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const canSubmit = Boolean(displayName.trim() && email.trim() && password.trim() && phoneE164 && acceptedPolicies);
 
@@ -24,44 +30,56 @@ export default function DispatchRegisterScreen() {
       clearError();
     }
 
+    setValidationError(null);
     setter(value);
   };
 
   const handleRegister = async () => {
-    if (!displayName.trim() || !email.trim() || !password.trim() || !phoneE164) {
-      Alert.alert('Missing details', 'Complete your name, email, password, and phone number before continuing.');
+    const invalid = validateRegisterForm({ displayName, email, password, phoneE164, acceptedPolicies });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
-    if (!acceptedPolicies) {
-      Alert.alert('Terms required', 'Accept the Terms and Privacy Policy before creating your rider login.');
-      return;
-    }
+    setValidationError(null);
 
     try {
       const result = await signUp(email.trim(), password, {
         displayName: displayName.trim(),
-        phoneNumber: phoneE164,
+        phoneNumber: phoneE164 ?? '',
       });
 
+      // Both branches already navigated, so the confirmation travels with them
+      // as a route param and the destination renders it. Hanging it off an
+      // `Alert` was doubly wrong: under react-native-web the call is an empty
+      // function, and even on native the `router.replace` on the next line
+      // fires immediately, so the dialog lands on top of the screen the rider
+      // has already been moved to.
+      const noticeKey: DispatchSuccessNoticeKey = result.sessionPresent
+        ? 'login-ready'
+        : result.verificationEmailSent
+          ? 'verification-email-sent'
+          : 'verification-email-failed';
+
+      // `signUp` puts "Verify your email, then sign in..." into `AuthContext`'s
+      // `error` on the no-session path — a SUCCESS message stored in the error
+      // channel, which the destination would otherwise render in red directly
+      // above the green confirmation saying the same thing. Clearing it here
+      // leaves one statement of what happened.
+      clearError();
+
       if (result.sessionPresent) {
-        Alert.alert(
-          'Login ready',
-          'Your rider login is ready. Complete your rider details to finish setup.'
-        );
-        router.replace('/(dispatch)/complete-rider-details' as never);
+        router.replace({
+          pathname: '/(dispatch)/complete-rider-details',
+          params: { notice: noticeKey },
+        } as never);
         return;
       }
 
-      Alert.alert(
-        'Confirm your email',
-        result.verificationEmailSent
-          ? 'We sent a verification email. Confirm it, then sign in to finish your rider setup.'
-          : 'Your login was created, but the verification email could not be sent from the app. Sign in after you verify your email.'
-      );
-      router.replace('/(auth)/login');
-    } catch (nextError: any) {
-      Alert.alert('Sign up failed', nextError.message ?? 'Unable to create your rider login right now.');
+      router.replace({ pathname: '/(auth)/login', params: { notice: noticeKey } } as never);
+    } catch {
+      // `signUp` already set `AuthContext`'s `error`, rendered in the slot above.
     }
   };
 
@@ -81,7 +99,11 @@ export default function DispatchRegisterScreen() {
         </View>
 
         <View style={styles.card}>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {formError ? (
+            <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+              {formError}
+            </Text>
+          ) : null}
 
           <TextInput
             style={styles.input}
@@ -116,6 +138,7 @@ export default function DispatchRegisterScreen() {
                 if (error) {
                   clearError();
                 }
+                setValidationError(null);
                 setPhoneE164(e164);
               }}
             />

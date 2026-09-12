@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { formatOrderStatusLabel, formatPaymentStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
+import { resolveDispatchOfferNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import {
   formatDispatchMoney,
@@ -18,6 +19,12 @@ import {
 export default function DeliveriesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ notice?: string | string[] }>();
+  // The offer screen answers accept/decline and then routes here either way, so
+  // its refusal has to be rendered on this side of the navigation -- by the
+  // time it is known, that screen is unmounted. Previously the rider arrived
+  // back at the queue with the offer silently gone.
+  const offerNotice = resolveDispatchOfferNotice(params.notice);
   const {
     activeDeliveryOrders,
     completedDeliveryOrders,
@@ -156,6 +163,15 @@ export default function DeliveriesScreen() {
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+      ) : null}
+
+      {offerNotice ? (
+        <View style={styles.offerNoticeCard}>
+          <Text style={styles.offerNoticeTitle}>Offer not available</Text>
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.offerNoticeText}>
+            {offerNotice}
+          </Text>
         </View>
       ) : null}
 
@@ -397,6 +413,28 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
+  },
+  // Same shape as errorCard below, which reports a queue that would not load.
+  // This one reports an offer that is gone, so it carries no retry button:
+  // there is nothing for the rider to retry.
+  offerNoticeCard: {
+    backgroundColor: dispatchTheme.dangerSoft,
+    borderColor: '#efc4bd',
+    borderRadius: 18,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 16,
+  },
+  offerNoticeTitle: {
+    color: dispatchTheme.danger,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  offerNoticeText: {
+    color: dispatchTheme.danger,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
   },
   errorCard: {
     backgroundColor: dispatchTheme.dangerSoft,

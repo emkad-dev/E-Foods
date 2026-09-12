@@ -2,7 +2,6 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // it needs. Customer and partner, which already load the fonts, import it by
 // package name.
 import { useConfirm } from '../../../../packages/design-system/src/primitives/ConfirmDialog';
+import { useNotice } from '../../../../packages/design-system/src/primitives/Notice';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -105,6 +105,15 @@ export default function ProfileScreen() {
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { error, riders } = useDispatchRiders();
   const { confirm, confirmDialog } = useConfirm();
+  // Saving and signing out reported failure through `Alert`, an empty function
+  // under react-native-web. Floating rather than inline: this screen is a long
+  // scrolling stack of sections (earnings, shift slots, inbox, activity) and
+  // the Save button is only one row of it, so an inline notice would often sit
+  // off-screen. The offset clears the 70px tab bar defined in ./_layout.tsx.
+  const { notice, showNotice } = useNotice({
+    placement: 'floating',
+    offsetBottom: insets.bottom + 86,
+  });
   // Separate from `error` above, which belongs to useDispatchRiders and renders
   // inside the profile editor; this one sits beside the delete button.
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -202,12 +211,20 @@ export default function ProfileScreen() {
 
   const handleSaveRider = async () => {
     if (!user?.uid) {
-      Alert.alert('Profile unavailable', 'Sign in again before updating your rider profile.');
+      showNotice({
+        tone: 'error',
+        title: 'Profile unavailable',
+        message: 'Sign in again before updating your rider profile.',
+      });
       return;
     }
 
     if (!draft.name.trim() || !draft.zone.trim() || !draft.lga.trim()) {
-      Alert.alert('Missing details', 'Select your dispatch state and LGA.');
+      showNotice({
+        tone: 'error',
+        title: 'Missing details',
+        message: 'Select your dispatch state and LGA.',
+      });
       return;
     }
 
@@ -222,8 +239,16 @@ export default function ProfileScreen() {
       });
 
       resetForm();
+      // The only thing a successful save used to do was clear the form, which
+      // reads the same as a form that reset itself for some other reason. The
+      // success notice self-dismisses, so it confirms without demanding an OK.
+      showNotice({ tone: 'success', title: 'Rider profile saved' });
     } catch (nextError: any) {
-      Alert.alert('Save failed', nextError.message ?? 'Could not save this rider profile.');
+      showNotice({
+        tone: 'error',
+        title: 'Save failed',
+        message: nextError.message ?? 'Could not save this rider profile.',
+      });
     } finally {
       setSaving(false);
     }
@@ -233,7 +258,13 @@ export default function ProfileScreen() {
     try {
       await signOut();
     } catch (nextError: any) {
-      Alert.alert('Sign out failed', nextError.message ?? 'Could not sign out right now.');
+      // A failed sign-out leaves the rider looking at their own profile after
+      // pressing Sign out, which reads as a frozen button unless it says why.
+      showNotice({
+        tone: 'error',
+        title: 'Sign out failed',
+        message: nextError.message ?? 'Could not sign out right now.',
+      });
     }
   };
 
@@ -522,12 +553,18 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
-      {renderHeader()}
-      {renderMenu()}
-      {renderDetail()}
-      {confirmDialog}
-    </ScrollView>
+    // Wrapped rather than used as the root because the floating notice
+    // positions itself absolutely: inside a ScrollView that would anchor it to
+    // the bottom of the CONTENT and let it scroll away.
+    <View style={styles.screen}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
+        {renderHeader()}
+        {renderMenu()}
+        {renderDetail()}
+        {confirmDialog}
+      </ScrollView>
+      {notice}
+    </View>
   );
 }
 
@@ -556,6 +593,9 @@ function Metric({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: dispatchTheme.background,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   content: {

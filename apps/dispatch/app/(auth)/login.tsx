@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Link, useLocalSearchParams } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateLoginForm } from '../../src/domain/authFormValidation';
+import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 
 export default function DispatchLoginScreen() {
@@ -12,17 +14,25 @@ export default function DispatchLoginScreen() {
   const { clearError, error, loading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  // Confirmations that have to outlive a navigation. Reset-password lands here
-  // with `notice=password-updated` rather than relying on an Alert callback,
-  // which would be an empty function the day dispatch gains a web build.
-  const noticeKey = Array.isArray(params.notice) ? params.notice[0] : params.notice;
-  const notice = noticeKey === 'password-updated' ? 'Password updated. Sign in with your new password.' : null;
+  // Confirmations that have to outlive a navigation. Reset-password, register
+  // and forgot-password all land here with `notice=<key>` rather than relying
+  // on an Alert callback, which would be an empty function the day dispatch
+  // gains a web build. The keys live in src/utils/routeNotices.ts.
+  const notice = resolveDispatchSuccessNotice(params.notice);
+  // Client-side validation used to go to `Alert`, an empty function under
+  // react-native-web, so an empty submit would look like a dead button. Held
+  // locally because `AuthContext` exposes no setter, and rendered through the
+  // SAME slot as the context's `error` below, so the screen keeps exactly one
+  // error surface rather than gaining a second competing one.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleEmailChange = (value: string) => {
     if (error) {
       clearError();
     }
 
+    setValidationError(null);
     setEmail(value);
   };
 
@@ -31,19 +41,26 @@ export default function DispatchLoginScreen() {
       clearError();
     }
 
+    setValidationError(null);
     setPassword(value);
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Missing information', 'Enter both email and password to continue.');
+    const invalid = validateLoginForm({ email, password });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
+    setValidationError(null);
+
     try {
       await signIn(email.trim(), password);
-    } catch (nextError: any) {
-      Alert.alert('Sign in failed', nextError.message ?? 'Unable to sign in right now.');
+    } catch {
+      // `signIn` has already pushed the formatted message into `AuthContext`'s
+      // `error`, which the slot above renders; the `Alert` that used to sit
+      // here only duplicated it on native and said nothing at all on web.
     }
   };
 
@@ -68,7 +85,11 @@ export default function DispatchLoginScreen() {
             {notice}
           </Text>
         ) : null}
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {formError ? (
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+            {formError}
+          </Text>
+        ) : null}
 
         <TextInput
           style={styles.input}

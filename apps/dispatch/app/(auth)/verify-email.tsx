@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
@@ -69,9 +69,11 @@ export default function DispatchVerifyEmailScreen() {
         }
       } catch (nextError: any) {
         if (!cancelled) {
-          const formattedError = formatAuthError(nextError);
-          setError(formattedError);
-          Alert.alert('Unable to confirm email', formattedError);
+          // `setError` alone: the slot below already renders it, and the
+          // `Alert` that used to follow only repeated it on native and said
+          // nothing at all on web. This screen has no button to press — the
+          // exchange runs on mount — so the slot is the only surface there is.
+          setError(formatAuthError(nextError));
         }
       } finally {
         if (!cancelled) {
@@ -98,7 +100,11 @@ export default function DispatchVerifyEmailScreen() {
             : 'Open the verification link from your email on this device to confirm this account.'}
       </Text>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : null}
 
       <Link href="/(auth)/login" style={styles.link}>
         Back to sign in

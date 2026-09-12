@@ -17,13 +17,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useDispatchOrders } from '../../../src/hooks/useDispatchOrders';
 import { acceptDispatchOffer, declineDispatchOffer } from '../../../src/services/dispatchOrderActions';
 import { dispatchTheme } from '../../../src/theme/palette';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
+import type { DispatchOfferNoticeKey } from '../../../src/utils/routeNotices';
 
 const formatCurrency = (value?: number | null) => {
   const amount = typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -118,16 +119,23 @@ export default function DispatchOfferScreen() {
         await declineDispatchOffer(offer.id);
         await reload();
         router.replace('/deliveries');
-      } catch (nextError: any) {
+      } catch {
         // Every refusal reaching here is authoritative and final - the backend
         // decided it under a row lock. Reload so the screen reflects reality
         // (the offer will usually be gone) rather than leaving a dead button.
-        Alert.alert(
-          action === 'accept' ? 'Could not accept' : 'Could not decline',
-          nextError?.message ?? 'This offer is no longer available.'
-        );
+        //
+        // The message CANNOT be shown here, and not only because `Alert` is an
+        // empty function under react-native-web: the `router.replace` two lines
+        // down unmounts this screen, so an in-screen notice would be destroyed
+        // before the rider could read it. It travels to /deliveries as a route
+        // param instead and is rendered there (src/utils/routeNotices.ts).
+        // Until now the rider was simply bounced back to the queue with the
+        // offer gone and nothing saying why.
+        const noticeKey: DispatchOfferNoticeKey =
+          action === 'accept' ? 'offer-accept-failed' : 'offer-decline-failed';
+
         await reload();
-        router.replace('/deliveries');
+        router.replace({ pathname: '/deliveries', params: { notice: noticeKey } } as never);
       } finally {
         setSubmitting(null);
       }
