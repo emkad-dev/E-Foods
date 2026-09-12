@@ -6,6 +6,7 @@ import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput'
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateRegisterForm } from '../../src/domain/authFormValidation';
+import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/auth';
 import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -24,6 +25,11 @@ export default function PartnerRegisterScreen() {
   // see the note in login.tsx.
   const [validationError, setValidationError] = useState<string | null>(null);
   const formError = validationError ?? error;
+  // Compared by identity against the shared constant rather than by matching
+  // prose, so re-wording the message cannot silently drop the two routes out of
+  // it. `validationError` is client-side only and never carries this text, so
+  // only the context's `error` can light this up.
+  const showAlreadyRegisteredRoutes = formError === ACCOUNT_ALREADY_REGISTERED_MESSAGE;
 
   const canSubmit = Boolean(contactName.trim() && email.trim() && password.trim() && phoneE164 && acceptedPolicies);
 
@@ -107,9 +113,36 @@ export default function PartnerRegisterScreen() {
 
         <View style={styles.card}>
           {formError ? (
-            <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
-              {formError}
-            </Text>
+            <View style={styles.errorBlock}>
+              <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+                {formError}
+              </Text>
+              {showAlreadyRegisteredRoutes ? (
+                // Both branches of the already-registered message get a route, because
+                // the client cannot tell which branch it is in: sign in if the account
+                // was confirmed, enter the code if the resent confirmation just landed.
+                // The address rides along so the code screen — which runs signed out —
+                // does not make the partner retype it.
+                <View style={styles.errorActions}>
+                  <Link
+                    href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'}
+                    style={styles.errorActionLink}
+                  >
+                    Sign in
+                  </Link>
+                  <Text style={styles.errorActionSeparator}>·</Text>
+                  <Link
+                    href={{
+                      pathname: '/(auth)/verify-email',
+                      params: { email: email.trim(), ...(redirectTo ? { redirectTo } : null) },
+                    }}
+                    style={styles.errorActionLink}
+                  >
+                    Enter your code
+                  </Link>
+                </View>
+              ) : null}
+            </View>
           ) : null}
 
           <TextInput
@@ -229,11 +262,28 @@ const styles = StyleSheet.create({
     marginTop: 16,
     padding: 20,
   },
+  errorBlock: {
+    marginBottom: 10,
+  },
   errorText: {
     color: partnerTheme.danger,
     fontSize: 14,
     lineHeight: 20,
-    marginBottom: 10,
+  },
+  errorActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  errorActionLink: {
+    color: partnerTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  errorActionSeparator: {
+    color: partnerTheme.textMuted,
+    fontSize: 14,
   },
   input: {
     backgroundColor: partnerTheme.cream,

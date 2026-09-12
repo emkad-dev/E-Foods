@@ -25,6 +25,48 @@ export const isNetworkRequestError = (error: unknown) => {
 };
 
 /**
+ * The one message every app shows when a sign-up hits an address that already
+ * has an account. Exported so the register screens can recognise it by identity
+ * and offer the two follow-up routes (sign in / enter your code) beside it,
+ * rather than string-matching prose.
+ *
+ * WHY THE WORDING HEDGES. With email confirmation on, Supabase answers a repeat
+ * sign-up identically in two materially different cases:
+ *   - the address belongs to a CONFIRMED user  -> nothing is sent;
+ *   - the address belongs to an UNCONFIRMED user -> the confirmation email is
+ *     RESENT.
+ * Both come back HTTP 200 with an empty `identities` array, and the client has
+ * no way to tell them apart. So the message must be true either way: it states
+ * the one certain fact (the address is registered), points at sign-in, and puts
+ * the inbox suggestion behind an explicit "if you never confirmed it" — which is
+ * exactly the branch where an email really was just sent. Do not tighten this
+ * into "we've sent you a code": that would be a lie to the confirmed half.
+ *
+ * DELIBERATE USER ENUMERATION — an owner decision, not an oversight. Supabase's
+ * silent 200 exists precisely so nobody can probe which addresses are
+ * registered, and saying this out loud gives that up. The owner weighed it and
+ * chose the UX, as most consumer apps do: the silent version cost a real signup,
+ * which looked like a dead email pipeline until the auth log showed
+ * `user_repeated_signup`. Do not revert it to silence without asking.
+ */
+export const ACCOUNT_ALREADY_REGISTERED_MESSAGE =
+  'This email is already registered. Sign in instead — or if you never confirmed it, check your inbox for a new code.';
+
+/**
+ * True only when Supabase positively said "this address already has an
+ * account": `identities` present, an array, and empty.
+ *
+ * The `Array.isArray` guard is the point. A client build that omits `identities`
+ * altogether must read as "unknown" and fall through to the normal success path
+ * — a false positive here would tell every genuinely new user that their brand
+ * new address was already taken, which is a far worse failure than the one this
+ * whole branch exists to fix.
+ */
+const isAlreadyRegisteredSignUpUser = (user: User): boolean =>
+  Array.isArray((user as { identities?: unknown }).identities) &&
+  (user as { identities: unknown[] }).identities.length === 0;
+
+/**
  * Sign-up itself sends the confirmation email.
  *
  * No `emailRedirectTo` is passed, deliberately: email confirmation is OTP-only.
@@ -36,13 +78,19 @@ export const isNetworkRequestError = (error: unknown) => {
  * Whether the email body is a code or a link is decided by the Supabase email
  * template (dashboard-only, outside this repo). This function's contract is
  * only that the app never asks for a redirect.
+ *
+ * `alreadyRegistered` carries the empty-`identities` signal out to the caller.
+ * It used to be thrown away here, which is why a repeat sign-up looked like a
+ * success to every screen in the repo. See
+ * `ACCOUNT_ALREADY_REGISTERED_MESSAGE` above for what it means and the
+ * enumeration trade-off it implies.
  */
 export const createUserWithEmail = async (
   supabase: SupabaseClient,
   email: string,
   password: string,
   metadata?: Record<string, unknown>
-): Promise<{ user: User; session: Session | null }> => {
+): Promise<{ user: User; session: Session | null; alreadyRegistered: boolean }> => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -60,6 +108,7 @@ export const createUserWithEmail = async (
   return {
     user: data.user,
     session: data.session ?? null,
+    alreadyRegistered: isAlreadyRegisteredSignUpUser(data.user),
   };
 };
 
@@ -204,7 +253,11 @@ export const formatAuthError = (error: any): string => {
     invalid_credentials: 'Incorrect email or password',
     over_request_rate_limit: 'Too many login attempts. Please try again later',
     signup_disabled: 'Email/password accounts are not enabled',
-    user_already_exists: 'An account with this email already exists',
+    // Same text as the empty-`identities` path above, so a project configured
+    // to return the error outright lands the user on the same message — and the
+    // register screens' identity check offers the same two routes either way.
+    user_already_exists: ACCOUNT_ALREADY_REGISTERED_MESSAGE,
+    email_exists: ACCOUNT_ALREADY_REGISTERED_MESSAGE,
     weak_password: 'Password must be at least 6 characters',
     validation_failed: 'Please enter a valid email address',
     unexpected_failure: 'Network error. Check your internet connection and try again',

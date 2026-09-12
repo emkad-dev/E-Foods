@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import type { UserDocument } from '../domain/entities';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
 import {
+  ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
   formatAuthError,
@@ -464,11 +465,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // would only trip Supabase's 60s cooldown. No redirect is passed:
       // confirmation is OTP-only, so the email carries a 6-digit code the
       // customer types on /verify-email and there is no link to steer.
-      await createUserWithEmail(supabase, email, password, {
+      const { alreadyRegistered } = await createUserWithEmail(supabase, email, password, {
         display_name: userData?.displayName,
         phone: userData?.phoneNumber,
         role: DEFAULT_APP_ROLE,
       });
+
+      // Supabase answers a repeat sign-up with HTTP 200 and an empty
+      // `identities` array instead of an error, so without this branch the
+      // screen navigated to "account created" and the customer waited for a
+      // confirmation email that was never sent. Thrown rather than returned so
+      // the existing catch below puts it in `error` — the slot the register
+      // screen already renders — leaving `SignUpResult` and this context's
+      // public shape untouched.
+      if (alreadyRegistered) {
+        throw new Error(ACCOUNT_ALREADY_REGISTERED_MESSAGE);
+      }
+
       const policyAcceptance = userData.policyAcceptance;
       setPolicyAccepted(true);
       void storePolicyAccepted(true);

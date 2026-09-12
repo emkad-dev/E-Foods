@@ -11,6 +11,7 @@ import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { validateRegisterForm } from '../../src/domain/authFormValidation';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
+import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/auth';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function RegisterScreen() {
@@ -33,6 +34,11 @@ export default function RegisterScreen() {
   // SAME slot as the context's `error`, so there is one error surface.
   const [validationError, setValidationError] = useState<string | null>(null);
   const formError = validationError ?? error;
+  // Compared by identity against the shared constant rather than by matching
+  // prose, so re-wording the message cannot silently drop the two routes out of
+  // it. `validationError` is client-side only and never carries this text, so
+  // only the context's `error` can light this up.
+  const showAlreadyRegisteredRoutes = formError === ACCOUNT_ALREADY_REGISTERED_MESSAGE;
 
   const handleNicknameChange = (value: string) => {
     if (error) clearError();
@@ -118,9 +124,28 @@ export default function RegisterScreen() {
       />
 
       {formError ? (
-        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
-          {formError}
-        </Text>
+        <View style={styles.errorBlock}>
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+            {formError}
+          </Text>
+          {showAlreadyRegisteredRoutes ? (
+            // Both branches of the already-registered message get a route, because
+            // the client cannot tell which branch it is in: sign in if the account
+            // was confirmed, enter the code if the resent confirmation just landed.
+            <View style={styles.errorActions}>
+              <Link
+                href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'}
+                style={styles.errorActionLink}
+              >
+                Sign in
+              </Link>
+              <Text style={styles.errorActionSeparator}>·</Text>
+              <Link href="/verify-email" style={styles.errorActionLink}>
+                Enter your code
+              </Link>
+            </View>
+          ) : null}
+        </View>
       ) : null}
 
       <AuthTextField
@@ -217,11 +242,30 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
+  errorBlock: {
+    marginBottom: 14,
+  },
   errorText: {
     color: customerTheme.danger,
     fontSize: 14,
-    marginBottom: 14,
+    lineHeight: 20,
     textAlign: 'center',
+  },
+  errorActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  errorActionLink: {
+    color: customerTheme.accentText,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  errorActionSeparator: {
+    color: customerTheme.textMuted,
+    fontSize: 14,
   },
   fieldGap: {
     marginTop: 10,

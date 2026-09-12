@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
+  ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   createUserWithEmail,
   formatAuthError,
   getUserRoleClaim,
@@ -334,11 +335,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // would only trip Supabase's 60s cooldown. No redirect is passed:
       // confirmation is OTP-only, so the email carries a 6-digit code the
       // partner types on /verify-email and there is no link to steer.
-      const { session } = await createUserWithEmail(supabase, email, password, {
+      const { session, alreadyRegistered } = await createUserWithEmail(supabase, email, password, {
         display_name: userData.contactName.trim(),
         phone: userData.phoneNumber.trim(),
         role: 'customer',
       });
+
+      // Supabase answers a repeat sign-up with HTTP 200 and an empty
+      // `identities` array instead of an error, so without this branch the
+      // screen navigated to the code entry screen and the partner waited for a
+      // confirmation email that was never sent. Thrown rather than returned so
+      // the existing catch below puts it in `error` — the slot the register
+      // screen already renders — leaving `signUp`'s result and this context's
+      // public shape untouched.
+      if (alreadyRegistered) {
+        throw new Error(ACCOUNT_ALREADY_REGISTERED_MESSAGE);
+      }
 
       return { verificationEmailSent: true, sessionPresent: Boolean(session) };
     } catch (nextError: any) {

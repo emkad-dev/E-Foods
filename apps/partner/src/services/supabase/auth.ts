@@ -1,4 +1,5 @@
 export {
+  ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   clearOtpCooldown,
   createUserWithEmail,
   formatAuthError,

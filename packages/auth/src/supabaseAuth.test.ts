@@ -4,12 +4,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   createUserWithEmail,
+  formatAuthError,
   isNetworkRequestError,
   sendPasswordResetEmailWithFallback,
   sendVerificationEmailWithFallback,
   verifyPasswordResetOtp,
 } from './supabaseAuth.ts';
+
+const signUpStub = (user: unknown, session: unknown = null) =>
+  ({
+    auth: {
+      signUp: async () => ({ data: { user, session }, error: null }),
+    },
+  }) as any;
 
 test('createUserWithEmail returns the Supabase session and does not fall back to password sign-in', async () => {
   let signInCalled = false;
@@ -42,8 +51,76 @@ test('createUserWithEmail returns the Supabase session and does not fall back to
       email: 'new-user@example.com',
     },
     session: null,
+    // No `identities` key at all — an unknown, which must NOT read as
+    // already-registered. See the guard below.
+    alreadyRegistered: false,
   });
   assert.equal(signInCalled, false);
+});
+
+/**
+ * THE ALREADY-REGISTERED GATE.
+ *
+ * Supabase answers a sign-up for an address that already has an account with
+ * HTTP 200 and an empty `identities` array — no error, and (for a confirmed
+ * account) no email. That empty array is the ONLY signal the client gets, and it
+ * used to be discarded here, so every register screen reported success and the
+ * user waited forever for a code.
+ */
+test('createUserWithEmail flags a repeat sign-up from an empty identities array', async () => {
+  const result = await createUserWithEmail(
+    signUpStub({ id: 'user-123', email: 'taken@example.com', identities: [] }),
+    'taken@example.com',
+    'correct-horse-battery-staple'
+  );
+
+  assert.equal(result.alreadyRegistered, true);
+  // Still a resolved call, not a throw: the raw signal belongs to the caller,
+  // which decides how to phrase it.
+  assert.equal(result.session, null);
+});
+
+test('createUserWithEmail does not flag a genuinely new sign-up', async () => {
+  const withIdentity = await createUserWithEmail(
+    signUpStub({ id: 'user-123', email: 'new@example.com', identities: [{ id: 'identity-1' }] }),
+    'new@example.com',
+    'correct-horse-battery-staple'
+  );
+
+  assert.equal(withIdentity.alreadyRegistered, false);
+});
+
+test('createUserWithEmail treats a missing or non-array identities field as unknown, not as already-registered', async () => {
+  // A false positive here would tell every genuinely new user that their brand
+  // new address was already taken — worse than the silence this branch fixes —
+  // so anything that is not a real empty array must fall through.
+  for (const identities of [undefined, null, 'not-an-array', 0, {}]) {
+    const result = await createUserWithEmail(
+      signUpStub({ id: 'user-123', email: 'new@example.com', identities }),
+      'new@example.com',
+      'correct-horse-battery-staple'
+    );
+
+    assert.equal(result.alreadyRegistered, false, `identities=${JSON.stringify(identities)} must not flag`);
+  }
+});
+
+test('the already-registered message is true whether or not a confirmation email was just resent', () => {
+  // Supabase resends the confirmation for an UNCONFIRMED existing user and sends
+  // nothing for a CONFIRMED one, and both come back identically — so the inbox
+  // half of the message has to stay conditional.
+  assert.match(ACCOUNT_ALREADY_REGISTERED_MESSAGE, /already registered/);
+  assert.match(ACCOUNT_ALREADY_REGISTERED_MESSAGE, /Sign in/);
+  assert.match(ACCOUNT_ALREADY_REGISTERED_MESSAGE, /if you never confirmed it/);
+  // It must never claim outright that a code was sent.
+  assert.equal(/we(?:'ve| have)? (?:just )?sent/i.test(ACCOUNT_ALREADY_REGISTERED_MESSAGE), false);
+});
+
+test('an outright already-exists error code lands on the same message', () => {
+  // Some project configurations return the error instead of the silent 200; the
+  // register screens key their two follow-up links off this exact string.
+  assert.equal(formatAuthError({ code: 'user_already_exists' }), ACCOUNT_ALREADY_REGISTERED_MESSAGE);
+  assert.equal(formatAuthError({ code: 'email_exists' }), ACCOUNT_ALREADY_REGISTERED_MESSAGE);
 });
 
 /**

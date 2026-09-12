@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  ALLOWED_SIGNUP_EMAIL_DOMAINS,
   MIN_PASSWORD_LENGTH,
   validateEmailCode,
   validateForgotPasswordForm,
@@ -9,12 +10,15 @@ import {
   validatePhoneNumber,
   validateRegisterForm,
   validateResetPasswordForm,
+  validateSignupEmailDomain,
   validateUsername,
 } from './authFormValidation.ts';
 
 const validRegistration = {
   nickname: 'Ada',
-  email: 'ada@example.com',
+  // On the signup allowlist. `example.com` is not, and registration is the one
+  // form that enforces it.
+  email: 'ada@gmail.com',
   password: 'supersecret',
   confirmPassword: 'supersecret',
   phoneNumber: '08012345678',
@@ -76,6 +80,129 @@ describe('validateRegisterForm', () => {
     assert.match(
       validateRegisterForm({ ...validRegistration, acceptedPolicies: false }) ?? '',
       /Accept the Terms and Privacy Policy/
+    );
+  });
+
+  it('rejects an off-allowlist domain, after the empty-field check and before the passwords', () => {
+    // Empty fields still win: an entirely blank form should not be told its
+    // domain is wrong.
+    assert.match(
+      validateRegisterForm({ ...validRegistration, email: '   ', nickname: '' }) ?? '',
+      /complete all fields/
+    );
+
+    // The domain wins over a password problem, because the email field is the
+    // one above it on the screen.
+    assert.match(
+      validateRegisterForm({
+        ...validRegistration,
+        email: 'chef@restaurant.ng',
+        password: 'abc',
+        confirmPassword: 'abd',
+      }) ?? '',
+      /We accept gmail\.com/
+    );
+  });
+
+  it('accepts a plus-alias on an allowed domain', () => {
+    assert.equal(validateRegisterForm({ ...validRegistration, email: 'ada+feasty@gmail.com' }), null);
+  });
+});
+
+describe('validateSignupEmailDomain', () => {
+  it('accepts every domain on the allowlist', () => {
+    for (const domain of ALLOWED_SIGNUP_EMAIL_DOMAINS) {
+      assert.equal(validateSignupEmailDomain(`ada@${domain}`), null, `${domain} should be accepted`);
+    }
+
+    // The list is the owner's, exactly — a silent addition or removal here is a
+    // policy change, so pin it.
+    assert.deepEqual([...ALLOWED_SIGNUP_EMAIL_DOMAINS], [
+      'gmail.com',
+      'googlemail.com',
+      'yahoo.com',
+      'yahoo.co.uk',
+      'yahoo.com.ng',
+      'icloud.com',
+      'me.com',
+      'mac.com',
+    ]);
+  });
+
+  it('accepts a plus-alias — people use them legitimately', () => {
+    assert.equal(validateSignupEmailDomain('ada+feasty@gmail.com'), null);
+    assert.equal(validateSignupEmailDomain('ada+2026-09-12@yahoo.com.ng'), null);
+  });
+
+  it('ignores case and surrounding whitespace', () => {
+    assert.equal(validateSignupEmailDomain('ADA@GMAIL.COM'), null);
+    assert.equal(validateSignupEmailDomain('  Ada@Icloud.Com  '), null);
+    assert.equal(validateSignupEmailDomain('\tada@MAC.com\n'), null);
+  });
+
+  it('rejects a domain that merely CONTAINS an allowed one', () => {
+    // The whole point of comparing the full domain instead of `endsWith` /
+    // `includes`: every one of these is an attacker-chosen domain.
+    for (const email of [
+      'ada@gmail.com.evil.com',
+      'ada@notgmail.com',
+      'ada@gmail.company',
+      'ada@sub.gmail.com',
+      'ada@yahoo.com.ng.evil.co',
+      'ada@evil.com?x=gmail.com',
+    ]) {
+      assert.match(validateSignupEmailDomain(email) ?? '', /We accept gmail\.com/, `${email} should be rejected`);
+    }
+  });
+
+  it('rejects a business domain with a message that names what IS accepted', () => {
+    const message = validateSignupEmailDomain('owner@mamaputkitchen.com.ng') ?? '';
+
+    assert.match(message, /Gmail, Yahoo or iCloud/);
+    // Naming the accepted domains is the requirement — a bare "invalid email"
+    // on a well-formed address reads as a bug.
+    for (const domain of ALLOWED_SIGNUP_EMAIL_DOMAINS) {
+      assert.ok(message.includes(domain), `the rejection should name ${domain}`);
+    }
+  });
+
+  it('rejects outlook and other common non-allowlisted providers', () => {
+    for (const email of ['ada@outlook.com', 'ada@hotmail.com', 'ada@protonmail.com', 'ada@example.com']) {
+      assert.match(validateSignupEmailDomain(email) ?? '', /We accept/, `${email} should be rejected`);
+    }
+  });
+
+  it('asks for a complete address when there is no single @-separated domain', () => {
+    for (const email of ['', '   ', 'ada', 'ada@', '@gmail.com', 'ada@gmail@com']) {
+      assert.match(validateSignupEmailDomain(email) ?? '', /complete email address/, `${email} should be incomplete`);
+    }
+  });
+});
+
+describe('the signup domain allowlist is NOT applied anywhere else', () => {
+  // Customer accounts predating the allowlist may sit on a domain that is not on
+  // it. Gating any of these paths on the same check would lock those people out
+  // of an account they already own, so each one must keep accepting an
+  // off-allowlist address.
+  const legacy = 'ada@example.com';
+
+  it('sign-in accepts an off-allowlist address', () => {
+    assert.equal(validateLoginForm({ email: legacy, password: 'supersecret' }), null);
+  });
+
+  it('forgot-password accepts an off-allowlist address', () => {
+    assert.equal(validateForgotPasswordForm({ email: legacy }), null);
+  });
+
+  it('password reset accepts an off-allowlist address', () => {
+    assert.equal(
+      validateResetPasswordForm({
+        email: legacy,
+        code: '123456',
+        password: 'supersecret',
+        confirmPassword: 'supersecret',
+      }),
+      null
     );
   });
 });
