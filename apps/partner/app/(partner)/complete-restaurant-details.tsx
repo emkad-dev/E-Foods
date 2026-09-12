@@ -21,7 +21,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -32,6 +31,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNotice } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { NIGERIA_BANKS, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
 import {
@@ -210,10 +210,29 @@ export default function CompleteRestaurantDetailsScreen() {
     [user?.displayName, user?.email]
   );
 
+  // Every failure in this 764-line wizard went to `Alert`, which is
+  // `class Alert { static alert() {} }` in react-native-web - nothing at all on
+  // partner.feasty.com.ng. The only inline error in the whole file was the
+  // delivery-radius hint, so a payout account that Paystack could not resolve,
+  // a document upload that failed, or a rejected submission all looked like a
+  // dead button. That matters most on the payout step: approval later mints a
+  // subaccount from this pair, so a partner who cannot verify here cannot be
+  // paid, and was never told why.
+  //
+  // Inline rather than floating: this is a one-step-at-a-time form, and the
+  // notice renders directly below the step card, immediately above the
+  // Continue/Submit button and just under the Verify account and Upload
+  // controls it answers for.
+  const { notice, showNotice } = useNotice({ placement: 'inline' });
+
   const pickImage = async (onPicked: (uri: string) => void) => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo access to attach an image.');
+      showNotice({
+        tone: 'error',
+        title: 'Permission needed',
+        message: 'Allow photo access to attach an image.',
+      });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -231,11 +250,19 @@ export default function CompleteRestaurantDetailsScreen() {
       return;
     }
     if (!form.bankCode) {
-      Alert.alert('Pick a bank', 'Select your bank before verifying the account.');
+      showNotice({
+        tone: 'error',
+        title: 'Pick a bank',
+        message: 'Select your bank before verifying the account.',
+      });
       return;
     }
     if (!isPlausibleNubanAccountNumber(form.accountNumber)) {
-      Alert.alert('Check the account number', 'A Nigerian account number is exactly 10 digits.');
+      showNotice({
+        tone: 'error',
+        title: 'Check the account number',
+        message: 'A Nigerian account number is exactly 10 digits.',
+      });
       return;
     }
 
@@ -250,7 +277,14 @@ export default function CompleteRestaurantDetailsScreen() {
     } catch (error: any) {
       setForm((current) => ({ ...current, bankVerifiedAccountName: null }));
       setVerifiedPair(null);
-      Alert.alert('Could not verify', error?.message ?? 'Check the account number and bank, then try again.');
+      // Sticky, as errors default to: the payout step will not advance until
+      // Paystack resolves the account holder's name, so this banner is the only
+      // thing standing between the partner and a step that refuses to continue.
+      showNotice({
+        tone: 'error',
+        title: 'Could not verify',
+        message: error?.message ?? 'Check the account number and bank, then try again.',
+      });
     } finally {
       setVerifyingBank(false);
     }
@@ -263,7 +297,11 @@ export default function CompleteRestaurantDetailsScreen() {
         const path = await uploadPartnerVerificationDocument({ fileUri: uri, kind });
         setField(kind === 'front' ? 'documentFrontPath' : 'documentBackPath', path);
       } catch (error: any) {
-        Alert.alert('Upload failed', error?.message ?? 'Please try again.');
+        showNotice({
+          tone: 'error',
+          title: 'Upload failed',
+          message: error?.message ?? 'Please try again.',
+        });
       } finally {
         setUploadingKind(null);
       }
@@ -312,7 +350,11 @@ export default function CompleteRestaurantDetailsScreen() {
       await supabase.auth.refreshSession().catch(() => undefined);
       router.replace('/(partner)/application-under-review' as never);
     } catch (error: any) {
-      Alert.alert('Unable to submit', error?.message ?? 'Please try again.');
+      showNotice({
+        tone: 'error',
+        title: 'Unable to submit',
+        message: error?.message ?? 'Please try again.',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -668,6 +710,8 @@ export default function CompleteRestaurantDetailsScreen() {
           </>
         ) : null}
       </View>
+
+      {notice}
 
       {stepId === 'review' ? (
         <TouchableOpacity

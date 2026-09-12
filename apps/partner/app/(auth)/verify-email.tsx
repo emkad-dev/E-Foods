@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
@@ -69,9 +69,9 @@ export default function PartnerVerifyEmailScreen() {
         }
       } catch (nextError: any) {
         if (!cancelled) {
-          const formattedError = formatAuthError(nextError);
-          setError(formattedError);
-          Alert.alert('Unable to confirm email', formattedError);
+          // `setError` alone: it renders in the inline slot below. The `Alert`
+          // that followed it was inert on the web build (partner.feasty.com.ng).
+          setError(formatAuthError(nextError));
         }
       } finally {
         if (!cancelled) {

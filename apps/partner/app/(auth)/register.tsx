@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateRegisterForm } from '../../src/domain/authFormValidation';
+import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerRegisterScreen() {
@@ -18,6 +20,10 @@ export default function PartnerRegisterScreen() {
   const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
+  // Held locally and rendered through the same slot as `AuthContext`'s error —
+  // see the note in login.tsx.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const canSubmit = Boolean(contactName.trim() && email.trim() && password.trim() && phoneE164 && acceptedPolicies);
 
@@ -26,19 +32,19 @@ export default function PartnerRegisterScreen() {
       clearError();
     }
 
+    setValidationError(null);
     setter(value);
   };
 
   const handleRegister = async () => {
-    if (!contactName.trim() || !email.trim() || !password.trim() || !phoneE164) {
-      Alert.alert('Missing details', 'Complete the contact name, email, password, and phone number before continuing.');
+    const invalid = validateRegisterForm({ contactName, email, password, phoneE164, acceptedPolicies });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
-    if (!acceptedPolicies) {
-      Alert.alert('Terms required', 'Accept the Terms and Privacy Policy before creating your login.');
-      return;
-    }
+    setValidationError(null);
 
     try {
       const result = await signUp(email.trim(), password, {
@@ -46,20 +52,24 @@ export default function PartnerRegisterScreen() {
         phoneNumber: phoneE164 ?? '',
       });
 
-      Alert.alert(
-        result.sessionPresent ? 'Account created' : 'Check your inbox',
-          result.verificationEmailSent
-            ? result.sessionPresent
-            ? 'Your login is ready. Sign in to complete your restaurant details and open your dashboard.'
-            : 'We sent a verification email. Confirm it, then sign in to finish your restaurant setup and open your dashboard.'
-          : 'Your account was created, but the verification email could not be confirmed from the app.'
-      );
+      // Navigate UNCONDITIONALLY and carry the confirmation as a route param.
+      // The `router.replace` used to sit behind `if (!result.sessionPresent)`,
+      // so in the session-present branch the only thing that happened was an
+      // `Alert` — an empty function on partner.feasty.com.ng. The account was
+      // created and the screen never changed, leaving the partner re-submitting
+      // an email address that now already exists.
+      const noticeKey: PartnerSuccessNoticeKey = result.verificationEmailSent
+        ? result.sessionPresent
+          ? 'account-created'
+          : 'verification-email-sent'
+        : 'account-created-unverified';
 
-      if (!result.sessionPresent) {
-        router.replace('/(auth)/login');
-      }
-    } catch (nextError: any) {
-      Alert.alert('Sign up failed', nextError.message ?? 'Unable to create your login right now.');
+      router.replace({
+        pathname: '/(auth)/login',
+        params: { notice: noticeKey, ...(redirectTo ? { redirectTo } : null) },
+      } as never);
+    } catch {
+      // `signUp` already set `AuthContext`'s `error`, rendered in the slot above.
     }
   };
 
@@ -78,7 +88,11 @@ export default function PartnerRegisterScreen() {
         </View>
 
         <View style={styles.card}>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {formError ? (
+            <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+              {formError}
+            </Text>
+          ) : null}
 
           <TextInput
             style={styles.input}

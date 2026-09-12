@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { formatAuthError } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
+import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerResetPasswordScreen() {
@@ -36,23 +38,18 @@ export default function PartnerResetPasswordScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const handleResetPassword = async () => {
-    if (!accessToken && !refreshToken && !recoveryCode) {
-      Alert.alert('Invalid link', 'This reset link is missing the required recovery code.');
-      return;
-    }
+    // Client-side validation used to go to `Alert`, an empty function on the
+    // web build, so a mismatched pair or a code-less link produced no message
+    // at all. This screen already owns a local `error` rendered inline below,
+    // so these route into that same single surface.
+    const invalid = validateResetPasswordForm({
+      hasResetCredential: Boolean(accessToken || refreshToken || recoveryCode),
+      password,
+      confirmPassword,
+    });
 
-    if (!password.trim() || !confirmPassword.trim()) {
-      Alert.alert('Missing information', 'Please enter both password fields to continue.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Enter matching passwords to continue.');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters long.');
+    if (invalid) {
+      setError(invalid);
       return;
     }
 
@@ -89,14 +86,15 @@ export default function PartnerResetPasswordScreen() {
       // build (`Alert` is an empty function in react-native-web) — so the
       // partner was left stranded on this form, already signed out, with the
       // recovery code spent and no confirmation that anything had happened.
+      const noticeKey: PartnerSuccessNoticeKey = 'password-updated';
       router.replace({
         pathname: '/(auth)/login',
-        params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },
+        params: { notice: noticeKey, ...(redirectTo ? { redirectTo } : null) },
       } as never);
     } catch (nextError: any) {
-      const formattedError = formatAuthError(nextError);
-      setError(formattedError);
-      Alert.alert('Unable to reset password', formattedError);
+      // `setError` alone: it renders in the inline slot above. The `Alert` that
+      // followed it said the same thing to nobody on the web build.
+      setError(formatAuthError(nextError));
     } finally {
       setSubmitting(false);
     }
@@ -107,7 +105,11 @@ export default function PartnerResetPasswordScreen() {
       <Text style={styles.title}>Choose a new partner password</Text>
       <Text style={styles.copy}>Set a fresh password for your partner account, then sign in to open your dashboard.</Text>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : null}
 
       <TextInput
         style={styles.input}

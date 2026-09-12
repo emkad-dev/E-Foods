@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNotice } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import {
@@ -103,8 +104,25 @@ const normalizeMenuItemCategory = (categoryName: string, item: { categoryId?: st
 
 export default function PartnerMenuScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { user } = useAuth();
   const { error, loading, restaurant } = usePartnerRestaurant();
+  // Every outcome on this screen used to go to `Alert`, which is
+  // `class Alert { static alert() {} }` in react-native-web - nothing at all on
+  // partner.feasty.com.ng. The `error` above belongs to usePartnerRestaurant and
+  // carries LOAD failures only, so a failed availability toggle left the row
+  // looking unchanged while customers kept ordering a dish that is not
+  // available, and the add-meal form refused to submit with the button reading
+  // as broken.
+  //
+  // Floating: "Sold out" / "Back in stock" fires from an arbitrary row of a
+  // potentially long menu, so an inline notice would render wherever that row
+  // happens to be. The offset clears the tab bar on narrow layouts; the wide
+  // layout uses a sidebar and has none.
+  const { notice, showNotice } = useNotice({
+    placement: 'floating',
+    offsetBottom: width >= 1024 ? insets.bottom + 16 : insets.bottom + 86,
+  });
   const [saving, setSaving] = useState(false);
   const [togglingItemId, setTogglingItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -138,19 +156,31 @@ export default function PartnerMenuScreen() {
 
   const handleSaveItem = async () => {
     if (!restaurant?.id || !user) {
-      Alert.alert('Store setup needed', 'Create or link a restaurant record on the Store tab before adding meals.');
+      showNotice({
+        tone: 'error',
+        title: 'Store setup needed',
+        message: 'Create or link a restaurant record on the Store tab before adding meals.',
+      });
       return;
     }
 
     if (!categoryId || !itemName.trim() || !itemPrice.trim()) {
-      Alert.alert('Missing details', 'Add a category, meal name, and price before saving.');
+      showNotice({
+        tone: 'error',
+        title: 'Missing details',
+        message: 'Add a category, meal name, and price before saving.',
+      });
       return;
     }
 
     const parsedPrice = Number.parseFloat(itemPrice);
 
     if (!Number.isFinite(parsedPrice)) {
-      Alert.alert('Invalid price', 'Use a valid numeric price for this meal.');
+      showNotice({
+        tone: 'error',
+        title: 'Invalid price',
+        message: 'Use a valid numeric price for this meal.',
+      });
       return;
     }
 
@@ -205,9 +235,17 @@ export default function PartnerMenuScreen() {
 
       await savePartnerRestaurantMenu(restaurant.id, nextMenu);
       resetForm();
-      Alert.alert('Menu saved', `${nextItem.name} is now available in ${normalizedCategory}.`);
+      showNotice({
+        tone: 'success',
+        title: 'Menu saved',
+        message: `${nextItem.name} is now available in ${normalizedCategory}.`,
+      });
     } catch (nextError: any) {
-      Alert.alert('Save failed', nextError.message ?? 'Unable to save this menu item right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Save failed',
+        message: nextError?.message ?? 'Unable to save this menu item right now.',
+      });
     } finally {
       setSaving(false);
     }
@@ -289,7 +327,11 @@ export default function PartnerMenuScreen() {
         resetForm();
       }
     } catch (nextError: any) {
-      Alert.alert('Remove failed', nextError.message ?? 'Unable to remove this meal right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Remove failed',
+        message: nextError?.message ?? 'Unable to remove this meal right now.',
+      });
     } finally {
       setSaving(false);
     }
@@ -319,224 +361,239 @@ export default function PartnerMenuScreen() {
         restaurantId: restaurant.id,
       });
     } catch (nextError: any) {
-      Alert.alert(
-        'Update failed',
-        nextError.message ?? `Unable to mark "${item.name}" ${nextIsAvailable ? 'available' : 'unavailable'} right now.`
-      );
+      // Sticky, as errors default to: the row's label has not flipped, and
+      // until the partner reads this they will believe a sold-out dish is off
+      // the menu while customers can still order it.
+      showNotice({
+        tone: 'error',
+        title: 'Update failed',
+        message:
+          nextError?.message ??
+          `Unable to mark "${item.name}" ${nextIsAvailable ? 'available' : 'unavailable'} right now.`,
+      });
     } finally {
       setTogglingItemId(null);
     }
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-      <Text style={styles.title}>Menu builder</Text>
-      <Text style={styles.subtitle}>
-        Shape the dishes customers will see first. Keep names clean, pricing accurate, and descriptions short enough to scan fast.
-      </Text>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+    // Wrapped rather than used as the root because the floating notice
+    // positions itself absolutely: inside a ScrollView that would anchor it to
+    // the bottom of the CONTENT and let it scroll away.
+    <View style={styles.screen}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+        <Text style={styles.title}>Menu builder</Text>
+        <Text style={styles.subtitle}>
+          Shape the dishes customers will see first. Keep names clean, pricing accurate, and descriptions short enough to scan fast.
+        </Text>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryPill}>
-          <Text style={styles.summaryValue}>{menu.length}</Text>
-          <Text style={styles.summaryLabel}>Categories</Text>
-        </View>
-        <View style={styles.summaryPill}>
-          <Text style={styles.summaryValue}>{totalMeals}</Text>
-          <Text style={styles.summaryLabel}>Meals</Text>
-        </View>
-        <View style={styles.summaryPill}>
-          <Text style={styles.summaryValue}>{availableMeals}</Text>
-          <Text style={styles.summaryLabel}>Live now</Text>
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Meal editor</Text>
-        {!restaurant ? (
-          <Text style={styles.emptyCopy}>Set up or link a restaurant on the Store tab before building a menu.</Text>
-        ) : null}
-        <View style={styles.editorIntro}>
-          <Text style={styles.editorIntroTitle}>
-            {editingItemId ? 'Update this meal listing' : 'Build a meal customers can trust'}
-          </Text>
-          <Text style={styles.editorIntroCopy}>
-            Pick the food category customers should find this meal under, then add a sharp title and short description.
-          </Text>
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Category</Text>
-          <Text style={styles.fieldHint}>Choose the customer-facing food group for this meal.</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryPickerRow}>
-            {MENU_CATEGORY_OPTIONS.map((categoryOption) => {
-              const active = categoryId === categoryOption.id;
-              return (
-                <TouchableOpacity
-                  key={categoryOption.id}
-                  style={[styles.categoryPickerChip, active ? styles.categoryPickerChipActive : null]}
-                  onPress={() => setCategoryId(categoryOption.id)}
-                >
-                  <Text style={active ? styles.categoryPickerChipTextActive : styles.categoryPickerChipText}>
-                    {categoryOption.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Meal name</Text>
-          <Text style={styles.fieldHint}>Write the exact name you want customers to remember and reorder.</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Examples: Chicken Shawarma Wrap, Smoky Jollof Bowl"
-            placeholderTextColor={partnerTheme.textMuted}
-            value={itemName}
-            onChangeText={setItemName}
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Meal description</Text>
-          <Text style={styles.fieldHint}>Keep it short and appetizing: ingredients, spice level, portion style, or what comes with it.</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Examples: Grilled chicken, crunchy vegetables, house sauce, and soft flatbread."
-            placeholderTextColor={partnerTheme.textMuted}
-            value={itemDescription}
-            onChangeText={setItemDescription}
-            multiline
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Price</Text>
-          <Text style={styles.fieldHint}>Enter the full selling price in naira without commas.</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Examples: 4500 or 12500"
-            placeholderTextColor={partnerTheme.textMuted}
-            value={itemPrice}
-            onChangeText={setItemPrice}
-            keyboardType="decimal-pad"
-          />
-        </View>
-
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Image URL</Text>
-          <Text style={styles.fieldHint}>Optional, but helpful when you already have a good hosted photo for the dish.</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Example: https://yourcdn.com/meals/chicken-shawarma.jpg"
-            placeholderTextColor={partnerTheme.textMuted}
-            value={itemImage}
-            onChangeText={setItemImage}
-          />
-        </View>
-
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleCopy}>
-            <Text style={styles.toggleLabel}>Available for ordering</Text>
-            <Text style={styles.toggleHint}>Turn this off if the meal is sold out or paused for now.</Text>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryValue}>{menu.length}</Text>
+            <Text style={styles.summaryLabel}>Categories</Text>
           </View>
-          <Switch
-            value={isAvailable}
-            onValueChange={setIsAvailable}
-            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-            thumbColor={isAvailable ? partnerTheme.accent : '#f3f4f6'}
-          />
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryValue}>{totalMeals}</Text>
+            <Text style={styles.summaryLabel}>Meals</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryValue}>{availableMeals}</Text>
+            <Text style={styles.summaryLabel}>Live now</Text>
+          </View>
         </View>
 
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={[styles.primaryButton, !restaurant ? styles.primaryButtonDisabled : null]}
-            onPress={handleSaveItem}
-            disabled={!restaurant || saving || loading}
-          >
-            <Text style={styles.primaryButtonText}>
-              {saving ? 'Saving...' : editingItemId ? 'Save meal changes' : 'Add meal'}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Meal editor</Text>
+          {!restaurant ? (
+            <Text style={styles.emptyCopy}>Set up or link a restaurant on the Store tab before building a menu.</Text>
+          ) : null}
+          <View style={styles.editorIntro}>
+            <Text style={styles.editorIntroTitle}>
+              {editingItemId ? 'Update this meal listing' : 'Build a meal customers can trust'}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={resetForm} disabled={saving}>
-            <Text style={styles.secondaryButtonText}>{editingItemId ? 'Cancel edit' : 'Reset form'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Live menu</Text>
-        <Text style={styles.cardSubtitle}>This is the structure your customer-facing menu will follow once the restaurant is published.</Text>
-        {menu.length === 0 ? (
-          <View style={styles.emptyPanel}>
-            <Text style={styles.emptyPanelTitle}>No categories yet</Text>
-            <Text style={styles.emptyCopy}>Start with one strong category and one complete meal so the menu feels intentional from the first save.</Text>
+            <Text style={styles.editorIntroCopy}>
+              Pick the food category customers should find this meal under, then add a sharp title and short description.
+            </Text>
           </View>
-        ) : null}
-        {menu.map((menuCategory) => (
-          <View key={menuCategory.category} style={styles.categoryBlock}>
-            <View style={styles.categoryHeader}>
-              <Text style={styles.categoryTitle}>{menuCategory.category}</Text>
-              <View style={styles.categoryCountPill}>
-                <Text style={styles.categoryCountText}>
-                  {menuCategory.items.length} {menuCategory.items.length === 1 ? 'meal' : 'meals'}
-                </Text>
-              </View>
-            </View>
-            {menuCategory.items.map((item) => {
-              const itemUnavailable = isItemCurrentlyUnavailable(item);
-              const isToggling = togglingItemId === item.id;
-              const resumeLabel =
-                itemUnavailable && item.isAvailable !== false && item.unavailableUntil
-                  ? formatUnavailableUntil(item.unavailableUntil)
-                  : null;
 
-              return (
-                <View key={item.id} style={styles.itemRow}>
-                  <View style={styles.itemMeta}>
-                    <Text style={styles.itemName}>{item.name}</Text>
-                    <Text style={styles.itemInfo}>
-                      ₦{item.price.toFixed(2)} | {item.categoryLabel ?? menuCategory.category} |{' '}
-                      {itemUnavailable ? 'Sold out' : 'Available'}
-                      {resumeLabel ? ` (back at ${resumeLabel})` : ''}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Category</Text>
+            <Text style={styles.fieldHint}>Choose the customer-facing food group for this meal.</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryPickerRow}>
+              {MENU_CATEGORY_OPTIONS.map((categoryOption) => {
+                const active = categoryId === categoryOption.id;
+                return (
+                  <TouchableOpacity
+                    key={categoryOption.id}
+                    style={[styles.categoryPickerChip, active ? styles.categoryPickerChipActive : null]}
+                    onPress={() => setCategoryId(categoryOption.id)}
+                  >
+                    <Text style={active ? styles.categoryPickerChipTextActive : styles.categoryPickerChipText}>
+                      {categoryOption.label}
                     </Text>
-                    {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
-                  </View>
-                  <View style={styles.itemActions}>
-                    <TouchableOpacity
-                      style={[styles.inlineAction, itemUnavailable ? styles.inlineAvailabilityOn : styles.inlineAvailabilityOff]}
-                      onPress={() => handleToggleItemAvailability(item)}
-                      disabled={isToggling}
-                    >
-                      <Text style={[styles.inlineActionText, itemUnavailable ? styles.inlineAvailabilityOnText : styles.inlineAvailabilityOffText]}>
-                        {isToggling ? 'Updating...' : itemUnavailable ? 'Back in stock' : 'Sold out'}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.inlineAction} onPress={() => handleEditItem(menuCategory.category, item)}>
-                      <Text style={styles.inlineActionText}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.inlineAction, styles.inlineDanger]}
-                      onPress={() => handleRemoveItem(menuCategory.category, item.id)}
-                      disabled={saving}
-                    >
-                      <Text style={[styles.inlineActionText, styles.inlineDangerText]}>Remove</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              );
-            })}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
-        ))}
-      </View>
-    </ScrollView>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Meal name</Text>
+            <Text style={styles.fieldHint}>Write the exact name you want customers to remember and reorder.</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Examples: Chicken Shawarma Wrap, Smoky Jollof Bowl"
+              placeholderTextColor={partnerTheme.textMuted}
+              value={itemName}
+              onChangeText={setItemName}
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Meal description</Text>
+            <Text style={styles.fieldHint}>Keep it short and appetizing: ingredients, spice level, portion style, or what comes with it.</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Examples: Grilled chicken, crunchy vegetables, house sauce, and soft flatbread."
+              placeholderTextColor={partnerTheme.textMuted}
+              value={itemDescription}
+              onChangeText={setItemDescription}
+              multiline
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Price</Text>
+            <Text style={styles.fieldHint}>Enter the full selling price in naira without commas.</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Examples: 4500 or 12500"
+              placeholderTextColor={partnerTheme.textMuted}
+              value={itemPrice}
+              onChangeText={setItemPrice}
+              keyboardType="decimal-pad"
+            />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Image URL</Text>
+            <Text style={styles.fieldHint}>Optional, but helpful when you already have a good hosted photo for the dish.</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Example: https://yourcdn.com/meals/chicken-shawarma.jpg"
+              placeholderTextColor={partnerTheme.textMuted}
+              value={itemImage}
+              onChangeText={setItemImage}
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleCopy}>
+              <Text style={styles.toggleLabel}>Available for ordering</Text>
+              <Text style={styles.toggleHint}>Turn this off if the meal is sold out or paused for now.</Text>
+            </View>
+            <Switch
+              value={isAvailable}
+              onValueChange={setIsAvailable}
+              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
+              thumbColor={isAvailable ? partnerTheme.accent : '#f3f4f6'}
+            />
+          </View>
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[styles.primaryButton, !restaurant ? styles.primaryButtonDisabled : null]}
+              onPress={handleSaveItem}
+              disabled={!restaurant || saving || loading}
+            >
+              <Text style={styles.primaryButtonText}>
+                {saving ? 'Saving...' : editingItemId ? 'Save meal changes' : 'Add meal'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryButton} onPress={resetForm} disabled={saving}>
+              <Text style={styles.secondaryButtonText}>{editingItemId ? 'Cancel edit' : 'Reset form'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Live menu</Text>
+          <Text style={styles.cardSubtitle}>This is the structure your customer-facing menu will follow once the restaurant is published.</Text>
+          {menu.length === 0 ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyPanelTitle}>No categories yet</Text>
+              <Text style={styles.emptyCopy}>Start with one strong category and one complete meal so the menu feels intentional from the first save.</Text>
+            </View>
+          ) : null}
+          {menu.map((menuCategory) => (
+            <View key={menuCategory.category} style={styles.categoryBlock}>
+              <View style={styles.categoryHeader}>
+                <Text style={styles.categoryTitle}>{menuCategory.category}</Text>
+                <View style={styles.categoryCountPill}>
+                  <Text style={styles.categoryCountText}>
+                    {menuCategory.items.length} {menuCategory.items.length === 1 ? 'meal' : 'meals'}
+                  </Text>
+                </View>
+              </View>
+              {menuCategory.items.map((item) => {
+                const itemUnavailable = isItemCurrentlyUnavailable(item);
+                const isToggling = togglingItemId === item.id;
+                const resumeLabel =
+                  itemUnavailable && item.isAvailable !== false && item.unavailableUntil
+                    ? formatUnavailableUntil(item.unavailableUntil)
+                    : null;
+
+                return (
+                  <View key={item.id} style={styles.itemRow}>
+                    <View style={styles.itemMeta}>
+                      <Text style={styles.itemName}>{item.name}</Text>
+                      <Text style={styles.itemInfo}>
+                        ₦{item.price.toFixed(2)} | {item.categoryLabel ?? menuCategory.category} |{' '}
+                        {itemUnavailable ? 'Sold out' : 'Available'}
+                        {resumeLabel ? ` (back at ${resumeLabel})` : ''}
+                      </Text>
+                      {item.description ? <Text style={styles.itemDescription}>{item.description}</Text> : null}
+                    </View>
+                    <View style={styles.itemActions}>
+                      <TouchableOpacity
+                        style={[styles.inlineAction, itemUnavailable ? styles.inlineAvailabilityOn : styles.inlineAvailabilityOff]}
+                        onPress={() => handleToggleItemAvailability(item)}
+                        disabled={isToggling}
+                      >
+                        <Text style={[styles.inlineActionText, itemUnavailable ? styles.inlineAvailabilityOnText : styles.inlineAvailabilityOffText]}>
+                          {isToggling ? 'Updating...' : itemUnavailable ? 'Back in stock' : 'Sold out'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.inlineAction} onPress={() => handleEditItem(menuCategory.category, item)}>
+                        <Text style={styles.inlineActionText}>Edit</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.inlineAction, styles.inlineDanger]}
+                        onPress={() => handleRemoveItem(menuCategory.category, item.id)}
+                        disabled={saving}
+                      >
+                        <Text style={[styles.inlineActionText, styles.inlineDangerText]}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+      {notice}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: partnerTheme.background,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   content: {

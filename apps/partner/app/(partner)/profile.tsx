@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -9,10 +8,11 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useConfirm } from '@feasty/design-system';
+import { useConfirm, useNotice } from '@feasty/design-system';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -66,11 +66,41 @@ const toNumberOrNull = (value: string) => {
 const INPUT_PLACEHOLDER_COLOR = '#6a7d76';
 type PublishFieldKey = 'name' | 'latitude' | 'longitude' | 'deliveryRadiusKm';
 
+/**
+ * The messages that used to sit in an `Alert.alert` beside `setFieldErrors`.
+ * The red border already told the partner WHICH field was wrong; the Alert was
+ * meant to say why, and says nothing at all on the web build, so the border was
+ * the entire explanation. These now render in that same per-field surface
+ * rather than in a second, competing one.
+ */
+const PUBLISH_FIELD_MESSAGES = {
+  name: 'Add a restaurant name before saving.',
+  location: 'Add both latitude and longitude before publishing this store.',
+  deliveryRadiusKm: 'Add a delivery distance above zero before publishing this store.',
+} as const;
+
 export default function PartnerProfileScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const { deleteAccount, linkRestaurant, loading: authLoading, signOut, user } = useAuth();
   const { error, loading, restaurant, restaurants, requiresVerifiedLink } = usePartnerRestaurant();
   const { confirm, confirmDialog } = useConfirm();
+  // Every save, upload, link, pause, resume and sign-out failure on this screen
+  // used to report through `Alert`, which is `class Alert { static alert() {} }`
+  // in react-native-web - nothing at all on partner.feasty.com.ng. The `error`
+  // below belongs to usePartnerRestaurant and carries LOAD failures only, so a
+  // failed Pause left the partner believing the store was paused while it was
+  // still accepting orders nobody would cook.
+  //
+  // Floating rather than inline: the controls are spread down a long scrolling
+  // page - Save sits in Restaurant details, the pause chips in their own card,
+  // Confirm link further down and Sign out at the very bottom - so no single
+  // in-layout slot is visible from all of them. The offset clears the tab bar
+  // on narrow layouts; the wide layout uses a sidebar and has none.
+  const { notice, showNotice } = useNotice({
+    placement: 'floating',
+    offsetBottom: width >= 1024 ? insets.bottom + 16 : insets.bottom + 86,
+  });
   // Separate from `error` above, which belongs to usePartnerRestaurant and is
   // rendered at the top of the screen; this one sits beside the delete button.
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -94,7 +124,9 @@ export default function PartnerProfileScreen() {
   const [supportsPickup, setSupportsPickup] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
   const [isPublished, setIsPublished] = useState(true);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<PublishFieldKey, boolean>>>({});
+  // Holds the MESSAGE per field now rather than a bare boolean - see the note
+  // on PUBLISH_FIELD_MESSAGES. Truthiness still drives the red border.
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<PublishFieldKey, string>>>({});
 
   const linkedRestaurantId = user?.restaurantId ?? restaurant?.id ?? null;
   const linkableRestaurants = [...restaurants].sort((left, right) => left.name.localeCompare(right.name));
@@ -132,13 +164,21 @@ export default function PartnerProfileScreen() {
 
   const handlePickRestaurantAsset = async (kind: 'covers' | 'logos') => {
     if (!user) {
-      Alert.alert('Session expired', 'Sign in again before uploading images.');
+      showNotice({
+        tone: 'error',
+        title: 'Session expired',
+        message: 'Sign in again before uploading images.',
+      });
       return;
     }
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Photo access blocked', 'Allow photo access to upload images.');
+      showNotice({
+        tone: 'error',
+        title: 'Photo access blocked',
+        message: 'Allow photo access to upload images.',
+      });
       return;
     }
 
@@ -166,16 +206,30 @@ export default function PartnerProfileScreen() {
         setImage(publicUrl);
       }
     } catch (nextError: any) {
-      Alert.alert('Upload failed', nextError.message ?? 'Unable to upload this image right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Upload failed',
+        message: nextError?.message ?? 'Unable to upload this image right now.',
+      });
     }
   };
 
   const handleLinkRestaurant = async (restaurantId: string, restaurantName: string) => {
     try {
       await linkRestaurant(restaurantId);
-      Alert.alert('Restaurant linked', `${restaurantName} is now connected to this partner account.`);
+      showNotice({
+        tone: 'success',
+        title: 'Restaurant linked',
+        message: `${restaurantName} is now connected to this partner account.`,
+      });
     } catch (nextError: any) {
-      Alert.alert('Link failed', nextError.message ?? 'Unable to link this restaurant right now.');
+      // `linkRestaurant` writes to AuthContext's `error`, which this screen
+      // never renders - the slot at the top belongs to usePartnerRestaurant.
+      showNotice({
+        tone: 'error',
+        title: 'Link failed',
+        message: nextError?.message ?? 'Unable to link this restaurant right now.',
+      });
     }
   };
 
@@ -212,13 +266,16 @@ export default function PartnerProfileScreen() {
 
   const handleSaveProfile = async () => {
     if (!user) {
-      Alert.alert('Session expired', 'Sign in again before saving store changes.');
+      showNotice({
+        tone: 'error',
+        title: 'Session expired',
+        message: 'Sign in again before saving store changes.',
+      });
       return;
     }
 
     if (!name.trim()) {
-      setFieldErrors({ name: true });
-      Alert.alert('Store name required', 'Add a restaurant name before saving.');
+      setFieldErrors({ name: PUBLISH_FIELD_MESSAGES.name });
       return;
     }
 
@@ -229,16 +286,14 @@ export default function PartnerProfileScreen() {
     if (isPublished) {
       if (parsedLatitude === null || parsedLongitude === null) {
         setFieldErrors({
-          latitude: parsedLatitude === null,
-          longitude: parsedLongitude === null,
+          latitude: parsedLatitude === null ? PUBLISH_FIELD_MESSAGES.location : undefined,
+          longitude: parsedLongitude === null ? PUBLISH_FIELD_MESSAGES.location : undefined,
         });
-        Alert.alert('Location required', 'Add both latitude and longitude before publishing this store.');
         return;
       }
 
       if (parsedDeliveryRadiusKm === null || parsedDeliveryRadiusKm <= 0) {
-        setFieldErrors({ deliveryRadiusKm: true });
-        Alert.alert('Delivery radius required', 'Add a delivery distance above zero before publishing this store.');
+        setFieldErrors({ deliveryRadiusKm: PUBLISH_FIELD_MESSAGES.deliveryRadiusKm });
         return;
       }
     }
@@ -274,12 +329,17 @@ export default function PartnerProfileScreen() {
         await linkRestaurant(savedRestaurant.id);
       }
 
-      Alert.alert(
-        user.restaurantId || restaurant?.id ? 'Store updated' : 'Store created',
-        `${savedRestaurant.name} is ${isPublished ? 'live for customers' : 'hidden from customers'} and saved for partner menu management.`
-      );
+      showNotice({
+        tone: 'success',
+        title: user.restaurantId || restaurant?.id ? 'Store updated' : 'Store created',
+        message: `${savedRestaurant.name} is ${isPublished ? 'live for customers' : 'hidden from customers'} and saved for partner menu management.`,
+      });
     } catch (nextError: any) {
-      Alert.alert('Save failed', nextError.message ?? 'Unable to save store details right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Save failed',
+        message: nextError?.message ?? 'Unable to save store details right now.',
+      });
     } finally {
       setSavingProfile(false);
     }
@@ -291,7 +351,11 @@ export default function PartnerProfileScreen() {
   // doesn't require touching (or re-validating) the rest of the profile.
   const handlePauseStore = async (minutes: number) => {
     if (!restaurant?.id) {
-      Alert.alert('Store setup needed', 'Create or link a restaurant record before pausing orders.');
+      showNotice({
+        tone: 'error',
+        title: 'Store setup needed',
+        message: 'Create or link a restaurant record before pausing orders.',
+      });
       return;
     }
 
@@ -304,7 +368,13 @@ export default function PartnerProfileScreen() {
         restaurantId: restaurant.id,
       });
     } catch (nextError: any) {
-      Alert.alert('Pause failed', nextError.message ?? 'Unable to pause the store right now.');
+      // The partner must not be left believing the store is paused while it is
+      // still taking orders. Sticky, as errors default to.
+      showNotice({
+        tone: 'error',
+        title: 'Pause failed',
+        message: nextError?.message ?? 'Unable to pause the store right now.',
+      });
     } finally {
       setPauseActionPending(false);
     }
@@ -320,7 +390,11 @@ export default function PartnerProfileScreen() {
     try {
       await setPartnerStorePause({ paused: false, restaurantId: restaurant.id });
     } catch (nextError: any) {
-      Alert.alert('Resume failed', nextError.message ?? 'Unable to resume the store right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Resume failed',
+        message: nextError?.message ?? 'Unable to resume the store right now.',
+      });
     } finally {
       setPauseActionPending(false);
     }
@@ -330,7 +404,11 @@ export default function PartnerProfileScreen() {
     try {
       await signOut();
     } catch (nextError: any) {
-      Alert.alert('Sign out failed', nextError.message ?? 'Unable to sign out right now.');
+      showNotice({
+        tone: 'error',
+        title: 'Sign out failed',
+        message: nextError?.message ?? 'Unable to sign out right now.',
+      });
     }
   };
 
@@ -358,370 +436,395 @@ export default function PartnerProfileScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-      <Text style={styles.title}>Store control</Text>
-      <Text style={styles.subtitle}>Run the partner side from one place: your business identity, store setup, publishing state, and linked restaurant record.</Text>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Partner account</Text>
-        <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
-        <Text style={styles.metaLine}>Role: {user?.role ?? 'restaurant'}</Text>
-        <Text style={styles.metaLine}>Email verified: {user?.emailVerified ? 'Yes' : 'No'}</Text>
-        <Text style={styles.metaLine}>Linked restaurant: {user?.restaurantName ?? restaurant?.name ?? 'Not linked yet'}</Text>
-        <Text style={styles.metaLine}>Single-device session: {user?.activeSessionId ? 'Active' : 'Idle'}</Text>
-      </View>
-      {requiresVerifiedLink ? (
-        <View style={styles.warningCard}>
-          <Text style={styles.warningTitle}>Verified link needed</Text>
-          <Text style={styles.warningCopy}>
-            We found a restaurant owned by this account, but your partner profile is not explicitly linked yet. Confirm the link below so future access stays pinned to the correct restaurant ID.
-          </Text>
+    // Wrapped rather than used as the root because the floating notice
+    // positions itself absolutely: inside a ScrollView that would anchor it to
+    // the bottom of the CONTENT and let it scroll away, instead of pinning it
+    // to the bottom of the screen.
+    <View style={styles.screen}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+        <Text style={styles.title}>Store control</Text>
+        <Text style={styles.subtitle}>Run the partner side from one place: your business identity, store setup, publishing state, and linked restaurant record.</Text>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Partner account</Text>
+          <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
+          <Text style={styles.metaLine}>Role: {user?.role ?? 'restaurant'}</Text>
+          <Text style={styles.metaLine}>Email verified: {user?.emailVerified ? 'Yes' : 'No'}</Text>
+          <Text style={styles.metaLine}>Linked restaurant: {user?.restaurantName ?? restaurant?.name ?? 'Not linked yet'}</Text>
+          <Text style={styles.metaLine}>Single-device session: {user?.activeSessionId ? 'Active' : 'Idle'}</Text>
         </View>
-      ) : null}
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Restaurant details</Text>
-        <Text style={styles.fieldLabel}>Restaurant name</Text>
-        <TextInput
-          style={[styles.input, fieldErrors.name ? styles.inputError : null]}
-          placeholder="Type the exact restaurant name customers should see"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          value={name}
-          onChangeText={handleRequiredFieldChange('name', setName)}
-        />
-        <Text style={styles.fieldLabel}>Cuisine</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Example: Nigerian, Grills, Fast Food"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          value={cuisine}
-          onChangeText={setCuisine}
-        />
-        <Text style={styles.fieldLabel}>Short description</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Tell customers what you serve in one short sentence"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          value={description}
-          onChangeText={setDescription}
-          multiline
-        />
-        <Text style={styles.fieldLabel}>Restaurant address</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Street, area, city"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          value={address}
-          onChangeText={setAddress}
-        />
-        <View style={styles.assetGrid}>
-          <View style={styles.assetBlock}>
-            <View style={styles.logoPreview}>
-              {logoImage ? (
-                <Image source={{ uri: logoImage }} style={styles.assetImage} />
-              ) : (
-                <Text style={styles.assetFallbackText}>Logo</Text>
-              )}
-            </View>
-            <TouchableOpacity style={styles.assetButton} onPress={() => handlePickRestaurantAsset('logos')}>
-              <Text style={styles.assetButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.assetBlock}>
-            <View style={styles.coverPreview}>
-              {image ? (
-                <Image source={{ uri: image }} style={styles.assetImage} />
-              ) : (
-                <Text style={styles.assetFallbackText}>Cover</Text>
-              )}
-            </View>
-            <TouchableOpacity style={styles.assetButton} onPress={() => handlePickRestaurantAsset('covers')}>
-              <Text style={styles.assetButtonText}>{image ? 'Change cover' : 'Upload cover'}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-        <Text style={styles.fieldLabel}>Delivery time</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Example: 25-35 min"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          value={deliveryTime}
-          onChangeText={setDeliveryTime}
-        />
-        <View style={styles.row}>
-          <View style={styles.fieldColumn}>
-            <Text style={styles.fieldLabel}>Opening time</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="08:00"
-              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              value={openingTime}
-              onChangeText={setOpeningTime}
-              autoCapitalize="none"
-            />
-          </View>
-          <View style={styles.fieldColumn}>
-            <Text style={styles.fieldLabel}>Closing time</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="22:00"
-              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              value={closingTime}
-              onChangeText={setClosingTime}
-              autoCapitalize="none"
-            />
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.fieldColumn}>
-            <Text style={styles.fieldLabel}>Delivery fee</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Amount customers pay for delivery"
-              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              value={deliveryFee}
-              onChangeText={setDeliveryFee}
-              keyboardType="decimal-pad"
-            />
-          </View>
-          <View style={styles.fieldColumn}>
-            <Text style={styles.fieldLabel}>Minimum order</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Lowest order amount accepted"
-              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              value={minOrder}
-              onChangeText={setMinOrder}
-              keyboardType="decimal-pad"
-            />
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.fieldColumn}>
-            <Text style={styles.fieldLabel}>Latitude</Text>
-            <TextInput
-              style={[styles.input, fieldErrors.latitude ? styles.inputError : null]}
-              placeholder="Required to publish"
-              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              value={latitude}
-              onChangeText={handleRequiredFieldChange('latitude', setLatitude)}
-              keyboardType="decimal-pad"
-            />
-          </View>
-          <View style={styles.fieldColumn}>
-            <Text style={styles.fieldLabel}>Longitude</Text>
-            <TextInput
-              style={[styles.input, fieldErrors.longitude ? styles.inputError : null]}
-              placeholder="Required to publish"
-              placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              value={longitude}
-              onChangeText={handleRequiredFieldChange('longitude', setLongitude)}
-              keyboardType="decimal-pad"
-            />
-          </View>
-        </View>
-        <Text style={styles.fieldLabel}>Delivery radius</Text>
-        <TextInput
-          style={[styles.input, fieldErrors.deliveryRadiusKm ? styles.inputError : null]}
-          placeholder="Maximum delivery distance in km"
-          placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-          value={deliveryRadiusKm}
-          onChangeText={handleRequiredFieldChange('deliveryRadiusKm', setDeliveryRadiusKm)}
-          keyboardType="decimal-pad"
-        />
-
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleLabelGroup}>
-            <Text style={styles.toggleLabel}>I handle my own delivery</Text>
-            <Text style={styles.toggleCaption}>
-              Turn on to offer delivery with the fee and radius above — your team delivers. Leave off and
-              customers see &ldquo;delivery coming soon&rdquo; and order pickup.
+        {requiresVerifiedLink ? (
+          <View style={styles.warningCard}>
+            <Text style={styles.warningTitle}>Verified link needed</Text>
+            <Text style={styles.warningCopy}>
+              We found a restaurant owned by this account, but your partner profile is not explicitly linked yet. Confirm the link below so future access stays pinned to the correct restaurant ID.
             </Text>
           </View>
-          <Switch
-            value={supportsDelivery}
-            onValueChange={setSupportsDelivery}
-            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-            thumbColor={supportsDelivery ? partnerTheme.accent : '#f3f4f6'}
-          />
-        </View>
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Supports pickup</Text>
-          <Switch
-            value={supportsPickup}
-            onValueChange={setSupportsPickup}
-            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-            thumbColor={supportsPickup ? partnerTheme.accent : '#f3f4f6'}
-          />
-        </View>
-        <View style={styles.approvalNotice}>
-          <Text style={styles.approvalNoticeTitle}>Self-publish active</Text>
-          <Text style={styles.approvalNoticeCopy}>
-            Save changes and your restaurant stays visible to customers. Use the visibility switch below if you want to hide it temporarily.
-          </Text>
-        </View>
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Visible to customers</Text>
-          <Switch
-            value={isPublished}
-            onValueChange={handlePublishToggle}
-            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-            thumbColor={isPublished ? partnerTheme.accent : '#f3f4f6'}
-          />
-        </View>
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Store open now</Text>
-          <Switch
-            value={isOpen}
-            onValueChange={setIsOpen}
-            trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-            thumbColor={isOpen ? partnerTheme.accent : '#f3f4f6'}
-          />
-        </View>
-
-        <TouchableOpacity style={styles.primaryButton} onPress={handleSaveProfile} disabled={savingProfile || loading}>
-          <Text style={styles.primaryButtonText}>
-            {savingProfile ? 'Saving store...' : user?.restaurantId || restaurant?.id ? 'Save store changes' : 'Create store record'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Pause orders</Text>
-        <Text style={styles.helperText}>
-          Kitchen backed up? Pause the whole store for a set time — customers stop seeing you in search and can&apos;t place new
-          orders. It resumes on its own the moment the time is up, no need to remember to switch it back on.
-        </Text>
-        {isStoreCurrentlyPaused(restaurant?.pausedUntil) ? (
-          <View style={styles.pausedBanner}>
-            <Text style={styles.pausedBannerTitle}>Paused right now</Text>
-            <Text style={styles.pausedBannerCopy}>
-              {restaurant?.pausedUntil && formatPausedUntil(restaurant.pausedUntil)
-                ? `Resumes automatically at ${formatPausedUntil(restaurant.pausedUntil)}, or tap below to resume sooner.`
-                : 'Tap below to resume taking orders.'}
-            </Text>
-            <TouchableOpacity
-              style={[styles.primaryButton, styles.resumeButton]}
-              onPress={handleResumeStore}
-              disabled={pauseActionPending || loading}
-            >
-              <Text style={styles.primaryButtonText}>{pauseActionPending ? 'Updating...' : 'Resume now'}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.pauseChipRow}>
-            {PAUSE_DURATION_OPTIONS.map((option) => (
-              <TouchableOpacity
-                key={option.label}
-                style={styles.pauseChip}
-                onPress={() => handlePauseStore(option.minutes)}
-                disabled={pauseActionPending || loading || !restaurant}
-              >
-                <Text style={styles.pauseChipText}>{option.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Current publishing state</Text>
-        <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
-        <Text style={styles.metaLine}>Linked restaurant ID: {user?.restaurantId ?? restaurant?.id ?? 'Not linked yet'}</Text>
-        <Text style={styles.metaLine}>Link source: {user?.restaurantLinkSource ?? 'Not recorded yet'}</Text>
-        <Text style={styles.metaLine}>Link confirmed at: {user?.restaurantLinkedAt ?? 'Not recorded yet'}</Text>
-        <Text style={styles.metaLine}>Menu categories: {restaurant?.menu?.length ?? 0}</Text>
-        <Text style={styles.metaLine}>
-          Listed items: {restaurant?.menu?.reduce((sum, category) => sum + (category.items?.length ?? 0), 0) ?? 0}
-        </Text>
-        <Text style={styles.metaLine}>Live status: {restaurant?.approvalStatus ?? (restaurant?.isPublished === true ? 'live' : 'hidden')}</Text>
-        <Text style={styles.metaLine}>Last live update: {restaurant?.approvedAt ?? 'Not recorded yet'}</Text>
-        <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
-        <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
-        <Text style={styles.metaLine}>
-          Order pause:{' '}
-          {isStoreCurrentlyPaused(restaurant?.pausedUntil)
-            ? `Paused${restaurant?.pausedUntil && formatPausedUntil(restaurant.pausedUntil) ? ` until ${formatPausedUntil(restaurant.pausedUntil)}` : ''}`
-            : 'Not paused'}
-        </Text>
-        <Text style={styles.metaLine}>
-          Trading hours: {restaurant?.openingTime && restaurant?.closingTime ? `${restaurant.openingTime} - ${restaurant.closingTime}` : 'Not set'}
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Restaurant linking</Text>
-        <Text style={styles.helperText}>
-          This is the restaurant record tied to your partner account. Create or update your store above and the link is kept in sync.
-        </Text>
-        {linkableRestaurants.length === 0 ? (
-          <Text style={styles.metaLine}>
-            No restaurant is attached to this account yet. Complete your restaurant application to have one created for you.
-          </Text>
         ) : null}
-        {linkableRestaurants.map((candidate) => {
-          const isLinked = linkedRestaurantId === candidate.id;
 
-          return (
-            <View
-              key={candidate.id}
-              style={[styles.restaurantRow, isLinked ? styles.restaurantRowActive : null]}
-            >
-              <View style={styles.restaurantMeta}>
-                <Text style={styles.restaurantName}>{candidate.name}</Text>
-                <Text style={styles.restaurantInfo}>
-                  {candidate.cuisine ?? 'Cuisine not set'} | {candidate.address ?? 'Address not set'}
-                </Text>
-                <Text style={styles.restaurantId}>ID: {candidate.id}</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Restaurant details</Text>
+          <Text style={styles.fieldLabel}>Restaurant name</Text>
+          <TextInput
+            style={[styles.input, fieldErrors.name ? styles.inputError : null]}
+            placeholder="Type the exact restaurant name customers should see"
+            placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+            value={name}
+            onChangeText={handleRequiredFieldChange('name', setName)}
+          />
+          {fieldErrors.name ? (
+            <Text accessibilityLiveRegion="polite" role="alert" style={styles.fieldErrorText}>
+              {fieldErrors.name}
+            </Text>
+          ) : null}
+          <Text style={styles.fieldLabel}>Cuisine</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Example: Nigerian, Grills, Fast Food"
+            placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+            value={cuisine}
+            onChangeText={setCuisine}
+          />
+          <Text style={styles.fieldLabel}>Short description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Tell customers what you serve in one short sentence"
+            placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+          />
+          <Text style={styles.fieldLabel}>Restaurant address</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Street, area, city"
+            placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+            value={address}
+            onChangeText={setAddress}
+          />
+          <View style={styles.assetGrid}>
+            <View style={styles.assetBlock}>
+              <View style={styles.logoPreview}>
+                {logoImage ? (
+                  <Image source={{ uri: logoImage }} style={styles.assetImage} />
+                ) : (
+                  <Text style={styles.assetFallbackText}>Logo</Text>
+                )}
               </View>
-              <TouchableOpacity
-                style={[styles.linkButton, isLinked ? styles.linkButtonActive : null]}
-                onPress={() => handleLinkRestaurant(candidate.id, candidate.name)}
-                disabled={loading || isLinked}
-              >
-                <Text style={[styles.linkButtonText, isLinked ? styles.linkButtonTextActive : null]}>
-                  {isLinked ? 'Linked' : 'Confirm link'}
-                </Text>
+              <TouchableOpacity style={styles.assetButton} onPress={() => handlePickRestaurantAsset('logos')}>
+                <Text style={styles.assetButtonText}>{logoImage ? 'Change logo' : 'Upload logo'}</Text>
               </TouchableOpacity>
             </View>
-          );
-        })}
-      </View>
+            <View style={styles.assetBlock}>
+              <View style={styles.coverPreview}>
+                {image ? (
+                  <Image source={{ uri: image }} style={styles.assetImage} />
+                ) : (
+                  <Text style={styles.assetFallbackText}>Cover</Text>
+                )}
+              </View>
+              <TouchableOpacity style={styles.assetButton} onPress={() => handlePickRestaurantAsset('covers')}>
+                <Text style={styles.assetButtonText}>{image ? 'Change cover' : 'Upload cover'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.fieldLabel}>Delivery time</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Example: 25-35 min"
+            placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+            value={deliveryTime}
+            onChangeText={setDeliveryTime}
+          />
+          <View style={styles.row}>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.fieldLabel}>Opening time</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="08:00"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+                value={openingTime}
+                onChangeText={setOpeningTime}
+                autoCapitalize="none"
+              />
+            </View>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.fieldLabel}>Closing time</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="22:00"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+                value={closingTime}
+                onChangeText={setClosingTime}
+                autoCapitalize="none"
+              />
+            </View>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.fieldLabel}>Delivery fee</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Amount customers pay for delivery"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+                value={deliveryFee}
+                onChangeText={setDeliveryFee}
+                keyboardType="decimal-pad"
+              />
+            </View>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.fieldLabel}>Minimum order</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Lowest order amount accepted"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+                value={minOrder}
+                onChangeText={setMinOrder}
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.fieldLabel}>Latitude</Text>
+              <TextInput
+                style={[styles.input, fieldErrors.latitude ? styles.inputError : null]}
+                placeholder="Required to publish"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+                value={latitude}
+                onChangeText={handleRequiredFieldChange('latitude', setLatitude)}
+                keyboardType="decimal-pad"
+              />
+            </View>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.fieldLabel}>Longitude</Text>
+              <TextInput
+                style={[styles.input, fieldErrors.longitude ? styles.inputError : null]}
+                placeholder="Required to publish"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+                value={longitude}
+                onChangeText={handleRequiredFieldChange('longitude', setLongitude)}
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+          {fieldErrors.latitude ?? fieldErrors.longitude ? (
+            <Text accessibilityLiveRegion="polite" role="alert" style={styles.fieldErrorText}>
+              {fieldErrors.latitude ?? fieldErrors.longitude}
+            </Text>
+          ) : null}
+          <Text style={styles.fieldLabel}>Delivery radius</Text>
+          <TextInput
+            style={[styles.input, fieldErrors.deliveryRadiusKm ? styles.inputError : null]}
+            placeholder="Maximum delivery distance in km"
+            placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
+            value={deliveryRadiusKm}
+            onChangeText={handleRequiredFieldChange('deliveryRadiusKm', setDeliveryRadiusKm)}
+            keyboardType="decimal-pad"
+          />
+          {fieldErrors.deliveryRadiusKm ? (
+            <Text accessibilityLiveRegion="polite" role="alert" style={styles.fieldErrorText}>
+              {fieldErrors.deliveryRadiusKm}
+            </Text>
+          ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Account access</Text>
-        <Text style={styles.helperText}>
-          Sign out when you are done on this device. If you want this partner account removed entirely, use delete. The backend will block self-removal when admin-controlled business records are still attached.
-        </Text>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={handleSignOut}
-          disabled={loading || savingProfile || authLoading}
-        >
-          <Text style={styles.secondaryButtonText}>Sign out</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={handleDeleteAccount}
-          disabled={loading || savingProfile || authLoading}
-        >
-          <Text style={styles.deleteButtonText}>Delete account</Text>
-        </TouchableOpacity>
-        {deleteError ? (
-          <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
-            {deleteError}
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLabelGroup}>
+              <Text style={styles.toggleLabel}>I handle my own delivery</Text>
+              <Text style={styles.toggleCaption}>
+                Turn on to offer delivery with the fee and radius above — your team delivers. Leave off and
+                customers see &ldquo;delivery coming soon&rdquo; and order pickup.
+              </Text>
+            </View>
+            <Switch
+              value={supportsDelivery}
+              onValueChange={setSupportsDelivery}
+              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
+              thumbColor={supportsDelivery ? partnerTheme.accent : '#f3f4f6'}
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Supports pickup</Text>
+            <Switch
+              value={supportsPickup}
+              onValueChange={setSupportsPickup}
+              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
+              thumbColor={supportsPickup ? partnerTheme.accent : '#f3f4f6'}
+            />
+          </View>
+          <View style={styles.approvalNotice}>
+            <Text style={styles.approvalNoticeTitle}>Self-publish active</Text>
+            <Text style={styles.approvalNoticeCopy}>
+              Save changes and your restaurant stays visible to customers. Use the visibility switch below if you want to hide it temporarily.
+            </Text>
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Visible to customers</Text>
+            <Switch
+              value={isPublished}
+              onValueChange={handlePublishToggle}
+              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
+              thumbColor={isPublished ? partnerTheme.accent : '#f3f4f6'}
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Store open now</Text>
+            <Switch
+              value={isOpen}
+              onValueChange={setIsOpen}
+              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
+              thumbColor={isOpen ? partnerTheme.accent : '#f3f4f6'}
+            />
+          </View>
+
+          <TouchableOpacity style={styles.primaryButton} onPress={handleSaveProfile} disabled={savingProfile || loading}>
+            <Text style={styles.primaryButtonText}>
+              {savingProfile ? 'Saving store...' : user?.restaurantId || restaurant?.id ? 'Save store changes' : 'Create store record'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Pause orders</Text>
+          <Text style={styles.helperText}>
+            Kitchen backed up? Pause the whole store for a set time — customers stop seeing you in search and can&apos;t place new
+            orders. It resumes on its own the moment the time is up, no need to remember to switch it back on.
           </Text>
-        ) : null}
-      </View>
+          {isStoreCurrentlyPaused(restaurant?.pausedUntil) ? (
+            <View style={styles.pausedBanner}>
+              <Text style={styles.pausedBannerTitle}>Paused right now</Text>
+              <Text style={styles.pausedBannerCopy}>
+                {restaurant?.pausedUntil && formatPausedUntil(restaurant.pausedUntil)
+                  ? `Resumes automatically at ${formatPausedUntil(restaurant.pausedUntil)}, or tap below to resume sooner.`
+                  : 'Tap below to resume taking orders.'}
+              </Text>
+              <TouchableOpacity
+                style={[styles.primaryButton, styles.resumeButton]}
+                onPress={handleResumeStore}
+                disabled={pauseActionPending || loading}
+              >
+                <Text style={styles.primaryButtonText}>{pauseActionPending ? 'Updating...' : 'Resume now'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.pauseChipRow}>
+              {PAUSE_DURATION_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option.label}
+                  style={styles.pauseChip}
+                  onPress={() => handlePauseStore(option.minutes)}
+                  disabled={pauseActionPending || loading || !restaurant}
+                >
+                  <Text style={styles.pauseChipText}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
 
-      {confirmDialog}
-    </ScrollView>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Current publishing state</Text>
+          <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
+          <Text style={styles.metaLine}>Linked restaurant ID: {user?.restaurantId ?? restaurant?.id ?? 'Not linked yet'}</Text>
+          <Text style={styles.metaLine}>Link source: {user?.restaurantLinkSource ?? 'Not recorded yet'}</Text>
+          <Text style={styles.metaLine}>Link confirmed at: {user?.restaurantLinkedAt ?? 'Not recorded yet'}</Text>
+          <Text style={styles.metaLine}>Menu categories: {restaurant?.menu?.length ?? 0}</Text>
+          <Text style={styles.metaLine}>
+            Listed items: {restaurant?.menu?.reduce((sum, category) => sum + (category.items?.length ?? 0), 0) ?? 0}
+          </Text>
+          <Text style={styles.metaLine}>Live status: {restaurant?.approvalStatus ?? (restaurant?.isPublished === true ? 'live' : 'hidden')}</Text>
+          <Text style={styles.metaLine}>Last live update: {restaurant?.approvedAt ?? 'Not recorded yet'}</Text>
+          <Text style={styles.metaLine}>Published to customers: {restaurant?.isPublished === true ? 'Yes' : 'No'}</Text>
+          <Text style={styles.metaLine}>Store status: {restaurant?.isOpen === false ? 'Closed' : 'Open'}</Text>
+          <Text style={styles.metaLine}>
+            Order pause:{' '}
+            {isStoreCurrentlyPaused(restaurant?.pausedUntil)
+              ? `Paused${restaurant?.pausedUntil && formatPausedUntil(restaurant.pausedUntil) ? ` until ${formatPausedUntil(restaurant.pausedUntil)}` : ''}`
+              : 'Not paused'}
+          </Text>
+          <Text style={styles.metaLine}>
+            Trading hours: {restaurant?.openingTime && restaurant?.closingTime ? `${restaurant.openingTime} - ${restaurant.closingTime}` : 'Not set'}
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Restaurant linking</Text>
+          <Text style={styles.helperText}>
+            This is the restaurant record tied to your partner account. Create or update your store above and the link is kept in sync.
+          </Text>
+          {linkableRestaurants.length === 0 ? (
+            <Text style={styles.metaLine}>
+              No restaurant is attached to this account yet. Complete your restaurant application to have one created for you.
+            </Text>
+          ) : null}
+          {linkableRestaurants.map((candidate) => {
+            const isLinked = linkedRestaurantId === candidate.id;
+
+            return (
+              <View
+                key={candidate.id}
+                style={[styles.restaurantRow, isLinked ? styles.restaurantRowActive : null]}
+              >
+                <View style={styles.restaurantMeta}>
+                  <Text style={styles.restaurantName}>{candidate.name}</Text>
+                  <Text style={styles.restaurantInfo}>
+                    {candidate.cuisine ?? 'Cuisine not set'} | {candidate.address ?? 'Address not set'}
+                  </Text>
+                  <Text style={styles.restaurantId}>ID: {candidate.id}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.linkButton, isLinked ? styles.linkButtonActive : null]}
+                  onPress={() => handleLinkRestaurant(candidate.id, candidate.name)}
+                  disabled={loading || isLinked}
+                >
+                  <Text style={[styles.linkButtonText, isLinked ? styles.linkButtonTextActive : null]}>
+                    {isLinked ? 'Linked' : 'Confirm link'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Account access</Text>
+          <Text style={styles.helperText}>
+            Sign out when you are done on this device. If you want this partner account removed entirely, use delete. The backend will block self-removal when admin-controlled business records are still attached.
+          </Text>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleSignOut}
+            disabled={loading || savingProfile || authLoading}
+          >
+            <Text style={styles.secondaryButtonText}>Sign out</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={handleDeleteAccount}
+            disabled={loading || savingProfile || authLoading}
+          >
+            <Text style={styles.deleteButtonText}>Delete account</Text>
+          </TouchableOpacity>
+          {deleteError ? (
+            <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
+              {deleteError}
+            </Text>
+          ) : null}
+        </View>
+
+        {confirmDialog}
+      </ScrollView>
+      {notice}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: partnerTheme.background,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   content: {
@@ -746,6 +849,14 @@ const styles = StyleSheet.create({
     color: partnerTheme.danger,
     fontSize: 13,
     marginTop: 12,
+  },
+  // Sits directly under the field it explains, so the red border and the reason
+  // for it are read together.
+  fieldErrorText: {
+    color: partnerTheme.danger,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
   },
   warningCard: {
     backgroundColor: partnerTheme.warningSoft,

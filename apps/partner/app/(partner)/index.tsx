@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
-  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNotice } from '@feasty/design-system';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
@@ -81,6 +81,13 @@ export default function PartnerHome() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isWide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
+  // Floating: Sign out sits at the top of a long scrolling dashboard, so an
+  // inline notice would scroll out of sight. The offset clears the tab bar on
+  // narrow layouts; the wide layout uses a sidebar and has none.
+  const { notice, showNotice } = useNotice({
+    placement: 'floating',
+    offsetBottom: isWide ? insets.bottom + 16 : insets.bottom + 86,
+  });
   const { completedToday, error, incomingOrders, loading, orders, preparingOrders, restaurant } = usePartnerOrders();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
 
@@ -100,7 +107,14 @@ export default function PartnerHome() {
     try {
       await signOut();
     } catch (nextError: any) {
-      Alert.alert('Sign out failed', nextError.message ?? 'Unable to sign out right now.');
+      // Was `Alert.alert`, i.e. nothing at all on partner.feasty.com.ng: the tap
+      // left the partner signed in with no explanation. `signOut` writes to
+      // AuthContext's `error`, which this dashboard never renders.
+      showNotice({
+        tone: 'error',
+        title: 'Sign out failed',
+        message: nextError?.message ?? 'Unable to sign out right now.',
+      });
     }
   };
 
@@ -118,166 +132,175 @@ export default function PartnerHome() {
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingTop: (isWide ? 8 : insets.top) + 16 }]}
-    >
-      <View style={styles.headerRow}>
-        <View style={styles.greetingBlock}>
-          <Text style={styles.greetingText} numberOfLines={1}>
-            Hello, {greetingName}!
-          </Text>
-          {restaurant?.name ? (
-            <Text style={styles.greetingMeta} numberOfLines={1}>
-              {restaurant.name}
+    // Wrapped rather than used as the root because the floating notice
+    // positions itself absolutely: inside a ScrollView that would anchor it to
+    // the bottom of the CONTENT and let it scroll away.
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingTop: (isWide ? 8 : insets.top) + 16 }]}
+      >
+        <View style={styles.headerRow}>
+          <View style={styles.greetingBlock}>
+            <Text style={styles.greetingText} numberOfLines={1}>
+              Hello, {greetingName}!
             </Text>
+            {restaurant?.name ? (
+              <Text style={styles.greetingMeta} numberOfLines={1}>
+                {restaurant.name}
+              </Text>
+            ) : null}
+          </View>
+          {!isWide ? (
+            <TouchableOpacity onPress={handleSignOut}>
+              <Text style={styles.signOutLink}>Sign out</Text>
+            </TouchableOpacity>
           ) : null}
         </View>
-        {!isWide ? (
-          <TouchableOpacity onPress={handleSignOut}>
-            <Text style={styles.signOutLink}>Sign out</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
 
-      <View style={styles.rangeRow}>
-        {RANGE_OPTIONS.map((option) => {
-          const active = rangeDays === option.value;
+        <View style={styles.rangeRow}>
+          {RANGE_OPTIONS.map((option) => {
+            const active = rangeDays === option.value;
 
-          return (
-            <TouchableOpacity
-              key={option.value}
-              style={[styles.rangeChip, active ? styles.rangeChipActive : null]}
-              onPress={() => setRangeDays(option.value)}
-            >
-              <Text style={active ? styles.rangeChipActiveText : styles.rangeChipText}>{option.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-      {!restaurant ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No linked restaurant profile yet</Text>
-          <Text style={styles.emptyCopy}>
-            Head to the Store tab to create or link the restaurant record this account should manage.
-          </Text>
+            return (
+              <TouchableOpacity
+                key={option.value}
+                style={[styles.rangeChip, active ? styles.rangeChipActive : null]}
+                onPress={() => setRangeDays(option.value)}
+              >
+                <Text style={active ? styles.rangeChipActiveText : styles.rangeChipText}>{option.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-      ) : (
-        <>
-          <View style={styles.kpiGrid}>
-            <KpiCard
-              label={`Orders (${rangeDays}d)`}
-              value={String(kpis.orders.current)}
-              current={kpis.orders.current}
-              previous={kpis.orders.previous}
-              wide={isWide}
-            />
-            <KpiCard
-              label={`Earnings (${rangeDays}d)`}
-              value={formatPartnerMoney(kpis.earnings.current)}
-              current={kpis.earnings.current}
-              previous={kpis.earnings.previous}
-              wide={isWide}
-            />
-            <KpiCard
-              label="Avg order value"
-              value={formatPartnerMoney(kpis.avgOrder.current)}
-              current={kpis.avgOrder.current}
-              previous={kpis.avgOrder.previous}
-              wide={isWide}
-            />
-            <KpiCard label="Incoming" value={String(incomingOrders.length)} wide={isWide} />
-            <KpiCard label="In kitchen" value={String(preparingOrders.length)} wide={isWide} />
-            <KpiCard label="Delivered today" value={String(completedToday)} wide={isWide} />
-          </View>
 
-          <View style={[styles.splitRow, isWide ? styles.splitRowWide : null]}>
-            <View style={[styles.card, isWide ? styles.splitCardNarrow : null]}>
-              <Text style={styles.cardTitle}>Orders by status ({rangeDays}d)</Text>
-              {breakdownTotal === 0 ? (
-                <View style={styles.emptyInline}>
-                  <Text style={styles.emptyCopy}>No orders in this window yet.</Text>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.breakdownBar}>
-                    {statusBreakdown.map((slice) => (
-                      <View
-                        key={slice.status}
-                        style={{
-                          backgroundColor: slice.color,
-                          flex: slice.count,
-                        }}
-                      />
-                    ))}
-                  </View>
-                  {statusBreakdown.map((slice) => (
-                    <View key={slice.status} style={styles.legendRow}>
-                      <View style={styles.legendLeft}>
-                        <View style={[styles.legendDot, { backgroundColor: slice.color }]} />
-                        <Text style={styles.legendLabel}>{slice.label}</Text>
-                      </View>
-                      <Text style={styles.legendValue}>
-                        {slice.count} · {Math.round((slice.count / breakdownTotal) * 100)}%
-                      </Text>
-                    </View>
-                  ))}
-                </>
-              )}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        {!restaurant ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No linked restaurant profile yet</Text>
+            <Text style={styles.emptyCopy}>
+              Head to the Store tab to create or link the restaurant record this account should manage.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.kpiGrid}>
+              <KpiCard
+                label={`Orders (${rangeDays}d)`}
+                value={String(kpis.orders.current)}
+                current={kpis.orders.current}
+                previous={kpis.orders.previous}
+                wide={isWide}
+              />
+              <KpiCard
+                label={`Earnings (${rangeDays}d)`}
+                value={formatPartnerMoney(kpis.earnings.current)}
+                current={kpis.earnings.current}
+                previous={kpis.earnings.previous}
+                wide={isWide}
+              />
+              <KpiCard
+                label="Avg order value"
+                value={formatPartnerMoney(kpis.avgOrder.current)}
+                current={kpis.avgOrder.current}
+                previous={kpis.avgOrder.previous}
+                wide={isWide}
+              />
+              <KpiCard label="Incoming" value={String(incomingOrders.length)} wide={isWide} />
+              <KpiCard label="In kitchen" value={String(preparingOrders.length)} wide={isWide} />
+              <KpiCard label="Delivered today" value={String(completedToday)} wide={isWide} />
             </View>
 
-            <View style={[styles.card, isWide ? styles.splitCardWide : null]}>
-              <View style={styles.cardTitleRow}>
-                <Text style={styles.cardTitle}>Orders history</Text>
-                <TouchableOpacity onPress={() => router.push('/(partner)/orders')}>
-                  <Text style={styles.moreLink}>more →</Text>
-                </TouchableOpacity>
-              </View>
-              {recentOrders.length === 0 ? (
-                <View style={styles.emptyInline}>
-                  <Text style={styles.emptyCopy}>New orders for this restaurant will show up here automatically.</Text>
-                </View>
-              ) : (
-                recentOrders.map((order) => {
-                  const statusColor = getPartnerStatusColor(order.status);
-
-                  return (
-                    <TouchableOpacity
-                      key={order.id}
-                      style={styles.orderRow}
-                      activeOpacity={0.92}
-                      onPress={() => router.push(`/(partner)/order/${order.id}`)}
-                    >
-                      <View style={styles.orderMeta}>
-                        <Text style={styles.orderTitle}>#{order.id.slice(-6).toUpperCase()}</Text>
-                        <Text style={styles.orderSub}>{formatOrderTime(order.createdAt)}</Text>
-                      </View>
-                      <View style={[styles.statusPill, { backgroundColor: `${statusColor}20` }]}>
-                        <Text style={[styles.statusText, { color: statusColor }]}>
-                          {formatOrderStatusLabel(order.status)}
+            <View style={[styles.splitRow, isWide ? styles.splitRowWide : null]}>
+              <View style={[styles.card, isWide ? styles.splitCardNarrow : null]}>
+                <Text style={styles.cardTitle}>Orders by status ({rangeDays}d)</Text>
+                {breakdownTotal === 0 ? (
+                  <View style={styles.emptyInline}>
+                    <Text style={styles.emptyCopy}>No orders in this window yet.</Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.breakdownBar}>
+                      {statusBreakdown.map((slice) => (
+                        <View
+                          key={slice.status}
+                          style={{
+                            backgroundColor: slice.color,
+                            flex: slice.count,
+                          }}
+                        />
+                      ))}
+                    </View>
+                    {statusBreakdown.map((slice) => (
+                      <View key={slice.status} style={styles.legendRow}>
+                        <View style={styles.legendLeft}>
+                          <View style={[styles.legendDot, { backgroundColor: slice.color }]} />
+                          <Text style={styles.legendLabel}>{slice.label}</Text>
+                        </View>
+                        <Text style={styles.legendValue}>
+                          {slice.count} · {Math.round((slice.count / breakdownTotal) * 100)}%
                         </Text>
                       </View>
-                      <Text style={styles.orderAmount}>
-                        {formatPartnerMoney(order.pricing?.total ?? (order as { total?: number }).total ?? 0)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
+                    ))}
+                  </>
+                )}
+              </View>
+
+              <View style={[styles.card, isWide ? styles.splitCardWide : null]}>
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.cardTitle}>Orders history</Text>
+                  <TouchableOpacity onPress={() => router.push('/(partner)/orders')}>
+                    <Text style={styles.moreLink}>more →</Text>
+                  </TouchableOpacity>
+                </View>
+                {recentOrders.length === 0 ? (
+                  <View style={styles.emptyInline}>
+                    <Text style={styles.emptyCopy}>New orders for this restaurant will show up here automatically.</Text>
+                  </View>
+                ) : (
+                  recentOrders.map((order) => {
+                    const statusColor = getPartnerStatusColor(order.status);
+
+                    return (
+                      <TouchableOpacity
+                        key={order.id}
+                        style={styles.orderRow}
+                        activeOpacity={0.92}
+                        onPress={() => router.push(`/(partner)/order/${order.id}`)}
+                      >
+                        <View style={styles.orderMeta}>
+                          <Text style={styles.orderTitle}>#{order.id.slice(-6).toUpperCase()}</Text>
+                          <Text style={styles.orderSub}>{formatOrderTime(order.createdAt)}</Text>
+                        </View>
+                        <View style={[styles.statusPill, { backgroundColor: `${statusColor}20` }]}>
+                          <Text style={[styles.statusText, { color: statusColor }]}>
+                            {formatOrderStatusLabel(order.status)}
+                          </Text>
+                        </View>
+                        <Text style={styles.orderAmount}>
+                          {formatPartnerMoney(order.pricing?.total ?? (order as { total?: number }).total ?? 0)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
             </View>
-          </View>
-        </>
-      )}
-    </ScrollView>
+          </>
+        )}
+      </ScrollView>
+      {notice}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: partnerTheme.background,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   content: {

@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNotice } from '@feasty/design-system';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
@@ -22,6 +23,30 @@ export default function PartnerOrderDetailScreen() {
   const { width } = useWindowDimensions();
   const { error, loading, order } = usePartnerOrder(id as string);
   const isCompactRail = width < 480;
+  // Every action on this screen used to report failure through `Alert`, which
+  // is `class Alert { static alert() {} }` in react-native-web — nothing at all
+  // on partner.feasty.com.ng. `error` above belongs to `usePartnerOrder` and
+  // carries LOAD failures only (it is consumed by the early return below), so a
+  // failed Accept or Reject moved no status chip and printed no message: from
+  // the kitchen it was indistinguishable from a slow network, and the partner
+  // either retried or assumed the order was accepted.
+  //
+  // Floating rather than inline: the actions live on a horizontally scrolling
+  // rail at the bottom of a scrolling page, so an inline notice would often
+  // render off-screen. The offset clears the tab bar, which is still mounted
+  // here (this route is a `href: null` Tabs.Screen); a notice hidden behind
+  // chrome would be the same silence it replaces.
+  const { notice, showNotice } = useNotice({
+    placement: 'floating',
+    offsetBottom: width >= 1024 ? insets.bottom + 16 : insets.bottom + 86,
+  });
+
+  // Each action reports its own failure through the one banner. Sticky (errors
+  // default to `durationMs: null`): the status chip has not moved and this is
+  // the only thing saying why.
+  const reportFailure = (message: string) => {
+    showNotice({ tone: 'error', title: 'Update failed', message });
+  };
 
   const handleAccept = async () => {
     if (!order) return;
@@ -29,7 +54,7 @@ export default function PartnerOrderDetailScreen() {
     try {
       await acceptPartnerOrder(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      Alert.alert('Update failed', nextError.message ?? 'Unable to accept this order.');
+      reportFailure(nextError?.message ?? 'Unable to accept this order.');
     }
   };
 
@@ -39,7 +64,7 @@ export default function PartnerOrderDetailScreen() {
     try {
       await markPartnerOrderPreparing(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      Alert.alert('Update failed', nextError.message ?? 'Unable to mark this order as preparing.');
+      reportFailure(nextError?.message ?? 'Unable to mark this order as preparing.');
     }
   };
 
@@ -49,7 +74,7 @@ export default function PartnerOrderDetailScreen() {
     try {
       await markPartnerOrderReady(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      Alert.alert('Update failed', nextError.message ?? 'Unable to mark this order ready.');
+      reportFailure(nextError?.message ?? 'Unable to mark this order ready.');
     }
   };
 
@@ -59,7 +84,7 @@ export default function PartnerOrderDetailScreen() {
     try {
       await markPartnerOrderDelivered(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      Alert.alert('Update failed', nextError.message ?? 'Unable to complete this order.');
+      reportFailure(nextError?.message ?? 'Unable to complete this order.');
     }
   };
 
@@ -70,7 +95,7 @@ export default function PartnerOrderDetailScreen() {
       await rejectPartnerOrder(order.id, order.timeline ?? null);
       router.back();
     } catch (nextError: any) {
-      Alert.alert('Update failed', nextError.message ?? 'Unable to reject this order.');
+      reportFailure(nextError?.message ?? 'Unable to reject this order.');
     }
   };
 
@@ -96,112 +121,121 @@ export default function PartnerOrderDetailScreen() {
   const canComplete = ['preparing', 'ready_for_pickup'].includes(normalizedStatus);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-      <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Kitchen flow</Text>
-        <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
-        <Text style={styles.copy}>
-          {(order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0)} items ·{' '}
-          {(order.fulfillmentType ?? 'delivery').toUpperCase()} · {formatPartnerMoney(order.pricing?.total ?? order.total ?? 0)}
-        </Text>
-        <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
-          <Text style={[styles.statusText, { color: getPartnerStatusColor(order.status) }]}>
-            {formatOrderStatusLabel(order.status)}
+    // Wrapped rather than used as the root because the floating notice
+    // positions itself absolutely: inside a ScrollView that would anchor it to
+    // the bottom of the CONTENT and let it scroll away.
+    <View style={styles.screen}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.hero}>
+          <Text style={styles.eyebrow}>Kitchen flow</Text>
+          <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
+          <Text style={styles.copy}>
+            {(order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0)} items ·{' '}
+            {(order.fulfillmentType ?? 'delivery').toUpperCase()} · {formatPartnerMoney(order.pricing?.total ?? order.total ?? 0)}
+          </Text>
+          <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
+            <Text style={[styles.statusText, { color: getPartnerStatusColor(order.status) }]}>
+              {formatOrderStatusLabel(order.status)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Order items</Text>
+          {order.items?.map((item) => (
+            <View key={item.id ?? item.name} style={styles.itemRow}>
+              <View>
+                <Text style={styles.itemName}>{item.name ?? 'Order item'}</Text>
+                <Text style={styles.itemMeta}>Qty {item.quantity ?? 0}</Text>
+              </View>
+              <Text style={styles.itemPrice}>{formatPartnerMoney(((item.price ?? 0) * (item.quantity ?? 0)) || 0)}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Handoff notes</Text>
+          <Text style={styles.metaLine}>Payment: {order.payment?.status ?? 'pending'}</Text>
+          <Text style={styles.metaLine}>
+            Pickup/delivery point: {order.deliveryLocation?.shortAddress ?? order.deliveryAddress ?? 'Pending'}
+          </Text>
+          <Text style={styles.metaLine}>
+            Fulfilment: {isPickup ? 'Customer pickup' : 'Restaurant delivery'}
           </Text>
         </View>
-      </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Order items</Text>
-        {order.items?.map((item) => (
-          <View key={item.id ?? item.name} style={styles.itemRow}>
-            <View>
-              <Text style={styles.itemName}>{item.name ?? 'Order item'}</Text>
-              <Text style={styles.itemMeta}>Qty {item.quantity ?? 0}</Text>
-            </View>
-            <Text style={styles.itemPrice}>{formatPartnerMoney(((item.price ?? 0) * (item.quantity ?? 0)) || 0)}</Text>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Handoff notes</Text>
-        <Text style={styles.metaLine}>Payment: {order.payment?.status ?? 'pending'}</Text>
-        <Text style={styles.metaLine}>
-          Pickup/delivery point: {order.deliveryLocation?.shortAddress ?? order.deliveryAddress ?? 'Pending'}
-        </Text>
-        <Text style={styles.metaLine}>
-          Fulfilment: {isPickup ? 'Customer pickup' : 'Restaurant delivery'}
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Actions</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.actionRail, isCompactRail ? styles.actionRailCompact : null]}
-        >
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              isCompactRail ? styles.actionButtonCompact : null,
-              normalizedStatus !== 'placed' ? styles.actionButtonDisabled : null,
-            ]}
-            disabled={normalizedStatus !== 'placed'}
-            onPress={handleAccept}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Actions</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[styles.actionRail, isCompactRail ? styles.actionRailCompact : null]}
           >
-            <Text style={styles.actionButtonText}>Accept order</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              isCompactRail ? styles.actionButtonCompact : null,
-              !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
-            ]}
-            disabled={!['accepted', 'placed'].includes(normalizedStatus)}
-            onPress={handlePreparing}
-          >
-            <Text style={styles.actionButtonText}>Start preparing</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              isCompactRail ? styles.actionButtonCompact : null,
-              !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
-            ]}
-            disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
-            onPress={handleReady}
-          >
-            <Text style={styles.actionButtonText}>{isPickup ? 'Mark ready for pickup' : 'Mark ready'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, isCompactRail ? styles.actionButtonCompact : null, !canComplete ? styles.actionButtonDisabled : null]}
-            disabled={!canComplete}
-            onPress={handleDelivered}
-          >
-            <Text style={styles.actionButtonText}>{isPickup ? 'Mark collected' : 'Mark delivered'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.rejectButton,
-              isCompactRail ? styles.actionButtonCompact : null,
-              !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
-            ]}
-            disabled={!['placed', 'accepted'].includes(normalizedStatus)}
-            onPress={handleReject}
-          >
-            <Text style={styles.rejectButtonText}>Reject order</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    </ScrollView>
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                isCompactRail ? styles.actionButtonCompact : null,
+                normalizedStatus !== 'placed' ? styles.actionButtonDisabled : null,
+              ]}
+              disabled={normalizedStatus !== 'placed'}
+              onPress={handleAccept}
+            >
+              <Text style={styles.actionButtonText}>Accept order</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                isCompactRail ? styles.actionButtonCompact : null,
+                !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+              ]}
+              disabled={!['accepted', 'placed'].includes(normalizedStatus)}
+              onPress={handlePreparing}
+            >
+              <Text style={styles.actionButtonText}>Start preparing</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                isCompactRail ? styles.actionButtonCompact : null,
+                !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+              ]}
+              disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
+              onPress={handleReady}
+            >
+              <Text style={styles.actionButtonText}>{isPickup ? 'Mark ready for pickup' : 'Mark ready'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, isCompactRail ? styles.actionButtonCompact : null, !canComplete ? styles.actionButtonDisabled : null]}
+              disabled={!canComplete}
+              onPress={handleDelivered}
+            >
+              <Text style={styles.actionButtonText}>{isPickup ? 'Mark collected' : 'Mark delivered'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.rejectButton,
+                isCompactRail ? styles.actionButtonCompact : null,
+                !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+              ]}
+              disabled={!['placed', 'accepted'].includes(normalizedStatus)}
+              onPress={handleReject}
+            >
+              <Text style={styles.rejectButtonText}>Reject order</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </ScrollView>
+      {notice}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: partnerTheme.background,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   content: {

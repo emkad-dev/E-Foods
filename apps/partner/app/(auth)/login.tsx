@@ -1,9 +1,11 @@
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateLoginForm } from '../../src/domain/authFormValidation';
+import { resolvePartnerSuccessNotice } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerLoginScreen() {
@@ -13,17 +15,24 @@ export default function PartnerLoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
-  // Confirmations that have to outlive a navigation. Reset-password lands here
-  // with `notice=password-updated` instead of relying on an Alert callback,
-  // which never fires on the web build (partner.feasty.com.ng).
-  const noticeKey = Array.isArray(params.notice) ? params.notice[0] : params.notice;
-  const notice = noticeKey === 'password-updated' ? 'Password updated. Sign in to open your dashboard.' : null;
+  // Confirmations that have to outlive a navigation. Reset-password, register
+  // and forgot-password all land here with `notice=<key>` instead of relying on
+  // an Alert callback, which never fires on the web build
+  // (partner.feasty.com.ng). The keys live in src/utils/successNotices.ts.
+  const notice = resolvePartnerSuccessNotice(params.notice);
+  // Client-side validation used to go to `Alert`, an empty function on the web
+  // build, so an empty submit looked like a dead button. Held locally because
+  // `AuthContext` exposes no setter, and rendered through the SAME slot as the
+  // context's `error` below, so the screen keeps exactly one error surface.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleEmailChange = (value: string) => {
     if (error) {
       clearError();
     }
 
+    setValidationError(null);
     setEmail(value);
   };
 
@@ -32,19 +41,26 @@ export default function PartnerLoginScreen() {
       clearError();
     }
 
+    setValidationError(null);
     setPassword(value);
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Missing information', 'Enter both email and password to continue.');
+    const invalid = validateLoginForm({ email, password });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
+    setValidationError(null);
+
     try {
       await signIn(email.trim(), password);
-    } catch (nextError: any) {
-      Alert.alert('Sign in failed', nextError.message ?? 'Unable to sign in right now.');
+    } catch {
+      // `signIn` has already pushed the formatted message into `AuthContext`'s
+      // `error`, which the slot above renders; the dead `Alert` that used to
+      // sit here added nothing on native and nothing at all on web.
     }
   };
 
@@ -69,7 +85,11 @@ export default function PartnerLoginScreen() {
             {notice}
           </Text>
         ) : null}
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {formError ? (
+          <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+            {formError}
+          </Text>
+        ) : null}
 
         <TextInput
           style={styles.input}

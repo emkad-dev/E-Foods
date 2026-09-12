@@ -1,36 +1,58 @@
-import { Link, useLocalSearchParams } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
+import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
 
 export default function PartnerForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
+  const router = useRouter();
   const { clearError, error, loading, resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const redirectTo = typeof params.redirectTo === 'string' ? params.redirectTo : undefined;
+  // Held locally and rendered through the same slot as `AuthContext`'s error —
+  // see the note in login.tsx.
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const formError = validationError ?? error;
 
   const handleEmailChange = (value: string) => {
     if (error) {
       clearError();
     }
 
+    setValidationError(null);
     setEmail(value);
   };
 
   const handleResetPassword = async () => {
-    if (!email.trim()) {
-      Alert.alert('Missing information', 'Enter the email address linked to your partner account.');
+    const invalid = validateForgotPasswordForm({ email });
+
+    if (invalid) {
+      setValidationError(invalid);
       return;
     }
 
+    setValidationError(null);
+
     try {
       await resetPassword(email.trim());
-      Alert.alert('Reset link sent', 'If this partner account exists, you will receive a password reset link shortly.');
-    } catch (nextError: any) {
-      Alert.alert('Reset failed', nextError.message ?? 'Unable to send reset email right now.');
+      // Navigate and carry the confirmation to the login screen as a route
+      // param, the way the reset-password flow already does. The success
+      // `Alert` that used to sit here was the ONLY feedback and nothing
+      // followed it, so on the web build the partner submitted, saw the screen
+      // sit unchanged, and re-submitted — each retry burning another rate-limit
+      // slot on the reset endpoint.
+      const noticeKey: PartnerSuccessNoticeKey = 'reset-link-sent';
+      router.replace({
+        pathname: '/(auth)/login',
+        params: { notice: noticeKey, ...(redirectTo ? { redirectTo } : null) },
+      } as never);
+    } catch {
+      // `resetPassword` already set `AuthContext`'s `error`, rendered above.
     }
   };
 
@@ -43,7 +65,11 @@ export default function PartnerForgotPasswordScreen() {
       <Text style={styles.title}>Reset your partner password</Text>
       <Text style={styles.copy}>Enter your partner email and we will send a link to set a new password and return to your dashboard.</Text>
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {formError ? (
+        <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
+          {formError}
+        </Text>
+      ) : null}
 
       <TextInput
         style={styles.input}
