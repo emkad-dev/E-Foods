@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   switchLink: {
-    color: customerTheme.brandOrange,
+    color: customerTheme.accentText,
     fontSize: 14,
     fontWeight: '800',
   },

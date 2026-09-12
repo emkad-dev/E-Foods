@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: '#fffdf8',
+    color: partnerTheme.textOnHero,
     fontSize: 31,
     fontWeight: '800',
   },
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     borderColor: partnerTheme.accent,
   },
   checkboxDot: {
-    backgroundColor: '#fff',
+    backgroundColor: partnerTheme.textOnBrand,
     borderRadius: 999,
     height: 10,
     width: 10,
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   buttonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

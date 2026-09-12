@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: dispatchTheme.cream,
+    color: dispatchTheme.textOnInverse,
     fontSize: 31,
     fontWeight: '800',
   },
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

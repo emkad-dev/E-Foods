@@ -133,8 +133,15 @@ export default function PartnerOrderDetailScreen() {
             {(order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0)} items ·{' '}
             {(order.fulfillmentType ?? 'delivery').toUpperCase()} · {formatPartnerMoney(order.pricing?.total ?? order.total ?? 0)}
           </Text>
+          {/*
+            The label is `textOnHero`, not the status colour. The status colours are
+            designed to sit on a light card; on the hero they never cleared AA, and
+            once the hero became FEASTY green the accepted/preparing tone (#2e7d32)
+            landed at 1.45:1 on the pill's own tinted fill — invisible. The tint
+            still carries the status hue; the wording carries the meaning.
+          */}
           <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
-            <Text style={[styles.statusText, { color: getPartnerStatusColor(order.status) }]}>
+            <Text style={[styles.statusText, { color: partnerTheme.textOnHero }]}>
               {formatOrderStatusLabel(order.status)}
             </Text>
           </View>
@@ -275,7 +282,7 @@ const styles = StyleSheet.create({
     padding: 22,
   },
   eyebrow: {
-    color: partnerTheme.textSoft,
+    color: partnerTheme.heroSoft,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 1,
@@ -283,12 +290,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: partnerTheme.text,
+    color: partnerTheme.textOnHero,
     fontSize: 30,
     fontWeight: '800',
   },
   copy: {
-    color: partnerTheme.textMuted,
+    color: partnerTheme.textOnHero,
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,

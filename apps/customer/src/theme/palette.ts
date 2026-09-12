@@ -43,8 +43,20 @@ export const customerTheme = {
   accentText: brand.accentText,
   link: brand.primaryStrong,
   linkSoft: brand.primaryTint,
-  hero: '#090f1d',
+  /**
+   * Was #090f1d — four/six/five points off `surface.inverse` (#0d1522). Close
+   * enough that nobody would catch it by eye, different enough to be a second
+   * source of truth for the darkest surface. Now the token.
+   */
+  hero: surface.inverse,
+  /** No token equivalent: a cool grey-blue used only by the home feature card. */
   heroSoft: '#d4dde7',
+  /** White label for a brand-green or danger fill. */
+  textOnBrand: text.onBrand,
+  /** Dark label for an orange fill — white on #f57c00 is 2.70:1, failing AA. */
+  textOnAccent: text.onAccent,
+  /** Text on the near-black hero. */
+  textOnInverse: text.onInverse,
   danger: status.danger,
   dangerSoft: status.dangerSoft,
   success: status.success,

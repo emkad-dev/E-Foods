@@ -892,7 +892,7 @@ const styles = StyleSheet.create({
     backgroundColor: partnerTheme.warningSoft,
   },
   inlineAvailabilityOffText: {
-    color: partnerTheme.warning,
+    color: partnerTheme.warningText,
   },
   inlineAvailabilityOn: {
     backgroundColor: partnerTheme.accentSoft,

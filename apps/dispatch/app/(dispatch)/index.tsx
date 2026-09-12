@@ -353,7 +353,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   alertTitle: {
-    color: dispatchTheme.warning,
+    color: dispatchTheme.warningText,
     fontSize: 15,
     fontWeight: '800',
   },

@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   buttonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

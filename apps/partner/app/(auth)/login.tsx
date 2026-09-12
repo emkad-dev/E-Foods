@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: '#fffdf8',
+    color: partnerTheme.textOnHero,
     fontSize: 31,
     fontWeight: '800',
   },
@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

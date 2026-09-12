@@ -159,5 +159,5 @@ const styles = StyleSheet.create({
     marginTop: 18,
     paddingVertical: 15,
   },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  buttonText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
 });

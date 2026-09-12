@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     borderColor: customerTheme.accent,
   },
   checkboxDot: {
-    backgroundColor: '#fff',
+    backgroundColor: customerTheme.textOnBrand,
     borderRadius: 999,
     height: 10,
     width: 10,
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   switchLink: {
-    color: customerTheme.brandOrange,
+    color: customerTheme.accentText,
     fontSize: 14,
     fontWeight: '800',
   },

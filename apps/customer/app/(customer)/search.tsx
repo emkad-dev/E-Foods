@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   resultStatusWarn: {
-    color: customerTheme.warning,
+    color: customerTheme.warningText,
     flex: 1,
     fontSize: 12,
     fontWeight: '700',

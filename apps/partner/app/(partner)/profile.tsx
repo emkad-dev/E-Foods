@@ -1003,7 +1003,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   pauseChipText: {
-    color: partnerTheme.warning,
+    color: partnerTheme.warningText,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -1016,7 +1016,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   pausedBannerTitle: {
-    color: partnerTheme.warning,
+    color: partnerTheme.warningText,
     fontSize: 15,
     fontWeight: '800',
   },

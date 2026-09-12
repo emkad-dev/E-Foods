@@ -760,7 +760,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   featureCtaPillText: {
-    color: '#ffffff',
+    color: customerTheme.textOnAccent,
     fontSize: 13,
     fontWeight: '800',
   },

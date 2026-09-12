@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   buttonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

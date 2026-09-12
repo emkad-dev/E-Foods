@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: dispatchTheme.cream,
+    color: dispatchTheme.textOnInverse,
     fontSize: 31,
     fontWeight: '800',
   },
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     borderColor: dispatchTheme.accent,
   },
   checkboxDot: {
-    backgroundColor: '#fff',
+    backgroundColor: dispatchTheme.textOnBrand,
     borderRadius: 999,
     height: 10,
     width: 10,
@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   buttonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

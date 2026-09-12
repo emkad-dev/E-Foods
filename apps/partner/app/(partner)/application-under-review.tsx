@@ -78,7 +78,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textTransform: 'uppercase',
   },
-  title: { color: '#fffdf8', fontSize: 30, fontWeight: '800' },
+  title: { color: partnerTheme.textOnHero, fontSize: 30, fontWeight: '800' },
   copy: { color: '#e7dbc7', fontSize: 15, lineHeight: 22, marginTop: 10 },
   card: {
     backgroundColor: partnerTheme.surface,
@@ -97,7 +97,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingVertical: 14,
   },
-  primaryButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  primaryButtonText: { color: partnerTheme.textOnBrand, fontSize: 14, fontWeight: '800' },
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.cream,

@@ -40,7 +40,31 @@ export const partnerTheme = {
   warningText: status.warningText,
   danger: status.danger,
   dangerSoft: status.dangerSoft,
-  hero: surface.inverse,
+  /**
+   * The partner hero is FEASTY green, on the owner's call (2026-09-12).
+   *
+   * `brand.primaryStrong` (#1b5e20), NOT `brand.primary` (#2e7d32). The hero
+   * carries `heroSoft` (= `brand.primarySoft`, #c8e6c9) as its eyebrow text, and
+   * that pairing measures 3.81:1 on #2e7d32 — under the 4.5:1 AA bar — versus
+   * 5.85:1 on #1b5e20. Shipping #2e7d32 here would force the eyebrow to white at
+   * the same time; the deeper green keeps every existing hero text colour passing:
+   *   heroSoft #c8e6c9 → 5.85:1   textOnHero #f3f7f6 → 7.29:1   #e7dbc7 → 5.75:1
+   *
+   * Previous values, newest first: surface.inverse #0d1522, #0c389e (blue),
+   * #4b3923 (brown), #fff0c2 (cream).
+   */
+  hero: brand.primaryStrong,
   heroSoft: brand.primarySoft,
   cream: surface.default,
+  /** White label for a brand-green or danger fill. */
+  textOnBrand: text.onBrand,
+  /** Dark label for an orange fill — white on #f57c00 is 2.70:1, failing AA. */
+  textOnAccent: text.onAccent,
+  /**
+   * Text on the hero, whatever `hero` currently is. Named for the role rather
+   * than the colour so the hero can change without renaming this. Replaces the
+   * literal #fffdf8 the auth heroes carried over from the era when `hero` was a
+   * cream (#fff0c2) panel.
+   */
+  textOnHero: text.onInverse,
 };
