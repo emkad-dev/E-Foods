@@ -238,6 +238,10 @@ export default function LoadingSkeleton({ mode = 'home' }: LoadingSkeletonProps)
   }
 
   if (mode === 'profile') {
+    // Block order mirrors /profile exactly: identity row, delivery card, the two
+    // tiles, then the link rows. It used to draw the rows BEFORE the tiles, so
+    // the placeholder and the real screen disagreed about where the tiles were
+    // and the whole lower half of the page jumped on load.
     return (
       <View style={styles.screen}>
         <View style={styles.shell}>
@@ -249,17 +253,27 @@ export default function LoadingSkeleton({ mode = 'home' }: LoadingSkeletonProps)
                 <SkeletonLine opacity={opacity} style={[styles.copy, { width: compact ? '66%' : '58%' }]} />
               </View>
             </View>
-            <View style={styles.profileSection}>
-              {Array.from({ length: compact ? 3 : 4 }).map((_, index) => (
-                <SkeletonLine key={index} opacity={opacity} style={styles.settingRow} />
-              ))}
-            </View>
+          </SectionCard>
+
+          <SectionCard compact={compact}>
+            <SkeletonLine opacity={opacity} style={[styles.eyebrow, { width: '34%' }]} />
+            <SkeletonLine
+              opacity={opacity}
+              style={[styles.title, { marginTop: 10, width: compact ? '62%' : '52%' }]}
+            />
+            <SkeletonLine opacity={opacity} style={[styles.copy, { width: compact ? '84%' : '72%' }]} />
           </SectionCard>
 
           <View style={styles.metricsRow}>
             <SkeletonLine opacity={opacity} style={[styles.metricCard, compact ? styles.metricCardCompact : null]} />
             <SkeletonLine opacity={opacity} style={[styles.metricCard, compact ? styles.metricCardCompact : null]} />
           </View>
+
+          <SectionCard compact={compact}>
+            {Array.from({ length: compact ? 3 : 4 }).map((_, index) => (
+              <SkeletonLine key={index} opacity={opacity} style={styles.settingRow} />
+            ))}
+          </SectionCard>
         </View>
       </View>
     );
@@ -594,9 +608,6 @@ const styles = StyleSheet.create({
   profileCopy: {
     flex: 1,
     gap: 8,
-  },
-  profileSection: {
-    marginTop: 18,
   },
   settingRow: {
     backgroundColor: customerTheme.surfaceStrong,

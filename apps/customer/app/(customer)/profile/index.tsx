@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
-import { useConfirm, useNotice } from '@feasty/design-system';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Button, Card, Text, space, useConfirm, useNotice } from '@feasty/design-system';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -11,79 +10,101 @@ import {
   accountDeletionParagraphs,
 } from '../../../../../packages/domain/src/accountDeletion';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import ProfileDeliveryCard from '../../../src/components/profile/ProfileDeliveryCard';
+import ProfileIdentityCard from '../../../src/components/profile/ProfileIdentityCard';
+import ProfileLinkRow from '../../../src/components/profile/ProfileLinkRow';
+import ProfileStatTile from '../../../src/components/profile/ProfileStatTile';
 import { useAuth } from '../../../src/contexts/AuthContext';
-import { validatePhoneNumber, validateUsername } from '../../../src/domain/authFormValidation';
+import { useCart } from '../../../src/contexts/CartContext';
+import { useFavorites } from '../../../src/contexts/FavoritesContext';
+import {
+  formatDeliverySummary,
+  getProfileInitials,
+  summarizeOrders,
+  type ProfileOrderSummary,
+} from '../../../src/domain/profileSummary';
+import { getCustomerOrders } from '../../../src/services/customerReadModel';
 import { customerTheme } from '../../../src/theme/palette';
 
-type ProfileRowProps = {
-  destructive?: boolean;
-  icon: React.ComponentProps<typeof FontAwesome>['name'];
-  label: string;
-  onPress?: () => void;
-  value?: string;
-};
-
-function ProfileRow({ destructive = false, icon, label, onPress, value }: ProfileRowProps) {
-  return (
-    <TouchableOpacity
-      activeOpacity={onPress ? 0.85 : 1}
-      disabled={!onPress}
-      onPress={onPress}
-      style={styles.row}
-    >
-      <View style={[styles.rowIconWrap, destructive ? styles.rowIconWrapDanger : null]}>
-        <FontAwesome
-          color={destructive ? customerTheme.danger : customerTheme.text}
-          name={icon}
-          size={16}
-        />
-      </View>
-      <View style={styles.rowCopy}>
-        <Text style={[styles.rowLabel, destructive ? styles.rowLabelDanger : null]}>{label}</Text>
-        {value ? <Text style={styles.rowValue}>{value}</Text> : null}
-      </View>
-      {onPress ? (
-        <FontAwesome
-          color={destructive ? customerTheme.danger : customerTheme.textSoft}
-          name="angle-right"
-          size={18}
-        />
-      ) : null}
-    </TouchableOpacity>
-  );
-}
+/** Which of the two account actions is in flight, if either. */
+type ProfileBusyAction = 'signOut' | 'delete';
 
 export default function ProfileScreen() {
-  const { deleteAccount, loading, signOut, updateDisplayName, updatePhoneNumber, user } = useAuth();
+  const { deleteAccount, signOut, user } = useAuth();
+  const { deliveryLocation } = useCart();
+  const { favoriteRestaurantIds } = useFavorites();
   const { confirm, confirmDialog } = useConfirm();
   // ONE feedback surface for the whole screen. Before this the screen had two —
   // a SuccessBanner pinned to the top for the saves that worked, and a separate
   // inline `deleteError` line down in the Access group — while the username and
   // phone FAILURES went to `Alert`, which is an empty function on the web build
   // (app.feasty.com.ng) and so said nothing at all. Floating rather than inline
-  // because the controls are spread down a scrolling page: the Save buttons sit
-  // in the Account group and Delete sits at the very bottom, so no single
-  // in-layout slot is visible from both. The profile tab hides the tab bar, so
-  // the card needs no bottom offset here.
+  // because the controls are spread down a scrolling page: Sign out and Delete
+  // sit at the very bottom, past the fold on a short screen. The profile tab
+  // hides the tab bar, so the card needs no bottom offset here.
   const { dismissNotice, notice, showNotice } = useNotice({ placement: 'floating' });
-  const [usernameDraft, setUsernameDraft] = useState('');
-  const [phoneDraft, setPhoneDraft] = useState('');
+
+  // NOT `loading` from useAuth(). That is one context-wide flag raised by every
+  // auth operation — sign-in, bootstrap, the profile saves, sign-out and delete
+  // alike — so gating controls on it made saving a display name disable the
+  // Sign out row and relabel it "Working...". Each action owns its own state.
+  const [busy, setBusy] = useState<ProfileBusyAction | null>(null);
+  const [orderSummary, setOrderSummary] = useState<ProfileOrderSummary | null>(null);
+
+  const userId = user?.uid;
 
   useEffect(() => {
-    setUsernameDraft(user?.displayName?.trim() ?? '');
-    setPhoneDraft(String(user?.phoneNumber ?? '').trim());
-  }, [user?.displayName, user?.phoneNumber]);
+    if (!userId) {
+      setOrderSummary(null);
+      return;
+    }
+
+    // ONE read on mount. No polling and no realtime channel: a second
+    // subscription on CustomerOrder costs real invocations on the Free plan and
+    // a tile showing a count does not warrant one. `getCustomerOrders` memoises
+    // per user for 12s, so arriving here from the orders list is free.
+    let cancelled = false;
+
+    getCustomerOrders()
+      .then(({ orders }) => {
+        if (!cancelled) {
+          setOrderSummary(summarizeOrders(orders));
+        }
+      })
+      .catch(() => {
+        // Swallowed on purpose. The tile's job is to navigate to /orders; a
+        // failed count must not raise an error banner on a screen the customer
+        // opened to do something else, and the tile renders figureless.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const handleSignOut = async () => {
+    setBusy('signOut');
+
     try {
       await signOut();
     } catch {
-      showNotice({ tone: 'error', title: 'Could not sign out', message: 'Check your connection and try again.' });
+      showNotice({
+        tone: 'error',
+        title: 'Could not sign out',
+        message: 'Check your connection and try again.',
+      });
+    } finally {
+      setBusy(null);
     }
   };
 
   const handleDeleteAccount = async () => {
     dismissNotice();
+    // Covers the whole dialog, not just the delete itself, so Sign out cannot be
+    // tapped behind the scrim. The dialog's own busy ref remains the guard that
+    // actually prevents a double delete — this flag only keeps the screen's two
+    // buttons consistent with each other.
+    setBusy('delete');
 
     try {
       await confirm({
@@ -102,79 +123,30 @@ export default function ProfileScreen() {
         title: 'Account not deleted',
         message: accountDeletionErrorMessage(nextError),
       });
-    }
-  };
-
-  const handleSaveUsername = async () => {
-    const nextUsername = usernameDraft.trim();
-    const invalid = validateUsername({ value: usernameDraft });
-
-    if (invalid) {
-      showNotice({ tone: 'error', title: 'Username required', message: invalid });
-      return;
-    }
-
-    if (nextUsername === user?.displayName?.trim()) {
-      return;
-    }
-
-    try {
-      await updateDisplayName(nextUsername);
-      showNotice({
-        tone: 'success',
-        title: 'Username saved',
-        message: 'Your customer greeting has been updated.',
-      });
-    } catch (nextError: any) {
-      showNotice({
-        tone: 'error',
-        title: 'Username not saved',
-        message: nextError?.message ?? 'Unable to update username right now.',
-      });
-    }
-  };
-
-  const handleSavePhoneNumber = async () => {
-    const nextPhone = phoneDraft.trim();
-    const invalid = validatePhoneNumber({ value: phoneDraft });
-
-    if (invalid) {
-      showNotice({ tone: 'error', title: 'Phone number required', message: invalid });
-      return;
-    }
-
-    if (nextPhone === String(user?.phoneNumber ?? '').trim()) {
-      return;
-    }
-
-    try {
-      await updatePhoneNumber(nextPhone);
-      showNotice({
-        tone: 'success',
-        title: 'Phone saved',
-        message: 'Your customer contact number has been updated.',
-      });
-    } catch (nextError: any) {
-      // The number riders and support dial. A failure here that says nothing
-      // leaves the customer believing an unreachable number was saved.
-      showNotice({
-        tone: 'error',
-        title: 'Phone number not saved',
-        message: nextError?.message ?? 'Unable to update phone number right now.',
-      });
+    } finally {
+      setBusy(null);
     }
   };
 
   if (!user) {
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.guestContainer}>
-        <AuthPromptCard
-          title="Sign in to manage your account"
-          message="Keep addresses, order recovery, and customer account controls in one place."
-        />
+        <View style={styles.column}>
+          <AuthPromptCard
+            title="Sign in to manage your account"
+            message="Keep addresses, order recovery, and customer account controls in one place."
+          />
+        </View>
       </ScrollView>
     );
   }
+
+  const delivery = formatDeliverySummary(deliveryLocation);
+  const ordersValue = orderSummary
+    ? orderSummary.activeCount > 0
+      ? `${orderSummary.activeCount} in progress`
+      : String(orderSummary.totalCount)
+    : null;
 
   return (
     // The ScrollView is wrapped rather than used as the root because the
@@ -183,83 +155,90 @@ export default function ProfileScreen() {
     // instead of pinning it to the bottom of the screen.
     <View style={styles.screen}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
-        <View style={styles.heroCard}>
-          <View style={styles.heroCopy}>
-            <Text style={styles.heroTitle}>{user.displayName ?? 'Customer account'}</Text>
-            <Text style={styles.heroMeta}>{user.email}</Text>
-          </View>
-        </View>
+        <View style={styles.column}>
+          <ProfileIdentityCard
+            initials={getProfileInitials(user.displayName, user.email)}
+            name={user.displayName?.trim() || 'Your account'}
+            email={user.email}
+            onEdit={() => router.push('/profile/edit')}
+          />
 
-        <View style={styles.group}>
-          <Text style={styles.groupTitle}>Orders and delivery</Text>
-          <ProfileRow icon="shopping-bag" label="Order history" onPress={() => router.push('/orders')} />
-          <ProfileRow icon="map-marker" label="Delivery location" onPress={() => router.push('/delivery-location')} />
-          <ProfileRow icon="life-ring" label="Help & Support" onPress={() => router.push('/support')} />
-        </View>
+          <ProfileDeliveryCard
+            title={delivery.title}
+            subtitle={delivery.subtitle}
+            onPress={() => router.push('/delivery-location')}
+          />
 
-        <View style={styles.group}>
-          <Text style={styles.groupTitle}>Account</Text>
-          <View style={styles.usernameRow}>
-            <Text style={styles.usernameLabel}>Username</Text>
-            <View style={styles.usernameInputRow}>
-              <TextInput
-                style={styles.usernameInput}
-                value={usernameDraft}
-                onChangeText={setUsernameDraft}
-                placeholder="Add username"
-                placeholderTextColor={customerTheme.textMuted}
-                editable={!loading}
-                maxLength={24}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.usernameSaveButton,
-                  !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()
-                    ? styles.usernameSaveButtonDisabled
-                    : null,
-                ]}
-                onPress={handleSaveUsername}
-                disabled={loading || !usernameDraft.trim() || usernameDraft.trim() === user.displayName?.trim()}
-              >
-                <Text style={styles.usernameSaveText}>Save</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.tiles}>
+            <ProfileStatTile
+              label="Orders"
+              value={ordersValue}
+              onPress={() => router.push('/orders')}
+            />
+            <ProfileStatTile
+              label="Saved"
+              // Free: FavoritesProvider wraps the whole (customer) group and has
+              // already loaded by the time any screen inside it renders.
+              value={String(favoriteRestaurantIds.length)}
+              onPress={() => router.push('/favorites')}
+            />
           </View>
-          <View style={styles.usernameRow}>
-            <Text style={styles.usernameLabel}>Phone number</Text>
-            <View style={styles.usernameInputRow}>
-              <TextInput
-                style={styles.usernameInput}
-                value={phoneDraft}
-                onChangeText={setPhoneDraft}
-                placeholder="Add phone number"
-                placeholderTextColor={customerTheme.textMuted}
-                editable={!loading}
-                keyboardType="phone-pad"
-              />
-              <TouchableOpacity
-                style={[
-                  styles.usernameSaveButton,
-                  !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()
-                    ? styles.usernameSaveButtonDisabled
-                    : null,
-                ]}
-                onPress={handleSavePhoneNumber}
-                disabled={loading || !phoneDraft.trim() || phoneDraft.trim() === String(user.phoneNumber ?? '').trim()}
-              >
-                <Text style={styles.usernameSaveText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          <ProfileRow icon="user-o" label="Email" value={user.email} />
-          <ProfileRow icon="check-circle-o" label="Email verified" value={user.emailVerified ? 'Yes' : 'No'} />
-          <ProfileRow icon="mobile" label="Session" value={user.activeSessionId ? 'Active on this device' : 'Idle'} />
-        </View>
 
-        <View style={styles.group}>
-          <Text style={styles.groupTitle}>Access</Text>
-          <ProfileRow icon="sign-out" label={loading ? 'Working...' : 'Sign out'} onPress={handleSignOut} />
-          <ProfileRow destructive icon="trash-o" label="Delete my account and data" onPress={handleDeleteAccount} />
+          {/* One group, not two. The legal pair sits beside support rather than
+              in a card of its own because these three rows are the same kind of
+              thing to a customer: somewhere to go read something.
+
+              These are now the primary signed-in route to either document — the
+              only other entry point is an accordion link on /accept-policy, which
+              nobody revisits — so they are not decoration, they are what an app
+              store reviewer looks for. */}
+          <Card padding="none" style={styles.group}>
+            <Text variant="caption" tone="secondary" style={styles.groupTitle}>
+              Help &amp; legal
+            </Text>
+            <ProfileLinkRow
+              icon="life-ring"
+              label="Help & Support"
+              onPress={() => router.push('/support')}
+            />
+            <ProfileLinkRow
+              icon="lock"
+              label="Privacy policy"
+              onPress={() => router.push('/privacy')}
+            />
+            <ProfileLinkRow
+              icon="file-text-o"
+              label="Terms of service"
+              onPress={() => router.push('/terms')}
+            />
+          </Card>
+
+          <View style={styles.actions}>
+            <Button
+              label="Sign out"
+              variant="secondary"
+              fullWidth
+              loading={busy === 'signOut'}
+              disabled={busy !== null}
+              onPress={handleSignOut}
+            />
+            <Button
+              label="Delete my account and data"
+              // `destructiveQuiet`, not `destructive`. As a solid red slab this was
+              // the single heaviest element on the screen, sitting below — and
+              // outweighing — the customer's own identity card, which is what the
+              // page is actually for. It is also the rarest control here and the
+              // only irreversible one. Red label, no slab: the signal survives, and
+              // the weight moves to the confirmation dialog, which already carries
+              // a full destructive confirm button.
+              variant="destructiveQuiet"
+              fullWidth
+              loading={busy === 'delete'}
+              disabled={busy !== null}
+              onPress={handleDeleteAccount}
+              style={styles.deleteButton}
+            />
+          </View>
         </View>
 
         {confirmDialog}
@@ -278,6 +257,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   container: {
+    // 14 is the customer app's horizontal gutter (home, search, orders/[id]).
     padding: 14,
     paddingBottom: 28,
   },
@@ -286,122 +266,43 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 20,
   },
-  heroCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 18,
-    borderWidth: 1,
+  /**
+   * Caps the reading column on the web build (app.feasty.com.ng), where an
+   * 800pt-wide window otherwise stretched a two-line sign-in card and a list of
+   * short rows across the whole viewport. A no-op below 560pt, so the two tiles
+   * still share a row at 375pt.
+   *
+   * Scoped to Profile deliberately: no other customer screen constrains its
+   * width yet, so this is a first instance rather than an existing house
+   * convention to copy.
+   */
+  column: {
+    alignSelf: 'center',
+    maxWidth: 560,
+    width: '100%',
+  },
+  tiles: {
     flexDirection: 'row',
-    padding: 16,
-  },
-  heroCopy: {
-    flex: 1,
-  },
-  heroTitle: {
-    color: customerTheme.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  heroMeta: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 4,
+    gap: space.md,
+    marginTop: space.md,
   },
   group: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginTop: 12,
+    marginTop: space.md,
     overflow: 'hidden',
   },
   groupTitle: {
-    color: customerTheme.textSoft,
-    fontSize: 11,
-    fontWeight: '800',
     letterSpacing: 0.7,
-    paddingHorizontal: 14,
-    paddingTop: 14,
+    paddingHorizontal: space.lg,
+    paddingTop: space.lg,
     textTransform: 'uppercase',
   },
-  usernameRow: {
-    borderTopColor: customerTheme.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+  actions: {
+    gap: space.md,
+    marginTop: space.xl,
   },
-  usernameLabel: {
-    color: customerTheme.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  usernameInputRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginTop: 10,
-  },
-  usernameInput: {
-    backgroundColor: customerTheme.surfaceStrong,
-    borderColor: customerTheme.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 14,
-    minHeight: 44,
-    paddingHorizontal: 12,
-  },
-  usernameSaveButton: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.accent,
-    borderRadius: 14,
-    marginLeft: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  usernameSaveButtonDisabled: {
-    opacity: 0.45,
-  },
-  usernameSaveText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  row: {
-    alignItems: 'center',
-    borderTopColor: customerTheme.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  rowIconWrap: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 14,
-    height: 28,
-    justifyContent: 'center',
-    width: 28,
-  },
-  rowIconWrapDanger: {
-    backgroundColor: customerTheme.dangerSoft,
-  },
-  rowCopy: {
-    flex: 1,
-    marginLeft: 12,
-    marginRight: 10,
-  },
-  rowLabel: {
-    color: customerTheme.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  rowLabelDanger: {
-    color: customerTheme.danger,
-  },
-  rowValue: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 3,
+  deleteButton: {
+    // Extra air above the irreversible control so it is never the button your
+    // thumb lands on by momentum after Sign out.
+    marginTop: space.md,
   },
 });

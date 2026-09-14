@@ -14,7 +14,17 @@ export default function ProfileLayout() {
           title: 'Profile',
         }}
       />
-      {/* Add additional screens here if needed, e.g., edit-profile.tsx */}
+      <Stack.Screen
+        name="edit"
+        options={{
+          // Back to /profile, not to whatever pushed this screen: the only way
+          // in is the identity card's Edit button, and a save ends with a
+          // `replace` to /profile, so "back" always means that one place.
+          headerLeft: () => <CustomerHeaderBackButton href="/profile" />,
+          headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
+          title: 'Edit profile',
+        }}
+      />
     </Stack>
   );
 }

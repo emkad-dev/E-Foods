@@ -12,6 +12,8 @@
  * surface per screen rather than a second competing one.
  */
 
+import { normalizePhone, phoneRejectionMessage } from '../../../../packages/domain/src/phone.ts';
+
 /** Matches the minimum Supabase Auth is configured to accept. */
 export const MIN_PASSWORD_LENGTH = 6;
 
@@ -224,11 +226,45 @@ export function validateUsername({ value }: ProfileFieldInput): string | null {
   return null;
 }
 
-/** Profile > Phone number — the number riders and support actually dial. */
+/**
+ * Profile > Phone number — the number riders and support actually dial.
+ *
+ * This used to check non-empty and nothing else, so `abc` saved happily into the
+ * one field whose entire purpose is being dialled. It now delegates to the same
+ * `normalizePhone` the sign-up and checkout paths use, which is the only place
+ * the NG/GB mobile rules live.
+ *
+ * FORMAT ONLY — NOT VERIFICATION, and deliberately so. Termii sender approval is
+ * still pending, so the OTP path is paused; requiring a verified number here
+ * would make the field uneditable for everyone rather than merely unverified.
+ * Correct formatting without a verification claim is the honest scope.
+ *
+ * The empty message is kept verbatim: it names who uses the number, which a
+ * generic "Enter your phone number." does not.
+ */
 export function validatePhoneNumber({ value }: ProfileFieldInput): string | null {
   if (!value.trim()) {
     return 'Add the phone number you want riders and support to use.';
   }
 
-  return null;
+  const result = normalizePhone(value);
+
+  return result.ok ? null : phoneRejectionMessage(result.reason);
+}
+
+/**
+ * The E.164 form of an already-validated number, or `null` if it is not a
+ * supported mobile.
+ *
+ * Exists so the edit screen can persist `+2348031234567` rather than whatever
+ * spacing the customer typed. Storing the raw text is what makes two records for
+ * the same person look like two different numbers, and leaves support dialling a
+ * string with spaces in it. Callers are expected to have run
+ * `validatePhoneNumber` first and rendered its message; this returns `null`
+ * rather than throwing so a caller that forgets cannot save garbage.
+ */
+export function normalizeProfilePhoneNumber(value: string): string | null {
+  const result = normalizePhone(value);
+
+  return result.ok ? result.e164 : null;
 }

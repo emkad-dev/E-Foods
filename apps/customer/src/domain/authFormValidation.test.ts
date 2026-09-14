@@ -6,6 +6,7 @@ import {
   MIN_PASSWORD_LENGTH,
   validateEmailCode,
   validateForgotPasswordForm,
+  normalizeProfilePhoneNumber,
   validateLoginForm,
   validatePhoneNumber,
   validateRegisterForm,
@@ -254,6 +255,27 @@ describe('profile and verification field checks', () => {
   it('requires a phone number', () => {
     assert.equal(validatePhoneNumber({ value: '08012345678' }), null);
     assert.match(validatePhoneNumber({ value: '' }) ?? '', /riders and support/);
+  });
+
+  it('rejects anything that is not a supported mobile', () => {
+    // The whole point: `abc` used to save into the field riders dial.
+    assert.match(validatePhoneNumber({ value: 'abc' }) ?? '', /digits only/);
+    // Lagos landline (01...) - right length, wrong range.
+    assert.match(validatePhoneNumber({ value: '01234567890' }) ?? '', /mobile number/);
+    assert.match(validatePhoneNumber({ value: '0803123' }) ?? '', /number of digits/);
+    assert.match(validatePhoneNumber({ value: '+1 415 555 0123' }) ?? '', /Nigerian/);
+  });
+
+  it('accepts the shapes people actually type', () => {
+    assert.equal(validatePhoneNumber({ value: '0803 123 4567' }), null);
+    assert.equal(validatePhoneNumber({ value: '+2348031234567' }), null);
+    assert.equal(validatePhoneNumber({ value: '+44 7123 456789' }), null);
+  });
+
+  it('hands the screen an E.164 number to save, not the typed text', () => {
+    assert.equal(normalizeProfilePhoneNumber('0803 123 4567'), '+2348031234567');
+    assert.equal(normalizeProfilePhoneNumber('+44 7123 456789'), '+447123456789');
+    assert.equal(normalizeProfilePhoneNumber('abc'), null);
   });
 
   it('requires the full 6-digit email code', () => {
