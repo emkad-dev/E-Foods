@@ -448,10 +448,7 @@ export default function PartnerProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Partner account</Text>
           <Text style={styles.metaLine}>Email: {user?.email ?? 'Not available'}</Text>
-          <Text style={styles.metaLine}>Role: {user?.role ?? 'restaurant'}</Text>
-          <Text style={styles.metaLine}>Email verified: {user?.emailVerified ? 'Yes' : 'No'}</Text>
           <Text style={styles.metaLine}>Linked restaurant: {user?.restaurantName ?? restaurant?.name ?? 'Not linked yet'}</Text>
-          <Text style={styles.metaLine}>Single-device session: {user?.activeSessionId ? 'Active' : 'Idle'}</Text>
         </View>
         {requiresVerifiedLink ? (
           <View style={styles.warningCard}>
