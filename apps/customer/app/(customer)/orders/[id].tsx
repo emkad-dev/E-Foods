@@ -324,10 +324,14 @@ export default function OrderTracking() {
           <View style={styles.fulfillmentBadge}>
             <Text style={styles.fulfillmentBadgeText}>{fulfillmentType === 'pickup' ? 'Pickup' : 'Delivery'}</Text>
           </View>
-          <View style={styles.statusBadge}>
-            <Text style={[styles.statusBadgeText, { color: getOrderStatusColor(order.status) }]}>
-              {formatOrderStatusLabel(order.status)}
-            </Text>
+          {/*
+            Status hue in the fill, not the label — same correction as the orders
+            list. On the badge's former fixed green tint (#e8f5e9) nine of the
+            eleven `getOrderStatusColor` branches failed AA, `placed` (#f5b342) at
+            1.64:1. The 12.5% tint keeps the hue and the label is plain `text`.
+          */}
+          <View style={[styles.statusBadge, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
+            <Text style={styles.statusBadgeText}>{formatOrderStatusLabel(order.status)}</Text>
           </View>
         </View>
         {scheduledSlotLabel ? (
@@ -599,12 +603,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   statusBadge: {
-    backgroundColor: customerTheme.accentTint,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   statusBadgeText: {
+    color: customerTheme.text,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.4,

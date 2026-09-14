@@ -126,7 +126,12 @@ export const getKitchenSignalColors = (tone: QueueTone) => {
     case 'accent':
       return { backgroundColor: partnerTheme.heroSoft, textColor: partnerTheme.accentStrong };
     case 'success':
-      return { backgroundColor: partnerTheme.successSoft, textColor: partnerTheme.success };
+      // The brand green is a fill too: #2e7d32 on `successSoft` (#c8e6c9) is
+      // 3.81:1, the same defect the orange and red branches above already had.
+      // There is no `successText` counterpart and none is needed — `Badge`'s own
+      // `success` tone is `successSoft` + `text.primary`, so this branch takes
+      // the pairing the design system had already settled.
+      return { backgroundColor: partnerTheme.successSoft, textColor: partnerTheme.text };
     default:
       return { backgroundColor: partnerTheme.surfaceMuted, textColor: partnerTheme.textMuted };
   }

@@ -260,7 +260,11 @@ export default function PartnerHome() {
                   </View>
                 ) : (
                   recentOrders.map((order) => {
-                    const statusColor = getPartnerStatusColor(order.status);
+                    // Fill only — it tints the pill. The label below is `text`, not
+                    // this colour: as text it would sit on a 12.5% wash of itself,
+                    // where six of the seven status branches fail AA. See the note
+                    // on `getPartnerStatusColor`.
+                    const statusFill = getPartnerStatusColor(order.status);
 
                     return (
                       <TouchableOpacity
@@ -273,10 +277,8 @@ export default function PartnerHome() {
                           <Text style={styles.orderTitle}>#{order.id.slice(-6).toUpperCase()}</Text>
                           <Text style={styles.orderSub}>{formatOrderTime(order.createdAt)}</Text>
                         </View>
-                        <View style={[styles.statusPill, { backgroundColor: `${statusColor}20` }]}>
-                          <Text style={[styles.statusText, { color: statusColor }]}>
-                            {formatOrderStatusLabel(order.status)}
-                          </Text>
+                        <View style={[styles.statusPill, { backgroundColor: `${statusFill}20` }]}>
+                          <Text style={styles.statusText}>{formatOrderStatusLabel(order.status)}</Text>
                         </View>
                         <Text style={styles.orderAmount}>
                           {formatPartnerMoney(order.pricing?.total ?? (order as { total?: number }).total ?? 0)}
@@ -513,6 +515,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   statusText: {
+    color: partnerTheme.text,
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',

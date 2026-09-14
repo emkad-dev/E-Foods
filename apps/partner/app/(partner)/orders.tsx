@@ -196,10 +196,15 @@ export default function PartnerOrdersScreen() {
                 >
                   <View style={styles.orderHeader}>
                     <Text style={styles.orderTitle}>Order #{order.id.slice(-6)}</Text>
+                    {/*
+                      The tint carries the status hue; the label is `text`, not the
+                      status colour. Colouring the label made each status sit on a
+                      12.5% wash of itself, where six of the seven branches failed AA
+                      (escalated/placed bottomed out at 2.40:1). Same rule as
+                      order/[id].tsx and as the `Badge` primitive.
+                    */}
                     <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
-                      <Text style={[styles.statusText, { color: getPartnerStatusColor(order.status) }]}>
-                        {formatOrderStatusLabel(order.status)}
-                      </Text>
+                      <Text style={styles.statusText}>{formatOrderStatusLabel(order.status)}</Text>
                     </View>
                   </View>
 
@@ -428,6 +433,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   statusText: {
+    color: partnerTheme.text,
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',

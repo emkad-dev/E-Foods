@@ -215,9 +215,16 @@ export default function DeliveriesScreen() {
             >
               <View style={styles.header}>
                 <Text style={styles.orderId}>Order #{order.id.slice(-6)}</Text>
-                <Text style={[styles.priority, { color: getOrderStatusColor(order.status) }]}>
-                  {formatOrderStatusLabel(order.status)}
-                </Text>
+                {/*
+                  Was bare coloured text on the card: seven of the eleven
+                  `getOrderStatusColor` branches failed AA there (`placed` #f5b342
+                  at 1.79:1 on #fbfcfc). The colour was the only thing carrying the
+                  status, so it moves to a 12.5% tint — the shape this app's own
+                  dashboard already uses — and the label becomes legible `text`.
+                */}
+                <View style={[styles.priorityPill, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
+                  <Text style={styles.priority}>{formatOrderStatusLabel(order.status)}</Text>
+                </View>
               </View>
 
               <View style={styles.signalRow}>
@@ -487,7 +494,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
+  priorityPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
   priority: {
+    color: dispatchTheme.text,
     fontSize: 12,
     fontWeight: '800',
     textTransform: 'uppercase',

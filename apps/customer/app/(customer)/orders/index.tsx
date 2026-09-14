@@ -265,10 +265,16 @@ export default function OrdersList() {
           <TouchableOpacity style={styles.orderCard} onPress={() => router.push(`/orders/${item.id}`)}>
             <View style={styles.orderHeader}>
               <Text style={styles.restaurantName}>{item.restaurantName}</Text>
-              <View style={styles.statusBadge}>
-                <Text style={[styles.status, { color: getOrderStatusColor(item.status) }]}>
-                  {formatOrderStatusLabel(item.status).toUpperCase()}
-                </Text>
+              {/*
+                The status hue moved from the label to the badge fill. As text on
+                the badge's fixed green tint, nine of the eleven
+                `getOrderStatusColor` branches failed AA — `placed` (#f5b342) at
+                1.64:1 on #e8f5e9. A 12.5% tint of the status colour keeps the hue
+                visible and lets the label be plain `text`, the rule the `Badge`
+                primitive already encodes.
+              */}
+              <View style={[styles.statusBadge, { backgroundColor: `${getOrderStatusColor(item.status)}20` }]}>
+                <Text style={styles.status}>{formatOrderStatusLabel(item.status).toUpperCase()}</Text>
               </View>
             </View>
             <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>
@@ -381,12 +387,12 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   statusBadge: {
-    backgroundColor: customerTheme.accentTint,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   status: {
+    color: customerTheme.text,
     fontSize: 10,
     fontWeight: '800',
   },

@@ -120,7 +120,11 @@ export const getDispatchSignalColors = (tone: QueueSignalTone) => {
     case 'warning':
       return {
         backgroundColor: dispatchTheme.warningSoft,
-        textColor: dispatchTheme.warning,
+        // `warningText`, matching partner's `getKitchenSignalColors` and the
+        // `dangerText` line above. The fill orange is 2.13:1 on `warningSoft` —
+        // the worst reading in either queue, and this branch carries the two
+        // chips ("New order", "Pickup risk") a dispatcher is meant to spot first.
+        textColor: dispatchTheme.warningText,
       };
     case 'accent':
       return {
@@ -130,7 +134,11 @@ export const getDispatchSignalColors = (tone: QueueSignalTone) => {
     case 'success':
       return {
         backgroundColor: dispatchTheme.successSoft,
-        textColor: dispatchTheme.success,
+        // The brand green is a fill too: #2e7d32 on `successSoft` (#c8e6c9) is
+        // 3.81:1. There is no `successText` counterpart, and none is needed —
+        // `Badge`'s own `success` tone is already `successSoft` + `text.primary`,
+        // so this branch takes the pairing the design system had settled.
+        textColor: dispatchTheme.text,
       };
     default:
       return {

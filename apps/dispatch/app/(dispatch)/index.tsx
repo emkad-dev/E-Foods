@@ -113,10 +113,15 @@ export default function DispatchDashboard() {
                     {order.deliveryLocation?.shortAddress ?? order.deliveryAddress ?? 'Customer address pending'}
                   </Text>
                 </View>
+                {/*
+                  The tint carries the status hue; the label is `text`. Colouring
+                  the label put each status on a 12.5% wash of itself, where ten of
+                  the eleven `getOrderStatusColor` branches failed AA (`placed`
+                  #f5b342 bottomed out at 1.67:1). Same rule as the `Badge`
+                  primitive and partner's order pills.
+                */}
                 <View style={[styles.liveStatusBadge, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
-                  <Text style={[styles.statusBadgeText, { color: getOrderStatusColor(order.status) }]}>
-                    {formatOrderStatusLabel(order.status)}
-                  </Text>
+                  <Text style={styles.statusBadgeText}>{formatOrderStatusLabel(order.status)}</Text>
                 </View>
               </View>
               <View style={styles.deliveryFacts}>
@@ -291,6 +296,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   statusBadgeText: {
+    color: dispatchTheme.text,
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',

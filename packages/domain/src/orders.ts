@@ -104,6 +104,23 @@ export const formatOrderStatusLabel = (status: string | null | undefined): strin
   }
 };
 
+/**
+ * FILL ONLY. These are saturated signal hues for a tint, a dot or a bar segment —
+ * never a text colour.
+ *
+ * Measured on the surfaces the five call sites actually used them on, the failures
+ * were the rule rather than the exception:
+ *   as text on `${color}20` over a light card  10 of 11 branches fail
+ *     (`placed` #f5b342 at 1.67:1, `default` #999999 at 2.50:1)
+ *   as text on the customer badge's green tint  9 of 11 fail (#f5b342, 1.64:1)
+ *   as bare text on a light card                7 of 11 fail (#f5b342, 1.79:1)
+ *   as text on `${color}20` over the dark hero  5 of 11 fail (#5D3FD3, 2.51:1)
+ * Darkening the hues cannot fix the tint cases — the background darkens with them.
+ * So every call site now follows the rule `Badge` encodes: the fill carries the
+ * status hue, the label is a plain legible foreground.
+ *
+ * The values are deliberately unchanged; only how they are consumed changed.
+ */
 export const getOrderStatusColor = (status: string | null | undefined): string => {
   const normalizedStatus = normalizeOrderStatus(status);
 

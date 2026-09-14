@@ -324,10 +324,16 @@ export default function DispatchDeliveryDetailScreen() {
             {order.restaurantName ?? 'Restaurant'} to{' '}
             {order.deliveryLocation?.shortAddress ?? order.deliveryAddress ?? 'Customer address pending'}
           </Text>
+          {/*
+            This pill sits on the dark hero, so the label is `textOnInverse` and the
+            tint carries the status hue. The status colours are built for a light
+            card: as text on their own 12.5% tint over #0d1522, five of the eleven
+            branches failed AA (`preparing` #5D3FD3 at 2.51:1). The stylesheet's
+            `accentStrong` default was no better — it never applied, because the
+            inline colour always won.
+          */}
           <View style={[styles.statusPill, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
-            <Text style={[styles.statusPillText, { color: getOrderStatusColor(order.status) }]}>
-              {formatOrderStatusLabel(order.status)}
-            </Text>
+            <Text style={styles.statusPillText}>{formatOrderStatusLabel(order.status)}</Text>
         </View>
         </View>
 
@@ -575,7 +581,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   statusPillText: {
-    color: dispatchTheme.accentStrong,
+    color: dispatchTheme.textOnInverse,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.4,
