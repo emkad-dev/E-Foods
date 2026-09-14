@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { Redirect, Stack, useLocalSearchParams, usePathname } from 'expo-router';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { resolveAuthRouteRedirect } from '../../src/domain/authRouteAccess';
 import { customerTheme } from '../../src/theme/palette';
 
 const AUTH_ROUTES = new Set(['/login', '/register', '/forgot-password', '/reset-password']);
@@ -95,24 +96,25 @@ export default function AuthLayout() {
     return <LoadingSkeleton mode={getAuthLoadingMode(pathname)} />;
   }
 
-  if (user) {
-    let target = '/home';
+  // The gate itself lives in src/domain/authRouteAccess.ts: the decision it
+  // makes -- in particular that /terms and /privacy are public content the
+  // onboarding gates must not swallow -- is the part worth testing, and it
+  // cannot be tested from here because this module imports react-native.
+  const redirect = resolveAuthRouteRedirect({
+    currentPath,
+    policyAccepted,
+    redirectTo,
+    viewer: user
+      ? {
+          emailVerified: user.emailVerified,
+          hasPhoneNumber: Boolean(user.phoneNumber),
+          role: user.role,
+        }
+      : null,
+  });
 
-    if (!user.emailVerified) {
-      target = '/verify-email';
-    } else if (user.role === 'customer' && !user.phoneNumber) {
-      target = '/complete-profile';
-    } else if (!policyAccepted) {
-      target = '/accept-policy';
-    } else if (redirectTo) {
-      target = redirectTo;
-    }
-
-    if (currentPath === target) {
-      return renderAuthStack();
-    }
-
-    return <Redirect href={target as never} />;
+  if (redirect) {
+    return <Redirect href={redirect as never} />;
   }
 
   return renderAuthStack();

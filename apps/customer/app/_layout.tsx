@@ -6,6 +6,7 @@ import { CartProvider } from '../src/contexts/CartContext';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import LoadingSkeleton from '../src/components/LoadingSkeleton';
+import { isPublicContentRoute } from '../src/domain/authRouteAccess';
 import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
 import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRouting';
 import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
@@ -179,7 +180,13 @@ function RootLayoutNav() {
     const currentPath = pathname || '/';
     const isAuthRoute = AUTH_PAGES.has(currentPath);
 
-    if (!user || isAuthRoute) {
+    // Public content (Terms, Privacy) is exempt from every gate below, not just
+    // the policy one. It used to be listed only on the policy check, so a
+    // signed-in user who had not yet verified their email or added a phone
+    // number was still bounced off /terms -- the two documents an app-store
+    // reviewer reads first, and the only ones a user has a legal reason to read
+    // BEFORE finishing onboarding.
+    if (!user || isAuthRoute || isPublicContentRoute(currentPath)) {
       return;
     }
 
@@ -193,13 +200,7 @@ function RootLayoutNav() {
       return;
     }
 
-    if (
-      !policyAccepted &&
-      currentPath !== '/accept-policy' &&
-      currentPath !== '/complete-profile' &&
-      currentPath !== '/terms' &&
-      currentPath !== '/privacy'
-    ) {
+    if (!policyAccepted && currentPath !== '/accept-policy' && currentPath !== '/complete-profile') {
       router.replace('/accept-policy' as never);
       return;
     }
