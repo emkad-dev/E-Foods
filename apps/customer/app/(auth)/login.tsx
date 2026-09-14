@@ -128,7 +128,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   errorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',

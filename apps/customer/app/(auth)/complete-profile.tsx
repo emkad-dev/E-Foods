@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   errorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 13,
     marginTop: 12,
   },

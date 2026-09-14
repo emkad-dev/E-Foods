@@ -112,7 +112,10 @@ export const getDispatchSignalColors = (tone: QueueSignalTone) => {
     case 'danger':
       return {
         backgroundColor: dispatchTheme.dangerSoft,
-        textColor: dispatchTheme.danger,
+        // Rendered as the chip's `color`. On `dangerSoft` the fill red measures
+        // 3.74:1 — the worst text contrast in the app, and on the one chip whose
+        // whole job is to be read first.
+        textColor: dispatchTheme.dangerText,
       };
     case 'warning':
       return {

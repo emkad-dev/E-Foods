@@ -18,6 +18,10 @@ import { brand, border, status, surface, text } from '@feasty/design-system';
  * color, so the new `accentText`/`warningText` keys exist for that purpose and the
  * former text usages have been pointed at them.
  *
+ * `danger` is the same story, found later: it is a fill that had never been declared
+ * as one, so it was carrying every error message in the app at 4.39:1 or worse.
+ * `dangerText` is now the label colour and the text usages point at it.
+ *
  * This shim is temporary: it is deleted per app as screens migrate to primitives.
  */
 export const customerTheme = {
@@ -67,6 +71,15 @@ export const customerTheme = {
   textOnInverseMuted: text.onInverseMuted,
   danger: status.danger,
   dangerSoft: status.dangerSoft,
+  /**
+   * Accessible counterpart to `danger` for text, the same role `accentText` and
+   * `warningText` already play for the orange. `danger` (#c54a43) is a fill: it
+   * fails AA as text on seven of the eight light surfaces in the token layer,
+   * including this app's own `background` (4.39:1) and `dangerSoft` (3.74:1 —
+   * the red-badge pairing, and the worst contrast in the app). Every error line
+   * and red label now points here instead.
+   */
+  dangerText: status.dangerText,
   success: status.success,
   successSoft: status.successSoft,
   warning: status.warning,

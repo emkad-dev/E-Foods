@@ -126,7 +126,7 @@ const makeStyles = (theme: PhoneComponentTheme) =>
     cellActive: { borderColor: theme.accent },
     cellText: { fontSize: 22, fontWeight: '700', color: theme.text },
     hiddenInput: { position: 'absolute', opacity: 0, height: 1, width: 1 },
-    errorText: { color: theme.danger, fontSize: 13, marginTop: 10, textAlign: 'center' },
+    errorText: { color: theme.dangerText, fontSize: 13, marginTop: 10, textAlign: 'center' },
     channelRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 16 },
     channelChip: {
       borderWidth: 1,

@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 14,
     lineHeight: 20,
   },

@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   error: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     paddingHorizontal: 16,
     paddingVertical: 4,
   },

@@ -115,7 +115,7 @@ export default function ForgotPasswordScreen() {
 
 const styles = StyleSheet.create({
   errorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',

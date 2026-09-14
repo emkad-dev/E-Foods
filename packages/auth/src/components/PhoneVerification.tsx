@@ -110,7 +110,7 @@ const makeStyles = (theme: PhoneComponentTheme) =>
     },
     buttonDisabled: { opacity: 0.5 },
     buttonText: { color: theme.surface, fontSize: 16, fontWeight: '700' },
-    errorText: { color: theme.danger, fontSize: 13, marginTop: 8 },
+    errorText: { color: theme.dangerText, fontSize: 13, marginTop: 8 },
     linkButton: { marginTop: 16, alignItems: 'center' },
     linkText: { color: theme.accent, fontSize: 14, fontWeight: '600' },
   });

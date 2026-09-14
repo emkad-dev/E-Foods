@@ -846,14 +846,14 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     marginTop: 12,
   },
   // Sits directly under the field it explains, so the red border and the reason
   // for it are read together.
   fieldErrorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 6,
@@ -1151,7 +1151,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   deleteButtonText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 15,
     fontWeight: '800',
   },

@@ -806,7 +806,7 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     marginTop: 6,
   },
@@ -962,7 +962,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   removeLogoText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 12,
     fontWeight: '800',
     marginTop: 8,
@@ -1032,7 +1032,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   reviewMissing: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 12,
     fontWeight: '800',
     marginTop: 3,

@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   errorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',

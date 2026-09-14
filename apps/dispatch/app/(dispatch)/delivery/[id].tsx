@@ -740,7 +740,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   assignError: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 8,

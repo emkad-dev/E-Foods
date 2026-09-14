@@ -17,7 +17,15 @@ export type PhoneComponentTheme = {
   border: string;
   accent: string;
   accentSoft: string;
+  /** Fill/border red. */
   danger: string;
+  /**
+   * Red for *words*. Separate from `danger` because `danger` (#c54a43) fails AA
+   * as text on almost every light surface, so the error line under a field —
+   * the one string here that has to be read — was the least readable text on
+   * the screen. Every app theme provides both.
+   */
+  dangerText: string;
 };
 
 export type PhoneInputChange = {
@@ -142,5 +150,5 @@ const makeStyles = (theme: PhoneComponentTheme) =>
       backgroundColor: theme.surface,
     },
     inputError: { borderColor: theme.danger },
-    errorText: { color: theme.danger, fontSize: 13, marginTop: 6 },
+    errorText: { color: theme.dangerText, fontSize: 13, marginTop: 6 },
   });

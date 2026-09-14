@@ -568,7 +568,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   reviewMissing: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 12,
     fontWeight: '800',
     marginTop: 3,
@@ -643,7 +643,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 10,
@@ -706,7 +706,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   statusBannerTitleRejected: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
   },
   statusBannerCopy: {
     color: dispatchTheme.textSoft,

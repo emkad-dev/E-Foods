@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 10,

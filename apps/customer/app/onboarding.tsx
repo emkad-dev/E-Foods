@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   errorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 14,

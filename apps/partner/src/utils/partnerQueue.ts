@@ -118,7 +118,9 @@ export const getKitchenSignal = (order: OrderDocument): KitchenSignal => {
 export const getKitchenSignalColors = (tone: QueueTone) => {
   switch (tone) {
     case 'danger':
-      return { backgroundColor: partnerTheme.dangerSoft, textColor: partnerTheme.danger };
+      // `dangerText`, matching the `warningText` line below: the chip's text sits
+      // on `dangerSoft`, where the fill red is 3.74:1.
+      return { backgroundColor: partnerTheme.dangerSoft, textColor: partnerTheme.dangerText };
     case 'warning':
       return { backgroundColor: partnerTheme.warningSoft, textColor: partnerTheme.warningText };
     case 'accent':

@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 10,

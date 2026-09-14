@@ -363,12 +363,12 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   errorTitle: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 15,
     fontWeight: '800',
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,

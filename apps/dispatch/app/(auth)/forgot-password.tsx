@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 10,

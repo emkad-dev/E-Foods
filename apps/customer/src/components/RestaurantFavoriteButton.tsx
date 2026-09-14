@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     opacity: 0.62,
   },
   error: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 11,
     lineHeight: 14,
     marginTop: 4,

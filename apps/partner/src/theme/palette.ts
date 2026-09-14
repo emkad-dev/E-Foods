@@ -41,6 +41,15 @@ export const partnerTheme = {
   danger: status.danger,
   dangerSoft: status.dangerSoft,
   /**
+   * Accessible counterpart to `danger` for text, the same role `accentText` and
+   * `warningText` already play for the orange. `danger` (#c54a43) is a fill: it
+   * fails AA as text on seven of the eight light surfaces in the token layer,
+   * including this app's own `background` (4.39:1) and `dangerSoft` (3.74:1 —
+   * the red-badge pairing, and the worst contrast in the app). Every error line
+   * and red label now points here instead.
+   */
+  dangerText: status.dangerText,
+  /**
    * The partner hero is FEASTY green, on the owner's call (2026-09-12).
    *
    * `brand.primaryStrong` (#1b5e20), NOT `brand.primary` (#2e7d32). The hero

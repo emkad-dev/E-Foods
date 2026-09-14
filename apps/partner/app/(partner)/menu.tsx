@@ -615,7 +615,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     marginTop: 12,
   },
@@ -882,7 +882,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fee2e2',
   },
   inlineDangerText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
   },
   // "Sold out" (item currently available, tap marks it unavailable): a
   // neutral warning tone, since this is a normal kitchen action, not an

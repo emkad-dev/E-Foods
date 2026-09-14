@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 14,
     marginBottom: 16,
     textAlign: 'center',

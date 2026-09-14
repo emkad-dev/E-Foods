@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   errorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     marginBottom: 16,
     textAlign: 'center',
     fontSize: 14,

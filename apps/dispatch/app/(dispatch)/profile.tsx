@@ -931,7 +931,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginVertical: 8,
@@ -957,7 +957,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
   },
   deleteButtonText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 15,
     fontWeight: '900',
   },

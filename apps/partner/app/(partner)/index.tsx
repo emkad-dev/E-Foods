@@ -53,7 +53,7 @@ function KpiCard({
     delta?.direction === 'up'
       ? partnerTheme.success
       : delta?.direction === 'down'
-        ? partnerTheme.danger
+        ? partnerTheme.dangerText
         : partnerTheme.textSoft;
 
   return (
@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   signOutLink: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -375,7 +375,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 13,
     marginTop: 12,
   },

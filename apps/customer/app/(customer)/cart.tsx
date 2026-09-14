@@ -1066,7 +1066,7 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   removeButtonText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 12,
     fontWeight: '800',
   },

@@ -426,12 +426,12 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   offerNoticeTitle: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 15,
     fontWeight: '800',
   },
   offerNoticeText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,
@@ -445,12 +445,12 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   errorTitle: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 15,
     fontWeight: '800',
   },
   errorText: {
-    color: dispatchTheme.danger,
+    color: dispatchTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,

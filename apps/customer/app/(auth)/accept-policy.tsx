@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
   title: { color: customerTheme.text, fontSize: 28, fontWeight: '900', marginTop: 8 },
   copy: { color: customerTheme.textMuted, fontSize: 15, lineHeight: 22, marginTop: 8 },
   sectionList: { gap: 10, marginTop: 16 },
-  errorText: { color: customerTheme.danger, fontSize: 14, lineHeight: 20, marginTop: 16 },
+  errorText: { color: customerTheme.dangerText, fontSize: 14, lineHeight: 20, marginTop: 16 },
   sectionButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.background,

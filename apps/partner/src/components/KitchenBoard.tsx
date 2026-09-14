@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   muteButtonTextMuted: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
   },
   board: {
     flex: 1,

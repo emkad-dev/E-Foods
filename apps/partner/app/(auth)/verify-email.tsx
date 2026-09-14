@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: {
-    color: partnerTheme.danger,
+    color: partnerTheme.dangerText,
     fontSize: 14,
     marginBottom: 16,
     textAlign: 'center',

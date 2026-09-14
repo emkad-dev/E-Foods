@@ -959,7 +959,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   cancelErrorText: {
-    color: customerTheme.danger,
+    color: customerTheme.dangerText,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 10,
