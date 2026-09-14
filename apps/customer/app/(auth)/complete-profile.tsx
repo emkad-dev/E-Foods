@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PhoneVerification } from '../../../../packages/auth/src/components/PhoneVerification';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { requestPhoneCode, verifyPhoneCode } from '../../src/services/phoneVerification';
@@ -43,8 +43,15 @@ export default function CompleteProfileScreen() {
               verifyCode={async (e164, code) => {
                 await verifyPhoneCode(e164, code);
               }}
+              // No confirmation banner here on purpose. This used to raise an
+              // `Alert`, which is an empty function on react-native-web, so the
+              // web build at app.feasty.com.ng confirmed nothing at all. A
+              // toast would be no better: `handleVerified` calls
+              // `router.replace` on the next line, so anything rendered on this
+              // screen is unmounted before it can be read. Leaving this screen
+              // for /home (or the policy gate) IS the confirmation -- the step
+              // the user was stuck on is gone.
               onVerified={(e164) => {
-                Alert.alert('Phone verified', 'Your number is confirmed.');
                 void handleVerified(e164);
               }}
             />
