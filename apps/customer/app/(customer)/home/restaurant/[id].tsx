@@ -19,6 +19,7 @@ import { useAppStateVisibility } from '../../../../../../packages/runtime/src/us
 import RemoteImage from '../../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
+import ScreenColumn, { screenColumn } from '../../../../src/components/ScreenColumn';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
 import { useCoverage } from '../../../../src/contexts/CoverageContext';
@@ -295,60 +296,62 @@ export default function RestaurantDetail() {
                 </TouchableOpacity>
               </View>
 
-              <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.summaryCard}>
-                <RestaurantLogoBadge
-                  logoImage={restaurant.logoImage}
-                  name={restaurant.name}
-                  size={56}
-                  style={styles.summaryLogo}
-                />
-                <View style={styles.summaryHeader}>
-                  <View style={styles.summaryHeaderCopy}>
-                    <Text style={styles.name}>{restaurant.name}</Text>
-                    <Text style={styles.cuisine}>{restaurant.cuisine ?? 'Cuisine coming soon'}</Text>
+              <ScreenColumn measure="feed">
+                <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.summaryCard}>
+                  <RestaurantLogoBadge
+                    logoImage={restaurant.logoImage}
+                    name={restaurant.name}
+                    size={56}
+                    style={styles.summaryLogo}
+                  />
+                  <View style={styles.summaryHeader}>
+                    <View style={styles.summaryHeaderCopy}>
+                      <Text style={styles.name}>{restaurant.name}</Text>
+                      <Text style={styles.cuisine}>{restaurant.cuisine ?? 'Cuisine coming soon'}</Text>
+                    </View>
+                    <RestaurantFavoriteButton restaurantId={restaurant.id} style={styles.summaryFavoriteButton} />
                   </View>
-                  <RestaurantFavoriteButton restaurantId={restaurant.id} style={styles.summaryFavoriteButton} />
-                </View>
 
-                <View style={styles.factsRow}>
-                  <Text style={styles.factPill}>{getRestaurantRatingLabel(restaurant)}</Text>
-                  <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
-                  <Text
-                    style={[
-                      styles.factPill,
-                      availabilityBadge === 'Closed' ? styles.closedBadge : null,
-                      availabilityBadge === 'Closed' ? styles.closedBadgeText : null,
-                    ]}
-                  >
-                    {restaurant.isOpen === false ? 'Closed' : availabilityBadge ?? 'Open'}
-                  </Text>
-                  <Text style={styles.factPill}>
-                    {restaurant.supportsDelivery === true
-                      ? `Delivery ${deliveryFeeAmount === null ? 'Pending' : formatMoney(deliveryFeeAmount)}`
-                      : 'Delivery coming soon'}
-                  </Text>
-                </View>
+                  <View style={styles.factsRow}>
+                    <Text style={styles.factPill}>{getRestaurantRatingLabel(restaurant)}</Text>
+                    <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
+                    <Text
+                      style={[
+                        styles.factPill,
+                        availabilityBadge === 'Closed' ? styles.closedBadge : null,
+                        availabilityBadge === 'Closed' ? styles.closedBadgeText : null,
+                      ]}
+                    >
+                      {restaurant.isOpen === false ? 'Closed' : availabilityBadge ?? 'Open'}
+                    </Text>
+                    <Text style={styles.factPill}>
+                      {restaurant.supportsDelivery === true
+                        ? `Delivery ${deliveryFeeAmount === null ? 'Pending' : formatMoney(deliveryFeeAmount)}`
+                        : 'Delivery coming soon'}
+                    </Text>
+                  </View>
 
-                {restaurant.description ? <Text style={styles.description}>{restaurant.description}</Text> : null}
+                  {restaurant.description ? <Text style={styles.description}>{restaurant.description}</Text> : null}
 
-                <View style={styles.metaPanel}>
-                  <Text style={styles.metaPanelText}>{restaurant.address ?? 'Address details coming soon'}</Text>
-                  <Text style={styles.metaPanelText}>
-                    Minimum order {formatPlainNumber(restaurant.minOrder)}
-                  </Text>
-                  {operatingHoursLabel ? (
-                    <Text style={styles.metaPanelText}>Open daily {operatingHoursLabel}</Text>
+                  <View style={styles.metaPanel}>
+                    <Text style={styles.metaPanelText}>{restaurant.address ?? 'Address details coming soon'}</Text>
+                    <Text style={styles.metaPanelText}>
+                      Minimum order {formatPlainNumber(restaurant.minOrder)}
+                    </Text>
+                    {operatingHoursLabel ? (
+                      <Text style={styles.metaPanelText}>Open daily {operatingHoursLabel}</Text>
+                    ) : null}
+                  </View>
+
+                  {restaurant.supportsDelivery !== true && restaurant.supportsPickup !== false ? (
+                    <Text style={styles.noticeText}>Pickup only for now — delivery is coming soon.</Text>
                   ) : null}
-                </View>
-
-                {restaurant.supportsDelivery !== true && restaurant.supportsPickup !== false ? (
-                  <Text style={styles.noticeText}>Pickup only for now — delivery is coming soon.</Text>
-                ) : null}
-              </Animated.View>
+                </Animated.View>
+              </ScreenColumn>
             </View>
 
             {menu.length > 0 ? (
-              <Animated.View entering={FadeInDown.delay(180).duration(500)} style={styles.categorySection}>
+              <Animated.View entering={FadeInDown.delay(180).duration(500)} style={[styles.categorySection, screenColumn.feed]}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
                   {menu.map((category) => {
                     const active = selectedCategory === category.category;
@@ -370,7 +373,7 @@ export default function RestaurantDetail() {
         data={visibleMenu}
         keyExtractor={(item) => item.category}
         renderItem={({ item: category, index }) => (
-          <Animated.View entering={FadeIn.delay(120 + index * 80).duration(350)} style={styles.categoryContainer}>
+          <Animated.View entering={FadeIn.delay(120 + index * 80).duration(350)} style={[styles.categoryContainer, screenColumn.feed]}>
             <View style={styles.categoryHeader}>
               <Text style={styles.categoryTitle}>{category.category}</Text>
               <Text style={styles.categoryCount}>{category.items.length} meals</Text>
@@ -422,10 +425,12 @@ export default function RestaurantDetail() {
         )}
         contentContainerStyle={styles.container}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Menu coming soon</Text>
-            <Text style={styles.emptyCopy}>This restaurant has not published any available meals yet.</Text>
-          </View>
+          <ScreenColumn measure="feed">
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Menu coming soon</Text>
+              <Text style={styles.emptyCopy}>This restaurant has not published any available meals yet.</Text>
+            </View>
+          </ScreenColumn>
         }
       />
 

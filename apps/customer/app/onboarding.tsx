@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
 import { getCurrentCoordinates, reverseGeocode } from '../src/services/deviceLocation';
 import { markLocationStepSeen } from '../src/services/customerOnboardingState';
@@ -86,7 +87,11 @@ export default function OnboardingScreen() {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 28, paddingTop: insets.top + 48 }]}
+      contentContainerStyle={[
+        styles.content,
+        screenColumn.reading,
+        { paddingBottom: insets.bottom + 28, paddingTop: insets.top + 48 },
+      ]}
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.eyebrow}>FEASTY</Text>

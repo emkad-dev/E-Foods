@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateEmailCode } from '../../src/domain/authFormValidation';
 import { useOtpCooldown } from '../../src/services/supabase/auth';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { customerTheme } from '../../src/theme/palette';
 
@@ -124,7 +125,7 @@ export default function VerifyEmailScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.container, screenColumn.reading]}>
       <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
         {`We sent a 6-digit code to ${user?.email ?? 'your inbox'}. Enter it below to confirm your email.`}

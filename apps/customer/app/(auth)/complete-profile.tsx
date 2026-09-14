@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PhoneVerification } from '../../../../packages/auth/src/components/PhoneVerification';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { requestPhoneCode, verifyPhoneCode } from '../../src/services/phoneVerification';
 import { customerTheme } from '../../src/theme/palette';
@@ -21,7 +22,7 @@ export default function CompleteProfileScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.content, screenColumn.reading]} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.eyebrow}>FEASTY Customer</Text>
           <Text style={styles.title}>Verify your phone number</Text>

@@ -10,6 +10,7 @@ import {
   accountDeletionParagraphs,
 } from '../../../../../packages/domain/src/accountDeletion';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import { screenColumn } from '../../../src/components/ScreenColumn';
 import ProfileDeliveryCard from '../../../src/components/profile/ProfileDeliveryCard';
 import ProfileIdentityCard from '../../../src/components/profile/ProfileIdentityCard';
 import ProfileLinkRow from '../../../src/components/profile/ProfileLinkRow';
@@ -131,7 +132,7 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.guestContainer}>
-        <View style={styles.column}>
+        <View style={screenColumn.reading}>
           <AuthPromptCard
             title="Sign in to manage your account"
             message="Keep addresses, order recovery, and customer account controls in one place."
@@ -155,7 +156,7 @@ export default function ProfileScreen() {
     // instead of pinning it to the bottom of the screen.
     <View style={styles.screen}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
-        <View style={styles.column}>
+        <View style={screenColumn.reading}>
           <ProfileIdentityCard
             initials={getProfileInitials(user.displayName, user.email)}
             name={user.displayName?.trim() || 'Your account'}
@@ -265,21 +266,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-  },
-  /**
-   * Caps the reading column on the web build (app.feasty.com.ng), where an
-   * 800pt-wide window otherwise stretched a two-line sign-in card and a list of
-   * short rows across the whole viewport. A no-op below 560pt, so the two tiles
-   * still share a row at 375pt.
-   *
-   * Scoped to Profile deliberately: no other customer screen constrains its
-   * width yet, so this is a first instance rather than an existing house
-   * convention to copy.
-   */
-  column: {
-    alignSelf: 'center',
-    maxWidth: 560,
-    width: '100%',
   },
   tiles: {
     flexDirection: 'row',

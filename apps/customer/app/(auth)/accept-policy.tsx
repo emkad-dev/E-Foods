@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router } from 'expo-router';
 import { policyCopy } from '../../../../packages/domain/src';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import { customerTheme } from '../../src/theme/palette';
 
 function PolicyAccordion({
@@ -71,7 +72,7 @@ export default function AcceptPolicyScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, screenColumn.reading]}>
       <View style={styles.card}>
         <Text style={styles.eyebrow}>FEASTY</Text>
         <Text style={styles.title}>Accept Terms</Text>

@@ -4,6 +4,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { resolveSuccessNotice } from '../../src/utils/successNotices';
 import { customerTheme } from '../../src/theme/palette';
@@ -108,7 +109,7 @@ export default function ResetPasswordScreen() {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, screenColumn.reading]}
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.title}>Choose a new password</Text>

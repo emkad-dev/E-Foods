@@ -6,6 +6,7 @@ import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/
 import { useRealtimeResource } from '../../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAppStateVisibility';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn';
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
@@ -208,10 +209,12 @@ export default function OrdersList() {
   if (!user) {
     return (
       <View style={styles.promptContainer}>
-        <AuthPromptCard
-          title="Sign in to track orders"
-          message="Your current and past orders will show up here once you sign in."
-        />
+        <ScreenColumn>
+          <AuthPromptCard
+            title="Sign in to track orders"
+            message="Your current and past orders will show up here once you sign in."
+          />
+        </ScreenColumn>
       </View>
     );
   }
@@ -287,7 +290,7 @@ export default function OrdersList() {
           </TouchableOpacity>
         </Animated.View>
       )}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, screenColumn.reading]}
     />
   );
 }

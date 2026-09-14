@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
+import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useSupportThreadRealtime } from '../../src/hooks/useSupportThreadRealtime';
@@ -69,10 +70,12 @@ export default function SupportScreen() {
   if (!user) {
     return (
       <View style={styles.promptWrap}>
-        <AuthPromptCard
-          title="Sign in for support"
-          message="Sign in to message our support team and see replies."
-        />
+        <ScreenColumn>
+          <AuthPromptCard
+            title="Sign in for support"
+            message="Sign in to message our support team and see replies."
+          />
+        </ScreenColumn>
       </View>
     );
   }
@@ -94,7 +97,7 @@ export default function SupportScreen() {
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, screenColumn.reading]}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) => (
             <View
@@ -113,24 +116,26 @@ export default function SupportScreen() {
         />
       )}
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text style={[styles.error, screenColumn.reading]}>{error}</Text> : null}
 
       <View style={styles.composer}>
-        <TextInput
-          style={styles.input}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Type a message…"
-          placeholderTextColor={customerTheme.textSoft}
-          multiline
-        />
-        <TouchableOpacity
-          style={[styles.sendButton, !draft.trim() || sending ? styles.sendButtonDisabled : null]}
-          disabled={!draft.trim() || sending}
-          onPress={() => void onSend()}
-        >
-          <Text style={styles.sendText}>{sending ? '…' : 'Send'}</Text>
-        </TouchableOpacity>
+        <ScreenColumn style={styles.composerRow}>
+          <TextInput
+            style={styles.input}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Type a message…"
+            placeholderTextColor={customerTheme.textSoft}
+            multiline
+          />
+          <TouchableOpacity
+            style={[styles.sendButton, !draft.trim() || sending ? styles.sendButtonDisabled : null]}
+            disabled={!draft.trim() || sending}
+            onPress={() => void onSend()}
+          >
+            <Text style={styles.sendText}>{sending ? '…' : 'Send'}</Text>
+          </TouchableOpacity>
+        </ScreenColumn>
       </View>
     </KeyboardAvoidingView>
   );
@@ -193,12 +198,14 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   composer: {
-    alignItems: 'flex-end',
     borderTopColor: customerTheme.border,
     borderTopWidth: 1,
+    padding: 12,
+  },
+  composerRow: {
+    alignItems: 'flex-end',
     flexDirection: 'row',
     gap: 8,
-    padding: 12,
   },
   input: {
     backgroundColor: customerTheme.surface,

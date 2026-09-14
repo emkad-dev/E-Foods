@@ -8,6 +8,7 @@ import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../..
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
 import { useCoverage } from '../../src/contexts/CoverageContext';
@@ -952,7 +953,7 @@ export default function CartScreen() {
             </View>
           </View>
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, screenColumn.reading]}
       />
       {authPromptDialog}
     </View>

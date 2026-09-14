@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { screenColumn } from '../../../src/components/ScreenColumn';
 import type { PromoContent } from '../../../src/domain/promoContent';
 import { supabase } from '../../../src/services/supabase/config';
 import { customerTheme } from '../../../src/theme/palette';
@@ -94,7 +95,7 @@ export default function PromoDetailScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView contentContainerStyle={[styles.container, screenColumn.reading]}>
         {promo.imageUrl ? (
           <Image source={{ uri: promo.imageUrl }} style={styles.hero} resizeMode="cover" />
         ) : (

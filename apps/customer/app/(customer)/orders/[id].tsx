@@ -5,6 +5,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useConfirm } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
+import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { computeEtaRangeBetween, formatEtaRange, shouldShowLiveMap } from '../../../src/domain/tracking';
@@ -105,10 +106,12 @@ export default function OrderTracking() {
   if (!user) {
     return (
       <View style={styles.promptContainer}>
-        <AuthPromptCard
-          title="Sign in to view order details"
-          message="Order tracking becomes available as soon as you sign in."
-        />
+        <ScreenColumn>
+          <AuthPromptCard
+            title="Sign in to view order details"
+            message="Order tracking becomes available as soon as you sign in."
+          />
+        </ScreenColumn>
       </View>
     );
   }
@@ -315,7 +318,7 @@ export default function OrderTracking() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.container, screenColumn.reading]}>
       <View style={styles.heroCard}>
         <Text style={styles.eyebrow}>Order detail</Text>
         <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>

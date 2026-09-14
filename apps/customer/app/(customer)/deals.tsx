@@ -1,6 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import type { PromoContent } from '../../src/domain/promoContent';
 import { trackPromoClick } from '../../src/services/promoTracking';
 import { supabase } from '../../src/services/supabase/config';
@@ -77,7 +78,7 @@ export default function DealsScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.container, screenColumn.feed]}>
       {promos.map((promo) => (
         <Pressable key={promo.id} style={styles.card} onPress={() => openPromo(promo)} accessibilityRole="button">
           {promo.imageUrl ? (

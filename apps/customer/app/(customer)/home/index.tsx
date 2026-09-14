@@ -22,6 +22,7 @@ import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
 import RemoteImage from '../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
+import { screenColumn } from '../../../src/components/ScreenColumn';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../src/services/supabase/config';
@@ -274,7 +275,7 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 12) + 6 }]}
+      contentContainerStyle={[styles.content, screenColumn.feed, { paddingTop: Math.max(insets.top, 12) + 6 }]}
     >
       <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.homeHeader}>
         <View style={styles.headerTopRow}>

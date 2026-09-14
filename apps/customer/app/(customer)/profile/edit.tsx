@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Card, Input, Text, space, useNotice } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
+import { screenColumn } from '../../../src/components/ScreenColumn';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
   normalizeProfilePhoneNumber,
@@ -141,7 +142,7 @@ export default function EditProfileScreen() {
   if (!user) {
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.guestContainer}>
-        <View style={styles.column}>
+        <View style={screenColumn.reading}>
           <AuthPromptCard
             title="Sign in to edit your profile"
             message="Your name and contact number live on your FEASTY account."
@@ -158,7 +159,7 @@ export default function EditProfileScreen() {
       keyboardShouldPersistTaps="handled"
     >
       {/* Same 560pt cap as /profile — see the note there. */}
-      <View style={styles.column}>
+      <View style={screenColumn.reading}>
         <Card>
           <Text variant="title3">Your details</Text>
 
@@ -222,11 +223,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-  },
-  column: {
-    alignSelf: 'center',
-    maxWidth: 560,
-    width: '100%',
   },
   field: {
     marginTop: space.lg,

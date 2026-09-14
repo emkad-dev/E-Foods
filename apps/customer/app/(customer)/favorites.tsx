@@ -5,6 +5,7 @@ import AuthPromptCard from '../../src/components/AuthPromptCard';
 import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
+import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
@@ -130,10 +131,12 @@ export default function CustomerFavoritesScreen() {
   if (!user) {
     return (
       <View style={styles.promptContainer}>
-        <AuthPromptCard
-          title="Sign in to save favorites"
-          message="Your favorite kitchens live here once you sign in. Browsing stays open either way."
-        />
+        <ScreenColumn>
+          <AuthPromptCard
+            title="Sign in to save favorites"
+            message="Your favorite kitchens live here once you sign in. Browsing stays open either way."
+          />
+        </ScreenColumn>
       </View>
     );
   }
@@ -148,7 +151,7 @@ export default function CustomerFavoritesScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, screenColumn.feed]}>
       {error ? (
         <View style={styles.stateCard}>
           <Text style={styles.stateTitle}>Favorites unavailable</Text>

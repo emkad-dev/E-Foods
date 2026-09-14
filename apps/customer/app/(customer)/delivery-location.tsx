@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { useCart } from '../../src/contexts/CartContext';
 import { useCoverage } from '../../src/contexts/CoverageContext';
 import {
@@ -183,7 +184,7 @@ export default function DeliveryLocationScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { paddingTop: insets.top + 12 }]}
     >
-      <View style={styles.header}>
+      <View style={[styles.header, screenColumn.reading]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <FontAwesome name="arrow-left" size={18} color="#07140c" />
         </TouchableOpacity>
@@ -194,17 +195,19 @@ export default function DeliveryLocationScreen() {
       </View>
 
       {!isCovered ? (
-        <View style={styles.comingSoonPanel}>
-          <Text style={styles.comingSoonTitle}>{COVERAGE_COMING_SOON_TITLE}</Text>
-          <Text style={styles.comingSoonCopy}>{COVERAGE_COMING_SOON_COPY}</Text>
-          {nearestKitchenDescription ? (
-            <Text style={styles.comingSoonMeta}>{nearestKitchenDescription}</Text>
-          ) : null}
-        </View>
+        <ScreenColumn>
+          <View style={styles.comingSoonPanel}>
+            <Text style={styles.comingSoonTitle}>{COVERAGE_COMING_SOON_TITLE}</Text>
+            <Text style={styles.comingSoonCopy}>{COVERAGE_COMING_SOON_COPY}</Text>
+            {nearestKitchenDescription ? (
+              <Text style={styles.comingSoonMeta}>{nearestKitchenDescription}</Text>
+            ) : null}
+          </View>
+        </ScreenColumn>
       ) : null}
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.content, screenColumn.reading, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>

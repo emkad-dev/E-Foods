@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import { customerTheme } from '../../src/theme/palette';
 
 const privacySections = [
@@ -75,7 +76,7 @@ const privacySections = [
 
 export default function CustomerPrivacyScreen() {
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, screenColumn.reading]}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Legal Notice</Text>
         <Text style={styles.title}>Privacy Policy</Text>

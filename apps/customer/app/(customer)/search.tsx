@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
 import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
+import { screenColumn } from '../../src/components/ScreenColumn';
 import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
 import {
@@ -173,7 +174,7 @@ export default function SearchScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 12) + 6 }]}>
-      <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+      <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, screenColumn.feed]}>
         <Text style={styles.title}>Search meals</Text>
         <TouchableOpacity style={styles.locationChip} onPress={() => router.push('/delivery-location')}>
           <FontAwesome name="map-marker" size={14} color={customerTheme.brandGreen} />
@@ -207,11 +208,11 @@ export default function SearchScreen() {
       </Animated.View>
 
       {loading ? (
-        <View style={styles.centered}>
+        <View style={[styles.centered, screenColumn.feed]}>
           <ActivityIndicator size="large" color={customerTheme.accentStrong} />
         </View>
       ) : catalogError ? (
-        <View style={styles.centered}>
+        <View style={[styles.centered, screenColumn.feed]}>
           <Text style={styles.emptyTitle}>Search is unavailable</Text>
           <Text style={styles.emptyCopy}>{catalogError}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => void loadRestaurants()}>
@@ -219,7 +220,7 @@ export default function SearchScreen() {
           </TouchableOpacity>
         </View>
       ) : trimmedQuery.length === 0 ? (
-        <View style={styles.promptBlock}>
+        <View style={[styles.promptBlock, screenColumn.feed]}>
           <Text style={styles.promptTitle}>What are you craving?</Text>
           <Text style={styles.promptCopy}>
             Search a dish or category and we&apos;ll show every kitchen serving it, nearest first.
@@ -243,7 +244,7 @@ export default function SearchScreen() {
           keyExtractor={(item) => item.key}
           renderItem={renderResult}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, screenColumn.feed]}
           ListHeaderComponent={
             results.length > 0 ? (
               <Text style={styles.resultCountLabel}>
