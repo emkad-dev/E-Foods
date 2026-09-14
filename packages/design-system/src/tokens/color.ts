@@ -8,6 +8,10 @@
  *  - `brand.accent` (#f57c00) is 2.70:1 on white and MUST NEVER be a text color on a
  *    light surface. It is a fill; pair it with `text.onAccent`. Use `brand.accentText`
  *    when orange-flavored text is needed.
+ *  - `status.danger` (#c54a43) is the same kind of colour and was simply never
+ *    declared as one: it clears AA on a single light surface and fails the other
+ *    seven, so it too is a fill. Red text is `status.dangerText` / `text.danger`
+ *    (#a83b35).
  *  - `text.secondary` is #54626f, not the legacy #6a7d76 (4.04:1, failed AA) nor
  *    #5b6978 (4.18:1 on the darker soft fills). #54626f clears 4.5:1 on every
  *    surface role in this file.
@@ -47,6 +51,36 @@ export const surface = {
   inverseBrand: '#14331d',
 } as const;
 
+export const status = {
+  success: '#2e7d32',
+  successSoft: '#c8e6c9',
+  /** Fill only, same rule as `brand.accent`. */
+  warning: '#f57c00',
+  warningSoft: '#ffe0b2',
+  warningText: '#8a4500',
+  /**
+   * FILL ONLY, same rule as `brand.accent` and `warning` — it just was not
+   * declared as one, so it got used as words. Measured against the eight light
+   * surfaces swept below it clears AA on exactly one of them (`surface.default`,
+   * 4.61:1) and fails the other seven, bottoming out at 3.52:1 on
+   * `brand.primarySoft`. Correct as a destructive button's fill or an invalid
+   * field's border; never as text. Red *text* is `dangerText`.
+   */
+  danger: '#c54a43',
+  dangerSoft: '#f8dfdc',
+  /**
+   * The accessible counterpart to `danger`, exactly as `warningText` is to
+   * `warning` and `brand.accentText` is to `brand.accent`. Clears 4.5:1 on every
+   * surface in `a11y.lightSurfaces`; worst case 4.67:1 on `brand.primarySoft`.
+   *
+   * Not a new colour. This is the value the destructive Button already carried,
+   * hardcoded, as its pressed background — the one place in the repo that knew a
+   * darker red existed. Naming it here is what lets error copy and quiet
+   * destructive labels stop reaching for the fill red.
+   */
+  dangerText: '#a83b35',
+} as const;
+
 export const text = {
   primary: '#0d1522',
   secondary: '#54626f',
@@ -78,6 +112,22 @@ export const text = {
    * of contrast without failing the test.
    */
   onInverseMuted: '#bac7c3',
+  /**
+   * Red words: a field's error message, the label on a quiet destructive button.
+   *
+   * It is `status.dangerText` (#a83b35) and NOT `status.danger` (#c54a43),
+   * because the fill red fails AA on seven of the eight surfaces in
+   * `a11y.lightSurfaces` — so every red string in the three apps was failing
+   * until this role existed, including the error line under every form field.
+   *
+   * It has to be a `text.*` key rather than a bare status value because `Text`
+   * derives `TextTone` from `keyof typeof text`; without it there is no
+   * `tone="danger"`, and a component that wants red copy has no choice but to
+   * hand-roll `color: status.danger` and fail. `status` is declared above `text`
+   * in this file purely so this role can name the token instead of repeating the
+   * hex.
+   */
+  danger: status.dangerText,
   /** WCAG 1.4.3 exempts disabled controls; excluded from the contrast test. */
   disabled: '#8d9c95',
 } as const;
@@ -87,17 +137,6 @@ export const border = {
   default: '#c2d0ca',
   strong: '#a9bcb4',
   focus: '#2e7d32',
-} as const;
-
-export const status = {
-  success: '#2e7d32',
-  successSoft: '#c8e6c9',
-  /** Fill only, same rule as `brand.accent`. */
-  warning: '#f57c00',
-  warningSoft: '#ffe0b2',
-  warningText: '#8a4500',
-  danger: '#c54a43',
-  dangerSoft: '#f8dfdc',
 } as const;
 
 export const overlay = {
@@ -112,7 +151,7 @@ export const overlay = {
  */
 export const a11y = {
   /** Text roles that must clear 4.5:1 against every surface in `lightSurfaces`. */
-  lightTextRoles: ['primary', 'secondary'] as const,
+  lightTextRoles: ['primary', 'secondary', 'danger'] as const,
   lightSurfaces: [
     surface.canvas,
     surface.default,
@@ -138,7 +177,7 @@ export const a11y = {
     { fg: status.warningText, bg: brand.accentSoft, name: 'warningText/accentSoft' },
   ] as const,
   /** Values banned from ever being used as a text color on a light surface. */
-  fillOnly: [brand.accent, status.warning] as const,
+  fillOnly: [brand.accent, status.warning, status.danger] as const,
 } as const;
 
 export const color = { brand, surface, text, border, status, overlay } as const;

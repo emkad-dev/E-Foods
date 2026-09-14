@@ -106,6 +106,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   invalid: {
+    /** A border, not words — the fill red is the right colour here and stays. */
     borderColor: status.danger,
   },
   input: {
@@ -117,7 +118,14 @@ const styles = StyleSheet.create({
   },
   error: {
     marginTop: space.xs,
-    color: status.danger,
+    /**
+     * `dangerText`, not `danger`. This is the line that tells someone why their
+     * form was rejected, and it renders on whatever surface the field sits on —
+     * where the fill red measured 3.52:1 to 4.39:1 on seven of the eight light
+     * surfaces the token sweep covers. The message that has to be read was the
+     * least readable text in the app.
+     */
+    color: status.dangerText,
   },
   hint: {
     marginTop: space.xs,

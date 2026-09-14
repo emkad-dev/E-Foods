@@ -14,7 +14,7 @@ import { radius } from '../tokens/radius';
 import { Text, type TextTone } from './Text';
 import type { TypeVariant } from '../tokens/type';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'destructiveQuiet';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export type ButtonProps = Omit<PressableProps, 'style' | 'children'> & {
@@ -54,9 +54,49 @@ const VARIANTS: Record<ButtonVariant, VariantSpec> = {
   },
   destructive: {
     background: status.danger,
-    backgroundPressed: '#a83b35',
+    /**
+     * Was the literal #a83b35 sitting right here — the only place in the repo
+     * that knew a legible dark red existed, which is exactly why red *text*
+     * elsewhere had nothing accessible to reach for and used the fill red.
+     * Same value, now named once in the token layer.
+     */
+    backgroundPressed: status.dangerText,
     tone: 'onBrand',
   },
+  /**
+   * Transparent like `ghost`, but with a `text.danger` label.
+   *
+   * The obvious question is why not just use `destructive`. Because a solid red
+   * slab is the right weight for the confirm button *inside* a confirmation
+   * dialog and the wrong weight for the control that opens one. An action a
+   * person takes once, if ever — delete this account, close this restaurant —
+   * must be unmistakably dangerous, but making it the heaviest element on its
+   * screen puts the most irreversible control exactly where the eye lands first,
+   * above whatever the screen is actually for. This keeps the danger signal and
+   * drops the shout; the weight belongs in the dialog, which already has it.
+   * `destructive` stays correct wherever the destructive act *is* the point of
+   * the surface.
+   *
+   * It could not exist before `text.danger` did: the only red on offer was the
+   * fill red, which fails AA as text on seven of eight light surfaces, so a
+   * quiet red label was an accessibility defect by construction.
+   */
+  destructiveQuiet: {
+    background: 'transparent',
+    backgroundPressed: surface.muted,
+    tone: 'danger',
+  },
+};
+
+/**
+ * Existing variants keep the spinner they shipped with. Only the quiet
+ * destructive needs its own: a green spinner inside a red-labelled button reads,
+ * mid-press, as a different button entirely.
+ */
+const spinnerColor = (tone: TextTone): string => {
+  if (tone === 'onBrand') return textColor.onBrand;
+  if (tone === 'danger') return textColor.danger;
+  return brand.primary;
 };
 
 /**
@@ -112,10 +152,7 @@ export function Button({
       {...rest}
     >
       {loading ? (
-        <ActivityIndicator
-          size="small"
-          color={spec.tone === 'onBrand' ? textColor.onBrand : brand.primary}
-        />
+        <ActivityIndicator size="small" color={spinnerColor(spec.tone)} />
       ) : (
         <View style={styles.content}>
           {icon}
