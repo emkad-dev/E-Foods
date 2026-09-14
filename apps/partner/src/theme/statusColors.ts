@@ -1,5 +1,7 @@
-import { normalizeOrderStatus } from '../domain/orders';
-import { partnerTheme } from './palette';
+// Explicit `.ts` specifiers so `statusColors.test.ts` can load this module
+// under Node's ESM test runner; see `partnerQueue.ts` for the full note.
+import { normalizeOrderStatus } from '../domain/orders.ts';
+import { partnerTheme } from './palette.ts';
 
 // FEASTY brand status colors, aligned with the admin hub conventions.
 // The shared packages/domain getOrderStatusColor stays untouched because the

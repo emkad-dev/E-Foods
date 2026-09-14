@@ -1,4 +1,11 @@
-import { brand, border, status, surface, text } from '@feasty/design-system';
+// Imported by module path with an explicit extension, not from the
+// '@feasty/design-system' barrel — the same rule dispatch's palette already
+// follows, now for two reasons. The barrel re-exports `useFeastyFonts`, which
+// pulls expo-font and six @expo-google-fonts faces in behind a file that only
+// wants six hex values; and the barrel reaches React Native primitives, which
+// Node's ESM test runner cannot load, so anything importing this shim was
+// unguardable. `tokens/color.ts` imports nothing, so taking it directly is free.
+import { brand, border, status, surface, text } from '../../../../packages/design-system/src/tokens/color.ts';
 
 /**
  * Compatibility shim over `@feasty/design-system`.

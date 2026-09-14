@@ -2,6 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Modules that Node's test runner has to load import their dependencies by
+    // .ts path, the way the app configs already do, so the source stays the
+    // single copy. Metro does the transpiling; tsc only typechecks.
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

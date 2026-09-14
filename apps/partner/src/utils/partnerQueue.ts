@@ -1,6 +1,11 @@
-import type { OrderDocument } from '../domain/entities';
-import { normalizeOrderStatus } from '../domain/orders';
-import { partnerTheme } from '../theme/palette';
+// Explicit `.ts` specifiers, the convention documented in
+// `packages/design-system/src/tokens/index.ts`: `partnerQueue.test.ts` guards
+// `getKitchenSignalColors` by loading this module under
+// `node --test --experimental-strip-types`, and Node's ESM resolver will not
+// infer an extension. Metro and tsc both resolve the explicit path unchanged.
+import type { OrderDocument } from '../domain/entities.ts';
+import { normalizeOrderStatus } from '../domain/orders.ts';
+import { partnerTheme } from '../theme/palette.ts';
 
 type QueueTone = 'danger' | 'warning' | 'accent' | 'success' | 'muted';
 

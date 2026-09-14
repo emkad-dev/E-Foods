@@ -1,1 +1,1 @@
-export * from '../../../../packages/domain/src/orders';
+export * from '../../../../packages/domain/src/orders.ts';

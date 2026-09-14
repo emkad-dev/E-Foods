@@ -3,7 +3,7 @@
 // re-exports useFeastyFonts, which pulls expo-font and six @expo-google-fonts
 // faces into the bundle; this app does not declare those dependencies. The
 // token module itself imports nothing, so taking it directly is free.
-import { brand, border, status, surface, text } from '../../../../packages/design-system/src/tokens/color';
+import { brand, border, status, surface, text } from '../../../../packages/design-system/src/tokens/color.ts';
 
 /**
  * Compatibility shim over `@feasty/design-system`.

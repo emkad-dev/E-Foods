@@ -1,22 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 
+import { BADGE_TONE_PAIRS, BADGE_TONES } from '../primitives/badgeTones.ts';
 import { a11y, brand, status, surface, text } from './color.ts';
-
-/** WCAG 2.1 relative luminance. */
-const luminance = (hex: string): number => {
-  const channels = [1, 3, 5]
-    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
-    .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
-  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-};
-
-const contrast = (a: string, b: string): number => {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-};
-
-const AA_NORMAL = 4.5;
+import { AA_NORMAL, contrastRatio as contrast } from './contrast.ts';
 
 describe('color tokens — contrast', () => {
   it('every light text role clears AA on every light surface', () => {
@@ -88,6 +75,54 @@ describe('color tokens — contrast', () => {
       );
       assert.ok(muted >= AA_NORMAL, `onInverseMuted on ${bg} = ${muted.toFixed(2)}:1`);
     }
+  });
+
+  /**
+   * `Badge` is the primitive that encodes the whole rule — the fill carries the
+   * status hue, the label is a plain legible foreground — and every later fix
+   * (`getKitchenSignalColors`, the partner and dispatch status pills) cites it
+   * as the pattern being copied. It had no test: `BADGE_TONE_PAIRS` was written
+   * "for the a11y test" and nothing imported it, so the reference implementation
+   * of the rule was the one pairing in this package that could regress in
+   * silence.
+   */
+  it('every badge tone is a legible fill/ink pairing', () => {
+    const failures: string[] = [];
+
+    for (const pair of BADGE_TONE_PAIRS) {
+      const ratio = contrast(pair.fg, pair.bg);
+      if (ratio < AA_NORMAL) {
+        failures.push(`${pair.name}: ink ${pair.fg} on fill ${pair.bg} = ${ratio.toFixed(2)}:1`);
+      }
+    }
+
+    assert.deepEqual(
+      failures,
+      [],
+      `A Badge tone renders its label below 4.5:1. The fill must carry the hue and ` +
+        `the label must stay a plain legible foreground — pointing the ink back at a ` +
+        `saturated tone colour is the defect this table exists to prevent:\n${failures.join('\n')}`,
+    );
+  });
+
+  /**
+   * Without this, deleting a tone from the table — or the table collapsing to
+   * `{}` through a bad refactor — would leave the sweep above iterating nothing
+   * and reporting a pass.
+   */
+  it('the badge tone table still covers every tone Badge offers', () => {
+    assert.deepEqual(
+      Object.keys(BADGE_TONES).sort(),
+      ['accent', 'danger', 'neutral', 'success', 'warning'],
+      'Badge tones changed. Every tone must appear in BADGE_TONES so the contrast ' +
+        'sweep above actually measures it; an unlisted tone is an unguarded pairing.',
+    );
+    assert.equal(
+      BADGE_TONE_PAIRS.length,
+      Object.keys(BADGE_TONES).length,
+      'BADGE_TONE_PAIRS no longer derives from BADGE_TONES, so the guard and the ' +
+        'rendered table can now disagree.',
+    );
   });
 
   it('retired legacy values are absent from the palette', () => {
