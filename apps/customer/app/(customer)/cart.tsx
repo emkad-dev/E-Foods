@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { useAuthPrompt } from '@feasty/design-system';
+import { radius, useAuthPrompt } from '@feasty/design-system';
 import { useFocusEffect } from '@react-navigation/native';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
@@ -1122,7 +1122,7 @@ const styles = StyleSheet.create({
   heroCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginBottom: 12,
     padding: 16,
@@ -1149,12 +1149,12 @@ const styles = StyleSheet.create({
   subtitle: {
     color: customerTheme.textMuted,
     fontSize: 13,
-    marginTop: 5,
+    marginTop: 6,
   },
   itemCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 10,
     padding: 14,
@@ -1179,7 +1179,7 @@ const styles = StyleSheet.create({
   quantityButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
-    borderRadius: 10,
+    borderRadius: radius.md,
     height: 30,
     justifyContent: 'center',
     width: 30,
@@ -1209,7 +1209,7 @@ const styles = StyleSheet.create({
   mixedBasketCard: {
     backgroundColor: '#f8fbff',
     borderColor: '#d6e7ff',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 12,
     padding: 14,
@@ -1230,7 +1230,7 @@ const styles = StyleSheet.create({
   sectionCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 12,
     padding: 14,
@@ -1246,7 +1246,7 @@ const styles = StyleSheet.create({
   groupCard: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 10,
     padding: 12,
@@ -1297,14 +1297,14 @@ const styles = StyleSheet.create({
   },
   fulfillmentToggle: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     flexDirection: 'row',
     marginBottom: 10,
     padding: 4,
   },
   fulfillmentOption: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radius.md,
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
@@ -1337,7 +1337,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.2,
-    marginTop: 1,
+    marginTop: 2,
   },
   fulfillmentHint: {
     color: customerTheme.textMuted,
@@ -1355,7 +1355,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 12,
@@ -1365,7 +1365,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surfaceStrong,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 12,
@@ -1374,7 +1374,7 @@ const styles = StyleSheet.create({
   locationIconWrap: {
     alignItems: 'center',
     backgroundColor: '#fde7e7',
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 38,
     justifyContent: 'center',
     marginRight: 12,
@@ -1383,7 +1383,7 @@ const styles = StyleSheet.create({
   locationEmptyIcon: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 38,
     justifyContent: 'center',
     marginRight: 12,
@@ -1412,7 +1412,7 @@ const styles = StyleSheet.create({
   noteInput: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     height: 46,
@@ -1422,7 +1422,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surfaceStrong,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     padding: 14,
@@ -1430,7 +1430,7 @@ const styles = StyleSheet.create({
   pickupIcon: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 38,
     justifyContent: 'center',
     marginRight: 12,
@@ -1442,7 +1442,7 @@ const styles = StyleSheet.create({
   optionCard: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     padding: 12,
   },
@@ -1487,10 +1487,10 @@ const styles = StyleSheet.create({
   tipChip: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 10,
   },
   tipChipActive: {
     backgroundColor: customerTheme.accent,
@@ -1507,14 +1507,14 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     padding: 14,
   },
   checkoutErrorCard: {
     backgroundColor: '#fef2f2',
     borderColor: '#fecaca',
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     marginBottom: 12,
     padding: 12,
@@ -1549,7 +1549,7 @@ const styles = StyleSheet.create({
   promoInput: {
     backgroundColor: '#fff',
     borderColor: '#e5e7eb',
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     flex: 1,
@@ -1559,9 +1559,9 @@ const styles = StyleSheet.create({
   },
   promoApplyButton: {
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 10,
+    borderRadius: radius.md,
     paddingHorizontal: 16,
-    paddingVertical: 11,
+    paddingVertical: 12,
   },
   promoApplyDisabled: {
     opacity: 0.5,
@@ -1614,7 +1614,7 @@ const styles = StyleSheet.create({
   checkoutButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
-    borderRadius: 12,
+    borderRadius: radius.md,
     paddingVertical: 14,
   },
   checkoutButtonDisabled: {

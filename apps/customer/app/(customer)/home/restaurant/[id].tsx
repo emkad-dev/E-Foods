@@ -10,7 +10,7 @@ import {
 import Animated, { FadeIn, FadeInDown, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { elevation, useNotice } from '@feasty/design-system';
+import { elevation, radius, useNotice } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../../../packages/runtime/src';
@@ -497,14 +497,14 @@ const styles = StyleSheet.create({
   heroBackButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(22,36,51,0.52)',
-    borderRadius: 20,
+    borderRadius: radius.xl,
     height: 40,
     justifyContent: 'center',
     width: 40,
   },
   summaryCard: {
     backgroundColor: customerTheme.surface,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     marginHorizontal: 16,
     marginTop: -32,
     padding: 20,
@@ -539,7 +539,7 @@ const styles = StyleSheet.create({
   },
   availabilityBadge: {
     backgroundColor: customerTheme.accentTint,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -551,7 +551,7 @@ const styles = StyleSheet.create({
   },
   closedBadge: {
     backgroundColor: customerTheme.warningSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -568,7 +568,7 @@ const styles = StyleSheet.create({
   },
   factPill: {
     backgroundColor: customerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     color: customerTheme.accentStrong,
     fontSize: 12,
     fontWeight: '700',
@@ -585,7 +585,7 @@ const styles = StyleSheet.create({
   },
   metaPanel: {
     backgroundColor: customerTheme.surfaceMuted,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 16,
     padding: 14,
   },
@@ -593,7 +593,7 @@ const styles = StyleSheet.create({
     color: customerTheme.textSoft,
     fontSize: 13,
     lineHeight: 19,
-    marginTop: 3,
+    marginTop: 4,
   },
   noticeText: {
     color: customerTheme.warningText,
@@ -612,7 +612,7 @@ const styles = StyleSheet.create({
   categoryChip: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     marginRight: 10,
     paddingHorizontal: 14,
@@ -656,7 +656,7 @@ const styles = StyleSheet.create({
   menuItemCard: {
     alignItems: 'stretch',
     backgroundColor: customerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     flexDirection: 'row',
     marginBottom: 10,
     overflow: 'hidden',
@@ -669,11 +669,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flexDirection: 'row',
-    gap: 5,
+    gap: 4,
     marginBottom: 8,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
     paddingVertical: 4,
   },
   matchTagText: {
@@ -717,7 +717,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'center',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     justifyContent: 'center',
     marginRight: 10,
     minWidth: 72,
@@ -736,7 +736,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     marginHorizontal: 16,
     marginTop: 20,
     padding: 24,
@@ -756,7 +756,7 @@ const styles = StyleSheet.create({
   cartFooter: {
     ...elevation.lg,
     backgroundColor: customerTheme.hero,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     left: 14,
     padding: 14,
     position: 'absolute',

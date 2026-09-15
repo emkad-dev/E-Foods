@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { elevation } from '@feasty/design-system';
+import { elevation, radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 import AuthLegalFooter from './AuthLegalFooter';
 
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     maxWidth: 420,
     padding: 24,

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 type AuthPasswordFieldProps = {
@@ -55,7 +56,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surfaceMuted,
     borderColor: customerTheme.border,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     flexDirection: 'row',
     minHeight: 50,

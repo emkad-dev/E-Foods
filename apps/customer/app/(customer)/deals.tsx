@@ -1,6 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import type { PromoContent } from '../../src/domain/promoContent';
 import { trackPromoClick } from '../../src/services/promoTracking';
@@ -103,11 +104,11 @@ const styles = StyleSheet.create({
   emptyTitle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
   emptyBody: { color: customerTheme.textMuted, fontSize: 14, textAlign: 'center' },
   retry: {
-    marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: 14,
+    marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: radius.lg,
     paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center',
   },
   retryText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
-  card: { backgroundColor: customerTheme.surface, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: customerTheme.border },
+  card: { backgroundColor: customerTheme.surface, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: customerTheme.border },
   image: { width: '100%', height: 150 },
   imagePlaceholder: { backgroundColor: customerTheme.accentSoft },
   cardBody: { padding: 14, gap: 4 },

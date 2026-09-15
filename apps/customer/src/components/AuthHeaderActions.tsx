@@ -1,5 +1,6 @@
 import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { useAuth } from '../contexts/AuthContext';
 import { customerTheme } from '../theme/palette';
 import { resolveAuthRedirectTo } from '../utils/authPrompt';
@@ -40,7 +41,7 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     borderColor: customerTheme.accent,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -52,7 +53,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: customerTheme.brandOrange,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginLeft: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,

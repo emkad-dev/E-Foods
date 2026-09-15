@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
+import { radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 // Uses the SAME react-native-webview + MapLibre-in-a-WebView approach as
@@ -190,7 +191,7 @@ export default function CustomerLiveMap({ delivery, restaurant, rider }: Custome
 const styles = StyleSheet.create({
   container: {
     backgroundColor: customerTheme.background,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 12,
     overflow: 'hidden',
   },

@@ -13,6 +13,7 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidScore, selectNextPendingRating, type PendingRating } from '../domain/ratingPrompt';
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: customerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     maxWidth: 420,
     padding: 20,
     width: '100%',
@@ -257,7 +258,7 @@ const styles = StyleSheet.create({
   commentInput: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     fontSize: 13,
@@ -274,7 +275,7 @@ const styles = StyleSheet.create({
   skipButton: {
     alignItems: 'center',
     borderColor: customerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     justifyContent: 'center',
     paddingHorizontal: 16,
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
   submitButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     flex: 1,
     justifyContent: 'center',
     paddingVertical: 12,

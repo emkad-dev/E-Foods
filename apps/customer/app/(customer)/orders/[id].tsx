@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
-import { useConfirm } from '@feasty/design-system';
+import { radius, useConfirm } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
 import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn';
@@ -565,7 +565,7 @@ const styles = StyleSheet.create({
   heroCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     padding: 18,
   },
@@ -593,10 +593,10 @@ const styles = StyleSheet.create({
   },
   fulfillmentBadge: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginRight: 8,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 8,
   },
   fulfillmentBadgeText: {
     color: customerTheme.accentStrong,
@@ -605,9 +605,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   statusBadge: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 8,
   },
   statusBadgeText: {
     color: customerTheme.text,
@@ -618,7 +618,7 @@ const styles = StyleSheet.create({
   },
   scheduledBanner: {
     backgroundColor: customerTheme.accentTint,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
   callButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     paddingVertical: 12,
   },
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
   progressCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
   },
   stepCircle: {
     backgroundColor: customerTheme.border,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     height: 16,
     marginRight: 10,
     width: 16,
@@ -694,7 +694,7 @@ const styles = StyleSheet.create({
   detailCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -702,7 +702,7 @@ const styles = StyleSheet.create({
   groupCard: {
     backgroundColor: customerTheme.accentTint,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -768,7 +768,7 @@ const styles = StyleSheet.create({
   etaSummaryCard: {
     backgroundColor: customerTheme.accentTint,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 12,
     padding: 14,
@@ -811,7 +811,7 @@ const styles = StyleSheet.create({
   refreshButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.hero,
-    borderRadius: 12,
+    borderRadius: radius.md,
     marginTop: 14,
     paddingVertical: 12,
   },
@@ -823,7 +823,7 @@ const styles = StyleSheet.create({
   riderCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -842,9 +842,9 @@ const styles = StyleSheet.create({
   liveBadge: {
     alignSelf: 'flex-start',
     backgroundColor: customerTheme.accentTint,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 8,
   },
   liveBadgeText: {
     color: customerTheme.accentStrong,
@@ -861,7 +861,7 @@ const styles = StyleSheet.create({
   coordinateChip: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flex: 1,
     padding: 12,
@@ -911,7 +911,7 @@ const styles = StyleSheet.create({
   mapButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.hero,
-    borderRadius: 12,
+    borderRadius: radius.md,
     marginTop: 14,
     paddingVertical: 12,
   },
@@ -926,7 +926,7 @@ const styles = StyleSheet.create({
   policyCard: {
     backgroundColor: customerTheme.warningSoft,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -945,9 +945,9 @@ const styles = StyleSheet.create({
   cancelButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.danger,
-    borderRadius: 12,
+    borderRadius: radius.md,
     marginTop: 14,
-    paddingVertical: 13,
+    paddingVertical: 14,
   },
   cancelButtonDisabled: {
     backgroundColor: '#d1d5db',
@@ -974,7 +974,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     padding: 18,

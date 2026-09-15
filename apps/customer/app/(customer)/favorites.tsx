@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { radius } from '@feasty/design-system';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
@@ -280,7 +281,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginBottom: 14,
     overflow: 'hidden',
@@ -343,7 +344,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'center',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 14,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -357,7 +358,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     padding: 22,
   },

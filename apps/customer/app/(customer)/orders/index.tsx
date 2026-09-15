@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
-import { elevation } from '@feasty/design-system';
+import { elevation, radius } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
 import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../../packages/runtime/src';
@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   emptyStateCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 10,
     padding: 18,
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
   filterShell: {
     backgroundColor: customerTheme.headerSurface,
     borderColor: 'rgba(3, 184, 51, 0.12)',
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginBottom: 14,
     padding: 4,
@@ -345,12 +345,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginRight: 8,
     minWidth: 80,
     paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingVertical: 10,
   },
   filterButtonActive: {
     ...elevation.md,
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
   orderCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginBottom: 12,
     padding: 14,
@@ -386,9 +386,9 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   statusBadge: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
   status: {
     color: customerTheme.text,

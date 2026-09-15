@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { radius } from '@feasty/design-system';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
@@ -229,7 +230,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     height: 50,
     marginBottom: 14,
@@ -239,7 +240,7 @@ const styles = StyleSheet.create({
   codeInput: {
     backgroundColor: customerTheme.surfaceMuted,
     borderColor: customerTheme.border,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     fontSize: 26,
@@ -252,8 +253,8 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
-    borderRadius: 10,
-    paddingVertical: 15,
+    borderRadius: radius.md,
+    paddingVertical: 16,
   },
   buttonText: {
     color: customerTheme.textOnBrand,

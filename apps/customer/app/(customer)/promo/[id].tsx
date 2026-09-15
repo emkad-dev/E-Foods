@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { screenColumn } from '../../../src/components/ScreenColumn';
 import type { PromoContent } from '../../../src/domain/promoContent';
 import { supabase } from '../../../src/services/supabase/config';
@@ -126,19 +127,19 @@ const styles = StyleSheet.create({
   emptyTitle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
   emptyBody: { color: customerTheme.textMuted, fontSize: 14, textAlign: 'center' },
   retry: {
-    marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: 14,
+    marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: radius.lg,
     paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center',
   },
-  hero: { width: '100%', height: 200, borderRadius: 16 },
+  hero: { width: '100%', height: 200, borderRadius: radius.lg },
   heroPlaceholder: { backgroundColor: customerTheme.accentSoft },
   title: { color: customerTheme.text, fontSize: 22, fontWeight: '800' },
   body: { color: customerTheme.text, fontSize: 15, lineHeight: 22 },
-  terms: { backgroundColor: customerTheme.surfaceMuted, borderRadius: 12, padding: 12, gap: 4 },
+  terms: { backgroundColor: customerTheme.surfaceMuted, borderRadius: radius.md, padding: 12, gap: 4 },
   termsLabel: { color: customerTheme.textMuted, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
   termsBody: { color: customerTheme.textMuted, fontSize: 13, lineHeight: 19 },
   cta: {
     position: 'absolute', left: 16, right: 16, bottom: 20, backgroundColor: customerTheme.accentStrong,
-    borderRadius: 14, paddingVertical: 16, alignItems: 'center',
+    borderRadius: radius.lg, paddingVertical: 16, alignItems: 'center',
   },
   ctaText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
 });

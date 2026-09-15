@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { elevation, useNotice } from '@feasty/design-system';
+import { elevation, radius, useNotice } from '@feasty/design-system';
 import { FontAwesome } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase/config';
@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     // deliberately stay literal; only the shadow is ours to standardise.
     backgroundColor: '#FFFFFF',
     borderColor: '#DADCE0',
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 12,
     minHeight: 52,

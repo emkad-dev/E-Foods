@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import { customerTheme } from '../../src/theme/palette';
 
@@ -136,7 +137,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 18,
   },
@@ -153,17 +154,17 @@ const styles = StyleSheet.create({
   metaPill: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   metaLabel: { color: customerTheme.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  metaValue: { color: customerTheme.text, fontSize: 13, fontWeight: '700', marginTop: 3 },
+  metaValue: { color: customerTheme.text, fontSize: 13, fontWeight: '700', marginTop: 4 },
   section: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 16,

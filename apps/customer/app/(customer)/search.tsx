@@ -13,6 +13,7 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import RemoteImage from '../../src/components/RemoteImage';
 import DeliveryLocationChip from '../../src/components/DeliveryLocationChip';
@@ -305,12 +306,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: 'rgba(255, 149, 31, 0.18)',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginTop: 12,
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
   searchInput: {
     color: customerTheme.text,
@@ -360,7 +361,7 @@ const styles = StyleSheet.create({
   categoryChip: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     marginBottom: 10,
     marginRight: 10,
@@ -387,7 +388,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 10,
@@ -416,7 +417,7 @@ const styles = StyleSheet.create({
   resultRestaurantRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    marginTop: 5,
+    marginTop: 6,
   },
   resultRestaurantBadge: {
     marginRight: 6,
@@ -469,7 +470,7 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 16,
     paddingHorizontal: 20,
     paddingVertical: 10,

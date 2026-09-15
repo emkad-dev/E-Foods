@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
+import { radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
@@ -279,7 +280,7 @@ const styles = StyleSheet.create({
   checkbox: {
     alignItems: 'center',
     borderColor: customerTheme.border,
-    borderRadius: 7,
+    borderRadius: radius.sm,
     borderWidth: 1,
     height: 24,
     justifyContent: 'center',
@@ -291,7 +292,7 @@ const styles = StyleSheet.create({
   },
   checkboxDot: {
     backgroundColor: customerTheme.textOnBrand,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
     width: 10,
   },

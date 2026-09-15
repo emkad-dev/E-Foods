@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router } from 'expo-router';
+import { radius } from '@feasty/design-system';
 import { policyCopy } from '../../../../packages/domain/src';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { screenColumn } from '../../src/components/ScreenColumn';
@@ -116,7 +117,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 22,
   },
@@ -129,7 +130,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -145,7 +146,7 @@ const styles = StyleSheet.create({
   expandedCard: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     padding: 14,
   },
@@ -156,9 +157,9 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 18,
-    paddingVertical: 15,
+    paddingVertical: 16,
   },
   buttonText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
 });

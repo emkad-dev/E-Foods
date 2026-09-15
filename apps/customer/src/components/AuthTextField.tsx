@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, TextInput, TextInputProps } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 /**
@@ -30,7 +31,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: customerTheme.surfaceMuted,
     borderColor: customerTheme.border,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     fontSize: 15,

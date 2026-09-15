@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { radius } from '@feasty/design-system';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
@@ -163,7 +164,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   bubble: {
-    borderRadius: 16,
+    borderRadius: radius.lg,
     maxWidth: '82%',
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -210,7 +211,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     color: customerTheme.text,
     flex: 1,
@@ -220,7 +221,7 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     backgroundColor: customerTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     paddingHorizontal: 18,
     paddingVertical: 12,
   },

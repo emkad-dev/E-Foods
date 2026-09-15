@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { PhoneVerification } from '../../../../packages/auth/src/components/PhoneVerification';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -76,7 +77,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     padding: 20,
   },

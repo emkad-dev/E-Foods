@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
+import { radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateEmailCode } from '../../src/domain/authFormValidation';
 import { useOtpCooldown } from '../../src/services/supabase/auth';
@@ -225,7 +226,7 @@ const styles = StyleSheet.create({
   codeInput: {
     backgroundColor: customerTheme.surfaceMuted,
     borderColor: customerTheme.border,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     fontSize: 26,
@@ -238,9 +239,9 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
-    borderRadius: 10,
+    borderRadius: radius.md,
     marginBottom: 12,
-    paddingVertical: 15,
+    paddingVertical: 16,
   },
   buttonDisabled: {
     opacity: 0.55,
@@ -254,10 +255,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.accent,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     marginBottom: 12,
-    paddingVertical: 15,
+    paddingVertical: 16,
   },
   secondaryText: {
     color: customerTheme.accentStrong,

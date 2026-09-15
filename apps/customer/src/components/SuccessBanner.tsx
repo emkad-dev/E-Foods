@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 import { FontAwesome } from '@expo/vector-icons';
+import { radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 type SuccessBannerProps = {
@@ -91,7 +92,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     backgroundColor: customerTheme.accentTint,
     borderColor: customerTheme.accentSoft,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
@@ -101,10 +102,10 @@ const styles = StyleSheet.create({
   iconWrap: {
     alignItems: 'center',
     backgroundColor: customerTheme.brandGreen,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 22,
     justifyContent: 'center',
-    marginTop: 1,
+    marginTop: 2,
     width: 22,
   },
   copy: {

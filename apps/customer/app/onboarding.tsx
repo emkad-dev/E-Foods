@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
 import { getCurrentCoordinates, reverseGeocode } from '../src/services/deviceLocation';
@@ -174,7 +175,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.brandGreen,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingVertical: 16,
   },
   primaryButtonText: {
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: customerTheme.text,
     fontSize: 15,
@@ -214,9 +215,9 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.surfaceMuted,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 12,
-    paddingVertical: 15,
+    paddingVertical: 16,
   },
   secondaryButtonText: {
     color: customerTheme.text,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
 import { customerTheme } from '../../src/theme/palette';
@@ -193,7 +194,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
     borderColor: '#E7ECEF',
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     maxWidth: 420,
     padding: 24,
@@ -222,7 +223,7 @@ const styles = StyleSheet.create({
   metaBox: {
     backgroundColor: '#F7FAFC',
     borderColor: '#E7ECEF',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginBottom: 12,
     padding: 16,
@@ -277,7 +278,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: customerTheme.brandGreen,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     minHeight: 52,
     justifyContent: 'center',
   },
@@ -290,7 +291,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#F7FAFC',
     borderColor: '#E7ECEF',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     minHeight: 52,

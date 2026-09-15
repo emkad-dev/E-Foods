@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { FontAwesome } from '@expo/vector-icons';
 import { Tabs, usePathname } from 'expo-router';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
-import { elevation } from '@feasty/design-system';
+import { elevation, radius } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
@@ -103,7 +103,7 @@ export default function CustomerLayout() {
               backgroundColor: customerTheme.surface,
               borderTopColor: customerTheme.border,
               borderTopWidth: 1,
-              borderRadius: 20,
+              borderRadius: radius.xl,
               // Float the pill above the device's bottom safe area (home indicator /
               // gesture bar) on mobile; falls back to 12 on web where the inset is 0.
               bottom: Math.max(insets.bottom, 12),
@@ -220,7 +220,7 @@ export default function CustomerLayout() {
 const styles = StyleSheet.create({
   tabIconWrap: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radius.md,
     height: 30,
     justifyContent: 'center',
     width: 30,

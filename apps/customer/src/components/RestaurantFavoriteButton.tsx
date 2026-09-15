@@ -1,5 +1,5 @@
 import { FontAwesome } from '@expo/vector-icons';
-import { useAuthPrompt } from '@feasty/design-system';
+import { radius, useAuthPrompt } from '@feasty/design-system';
 import { usePathname } from 'expo-router';
 import { useState } from 'react';
 import { StyleProp, StyleSheet, Text, TouchableOpacity, View, ViewStyle } from 'react-native';
@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 38,
     justifyContent: 'center',
     width: 38,

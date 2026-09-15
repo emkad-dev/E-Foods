@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Animated, Easing, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 type LoadingSkeletonMode =
@@ -367,7 +368,7 @@ const styles = StyleSheet.create({
   authCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 20,
     width: '100%',
@@ -382,7 +383,7 @@ const styles = StyleSheet.create({
   },
   brandMark: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     height: 52,
     marginRight: 12,
     width: 52,
@@ -397,17 +398,17 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
   },
   title: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 20,
   },
   copy: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
     marginTop: 10,
   },
@@ -417,18 +418,18 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 50,
   },
   button: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 50,
     marginTop: 2,
   },
   linkPill: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 28,
     marginTop: 6,
   },
@@ -440,7 +441,7 @@ const styles = StyleSheet.create({
   },
   checkbox: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     height: 24,
     width: 24,
   },
@@ -451,13 +452,13 @@ const styles = StyleSheet.create({
   },
   policyLine: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
   },
   onboardingCard: {
     backgroundColor: customerTheme.backgroundAlt,
     borderColor: customerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     gap: 10,
     padding: 16,
@@ -465,7 +466,7 @@ const styles = StyleSheet.create({
   sectionCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -475,7 +476,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 16,
   },
   topRow: {
@@ -496,7 +497,7 @@ const styles = StyleSheet.create({
   },
   chip: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 32,
     width: 74,
   },
@@ -506,7 +507,7 @@ const styles = StyleSheet.create({
   searchBar: {
     alignItems: 'center',
     backgroundColor: customerTheme.surfaceMuted,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     flexDirection: 'row',
     gap: 10,
     marginTop: 14,
@@ -514,7 +515,7 @@ const styles = StyleSheet.create({
   },
   searchIcon: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 18,
     width: 18,
   },
@@ -524,7 +525,7 @@ const styles = StyleSheet.create({
   },
   searchCopy: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
   },
   featureRow: {
@@ -534,7 +535,7 @@ const styles = StyleSheet.create({
   },
   featureCard: {
     backgroundColor: customerTheme.surfaceMuted,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     height: 96,
     flex: 1,
   },
@@ -549,7 +550,7 @@ const styles = StyleSheet.create({
   metricCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     flex: 1,
     height: 92,
@@ -564,7 +565,7 @@ const styles = StyleSheet.create({
   },
   rowAvatar: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     height: 32,
     marginRight: 12,
     width: 32,
@@ -575,17 +576,17 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 14,
   },
   rowSubtitle: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
   },
   rowBadge: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 24,
     marginLeft: 12,
     width: 60,
@@ -597,7 +598,7 @@ const styles = StyleSheet.create({
   },
   avatarLarge: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     height: 56,
     width: 56,
   },
@@ -611,7 +612,7 @@ const styles = StyleSheet.create({
   },
   settingRow: {
     backgroundColor: customerTheme.surfaceStrong,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     height: 46,
     marginTop: 10,
   },

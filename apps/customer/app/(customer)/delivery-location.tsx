@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { useCart } from '../../src/contexts/CartContext';
 import { useCoverage } from '../../src/contexts/CoverageContext';
@@ -313,7 +314,7 @@ const styles = StyleSheet.create({
   backButton: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     height: 42,
     justifyContent: 'center',
     marginRight: 12,
@@ -336,7 +337,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#ffffff',
     borderColor: customerTheme.borderSubtle,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 18,
   },
@@ -350,7 +351,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.borderSubtle,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     color: customerTheme.text,
     fontSize: 15,
@@ -367,7 +368,7 @@ const styles = StyleSheet.create({
   locationButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.accentSoft,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     flexDirection: 'row',
     justifyContent: 'center',
     marginTop: 18,
@@ -386,7 +387,7 @@ const styles = StyleSheet.create({
   statusBanner: {
     alignItems: 'flex-start',
     backgroundColor: customerTheme.accentTint,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     flexDirection: 'row',
     marginTop: 12,
     paddingHorizontal: 12,
@@ -410,7 +411,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: customerTheme.accentTint,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flexDirection: 'row',
     marginTop: 14,
     paddingHorizontal: 12,
@@ -425,9 +426,9 @@ const styles = StyleSheet.create({
   saveButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.brandGreen,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 18,
-    paddingVertical: 17,
+    paddingVertical: 18,
   },
   saveButtonText: {
     color: customerTheme.textOnBrand,
@@ -447,7 +448,7 @@ const styles = StyleSheet.create({
   comingSoonPanel: {
     backgroundColor: customerTheme.warningSoft,
     borderColor: customerTheme.warning,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginHorizontal: 16,
     marginTop: 12,

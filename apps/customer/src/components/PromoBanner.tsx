@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { elevation } from '@feasty/design-system';
+import { elevation, radius } from '@feasty/design-system';
 import { promoHasRichContent, type PromoContent } from '../domain/promoContent';
 import { supabase } from '../services/supabase/config';
 import { trackPromoClick, trackPromoImpression } from '../services/promoTracking';
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     ...elevation.lg,
     alignItems: 'flex-start',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     flexDirection: 'row',
     gap: 12,
     paddingHorizontal: 16,

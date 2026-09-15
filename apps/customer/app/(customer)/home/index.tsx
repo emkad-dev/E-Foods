@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { elevation } from '@feasty/design-system';
+import { elevation, radius } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../packages/auth/src';
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
     ...elevation.lg,
     backgroundColor: customerTheme.headerBackground,
     borderColor: 'rgba(3, 184, 51, 0.18)',
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 14,
   },
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.brandGreen,
     borderColor: 'rgba(255, 149, 31, 0.55)',
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     height: 40,
     justifyContent: 'center',
@@ -549,12 +549,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: 'rgba(255, 149, 31, 0.18)',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginTop: 10,
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
   searchInput: {
     color: customerTheme.text,
@@ -565,7 +565,7 @@ const styles = StyleSheet.create({
   },
   searchAction: {
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     height: 32,
     justifyContent: 'center',
     width: 32,
@@ -584,7 +584,7 @@ const styles = StyleSheet.create({
   catalogStatusCard: {
     backgroundColor: customerTheme.warningSoft,
     borderColor: customerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 16,
     padding: 16,
@@ -609,7 +609,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
   sectionAction: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flexDirection: 'row',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -653,7 +653,7 @@ const styles = StyleSheet.create({
   nearbyCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 12,
@@ -699,7 +699,7 @@ const styles = StyleSheet.create({
   coverageBanner: {
     backgroundColor: customerTheme.warningSoft,
     borderColor: customerTheme.warning,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 14,
     padding: 14,
@@ -730,7 +730,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 10,
     padding: 20,
   },
@@ -748,11 +748,11 @@ const styles = StyleSheet.create({
   },
   emptyAction: {
     backgroundColor: customerTheme.brandGreen,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     maxWidth: '100%',
     paddingHorizontal: 18,
-    paddingVertical: 11,
+    paddingVertical: 12,
   },
   emptyActionText: {
     color: customerTheme.textOnBrand,
@@ -777,7 +777,7 @@ const styles = StyleSheet.create({
   unavailableCard: {
     backgroundColor: customerTheme.dangerSoft,
     borderColor: '#ebc0b7',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     minHeight: 132,
@@ -811,9 +811,9 @@ const styles = StyleSheet.create({
   },
   unavailableBadge: {
     backgroundColor: '#f7d1ca',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
   unavailableBadgeClosed: {
     backgroundColor: '#fee2e2',

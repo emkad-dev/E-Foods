@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 type AuthPrimaryButtonProps = {
@@ -52,10 +53,10 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
-    borderRadius: 12,
+    borderRadius: radius.md,
     justifyContent: 'center',
     minHeight: 52,
-    paddingVertical: 15,
+    paddingVertical: 16,
   },
   buttonDisabled: {
     opacity: 0.55,
