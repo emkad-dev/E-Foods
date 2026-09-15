@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { elevation } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../packages/auth/src';
@@ -303,7 +304,7 @@ export default function HomeScreen() {
             onPress={handleSearchSubmit}
             disabled={!trimmedSearch}
           >
-            <FontAwesome name="arrow-right" size={15} color={trimmedSearch ? '#fff' : customerTheme.textMuted} />
+            <FontAwesome name="arrow-right" size={15} color={trimmedSearch ? customerTheme.textOnBrand : customerTheme.textMuted} />
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -487,15 +488,12 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   homeHeader: {
+    ...elevation.lg,
     backgroundColor: customerTheme.headerBackground,
     borderColor: 'rgba(3, 184, 51, 0.18)',
     borderRadius: 24,
     borderWidth: 1,
     padding: 14,
-    shadowColor: customerTheme.text,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
   },
   headerTopRow: {
     alignItems: 'center',
@@ -543,7 +541,7 @@ const styles = StyleSheet.create({
     width: 40,
   },
   avatarButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '800',
   },
@@ -620,7 +618,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   catalogRetryButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -699,32 +697,32 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   coverageBanner: {
-    backgroundColor: '#ffe0b2',
-    borderColor: '#ef6c00',
+    backgroundColor: customerTheme.warningSoft,
+    borderColor: customerTheme.warning,
     borderRadius: 16,
     borderWidth: 1,
     marginBottom: 14,
     padding: 14,
   },
   coverageBannerTitle: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 15,
     fontWeight: '800',
   },
   coverageBannerCopy: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 6,
   },
   coverageBannerMeta: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 12,
     fontWeight: '700',
     marginTop: 8,
   },
   coverageCardTag: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 11,
     fontWeight: '800',
     marginTop: 2,
@@ -821,7 +819,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fee2e2',
   },
   unavailableBadgeText: {
-    color: '#9a312c',
+    color: customerTheme.dangerText,
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -836,7 +834,7 @@ const styles = StyleSheet.create({
   },
   unavailableMeta: {
 
-    color: '#9a312c',
+    color: customerTheme.dangerText,
     fontSize: 11,
     lineHeight: 16,
     marginTop: 6,

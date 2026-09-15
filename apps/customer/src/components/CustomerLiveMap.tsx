@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
+import { customerTheme } from '../theme/palette';
+
 // Uses the SAME react-native-webview + MapLibre-in-a-WebView approach as
 // apps/dispatch/src/components/DispatchLiveMap.tsx - deliberately NOT
 // react-native-maps or any native mapping module. One mapping stack across the
@@ -64,7 +66,7 @@ const buildHtml = (markers: Marker[]) => {
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #f5f7f6;
+        background: ${customerTheme.background};
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       }
       .marker {
@@ -85,7 +87,7 @@ const buildHtml = (markers: Marker[]) => {
       .popup-title {
         font-size: 13px;
         font-weight: 800;
-        color: #0d1522;
+        color: ${customerTheme.text};
       }
     </style>
     <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
@@ -187,13 +189,13 @@ export default function CustomerLiveMap({ delivery, restaurant, rider }: Custome
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#f5f7f6',
+    backgroundColor: customerTheme.background,
     borderRadius: 18,
     marginTop: 12,
     overflow: 'hidden',
   },
   webView: {
-    backgroundColor: '#f5f7f6',
+    backgroundColor: customerTheme.background,
     height: 260,
     width: '100%',
   },

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useNotice } from '@feasty/design-system';
+import { elevation, useNotice } from '@feasty/design-system';
 import { FontAwesome } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase/config';
@@ -98,16 +98,15 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   button: {
+    ...elevation.sm,
+    // Google's own colours below are fixed by the Sign-In branding guidelines and
+    // deliberately stay literal; only the shadow is ours to standardise.
     backgroundColor: '#FFFFFF',
     borderColor: '#DADCE0',
     borderRadius: 14,
     borderWidth: 1,
     marginBottom: 12,
     minHeight: 52,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 2,
   },
   buttonPressed: {
     backgroundColor: '#F8FAFC',

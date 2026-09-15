@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { FontAwesome } from '@expo/vector-icons';
 import { Tabs, usePathname } from 'expo-router';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { elevation } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthHeaderActions from '../../src/components/AuthHeaderActions';
 import CustomerHeaderBackButton from '../../src/components/CustomerHeaderBackButton';
@@ -21,9 +22,15 @@ export const unstable_settings = {
 const TAB_BAR_MAX_WIDTH = 380;
 const TAB_BAR_SIDE_INSET = 24;
 
+// The focused icon takes the `color` the navigator hands it, same as the idle
+// one. It used to be forced to white, which sat on tabIconWrapActive's
+// accentSoft fill (#c8e6c9) at 1.34:1 — the active tab, the one thing in the
+// bar that has to be legible, was the least legible thing in it. The navigator
+// already supplies accentStrong as the active tint, which is 5.85:1 on that
+// same fill, so the override was not only unreadable but redundant.
 const renderTabIcon = (iconName: React.ComponentProps<typeof FontAwesome>['name'], color: string, focused: boolean) => (
   <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
-    <FontAwesome name={iconName} size={focused ? 19 : 18} color={focused ? '#ffffff' : color} />
+    <FontAwesome name={iconName} size={focused ? 19 : 18} color={color} />
   </View>
 );
 
@@ -92,6 +99,7 @@ export default function CustomerLayout() {
             tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
             tabBarItemStyle: { paddingVertical: 2 },
             tabBarStyle: {
+              ...elevation.lg,
               backgroundColor: customerTheme.surface,
               borderTopColor: customerTheme.border,
               borderTopWidth: 1,
@@ -99,7 +107,6 @@ export default function CustomerLayout() {
               // Float the pill above the device's bottom safe area (home indicator /
               // gesture bar) on mobile; falls back to 12 on web where the inset is 0.
               bottom: Math.max(insets.bottom, 12),
-              elevation: 8,
               // BottomTabBar pins itself with `start: 0` / `end: 0`, and those logical edges
               // beat `left`/`right` in Yoga, so the inset has to be written the same way or
               // the pill snaps back to the screen edge instead of sitting centred.
@@ -108,10 +115,6 @@ export default function CustomerLayout() {
               paddingBottom: 6,
               paddingTop: 6,
               position: 'absolute',
-              shadowColor: '#684612',
-              shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.14,
-              shadowRadius: 14,
               start: tabBarSideInset,
             },
             headerShown: false,

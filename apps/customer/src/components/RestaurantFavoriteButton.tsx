@@ -72,7 +72,7 @@ export default function RestaurantFavoriteButton({
         <FontAwesome
           name={isFavorite ? 'heart' : 'heart-o'}
           size={size}
-          color={isFavorite ? '#ffffff' : customerTheme.accentStrong}
+          color={isFavorite ? customerTheme.textOnBrand : customerTheme.accentStrong}
         />
       </TouchableOpacity>
       {error ? (

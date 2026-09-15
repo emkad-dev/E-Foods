@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   primaryText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '700',
   },

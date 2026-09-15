@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { elevation } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 import AuthLegalFooter from './AuthLegalFooter';
 
@@ -79,18 +80,14 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   card: {
+    ...elevation.lg,
     alignSelf: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
     borderRadius: 20,
     borderWidth: 1,
-    elevation: 4,
     maxWidth: 420,
     padding: 24,
-    shadowColor: '#0d1522',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 24,
     width: '100%',
   },
   brand: {

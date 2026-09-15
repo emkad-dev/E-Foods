@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
     marginTop: 12, backgroundColor: customerTheme.accentStrong, borderRadius: 14,
     paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center',
   },
-  retryText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  retryText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
   card: { backgroundColor: customerTheme.surface, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: customerTheme.border },
   image: { width: '100%', height: 150 },
   imagePlaceholder: { backgroundColor: customerTheme.accentSoft },

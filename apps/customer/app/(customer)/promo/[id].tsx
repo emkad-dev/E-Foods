@@ -140,5 +140,5 @@ const styles = StyleSheet.create({
     position: 'absolute', left: 16, right: 16, bottom: 20, backgroundColor: customerTheme.accentStrong,
     borderRadius: 14, paddingVertical: 16, alignItems: 'center',
   },
-  ctaText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  ctaText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
 });

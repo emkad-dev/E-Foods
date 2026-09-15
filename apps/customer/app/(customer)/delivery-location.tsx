@@ -24,6 +24,7 @@ import {
   type LocationWatch,
 } from '../../src/services/deviceLocation';
 import { LOCATION_ERROR_MESSAGES, coordinatesLabel } from '../../src/services/locationResolution';
+import { customerTheme } from '../../src/theme/palette';
 import { fallbackAddressFromCoords } from '../../src/utils/deliveryLocation';
 import {
   COVERAGE_COMING_SOON_COPY,
@@ -186,7 +187,7 @@ export default function DeliveryLocationScreen() {
     >
       <View style={[styles.header, screenColumn.reading]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <FontAwesome name="arrow-left" size={18} color="#07140c" />
+          <FontAwesome name="arrow-left" size={18} color={customerTheme.text} />
         </TouchableOpacity>
         <View>
           <Text style={styles.title}>Delivery address</Text>
@@ -216,7 +217,7 @@ export default function DeliveryLocationScreen() {
             multiline
             onChangeText={handleAddressChange}
             placeholder="Street, house number, area"
-            placeholderTextColor="#8b9690"
+            placeholderTextColor={customerTheme.textDisabled}
             style={[styles.input, styles.addressInput]}
             textAlignVertical="top"
             value={address}
@@ -226,7 +227,7 @@ export default function DeliveryLocationScreen() {
           <TextInput
             onChangeText={setLabel}
             placeholder="Home, office, hostel"
-            placeholderTextColor="#8b9690"
+            placeholderTextColor={customerTheme.textDisabled}
             style={styles.input}
             value={label}
           />
@@ -236,7 +237,7 @@ export default function DeliveryLocationScreen() {
             multiline
             onChangeText={setNote}
             placeholder="Gate color, landmark, or delivery note"
-            placeholderTextColor="#8b9690"
+            placeholderTextColor={customerTheme.textDisabled}
             style={[styles.input, styles.noteInput]}
             textAlignVertical="top"
             value={note}
@@ -249,9 +250,9 @@ export default function DeliveryLocationScreen() {
             style={[styles.locationButton, locating ? styles.locationButtonBusy : null]}
           >
             {locating ? (
-              <ActivityIndicator color="#07140c" />
+              <ActivityIndicator color={customerTheme.text} />
             ) : (
-              <FontAwesome name="location-arrow" size={16} color="#07140c" />
+              <FontAwesome name="location-arrow" size={16} color={customerTheme.text} />
             )}
             <Text style={styles.locationButtonText}>
               {locating ? 'Getting location' : liveTracking ? 'Refresh my location' : 'Use current location'}
@@ -263,7 +264,7 @@ export default function DeliveryLocationScreen() {
               <FontAwesome
                 name={status.tone === 'error' ? 'exclamation-circle' : 'info-circle'}
                 size={14}
-                color={status.tone === 'error' ? '#a3231f' : '#25613a'}
+                color={status.tone === 'error' ? customerTheme.dangerText : customerTheme.accentStrong}
               />
               <Text style={[styles.statusText, status.tone === 'error' ? styles.statusTextError : null]}>
                 {status.text}
@@ -272,7 +273,7 @@ export default function DeliveryLocationScreen() {
           ) : null}
 
           <View style={styles.coordinatePill}>
-            <FontAwesome name="map-marker" size={14} color="#069b3f" />
+            <FontAwesome name="map-marker" size={14} color={customerTheme.brandGreen} />
             <Text style={styles.coordinateText}>
               {hasCoordinates ? `${coordinateSource} · ${coordinatesLabel(latitude, longitude)}` : coordinateSource}
             </Text>
@@ -285,7 +286,7 @@ export default function DeliveryLocationScreen() {
               onPress={stopLiveTracking}
               style={[styles.locationButton, styles.stopButton]}
             >
-              <FontAwesome name="pause" size={14} color="#07140c" />
+              <FontAwesome name="pause" size={14} color={customerTheme.text} />
               <Text style={styles.locationButtonText}>Stop live updates</Text>
             </TouchableOpacity>
           ) : null}
@@ -301,7 +302,7 @@ export default function DeliveryLocationScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#f0f2f1',
+    backgroundColor: customerTheme.background,
     flex: 1,
   },
   header: {
@@ -319,12 +320,12 @@ const styles = StyleSheet.create({
     width: 42,
   },
   title: {
-    color: '#07140c',
+    color: customerTheme.text,
     fontSize: 22,
     fontWeight: '900',
   },
   subtitle: {
-    color: '#66736d',
+    color: customerTheme.textMuted,
     fontSize: 13,
     fontWeight: '700',
     marginTop: 2,
@@ -334,24 +335,24 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#ffffff',
-    borderColor: '#dbe4df',
+    borderColor: customerTheme.borderSubtle,
     borderRadius: 28,
     borderWidth: 1,
     padding: 18,
   },
   label: {
-    color: '#07140c',
+    color: customerTheme.text,
     fontSize: 13,
     fontWeight: '800',
     marginBottom: 8,
     marginTop: 14,
   },
   input: {
-    backgroundColor: '#f6f8f7',
-    borderColor: '#dbe4df',
+    backgroundColor: customerTheme.background,
+    borderColor: customerTheme.borderSubtle,
     borderRadius: 18,
     borderWidth: 1,
-    color: '#07140c',
+    color: customerTheme.text,
     fontSize: 15,
     minHeight: 52,
     paddingHorizontal: 14,
@@ -365,7 +366,7 @@ const styles = StyleSheet.create({
   },
   locationButton: {
     alignItems: 'center',
-    backgroundColor: '#cff5dd',
+    backgroundColor: customerTheme.accentSoft,
     borderRadius: 18,
     flexDirection: 'row',
     justifyContent: 'center',
@@ -377,14 +378,14 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   locationButtonText: {
-    color: '#07140c',
+    color: customerTheme.text,
     fontSize: 15,
     fontWeight: '900',
     marginLeft: 8,
   },
   statusBanner: {
     alignItems: 'flex-start',
-    backgroundColor: '#eefaf2',
+    backgroundColor: customerTheme.accentTint,
     borderRadius: 16,
     flexDirection: 'row',
     marginTop: 12,
@@ -392,10 +393,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   statusBannerError: {
-    backgroundColor: '#fdecea',
+    backgroundColor: customerTheme.dangerSoft,
   },
   statusText: {
-    color: '#25613a',
+    color: customerTheme.accentStrong,
     flex: 1,
     fontSize: 12,
     fontWeight: '700',
@@ -403,12 +404,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   statusTextError: {
-    color: '#a3231f',
+    color: customerTheme.dangerText,
   },
   coordinatePill: {
     alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: '#eefaf2',
+    backgroundColor: customerTheme.accentTint,
     borderRadius: 999,
     flexDirection: 'row',
     marginTop: 14,
@@ -416,36 +417,36 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   coordinateText: {
-    color: '#25613a',
+    color: customerTheme.accentStrong,
     fontSize: 12,
     fontWeight: '800',
     marginLeft: 6,
   },
   saveButton: {
     alignItems: 'center',
-    backgroundColor: '#06b84f',
+    backgroundColor: customerTheme.brandGreen,
     borderRadius: 20,
     marginTop: 18,
     paddingVertical: 17,
   },
   saveButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '900',
   },
   liveHint: {
-    color: '#25613a',
+    color: customerTheme.accentStrong,
     fontSize: 12,
     fontWeight: '700',
     marginTop: 10,
   },
   stopButton: {
-    backgroundColor: '#dff4e7',
+    backgroundColor: customerTheme.accentTint,
     marginTop: 12,
   },
   comingSoonPanel: {
-    backgroundColor: '#ffe0b2',
-    borderColor: '#ef6c00',
+    backgroundColor: customerTheme.warningSoft,
+    borderColor: customerTheme.warning,
     borderRadius: 16,
     borderWidth: 1,
     marginHorizontal: 16,
@@ -453,18 +454,18 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   comingSoonTitle: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 15,
     fontWeight: '800',
   },
   comingSoonCopy: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 6,
   },
   comingSoonMeta: {
-    color: '#7a3c00',
+    color: customerTheme.warningText,
     fontSize: 12,
     fontWeight: '700',
     marginTop: 8,

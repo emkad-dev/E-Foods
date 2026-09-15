@@ -770,7 +770,7 @@ export default function CartScreen() {
                   <FontAwesome
                     name="motorcycle"
                     size={15}
-                    color={fulfillmentType === 'delivery' ? '#fff' : customerTheme.accentStrong}
+                    color={fulfillmentType === 'delivery' ? customerTheme.textOnBrand : customerTheme.accentStrong}
                   />
                   <View style={styles.fulfillmentOptionLabel}>
                     <Text
@@ -796,7 +796,7 @@ export default function CartScreen() {
                   <FontAwesome
                     name="shopping-bag"
                     size={15}
-                    color={fulfillmentType === 'pickup' ? '#fff' : customerTheme.accentStrong}
+                    color={fulfillmentType === 'pickup' ? customerTheme.textOnBrand : customerTheme.accentStrong}
                   />
                   <View style={styles.fulfillmentOptionLabel}>
                     <Text
@@ -1185,7 +1185,7 @@ const styles = StyleSheet.create({
     width: 30,
   },
   quantityButtonText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '800',
   },
@@ -1276,14 +1276,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   groupWarning: {
-    color: '#8a4f12',
+    color: customerTheme.warningText,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
     marginTop: 8,
   },
   groupReady: {
-    color: '#047857',
+    color: customerTheme.success,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
@@ -1330,7 +1330,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   fulfillmentOptionTextActive: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
   },
   fulfillmentSoonText: {
     color: customerTheme.warningText,
@@ -1345,7 +1345,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   warningText: {
-    color: '#8a4f12',
+    color: customerTheme.warningText,
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 18,
@@ -1502,7 +1502,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   tipChipTextActive: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
   },
   summaryCard: {
     backgroundColor: customerTheme.surface,
@@ -1567,23 +1567,23 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   promoApplyText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '800',
   },
   promoError: {
-    color: '#b91c1c',
+    color: customerTheme.dangerText,
     fontSize: 12,
     marginBottom: 6,
   },
   promoAuto: {
-    color: '#047857',
+    color: customerTheme.success,
     fontSize: 12,
     fontWeight: '700',
     marginBottom: 6,
   },
   summaryDiscountValue: {
-    color: '#047857',
+    color: customerTheme.success,
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1621,7 +1621,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#d1d5db',
   },
   checkoutButtonText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '800',
   },

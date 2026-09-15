@@ -106,7 +106,7 @@ export default function OnboardingScreen() {
         style={[styles.primaryButton, locating ? styles.buttonDisabled : null]}
       >
         {locating ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color={customerTheme.textOnBrand} />
         ) : (
           <Text style={styles.primaryButtonText}>Use my current location</Text>
         )}
@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '900',
   },

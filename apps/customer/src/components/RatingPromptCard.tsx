@@ -198,7 +198,7 @@ export default function RatingPromptCard() {
             ]}
           >
             {submitting ? (
-              <ActivityIndicator color="#ffffff" size="small" />
+              <ActivityIndicator color={customerTheme.textOnBrand} size="small" />
             ) : (
               <Text style={styles.submitText}>Submit rating</Text>
             )}
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '800',
   },

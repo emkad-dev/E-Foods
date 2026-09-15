@@ -475,7 +475,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   retryButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },

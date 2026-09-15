@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { elevation } from '@feasty/design-system';
 import { promoHasRichContent, type PromoContent } from '../domain/promoContent';
 import { supabase } from '../services/supabase/config';
 import { trackPromoClick, trackPromoImpression } from '../services/promoTracking';
@@ -156,10 +157,10 @@ const styles = StyleSheet.create({
     zIndex: 50,
   },
   card: {
+    ...elevation.lg,
     alignItems: 'flex-start',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: 16,
-    boxShadow: '0 8px 18px rgba(13, 21, 34, 0.22)',
     flexDirection: 'row',
     gap: 12,
     paddingHorizontal: 16,
@@ -170,12 +171,16 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   title: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },
   body: {
-    color: '#eaf5ea',
+    // A surface tint used as a text colour: this copy sits on the dark
+    // `accentStrong` fill, and the literal here was #eaf5ea — the same pale green
+    // as `accentTint`, two points off. Same pattern as `viewCartLabel` on the
+    // restaurant screen, which reads `accentSoft` on the dark hero.
+    color: customerTheme.accentTint,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -192,7 +197,7 @@ const styles = StyleSheet.create({
     width: 24,
   },
   closeText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 20,
     fontWeight: '700',
     lineHeight: 22,

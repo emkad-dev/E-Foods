@@ -644,7 +644,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   callButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '900',
   },
@@ -932,12 +932,12 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   policyTitle: {
-    color: '#8a4f12',
+    color: customerTheme.warningText,
     fontSize: 15,
     fontWeight: '800',
   },
   policyCopy: {
-    color: '#7c5a2a',
+    color: customerTheme.warningText,
     fontSize: 13,
     lineHeight: 20,
     marginTop: 8,
@@ -953,7 +953,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#d1d5db',
   },
   cancelButtonText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '800',
   },

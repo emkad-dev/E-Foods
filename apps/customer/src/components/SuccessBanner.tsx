@@ -63,7 +63,7 @@ export default function SuccessBanner({ message, title = 'Done', onDismiss }: Su
       ]}
     >
       <View style={styles.iconWrap}>
-        <FontAwesome name="check" size={13} color="#fff" />
+        <FontAwesome name="check" size={13} color={customerTheme.textOnBrand} />
       </View>
 
       <View style={styles.copy}>

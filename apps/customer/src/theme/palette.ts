@@ -31,9 +31,25 @@ export const customerTheme = {
   surfaceMuted: surface.muted,
   surfaceStrong: surface.strong,
   border: border.default,
+  /**
+   * The hairline weight, under `border`. Added because the shim exposed only
+   * `border.default` (#c2d0ca), which is visibly darker than the hairlines some
+   * screens had hand-rolled -- `delivery-location` carried #dbe4df, two/three/four
+   * points off `border.subtle`. Pointing those at `surfaceStrong` would have got
+   * the value close but filed a border under a surface role.
+   */
+  borderSubtle: border.subtle,
   text: text.primary,
   textMuted: text.secondary,
   textSoft: text.secondary,
+  /**
+   * Placeholder and disabled-control text. Added because the shim had no key for
+   * it, so `delivery-location` invented #8b9690 for its three `placeholderTextColor`
+   * props -- two/six/five points off `text.disabled` and a second source of truth
+   * for the role. WCAG 1.4.3 exempts this role, which is why the token layer
+   * excludes it from the contrast sweep; it must not be used for live copy.
+   */
+  textDisabled: text.disabled,
   brandGreen: brand.primary,
   brandOrange: brand.accent,
   launchBackground: '#d2d2d2',

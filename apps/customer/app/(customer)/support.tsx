@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   sendText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontWeight: '700',
   },
 });

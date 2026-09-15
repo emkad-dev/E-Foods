@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
+import { elevation } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
 import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../../packages/runtime/src';
@@ -352,13 +353,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   filterButtonActive: {
+    ...elevation.md,
     backgroundColor: customerTheme.accentStrong,
     borderColor: customerTheme.accentStrong,
-    shadowColor: customerTheme.accentStrong,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 2,
   },
   filterButtonText: {
     color: customerTheme.text,
@@ -366,7 +363,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   filterButtonTextActive: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
   },
   orderCard: {
     backgroundColor: customerTheme.surface,

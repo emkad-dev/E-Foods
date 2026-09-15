@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   label: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '700',
   },

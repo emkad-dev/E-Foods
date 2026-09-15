@@ -10,7 +10,7 @@ import {
 import Animated, { FadeIn, FadeInDown, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { useNotice } from '@feasty/design-system';
+import { elevation, useNotice } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../../../packages/runtime/src';
@@ -399,7 +399,7 @@ export default function RestaurantDetail() {
                 <View style={styles.menuItemInfo}>
                   {menuItem.id === highlightId ? (
                     <View style={styles.matchTag}>
-                      <FontAwesome name="search" size={10} color="#ffffff" />
+                      <FontAwesome name="search" size={10} color={customerTheme.textOnBrand} />
                       <Text style={styles.matchTagText}>Your search match</Text>
                     </View>
                   ) : null}
@@ -628,7 +628,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   categoryChipActiveText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -677,7 +677,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   matchTagText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 10,
     fontWeight: '800',
     textTransform: 'uppercase',
@@ -729,7 +729,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#b9b0a0',
   },
   addButtonText: {
-    color: '#ffffff',
+    color: customerTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -754,16 +754,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   cartFooter: {
+    ...elevation.lg,
     backgroundColor: customerTheme.hero,
     borderRadius: 24,
     left: 14,
     padding: 14,
     position: 'absolute',
     right: 14,
-    shadowColor: '#3b2912',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
   },
   viewCartButton: {
     alignItems: 'center',

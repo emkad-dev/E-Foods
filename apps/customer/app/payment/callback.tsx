@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   errorText: {
-    color: '#b91c1c',
+    color: customerTheme.dangerText,
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 14,
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '800',
   },
