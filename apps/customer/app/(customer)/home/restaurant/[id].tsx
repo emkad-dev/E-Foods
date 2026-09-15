@@ -10,7 +10,7 @@ import {
 import Animated, { FadeIn, FadeInDown, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { elevation, radius, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, elevation, radius, useNotice } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../../../packages/runtime/src';
@@ -497,10 +497,13 @@ const styles = StyleSheet.create({
   heroBackButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(22,36,51,0.52)',
-    borderRadius: radius.xl,
-    height: 40,
+    // radius.pill, not radius.xl: xl (20) only read as a circle because it
+    // happened to equal half of the old 40pt box. The box is now the 44pt tap
+    // target -- the only control that leaves this screen was 4pt under it.
+    borderRadius: radius.pill,
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    width: 40,
+    width: MIN_TAP_TARGET,
   },
   summaryCard: {
     backgroundColor: customerTheme.surface,

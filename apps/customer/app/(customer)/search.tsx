@@ -31,6 +31,7 @@ import {
   getPopularMealCategories,
 } from '../../src/utils/mealSearch';
 import { customerTheme } from '../../src/theme/palette';
+import { pageTitleTextStyle } from '../../src/theme/screenChrome';
 import { formatDistanceAway, formatMoney } from '../../src/utils/formatting';
 
 // Meal-first, location-aware status line. Distance is only known once the
@@ -291,11 +292,7 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 4,
   },
-  title: {
-    color: customerTheme.text,
-    fontSize: 24,
-    fontWeight: '800',
-  },
+  title: pageTitleTextStyle,
   // Placement only - the chip's own geometry lives in DeliveryLocationChip.
   locationChip: {
     alignSelf: 'flex-start',

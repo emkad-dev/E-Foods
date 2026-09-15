@@ -81,7 +81,6 @@ export default function CustomerTermsScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, screenColumn.reading]}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>Legal Notice</Text>
-        <Text style={styles.title}>Terms of Service</Text>
         <Text style={styles.note}>
           These terms govern use of FEASTY for users in Nigeria and explain how orders, payments, cancellations, and
           account responsibility work.
@@ -149,7 +148,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  title: { color: customerTheme.text, fontSize: 30, fontWeight: '800', marginTop: 8 },
   note: { color: customerTheme.textMuted, fontSize: 14, lineHeight: 21, marginTop: 8 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   metaPill: {

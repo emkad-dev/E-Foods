@@ -3,6 +3,7 @@ import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { elevation, radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
+import { pageTitleTextStyle } from '../theme/screenChrome';
 import AuthLegalFooter from './AuthLegalFooter';
 
 type AuthScreenShellProps = {
@@ -113,9 +114,7 @@ const styles = StyleSheet.create({
     color: customerTheme.brandOrange,
   },
   title: {
-    color: customerTheme.text,
-    fontSize: 22,
-    fontWeight: '700',
+    ...pageTitleTextStyle,
     letterSpacing: -0.4,
     marginBottom: 6,
     textAlign: 'center',

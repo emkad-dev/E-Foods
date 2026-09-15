@@ -14,6 +14,7 @@ import { WebView, type WebViewNavigation } from 'react-native-webview';
 import { FontAwesome } from '@expo/vector-icons';
 import { MIN_TAP_TARGET, radius, space } from '@feasty/design-system';
 import { customerTheme } from '../../src/theme/palette';
+import { screenTitleTextStyle } from '../../src/theme/screenChrome';
 import { normalizeCustomerPaymentCallbackPath } from '../../src/services/paymentRouting';
 import { formatMoney } from '../../src/utils/formatting';
 import {
@@ -320,9 +321,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerTitle: {
-    color: customerTheme.text,
-    fontSize: 20,
-    fontWeight: '900',
+    // Hand-rolled title bar, so it takes the shared title-bar scale: at 20/900
+    // this was the third distinct size the same element rendered at.
+    ...screenTitleTextStyle,
     marginTop: space.hair,
   },
   headerSpacer: {

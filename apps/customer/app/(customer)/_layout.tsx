@@ -14,6 +14,7 @@ import { CoverageProvider } from '../../src/contexts/CoverageContext';
 import { FavoritesProvider } from '../../src/contexts/FavoritesContext';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { customerTheme } from '../../src/theme/palette';
+import { customerScreenOptions } from '../../src/theme/screenChrome';
 
 export const unstable_settings = {
   initialRouteName: 'home',
@@ -94,6 +95,10 @@ export default function CustomerLayout() {
         <RatingPromptCard />
         <Tabs
           screenOptions={{
+            // Applied to the navigator, not per screen: `deals`, `support` and
+            // `promo/[id]` all show a native header and each used to miss the
+            // per-screen copy, so they rendered the platform default title.
+            ...customerScreenOptions,
             tabBarActiveTintColor: customerTheme.accentStrong,
             tabBarInactiveTintColor: customerTheme.textMuted,
             tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
@@ -140,7 +145,6 @@ export default function CustomerLayout() {
               title: 'Favorites',
               headerShown: true,
               headerLeft: () => <CustomerHeaderBackButton href="/home" />,
-              headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
               tabBarIcon: ({ color, focused }) => renderTabIcon('heart', color, focused),
             }}
           />
@@ -150,7 +154,6 @@ export default function CustomerLayout() {
               title: 'Cart',
               headerShown: true,
               headerLeft: () => <CustomerHeaderBackButton href="/home" />,
-              headerTitleStyle: { color: customerTheme.text, fontSize: 18, fontWeight: '800' },
               tabBarStyle: { display: 'none' },
               tabBarIcon: ({ color, focused }) => renderTabIcon('shopping-cart', color, focused),
             }}

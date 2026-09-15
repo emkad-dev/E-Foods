@@ -5,6 +5,7 @@ import { radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
 import { customerTheme } from '../../src/theme/palette';
+import { pageTitleTextStyle } from '../../src/theme/screenChrome';
 
 type CallbackParams = {
   orderId?: string | string[];
@@ -209,9 +210,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: customerTheme.text,
-    fontSize: 28,
-    fontWeight: '900',
+    ...pageTitleTextStyle,
     marginBottom: 10,
   },
   copy: {

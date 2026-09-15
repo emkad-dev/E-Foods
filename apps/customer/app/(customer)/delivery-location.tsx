@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { useCart } from '../../src/contexts/CartContext';
 import { useCoverage } from '../../src/contexts/CoverageContext';
@@ -26,6 +26,7 @@ import {
 } from '../../src/services/deviceLocation';
 import { LOCATION_ERROR_MESSAGES, coordinatesLabel } from '../../src/services/locationResolution';
 import { customerTheme } from '../../src/theme/palette';
+import { screenTitleTextStyle } from '../../src/theme/screenChrome';
 import { fallbackAddressFromCoords } from '../../src/utils/deliveryLocation';
 import {
   COVERAGE_COMING_SOON_COPY,
@@ -314,17 +315,19 @@ const styles = StyleSheet.create({
   backButton: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderRadius: radius.xl,
-    height: 42,
+    // radius.pill, not radius.xl: xl (20) only read as a circle because it
+    // happened to equal half of the old 42pt box, so growing the box to the
+    // 44pt tap-target minimum would have quietly turned it into a squircle.
+    borderRadius: radius.pill,
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
     marginRight: 12,
-    width: 42,
+    width: MIN_TAP_TARGET,
   },
-  title: {
-    color: customerTheme.text,
-    fontSize: 22,
-    fontWeight: '900',
-  },
+  // This row is a native header drawn by hand -- back button, then title --
+  // so it takes the title-bar scale instead of a size of its own. At 22/900 it
+  // was louder than the real header the user had just come from.
+  title: screenTitleTextStyle,
   subtitle: {
     color: customerTheme.textMuted,
     fontSize: 13,

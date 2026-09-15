@@ -4,6 +4,7 @@ import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { resolveAuthRouteRedirect } from '../../src/domain/authRouteAccess';
 import { customerTheme } from '../../src/theme/palette';
+import { customerScreenOptions } from '../../src/theme/screenChrome';
 
 const AUTH_ROUTES = new Set(['/login', '/register', '/forgot-password', '/reset-password']);
 const normalizeRedirectTo = (value: unknown) => {
@@ -53,6 +54,10 @@ const getAuthLoadingMode = (pathname: string | null | undefined): CustomerLoadin
 const renderAuthStack = () => (
   <Stack
     screenOptions={{
+      // Every screen in this group used to render the platform default title,
+      // so crossing from a customer screen into Terms or Verify Email changed
+      // the title's size and weight mid-journey.
+      ...customerScreenOptions,
       headerShadowVisible: false,
       contentStyle: { backgroundColor: customerTheme.background },
     }}

@@ -21,6 +21,7 @@ import { useCart } from '../src/contexts/CartContext';
 import { getCurrentCoordinates, reverseGeocode } from '../src/services/deviceLocation';
 import { markLocationStepSeen } from '../src/services/customerOnboardingState';
 import { customerTheme } from '../src/theme/palette';
+import { pageTitleTextStyle } from '../src/theme/screenChrome';
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
@@ -160,9 +161,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    color: customerTheme.text,
-    fontSize: 30,
-    fontWeight: '900',
+    ...pageTitleTextStyle,
     marginTop: 10,
   },
   copy: {
