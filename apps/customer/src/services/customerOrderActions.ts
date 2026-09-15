@@ -1,6 +1,7 @@
 import type { CartItem, DeliveryLocation } from '../contexts/CartContext';
 import type { CheckoutPaymentMethod, FulfillmentType } from '../domain/orders';
 import { callCustomerBackendRpc } from './backendRpc';
+import { resolveCheckoutIdempotencyKey } from './checkoutIdempotency';
 import { clearCustomerReadCache } from './customerReadModel';
 import { buildCustomerPaymentCallbackUrl } from './paymentRouting';
 import { takeAttributedPromoId } from './promoTracking';
@@ -71,8 +72,6 @@ type InitializeCustomerPaymentResult = {
   total: number;
 };
 
-const createIdempotencyKey = () => `cust-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
 export const initializeCustomerPayment = async ({
   deliveryLocation,
   fulfillmentType,
@@ -93,10 +92,31 @@ export const initializeCustomerPayment = async ({
   return callCustomerBackendRpc<InitializeCustomerPaymentResult>('initializeCustomerPayment', {
     deliveryLocation,
     fulfillmentType,
-    idempotencyKey: createIdempotencyKey(),
+    // Same key for every retry of an unchanged basket, so the server's
+    // idempotency record actually matches and a double-tap on Pay replays the
+    // first response instead of creating a second order and a second Paystack
+    // transaction. See checkoutIdempotency.ts for what the key covers.
+    idempotencyKey: resolveCheckoutIdempotencyKey({
+      deliveryLocation,
+      fulfillmentType,
+      items,
+      paymentMethod,
+      promoCode,
+      restaurantId,
+      scheduledFor,
+      tipAmount,
+    }),
     items: items.map((item) => ({
       id: item.id,
       quantity: item.quantity,
+      // Mixed baskets live or die on this field: the server groups requested
+      // items by `item.restaurantId` and falls back to the top-level
+      // restaurantId when it is absent
+      // (supabase/functions/_shared/domains/orders.ts:658). Without it every
+      // second-restaurant line was grouped under the first restaurant, where
+      // buildOrderItems could not find it in that menu and rejected the whole
+      // basket with 412 "One or more selected menu items are unavailable."
+      restaurantId: item.restaurantId,
     })),
     callbackUrl: buildCustomerPaymentCallbackUrl(),
     paymentMethod,
