@@ -33,10 +33,8 @@ import {
   getDiscoverySections,
   getRestaurantAvailability,
   getRestaurantCardStatusLabel,
-  getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
-  normalizeRestaurantQuery,
 } from '../../../src/utils/restaurantAvailability';
 import {
   COVERAGE_COMING_SOON_COPY,
@@ -61,32 +59,6 @@ type DiscoveryEntry = {
 const getCustomerName = (displayName: string | undefined, email: string | undefined) => {
   const rawValue = displayName?.trim() || email?.split('@')[0]?.trim() || 'there';
   return rawValue.charAt(0).toUpperCase() + rawValue.slice(1);
-};
-
-const getMealPreview = (restaurant: Restaurant, searchQuery: string) => {
-  const normalizedQuery = normalizeRestaurantQuery(searchQuery);
-  const seen = new Set<string>();
-
-  (restaurant.menu ?? []).forEach((menuCategory) => {
-    (menuCategory.items ?? []).forEach((item) => {
-      if (item.isAvailable === false) {
-        return;
-      }
-
-      if (normalizedQuery) {
-        const haystack = [item.name, item.categoryLabel ?? '', menuCategory.category ?? ''].join(' ').toLowerCase();
-        if (!haystack.includes(normalizedQuery)) {
-          return;
-        }
-      }
-
-      if (!seen.has(item.name)) {
-        seen.add(item.name);
-      }
-    });
-  });
-
-  return Array.from(seen).slice(0, 2);
 };
 
 const toShelfEntries = (entries: DiscoveryEntry[], limit?: number) => (limit ? entries.slice(0, limit) : entries);
@@ -383,8 +355,6 @@ export default function HomeScreen() {
           ) : null}
 
           {nearbyVisible.map(({ restaurant, availability }) => {
-            const mealPreview = getMealPreview(restaurant, search);
-
             return (
               <TouchableOpacity
                 key={restaurant.id}
@@ -409,11 +379,6 @@ export default function HomeScreen() {
                   <Text style={styles.nearbyCuisine} numberOfLines={1}>
                     {restaurant.cuisine ?? 'Kitchen update pending'}
                   </Text>
-                  {mealPreview.length > 0 ? (
-                    <Text style={styles.nearbyMealPreview} numberOfLines={2}>
-                      Meals: {mealPreview.join(' • ')}
-                    </Text>
-                  ) : null}
                   <Text style={styles.nearbyMeta} numberOfLines={1}>
                     {[
                       availability.distanceKm
@@ -433,11 +398,6 @@ export default function HomeScreen() {
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>
-                  {getRestaurantOperatingHoursLabel(restaurant) ? (
-                    <Text style={styles.nearbyMeta} numberOfLines={1}>
-                      {getRestaurantOperatingHoursLabel(restaurant)}
-                    </Text>
-                  ) : null}
                   {!isCovered ? <Text style={styles.coverageCardTag}>{COVERAGE_UNAVAILABLE_TAG}</Text> : null}
                 </View>
               </TouchableOpacity>
@@ -467,7 +427,6 @@ export default function HomeScreen() {
             These kitchens are visible, but your current delivery point places them outside their supported range.
           </Text>
           {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => {
-            const mealPreview = getMealPreview(restaurant, search);
             const isClosed = availability.reason === 'closed';
 
               return (
@@ -501,11 +460,6 @@ export default function HomeScreen() {
                     </View>
                   </View>
                   <Text style={styles.unavailableCuisine}>{restaurant.cuisine ?? 'Kitchen update pending'}</Text>
-                  {mealPreview.length > 0 ? (
-                    <Text style={styles.unavailableMealPreview} numberOfLines={2}>
-                      Meals: {mealPreview.join(' • ')}
-                    </Text>
-                  ) : null}
                   <Text style={styles.unavailableMeta}>
                     {availability.distanceKm && availability.radiusKm
                       ? `${availability.distanceKm.toFixed(1)} km away, outside ${availability.radiusKm.toFixed(0)} km range`
@@ -532,12 +486,6 @@ const styles = StyleSheet.create({
     paddingBottom: 150,
     paddingHorizontal: 14,
     paddingTop: 12,
-  },
-  centered: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
   },
   homeHeader: {
     backgroundColor: customerTheme.headerBackground,
@@ -695,161 +643,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  featureSection: {
-    marginTop: 12,
-    zIndex: 1,
-  },
-  spotlightStack: {
-    minHeight: 220,
-    position: 'relative',
-  },
-  spotlightCardBack: {
-    backgroundColor: 'rgba(16, 24, 40, 0.08)',
-    borderRadius: 22,
-    bottom: 0,
-    left: 18,
-    position: 'absolute',
-    right: 18,
-    top: 18,
-  },
-  spotlightCardMid: {
-    backgroundColor: 'rgba(16, 24, 40, 0.12)',
-    borderRadius: 22,
-    bottom: 8,
-    left: 10,
-    position: 'absolute',
-    right: 10,
-    top: 10,
-  },
-  featureCard: {
-    borderRadius: 22,
-    minHeight: 210,
-    overflow: 'hidden',
-  },
-  featureCardImage: {
-    backgroundColor: customerTheme.hero,
-  },
-  featureCardAmber: {
-    backgroundColor: customerTheme.surfaceStrong,
-  },
-  featureCardHero: {
-    backgroundColor: customerTheme.heroSoft,
-  },
-  featureCardCream: {
-    backgroundColor: customerTheme.surface,
-  },
-  featureImageBackdrop: {
-    bottom: 0,
-    height: '100%',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    width: '100%',
-  },
-  featureImageGradient: {
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  featureContentOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    padding: 18,
-  },
-  featureTagLight: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    opacity: 0.92,
-    textTransform: 'uppercase',
-  },
-  featureTitleLight: {
-    color: '#ffffff',
-    fontSize: 21,
-    fontWeight: '900',
-    lineHeight: 26,
-    marginTop: 8,
-  },
-  featureCopyLight: {
-    color: customerTheme.textOnInverseMuted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 6,
-  },
-  featureCtaPill: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: customerTheme.brandOrange,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  featureCtaPillText: {
-    color: customerTheme.textOnAccent,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  featureContent: {
-    flex: 1,
-    padding: 16,
-  },
-  featureTag: {
-    color: customerTheme.accentStrong,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  featureTitle: {
-    color: customerTheme.text,
-    fontSize: 19,
-    fontWeight: '800',
-    lineHeight: 24,
-    marginTop: 10,
-  },
-  featureCopy: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 8,
-  },
-  featureFooter: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 'auto',
-    paddingTop: 14,
-  },
-  featureMeta: {
-    color: customerTheme.text,
-    fontSize: 13,
-    fontWeight: '700',
-    maxWidth: '82%',
-  },
-  spotlightDots: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  spotlightDot: {
-    backgroundColor: customerTheme.border,
-    borderRadius: 999,
-    height: 7,
-    marginHorizontal: 4,
-    width: 7,
-  },
-  spotlightDotActive: {
-    backgroundColor: customerTheme.accentStrong,
-    width: 22,
-  },
   sectionBlock: {
     marginTop: 16,
   },
@@ -877,158 +670,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginRight: 6,
-  },
-  topRatedRow: {
-    paddingRight: 10,
-  },
-  topRatedCard: {
-    backgroundColor: customerTheme.surface,
-    borderRadius: 18,
-    marginRight: 12,
-    overflow: 'hidden',
-    width: 236,
-  },
-  topRatedImage: {
-    height: 132,
-    width: '100%',
-  },
-  topRatedImageFallback: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surfaceStrong,
-    height: 132,
-    justifyContent: 'center',
-    width: '100%',
-  },
-  topRatedImageFallbackText: {
-    color: customerTheme.accentStrong,
-    fontSize: 34,
-    fontWeight: '800',
-  },
-  topRatedFavoriteButton: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-  },
-  topRatedInfo: {
-    padding: 12,
-  },
-  topRatedLogoBadge: {
-    left: 12,
-    position: 'absolute',
-    top: 108,
-  },
-  topRatedName: {
-    color: customerTheme.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  topRatedMeta: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  topRatedHours: {
-    color: customerTheme.textSoft,
-    fontSize: 11,
-    marginTop: 6,
-  },
-  topRatedFacts: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  topRatedFact: {
-    color: customerTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '700',
-    marginRight: 10,
-  },
-  suggestedCard: {
-    backgroundColor: customerTheme.surface,
-    borderRadius: 18,
-    flexDirection: 'row',
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  suggestedImage: {
-    height: 118,
-    width: 106,
-  },
-  suggestedImageFallback: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surfaceStrong,
-    height: 118,
-    justifyContent: 'center',
-    width: 106,
-  },
-  suggestedImageFallbackText: {
-    color: customerTheme.accentStrong,
-    fontSize: 30,
-    fontWeight: '800',
-  },
-  suggestedFavoriteButton: {
-    backgroundColor: customerTheme.surfaceMuted,
-    height: 34,
-    width: 34,
-  },
-  suggestedInfo: {
-    flex: 1,
-    padding: 12,
-  },
-  suggestedLogoBadge: {
-    left: 84,
-    position: 'absolute',
-    top: 72,
-  },
-  suggestedTitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  suggestedName: {
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '800',
-    marginRight: 10,
-  },
-  availabilityBadge: {
-    backgroundColor: customerTheme.accentTint,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  availabilityBadgeText: {
-    color: customerTheme.accentStrong,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  suggestedCuisine: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 6,
-  },
-  suggestedAddress: {
-    color: customerTheme.textSoft,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  suggestedHours: {
-    color: customerTheme.textSoft,
-    fontSize: 11,
-    marginTop: 6,
-  },
-  suggestedFacts: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 10,
-  },
-  suggestedFact: {
-    color: customerTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '700',
-    marginRight: 10,
-    marginTop: 4,
   },
   nearbyCard: {
     backgroundColor: customerTheme.surface,
@@ -1075,13 +716,6 @@ const styles = StyleSheet.create({
     color: customerTheme.textMuted,
     fontSize: 12,
     marginTop: 6,
-  },
-  nearbyMealPreview: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    marginTop: 8,
   },
   coverageBanner: {
     backgroundColor: '#ffe0b2',
@@ -1218,13 +852,6 @@ const styles = StyleSheet.create({
     color: customerTheme.textSoft,
     fontSize: 12,
     marginTop: 6,
-  },
-  unavailableMealPreview: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    marginTop: 8,
   },
   unavailableMeta: {
 
