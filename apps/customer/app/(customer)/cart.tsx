@@ -31,6 +31,7 @@ import { customerTheme } from '../../src/theme/palette';
 import { resolveAuthRedirectTo } from '../../src/utils/authPrompt';
 import { groupCartItemsByRestaurant } from '../../src/utils/checkoutGrouping';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
+import { formatMoney } from '../../src/utils/formatting';
 import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
 import { getRestaurantAvailability } from '../../src/utils/restaurantAvailability';
 
@@ -50,8 +51,6 @@ const CHECKOUT_NETWORK_FAILURE_MESSAGE = 'We could not reach FEASTY. Check your 
 // price that is not a price is worse than an obvious placeholder.
 const PENDING_AMOUNT_LABEL = 'Calculating...';
 const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer'];
-const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
-const formatPlainNumber = (amount: number) => Math.round(amount).toLocaleString('en-US');
 
 /**
  * Strings the RPC transport itself invents when it never got an answer from the

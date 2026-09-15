@@ -28,6 +28,7 @@ import {
   resolveSelectedCategory,
 } from '../../../../src/domain/restaurantMenuView';
 import { customerTheme } from '../../../../src/theme/palette';
+import { formatDeliveryEta, formatMoney } from '../../../../src/utils/formatting';
 import { getRestaurantDetail } from '../../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../../src/services/supabase/config';
 import {
@@ -58,8 +59,6 @@ type MenuCategory = {
   category: string;
   items: MenuItem[];
 };
-
-const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
 const formatPlainNumber = (value: number | null | undefined) =>
   value === null || value === undefined ? 'Not set' : Math.round(value).toLocaleString('en-US');
@@ -247,6 +246,7 @@ export default function RestaurantDetail() {
   // deliveryFee of 0, which the old `deliveryFee ? … : 'Pending'` rendered as
   // "Delivery Pending" while the cart and the server both charged nothing.
   const deliveryFeeAmount = restaurant ? resolveDeliveryFeeAmount(restaurant.deliveryFee) : null;
+  const deliveryEtaLabel = restaurant ? formatDeliveryEta(restaurant.deliveryTime) : null;
   const cartFooterBottom = insets.bottom + 92;
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -314,7 +314,11 @@ export default function RestaurantDetail() {
 
                   <View style={styles.factsRow}>
                     <Text style={styles.factPill}>{getRestaurantRatingLabel(restaurant)}</Text>
-                    <Text style={styles.factPill}>ETA {restaurant.deliveryTime ?? '25-35 min'}</Text>
+                    {/* No pill at all when the partner published no estimate. The
+                        old `?? '25-35 min'` quoted every unconfigured kitchen the
+                        same invented delivery promise, right beside the facts that
+                        are real. */}
+                    {deliveryEtaLabel ? <Text style={styles.factPill}>ETA {deliveryEtaLabel}</Text> : null}
                     <Text
                       style={[
                         styles.factPill,

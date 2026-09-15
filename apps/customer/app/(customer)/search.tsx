@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
 import RemoteImage from '../../src/components/RemoteImage';
+import DeliveryLocationChip from '../../src/components/DeliveryLocationChip';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
@@ -29,8 +30,7 @@ import {
   getPopularMealCategories,
 } from '../../src/utils/mealSearch';
 import { customerTheme } from '../../src/theme/palette';
-
-const formatMoney = (amount: number) => `₦${Number(amount ?? 0).toFixed(2)}`;
+import { formatDistanceAway, formatMoney } from '../../src/utils/formatting';
 
 // Meal-first, location-aware status line. Distance is only known once the
 // customer has pinned a delivery point AND the kitchen has coordinates.
@@ -40,7 +40,7 @@ const getResultStatus = (
 ): { label: string; tone: 'ok' | 'warn' } => {
   const { availability } = result;
   const distanceLabel =
-    availability.distanceKm != null ? `${availability.distanceKm.toFixed(1)} km away` : null;
+    availability.distanceKm != null ? formatDistanceAway(availability.distanceKm) : null;
 
   switch (availability.reason) {
     case 'available':
@@ -127,7 +127,6 @@ export default function SearchScreen() {
 
   const trimmedQuery = query.trim();
   const hasLocation = Boolean(deliveryLocation?.latitude && deliveryLocation?.longitude);
-  const locationLabel = deliveryLocation?.shortAddress ?? 'Set delivery area';
 
   const handleSubmit = () => {
     Keyboard.dismiss();
@@ -198,13 +197,7 @@ export default function SearchScreen() {
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 12) + 6 }]}>
       <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, screenColumn.feed]}>
         <Text style={styles.title}>Search meals</Text>
-        <TouchableOpacity style={styles.locationChip} onPress={() => router.push('/delivery-location')}>
-          <FontAwesome name="map-marker" size={14} color={customerTheme.brandGreen} />
-          <Text style={styles.locationChipLabel} numberOfLines={1}>
-            {locationLabel}
-          </Text>
-          <FontAwesome name="angle-down" size={16} color={customerTheme.brandGreen} />
-        </TouchableOpacity>
+        <DeliveryLocationChip style={styles.locationChip} />
 
         <View style={styles.searchShell}>
           <FontAwesome name="search" size={16} color={customerTheme.textMuted} />
@@ -302,24 +295,11 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
   },
+  // Placement only - the chip's own geometry lives in DeliveryLocationChip.
   locationChip: {
-    alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: customerTheme.headerSurface,
-    borderColor: 'rgba(3, 184, 51, 0.18)',
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: 'row',
     marginTop: 10,
     maxWidth: '100%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  locationChipLabel: {
-    color: customerTheme.text,
-    fontSize: 12,
-    fontWeight: '700',
-    marginHorizontal: 8,
   },
   searchShell: {
     alignItems: 'center',

@@ -15,6 +15,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { MIN_TAP_TARGET, radius, space } from '@feasty/design-system';
 import { customerTheme } from '../../src/theme/palette';
 import { normalizeCustomerPaymentCallbackPath } from '../../src/services/paymentRouting';
+import { formatMoney } from '../../src/utils/formatting';
 import {
   describeExternalLinkFailure,
   openInSameWindow,
@@ -32,10 +33,6 @@ const normalizeUrl = (url: string) => url.trim();
 
 /** Same shape the orders list, order detail and payment callback screens show. */
 const formatOrderReference = (orderId: string) => `#${orderId.slice(-6)}`;
-
-/** Matches `formatMoney` on the cart and order-detail screens. */
-const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
-
 
 const readUrlParts = (url: string) => {
   try {

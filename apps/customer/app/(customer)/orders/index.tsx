@@ -19,6 +19,7 @@ import {
 import { getCustomerOrders } from '../../../src/services/customerReadModel';
 import { supabase } from '../../../src/services/supabase/config';
 import { customerTheme } from '../../../src/theme/palette';
+import { formatMoney } from '../../../src/utils/formatting';
 
 type Order = {
   id: string;
@@ -34,8 +35,6 @@ type Order = {
   status: string;
   createdAt: any;
 };
-
-const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
 // Supabase returns ISO date strings. (Legacy Firestore Timestamps exposed a .toDate()
 // helper — tolerate those too so old rows still render a real date instead of "Updating...".)

@@ -20,6 +20,7 @@ import { useAppStateVisibility } from '../../../../../packages/runtime/src/useAp
 import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
+import DeliveryLocationChip from '../../../src/components/DeliveryLocationChip';
 import RemoteImage from '../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { screenColumn } from '../../../src/components/ScreenColumn';
@@ -43,6 +44,7 @@ import {
   describeNearestKitchen,
 } from '../../../src/utils/coverageMessaging';
 import { customerTheme } from '../../../src/theme/palette';
+import { formatDeliveryEta, formatDistanceAway } from '../../../src/utils/formatting';
 
 type Restaurant = DiscoveryRestaurant & {
   image: string;
@@ -246,7 +248,6 @@ export default function HomeScreen() {
   const customerName = getCustomerName(user?.displayName, user?.email);
   const greeting = `HI ${customerName.toUpperCase().slice(0, 18)}`;
   const avatarLabel = customerName.slice(0, 1).toUpperCase();
-  const locationLabel = deliveryLocation?.shortAddress ?? 'Set delivery area';
 
   if (loading) {
     return (
@@ -279,13 +280,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.headerActionRow}>
-          <TouchableOpacity style={styles.locationChip} onPress={() => router.push('/delivery-location')}>
-            <FontAwesome name="map-marker" size={15} color={customerTheme.brandGreen} />
-            <Text style={styles.locationChipLabel} numberOfLines={1}>
-              {locationLabel}
-            </Text>
-            <FontAwesome name="angle-down" size={18} color={customerTheme.brandGreen} />
-          </TouchableOpacity>
+          <DeliveryLocationChip fill />
           <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')}>
             <Text style={styles.avatarButtonText}>{avatarLabel}</Text>
           </TouchableOpacity>
@@ -382,7 +377,7 @@ export default function HomeScreen() {
                   <Text style={styles.nearbyMeta} numberOfLines={1}>
                     {[
                       availability.distanceKm
-                        ? `${availability.distanceKm.toFixed(1)} km away`
+                        ? formatDistanceAway(availability.distanceKm)
                         // "Within your zone" only makes sense when we actually have coverage
                         // here — in browse-only (out-of-coverage) mode this card can sit right
                         // under the "not delivering here" banner, so say nothing rather than
@@ -393,7 +388,11 @@ export default function HomeScreen() {
                         : isCovered && deliveryLocation
                           ? 'Within your zone'
                           : null,
-                      restaurant.deliveryTime ?? '25-35 min',
+                      // Nothing when the partner published no estimate: this list is
+                      // already `.filter(Boolean)`ed, so an absent ETA simply drops
+                      // out rather than inventing a delivery promise for a kitchen
+                      // that never made one.
+                      formatDeliveryEta(restaurant.deliveryTime),
                     ]
                       .filter(Boolean)
                       .join(' · ')}
@@ -462,7 +461,7 @@ export default function HomeScreen() {
                   <Text style={styles.unavailableCuisine}>{restaurant.cuisine ?? 'Kitchen update pending'}</Text>
                   <Text style={styles.unavailableMeta}>
                     {availability.distanceKm && availability.radiusKm
-                      ? `${availability.distanceKm.toFixed(1)} km away, outside ${availability.radiusKm.toFixed(0)} km range`
+                      ? `${formatDistanceAway(availability.distanceKm)}, outside ${availability.radiusKm.toFixed(0)} km range`
                       : isClosed
                         ? 'This restaurant is published but currently closed.'
                         : 'Delivery is not available for this restaurant yet'}
@@ -531,24 +530,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 12,
-  },
-  locationChip: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.headerSurface,
-    borderColor: 'rgba(3, 184, 51, 0.18)',
-    borderRadius: 15,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  locationChipLabel: {
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    marginHorizontal: 10,
   },
   avatarButton: {
     alignItems: 'center',

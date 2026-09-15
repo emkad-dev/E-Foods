@@ -30,8 +30,7 @@ import {
   openExternalLink,
 } from '../../../../../packages/runtime/src/externalLink';
 import { buildOrderTrackingSummary } from '../../../src/utils/orderTrackingSummary';
-
-const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+import { formatMoney } from '../../../src/utils/formatting';
 
 // Task 18 (G2): render the scheduled slot on the tracking screen.
 const formatScheduledSlot = (value: unknown): string | null => {

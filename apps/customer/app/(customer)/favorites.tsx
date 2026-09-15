@@ -12,6 +12,7 @@ import { useCart } from '../../src/contexts/CartContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getRestaurantList } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
+import { formatDeliveryEta } from '../../src/utils/formatting';
 import {
   getRestaurantAvailability,
   getRestaurantCardStatusLabel,
@@ -233,7 +234,12 @@ export default function CustomerFavoritesScreen() {
                 <RestaurantFavoriteButton restaurantId={restaurant.id} size={14} style={styles.favoriteButton} />
               </View>
               <Text style={styles.cardMeta} numberOfLines={1}>
-                {restaurant.cuisine ?? 'Kitchen'} | {restaurant.deliveryTime ?? '25-35 min'}
+                {/* The ETA is dropped, not defaulted. `?? '25-35 min'` gave every
+                    kitchen that had published no estimate the same invented
+                    delivery promise - the claim class this app has been removing. */}
+                {[restaurant.cuisine ?? 'Kitchen', formatDeliveryEta(restaurant.deliveryTime)]
+                  .filter(Boolean)
+                  .join(' | ')}
               </Text>
               <View style={styles.factRow}>
                 <Text style={styles.fact}>{getRestaurantRatingLabel(restaurant)}</Text>
