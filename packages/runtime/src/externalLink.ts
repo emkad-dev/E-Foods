@@ -63,3 +63,54 @@ export const openExternalLink = async (url: string): Promise<ExternalLinkResult>
     return { ok: false, reason: 'failed' };
   }
 };
+
+/**
+ * Navigates THIS window to a URL instead of opening a second one.
+ *
+ * WHY THIS EXISTS BESIDE `openExternalLink`: that one sends every non-handoff
+ * URL to `window.open(url, '_blank')`, and there are flows where a second tab is
+ * the defect rather than the feature. The customer payment handoff is the case
+ * that forced it. Paystack returns to a callback URL built from
+ * `window.location.origin` — a top-level return — and each tab runs its own copy
+ * of the app, so the tab that receives the callback is the tab whose CartContext
+ * clears. Open checkout in a new tab and the ORIGIN tab keeps the paid basket in
+ * memory, re-serialises it to storage on its next change (CartContext saves on
+ * every change), and goes on offering a live Pay button for an order already
+ * paid for. A payment bug must not be fixed by introducing a duplicate-order
+ * bug, so that flow navigates in place.
+ *
+ * On native there is no second window to avoid and `Linking.openURL` is what
+ * "go to this URL" means, so this behaves exactly like `openExternalLink`
+ * there. It deliberately does NOT refuse off web: a function that errors or
+ * quietly does nothing on native is how a third copy of this gets written.
+ *
+ * Never throws. Success means only that the browser did not refuse — a
+ * committed navigation reports nothing back — so callers pair this with the
+ * destination visible on screen, the same bargain the `tel:`/`mailto:` branch
+ * above makes. `blocked` is not among the reasons it can return: that reason is
+ * `window.open` handing back `null`, and a top-level navigation is not a popup,
+ * so no popup blocker can refuse it. Callers must not render pop-up copy here.
+ */
+export const openInSameWindow = async (url: string): Promise<ExternalLinkResult> => {
+  if (Platform.OS !== 'web') {
+    try {
+      await Linking.openURL(url);
+      return OPEN_EXTERNAL_LINK_OK;
+    } catch {
+      return { ok: false, reason: 'failed' };
+    }
+  }
+
+  if (typeof window === 'undefined') {
+    return { ok: false, reason: 'unsupported' };
+  }
+
+  try {
+    window.location.href = url;
+    return OPEN_EXTERNAL_LINK_OK;
+  } catch {
+    // Assigning window.location throws on a malformed URL, and on a scheme the
+    // browser refuses.
+    return { ok: false, reason: 'failed' };
+  }
+};
