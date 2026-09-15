@@ -488,6 +488,25 @@ export const getRestaurantRatingLabel = (
   return `${average.toFixed(1)} ★ (${count})`;
 };
 
+/**
+ * The cuisine line a discovery card shows, or a stated placeholder when the
+ * partner published none.
+ *
+ * WHY IT IS SHARED: the same line was spelled three ways across the card
+ * surfaces -- "Kitchen update pending" on both home shelves, "Kitchen" on
+ * favorites -- so one kitchen could introduce itself differently on two screens
+ * of a single session.
+ *
+ * WHY IT TRIMS: every copy was `cuisine ?? '...'`, which only catches null and
+ * undefined. `cuisine` arrives from a partner-edited text field, so an empty or
+ * all-whitespace value is a real shape, and `??` passed it straight through --
+ * rendering a BLANK line where the fallback was meant to be. Same defect
+ * formatDeliveryEta documents for an all-whitespace ETA.
+ */
+export const getRestaurantCuisineLabel = (
+  restaurant: Pick<DiscoveryRestaurant, 'cuisine'>
+): string => restaurant.cuisine?.trim() || 'Kitchen update pending';
+
 export const getRestaurantOperatingHoursLabel = (restaurant: DiscoveryRestaurant) => {
   const openingTime = restaurant.openingTime?.trim();
   const closingTime = restaurant.closingTime?.trim();

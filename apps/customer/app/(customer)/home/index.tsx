@@ -22,7 +22,7 @@ import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
 import DeliveryLocationChip from '../../../src/components/DeliveryLocationChip';
-import RemoteImage from '../../../src/components/RemoteImage';
+import RestaurantDiscoveryRow from '../../../src/components/RestaurantDiscoveryRow';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { screenColumn } from '../../../src/components/ScreenColumn';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
@@ -35,6 +35,7 @@ import {
   getDiscoverySections,
   getRestaurantAvailability,
   getRestaurantCardStatusLabel,
+  getRestaurantCuisineLabel,
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
 } from '../../../src/utils/restaurantAvailability';
@@ -350,59 +351,47 @@ export default function HomeScreen() {
             </View>
           ) : null}
 
-          {nearbyVisible.map(({ restaurant, availability }) => {
-            return (
-              <TouchableOpacity
-                key={restaurant.id}
-                style={styles.nearbyCard}
-                activeOpacity={0.92}
-                onPress={() => {
-                  trackAnalyticsEvent('customer_restaurant_opened', {
-                    restaurant_id: restaurant.id,
-                    source: 'nearby',
-                  });
-                  router.push(`/home/restaurant/${restaurant.id}`);
-                }}
-              >
-                <RemoteImage uri={restaurant.image} style={styles.nearbyImage} />
-                <View style={styles.nearbyInfo}>
-                  <View style={styles.nearbyHeader}>
-                    <Text style={styles.nearbyName} numberOfLines={1}>
-                      {restaurant.name}
-                    </Text>
-                    <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
-                  </View>
-                  <Text style={styles.nearbyCuisine} numberOfLines={1}>
-                    {restaurant.cuisine ?? 'Kitchen update pending'}
-                  </Text>
-                  <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {[
-                      availability.distanceKm
-                        ? formatDistanceAway(availability.distanceKm)
-                        // "Within your zone" only makes sense when we actually have coverage
-                        // here — in browse-only (out-of-coverage) mode this card can sit right
-                        // under the "not delivering here" banner, so say nothing rather than
-                        // contradict it. It equally needs a location to be inside a zone OF:
-                        // getPlatformCoverage fails open to isCovered=true when nothing is
-                        // pinned, so without this check every card told a visitor who had set
-                        // no address that they were inside a delivery zone.
-                        : isCovered && deliveryLocation
-                          ? 'Within your zone'
-                          : null,
-                      // Nothing when the partner published no estimate: this list is
-                      // already `.filter(Boolean)`ed, so an absent ETA simply drops
-                      // out rather than inventing a delivery promise for a kitchen
-                      // that never made one.
-                      formatDeliveryEta(restaurant.deliveryTime),
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </Text>
-                  {!isCovered ? <Text style={styles.coverageCardTag}>{COVERAGE_UNAVAILABLE_TAG}</Text> : null}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+          {nearbyVisible.map(({ restaurant, availability }) => (
+            <RestaurantDiscoveryRow
+              key={restaurant.id}
+              tone="available"
+              imageUri={restaurant.image}
+              name={restaurant.name}
+              cuisine={getRestaurantCuisineLabel(restaurant)}
+              meta={[
+                availability.distanceKm
+                  ? formatDistanceAway(availability.distanceKm)
+                  // "Within your zone" only makes sense when we actually have coverage
+                  // here — in browse-only (out-of-coverage) mode this card can sit right
+                  // under the "not delivering here" banner, so say nothing rather than
+                  // contradict it. It equally needs a location to be inside a zone OF:
+                  // getPlatformCoverage fails open to isCovered=true when nothing is
+                  // pinned, so without this check every card told a visitor who had set
+                  // no address that they were inside a delivery zone.
+                  : isCovered && deliveryLocation
+                    ? 'Within your zone'
+                    : null,
+                // Nothing when the partner published no estimate: this list is
+                // already `.filter(Boolean)`ed, so an absent ETA simply drops
+                // out rather than inventing a delivery promise for a kitchen
+                // that never made one.
+                formatDeliveryEta(restaurant.deliveryTime),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              footnote={isCovered ? null : COVERAGE_UNAVAILABLE_TAG}
+              trailing={
+                <RestaurantFavoriteButton restaurantId={restaurant.id} size={13} style={styles.nearbyFavoriteButton} />
+              }
+              onPress={() => {
+                trackAnalyticsEvent('customer_restaurant_opened', {
+                  restaurant_id: restaurant.id,
+                  source: 'nearby',
+                });
+                router.push(`/home/restaurant/${restaurant.id}`);
+              }}
+            />
+          ))}
         </Animated.View>
       ) : null}
 
@@ -429,46 +418,43 @@ export default function HomeScreen() {
           {unavailableRestaurants.slice(0, 3).map(({ restaurant, availability }) => {
             const isClosed = availability.reason === 'closed';
 
-              return (
-                <TouchableOpacity
-                  key={restaurant.id}
-                  style={[styles.unavailableCard, isClosed ? styles.unavailableCardClosed : null]}
-                  onPress={() => {
-                    trackAnalyticsEvent('customer_restaurant_opened', {
-                      restaurant_id: restaurant.id,
-                      source: 'unavailable',
-                    });
-                    router.push(`/home/restaurant/${restaurant.id}`);
-                  }}
-                >
-                  <RemoteImage uri={restaurant.image} style={styles.unavailableImage} />
-                  <View style={styles.unavailableInfo}>
-                  <View style={styles.unavailableHeader}>
-                    <Text style={styles.unavailableName}>{restaurant.name}</Text>
-                    <View style={[styles.unavailableBadge, isClosed ? styles.unavailableBadgeClosed : null]}>
-                      <Text style={[styles.unavailableBadgeText, isClosed ? styles.unavailableBadgeTextClosed : null]}>
-                        {/* Was a local ternary that labelled `delivery_disabled`
-                            "Pickup only" — backwards. That reason is only
-                            reached when supportsPickup is ALSO false (the
-                            pickup_only branch above it catches the
-                            delivery-off/pickup-on case), so it told a customer
-                            they could collect from a kitchen that had switched
-                            collection off. The shared helper is the one answer
-                            all three discovery screens now give. */}
-                        {getRestaurantCardStatusLabel(restaurant, availability) ?? 'Out of area'}
-                      </Text>
-                    </View>
+            return (
+              <RestaurantDiscoveryRow
+                key={restaurant.id}
+                tone={isClosed ? 'closed' : 'outOfZone'}
+                imageUri={restaurant.image}
+                name={restaurant.name}
+                cuisine={getRestaurantCuisineLabel(restaurant)}
+                meta={
+                  availability.distanceKm && availability.radiusKm
+                    ? `${formatDistanceAway(availability.distanceKm)}, outside ${availability.radiusKm.toFixed(0)} km range`
+                    : isClosed
+                      ? 'This restaurant is published but currently closed.'
+                      : 'Delivery is not available for this restaurant yet'
+                }
+                trailing={
+                  <View style={[styles.unavailableBadge, isClosed ? styles.unavailableBadgeClosed : null]}>
+                    <Text style={[styles.unavailableBadgeText, isClosed ? styles.unavailableBadgeTextClosed : null]}>
+                      {/* Was a local ternary that labelled `delivery_disabled`
+                          "Pickup only" — backwards. That reason is only reached
+                          when supportsPickup is ALSO false (the pickup_only
+                          branch above it catches the delivery-off/pickup-on
+                          case), so it told a customer they could collect from a
+                          kitchen that had switched collection off. The shared
+                          helper is the one answer all three discovery screens
+                          now give. */}
+                      {getRestaurantCardStatusLabel(restaurant, availability) ?? 'Out of area'}
+                    </Text>
                   </View>
-                  <Text style={styles.unavailableCuisine}>{restaurant.cuisine ?? 'Kitchen update pending'}</Text>
-                  <Text style={styles.unavailableMeta}>
-                    {availability.distanceKm && availability.radiusKm
-                      ? `${formatDistanceAway(availability.distanceKm)}, outside ${availability.radiusKm.toFixed(0)} km range`
-                      : isClosed
-                        ? 'This restaurant is published but currently closed.'
-                        : 'Delivery is not available for this restaurant yet'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+                }
+                onPress={() => {
+                  trackAnalyticsEvent('customer_restaurant_opened', {
+                    restaurant_id: restaurant.id,
+                    source: 'unavailable',
+                  });
+                  router.push(`/home/restaurant/${restaurant.id}`);
+                }}
+              />
             );
           })}
         </View>
@@ -650,51 +636,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginRight: 6,
   },
-  nearbyCard: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flexDirection: 'row',
-    marginBottom: 12,
-    minHeight: 132,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  nearbyImage: {
-    height: 132,
-    width: 112,
-  },
-  nearbyInfo: {
-    flex: 1,
-    padding: 14,
-  },
-  nearbyHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
   nearbyFavoriteButton: {
-    backgroundColor: customerTheme.surfaceMuted,
     height: 30,
     width: 30,
-  },
-  nearbyName: {
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-    marginRight: 8,
-  },
-  nearbyCuisine: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  nearbyMeta: {
-    color: customerTheme.textMuted,
-    fontSize: 12,
-    marginTop: 6,
   },
   coverageBanner: {
     backgroundColor: customerTheme.warningSoft,
@@ -720,12 +664,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 8,
-  },
-  coverageCardTag: {
-    color: customerTheme.warningText,
-    fontSize: 11,
-    fontWeight: '800',
-    marginTop: 2,
   },
   emptyState: {
     alignItems: 'center',
@@ -774,41 +712,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginTop: 6,
   },
-  unavailableCard: {
-    backgroundColor: customerTheme.dangerSoft,
-    borderColor: '#ebc0b7',
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flexDirection: 'row',
-    minHeight: 132,
-    marginBottom: 12,
-    width: '100%',
-    overflow: 'hidden',
-  },
-  unavailableCardClosed: {
-    backgroundColor: '#fdecec',
-    borderColor: '#ef4444',
-  },
-  unavailableImage: {
-    height: 132,
-    width: 112,
-  },
-  unavailableInfo: {
-    flex: 1,
-    padding: 14,
-  },
-  unavailableHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  unavailableName: {
-    color: customerTheme.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-    marginRight: 10,
-  },
   unavailableBadge: {
     backgroundColor: '#f7d1ca',
     borderRadius: radius.pill,
@@ -826,17 +729,5 @@ const styles = StyleSheet.create({
   },
   unavailableBadgeTextClosed: {
     color: '#b91c1c',
-  },
-  unavailableCuisine: {
-    color: customerTheme.textSoft,
-    fontSize: 12,
-    marginTop: 6,
-  },
-  unavailableMeta: {
-
-    color: customerTheme.dangerText,
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 6,
   },
 });

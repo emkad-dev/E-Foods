@@ -17,6 +17,7 @@ import { formatDeliveryEta } from '../../src/utils/formatting';
 import {
   getRestaurantAvailability,
   getRestaurantCardStatusLabel,
+  getRestaurantCuisineLabel,
   getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
   type DiscoveryRestaurant,
@@ -238,7 +239,7 @@ export default function CustomerFavoritesScreen() {
                 {/* The ETA is dropped, not defaulted. `?? '25-35 min'` gave every
                     kitchen that had published no estimate the same invented
                     delivery promise - the claim class this app has been removing. */}
-                {[restaurant.cuisine ?? 'Kitchen', formatDeliveryEta(restaurant.deliveryTime)]
+                {[getRestaurantCuisineLabel(restaurant), formatDeliveryEta(restaurant.deliveryTime)]
                   .filter(Boolean)
                   .join(' | ')}
               </Text>
@@ -331,7 +332,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   favoriteButton: {
-    backgroundColor: customerTheme.surfaceMuted,
     height: 34,
     width: 34,
   },

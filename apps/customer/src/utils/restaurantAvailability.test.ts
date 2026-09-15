@@ -10,6 +10,7 @@ import {
   getPlatformCoverage,
   getRestaurantAvailability,
   getRestaurantCardStatusLabel,
+  getRestaurantCuisineLabel,
   getRestaurantOpenState,
   getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
@@ -233,6 +234,22 @@ test('getPlatformCoverage: a card (no menu key) outside every radius is correctl
   const coverage = getPlatformCoverage([far], PINNED);
   assert.equal(coverage.isCovered, false);
   assert.ok(coverage.nearestOrderableKm !== null && coverage.nearestOrderableKm > 400);
+});
+
+// --- getRestaurantCuisineLabel: the fallback the `??` copies could not reach ---
+
+test('getRestaurantCuisineLabel: a published cuisine is returned as-is', () => {
+  assert.equal(getRestaurantCuisineLabel({ cuisine: 'Nigerian' }), 'Nigerian');
+});
+
+test('getRestaurantCuisineLabel: null and undefined both fall back', () => {
+  assert.equal(getRestaurantCuisineLabel({ cuisine: null }), 'Kitchen update pending');
+  assert.equal(getRestaurantCuisineLabel({}), 'Kitchen update pending');
+});
+
+test('getRestaurantCuisineLabel: an all-whitespace cuisine falls back too — the `??` copies rendered it blank', () => {
+  assert.equal(getRestaurantCuisineLabel({ cuisine: '   ' }), 'Kitchen update pending');
+  assert.equal(getRestaurantCuisineLabel({ cuisine: '' }), 'Kitchen update pending');
 });
 
 // --- getRestaurantRatingLabel: the "New" threshold flips at ratingCount === 5 ---

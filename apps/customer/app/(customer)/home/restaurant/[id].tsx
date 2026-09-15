@@ -309,7 +309,7 @@ export default function RestaurantDetail() {
                       <Text style={styles.name}>{restaurant.name}</Text>
                       <Text style={styles.cuisine}>{restaurant.cuisine ?? 'Cuisine coming soon'}</Text>
                     </View>
-                    <RestaurantFavoriteButton restaurantId={restaurant.id} style={styles.summaryFavoriteButton} />
+                    <RestaurantFavoriteButton restaurantId={restaurant.id} />
                   </View>
 
                   <View style={styles.factsRow}>
@@ -512,9 +512,6 @@ const styles = StyleSheet.create({
     marginTop: -32,
     padding: 20,
     paddingTop: 34,
-  },
-  summaryFavoriteButton: {
-    backgroundColor: customerTheme.surfaceMuted,
   },
   summaryLogo: {
     left: 20,
