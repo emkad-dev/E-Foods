@@ -15,8 +15,14 @@ const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', description: 'Sales & performance' },
   { path: '/orders', label: 'Orders', description: 'Live kitchen queue' },
   { path: '/menu', label: 'Menu', description: 'Items & availability' },
-  { path: '/profile', label: 'Store', description: 'Profile & delivery' },
+  { path: '/profile', label: 'Store', description: 'Pause, setup & account' },
 ];
+
+// The Store tab's own sub-screens. They are not tabs (four is the budget, and
+// spending a fifth on a screen touched once at setup would push the mid-service
+// pause control further away), so they keep Store lit while they are open
+// instead of leaving the sidebar with nothing selected.
+const STORE_SUB_ROUTES = ['/store-details', '/account'];
 
 const isNavItemActive = (path: string, pathname: string) => {
   if (path === '/') {
@@ -25,6 +31,10 @@ const isNavItemActive = (path: string, pathname: string) => {
 
   if (path === '/orders') {
     return pathname.startsWith('/orders') || pathname.startsWith('/order');
+  }
+
+  if (path === '/profile') {
+    return pathname.startsWith('/profile') || STORE_SUB_ROUTES.some((route) => pathname.startsWith(route));
   }
 
   return pathname.startsWith(path);
@@ -50,7 +60,7 @@ const getPartnerShellLoadingMode = (pathname: string | null | undefined): Partne
     return 'menu';
   }
 
-  if (currentPath.startsWith('/profile')) {
+  if (currentPath.startsWith('/profile') || STORE_SUB_ROUTES.some((route) => currentPath.startsWith(route))) {
     return 'profile';
   }
 
@@ -260,6 +270,9 @@ export default function PartnerStackLayout() {
           }}
         />
         <Tabs.Screen name="order/[id]" options={{ href: null }} />
+        {/* Reached from the Store tab, never from the tab bar - see STORE_SUB_ROUTES. */}
+        <Tabs.Screen name="store-details" options={{ href: null }} />
+        <Tabs.Screen name="account" options={{ href: null }} />
       </Tabs>
     </KitchenAlarmProvider>
   );
