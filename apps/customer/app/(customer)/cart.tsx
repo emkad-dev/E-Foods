@@ -36,13 +36,92 @@ import { getRestaurantAvailability } from '../../src/utils/restaurantAvailabilit
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
-const CHECKOUT_FAILURE_MESSAGE = 'Check network and try again.';
+// This screen only asks the server to CREATE an order and hand back a Paystack
+// authorization URL - the payment sheet lives on the next screen. Nothing that
+// fails here is a payment failure, so the old "Payment failed" heading
+// mislabelled every rejection (paused restaurant, minimum order, out of range)
+// as a money problem the customer could not act on.
+const CHECKOUT_FAILURE_TITLE = 'Order not placed';
+// Reserved for a genuine transport failure. It used to be shown for EVERY
+// rejection, which is why "this item is unavailable" and "we do not deliver to
+// your location" both read as a network glitch.
+const CHECKOUT_NETWORK_FAILURE_MESSAGE = 'We could not reach FEASTY. Check your connection and try again.';
+// An amount the screen does not know yet. Never a formatted zero: a real-looking
+// price that is not a price is worse than an obvious placeholder.
+const PENDING_AMOUNT_LABEL = 'Calculating...';
 const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer'];
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 const formatPlainNumber = (amount: number) => Math.round(amount).toLocaleString('en-US');
 
+/**
+ * Strings the RPC transport itself invents when it never got an answer from the
+ * server. Everything else reaching handlePlaceOrder's catch came out of the edge
+ * function's error envelope, where a rejection is a sentence written for a human
+ * (RpcError / ClientSafeError - see supabase/functions/_shared/observability.ts).
+ */
+const TRANSPORT_FAILURE_PATTERNS = [
+  /^backend rpc /i,
+  /failed to fetch/i,
+  /network ?request failed/i,
+  /^load failed\.?$/i,
+  /networkerror/i,
+  /^timeout/i,
+];
+
+/**
+ * packages/auth/src/backendRpc.ts only unwraps a STRING `error` field, but the
+ * edge functions answer with an `{ error: { message } }` envelope - so the Error
+ * it throws usually carries that whole envelope as raw JSON text. Unwrap it
+ * rather than showing the customer JSON.
+ */
+const unwrapRpcErrorMessage = (raw: string): string => {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{')) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown } | string; message?: unknown };
+    const candidate =
+      typeof parsed.error === 'object' && parsed.error !== null
+        ? parsed.error.message
+        : typeof parsed.error === 'string'
+          ? parsed.error
+          : parsed.message;
+
+    return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : trimmed;
+  } catch {
+    return trimmed;
+  }
+};
+
+/**
+ * The reason to print under CHECKOUT_FAILURE_TITLE, or null when nothing
+ * trustworthy survived (the caller then falls back to the network copy).
+ *
+ * The length/newline guard is deliberate: the RPC envelope serializes
+ * `error.message` even for 5xx, so an unexpected server fault could otherwise
+ * leak its internals onto this screen. A rejection the customer can act on is
+ * one short sentence; anything longer is not one.
+ */
+const resolveCheckoutFailureReason = (error: unknown): string | null => {
+  if (!(error instanceof Error) || !error.message) {
+    return null;
+  }
+
+  const message = unwrapRpcErrorMessage(error.message);
+
+  if (!message || message.length > 180 || message.includes('\n')) {
+    return null;
+  }
+
+  return TRANSPORT_FAILURE_PATTERNS.some((pattern) => pattern.test(message)) ? null : message;
+};
+
 type RestaurantCheckoutSummary = {
-  deliveryFee: number;
+  // null while the restaurant detail is still loading: the fee is UNKNOWN, not
+  // zero. The old `?? 0` printed a convincing price during that window.
+  deliveryFee: number | null;
   items: ReturnType<typeof groupCartItemsByRestaurant>[number]['items'];
   minOrder: number;
   restaurant: RestaurantDocument | null;
@@ -102,7 +181,12 @@ export default function CartScreen() {
   const [appliedPromo, setAppliedPromo] = useState<PromoCodePreview | null>(null);
   const [promoChecking, setPromoChecking] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
-  const [autoOffers, setAutoOffers] = useState<PromoCodePreview['automaticOffers']>([]);
+  // The full no-code preview, not just its `automaticOffers` list. The server
+  // returns the discount it will ACTUALLY apply at checkout (its chosen best
+  // automatic offer) in `discount`/`applied`; keeping only the unordered offer
+  // list threw that away and left the screen announcing an offer it never
+  // subtracted.
+  const [autoPromoPreview, setAutoPromoPreview] = useState<PromoCodePreview | null>(null);
   const [restaurantsById, setRestaurantsById] = useState<Record<string, RestaurantDocument | null>>({});
   const [restaurantsLoading, setRestaurantsLoading] = useState(false);
   // Task 30 [H6]. 'now' is the default and leaves checkout exactly as it was.
@@ -168,7 +252,9 @@ export default function CartScreen() {
         const supportsDelivery = restaurant?.supportsDelivery === true;
         const supportsPickup = restaurant?.supportsPickup !== false;
         const minOrder = restaurant?.minOrder ?? 0;
-        const deliveryFee = fulfillmentType === 'delivery' ? restaurant?.deliveryFee ?? 0 : 0;
+        // Unknown until the restaurant detail lands. Once it has, an absent fee
+        // really is 0 - the server reads it the same way (parseNumber(..., 0)).
+        const deliveryFee = fulfillmentType === 'delivery' ? (restaurant ? restaurant.deliveryFee ?? 0 : null) : 0;
         const belowMinimum = restaurant ? group.subtotal < minOrder : false;
         const outOfArea = fulfillmentType === 'delivery' && availability?.reason === 'out_of_area';
         let warning: string | null = null;
@@ -188,7 +274,17 @@ export default function CartScreen() {
         } else if (outOfArea) {
           warning = 'This restaurant does not deliver to your pinned address. Try pickup or choose a closer restaurant.';
         } else if (belowMinimum) {
-          warning = `Add ${Math.max(1, Math.ceil(minOrder - group.subtotal)).toLocaleString('en-US')} more to meet the minimum order.`;
+          // No figure, deliberately. `minOrder` is denominated in the
+          // restaurant's OWN price basis (server: restaurantBasis =
+          // sum(basePrice * quantity)) while group.subtotal is the marked-up
+          // menu total - base prices and the markup config never leave the
+          // server (public-catalog/catalog.ts), so the shortfall is not
+          // derivable here and "Add N more" was wrong in every case.
+          // The comparison is kept because it can only UNDER-report: display
+          // price >= base price, so a basket that trips this really is below the
+          // minimum. One that passes may still be rejected, and the server's own
+          // message now reaches the customer verbatim.
+          warning = 'This basket is below this restaurant\'s minimum order. Add a little more to check out.';
         }
 
         return {
@@ -209,7 +305,13 @@ export default function CartScreen() {
   );
 
   const basketSubtotal = restaurantSummaries.reduce((sum, group) => sum + group.subtotal, 0);
-  const basketDeliveryFee = fulfillmentType === 'delivery' ? restaurantSummaries.reduce((sum, group) => sum + group.deliveryFee, 0) : 0;
+  // An unknown fee must not silently total as zero. The sum is still computed so
+  // the pricing preview keeps its shape, but every place that RENDERS a
+  // fee-bearing amount checks this flag first.
+  const deliveryFeesKnown =
+    fulfillmentType !== 'delivery' || restaurantSummaries.every((group) => group.deliveryFee !== null);
+  const basketDeliveryFee =
+    fulfillmentType === 'delivery' ? restaurantSummaries.reduce((sum, group) => sum + (group.deliveryFee ?? 0), 0) : 0;
   const pricingPreview = calculateCheckoutTotal({
     deliveryFee: basketDeliveryFee,
     subtotal: basketSubtotal,
@@ -223,7 +325,20 @@ export default function CartScreen() {
       ? 'Loading restaurant details...'
       : restaurantSummaries.find((group) => group.warning)?.warning ?? null;
   const promoEligible = !isMixedBasket && restaurantSummaries.length === 1 && Boolean(primaryRestaurantId) && allRestaurantsLoaded;
-  const promoDiscount = promoEligible && appliedPromo?.valid ? appliedPromo.discount : 0;
+  // Single source of truth for the code checkout will actually submit. The
+  // server resolves an automatic offer ONLY when no code is sent at all, so the
+  // summary has to read the same value it is about to send or it would promise
+  // a discount the server then declines to apply.
+  const promoCodeForCheckout = promoEligible ? (appliedPromo?.valid ? appliedPromo.code : promoCodeInput.trim() || null) : null;
+  const manualDiscount = promoEligible && appliedPromo?.valid ? appliedPromo.discount : 0;
+  // The screen used to announce "Offer applied automatically: N off" and then
+  // never subtract it, so the summary lines did not add up to the stated Order
+  // total. The server does apply it, so the honest fix is to subtract it - using
+  // the server's own `discount` for the offer it picked, not automaticOffers[0],
+  // which arrives in arbitrary DB order and need not be the best one.
+  const autoDiscount = promoEligible && !promoCodeForCheckout ? autoPromoPreview?.discount ?? 0 : 0;
+  const promoDiscount = manualDiscount > 0 ? manualDiscount : autoDiscount;
+  const discountCode = (manualDiscount > 0 ? appliedPromo?.applied?.code : autoPromoPreview?.applied?.code) ?? null;
   const effectiveTotal = promoDiscount > 0 ? Math.max(pricingPreview.total - promoDiscount, 0) : pricingPreview.total;
   const checkoutTitle = isMixedBasket
     ? `${restaurantSummaries.length} restaurants in cart`
@@ -274,7 +389,7 @@ export default function CartScreen() {
 
   useEffect(() => {
     if (!user || !primaryRestaurantId || items.length === 0 || isMixedBasket) {
-      setAutoOffers([]);
+      setAutoPromoPreview(null);
       return;
     }
 
@@ -282,12 +397,12 @@ export default function CartScreen() {
     validateCustomerPromoCode({ fulfillmentType, items, restaurantId: primaryRestaurantId, tipAmount: safeTipAmount })
       .then((preview) => {
         if (!cancelled) {
-          setAutoOffers(preview.automaticOffers ?? []);
+          setAutoPromoPreview(preview);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setAutoOffers([]);
+          setAutoPromoPreview(null);
         }
       });
 
@@ -505,7 +620,7 @@ export default function CartScreen() {
         fulfillmentType,
         items,
         paymentMethod,
-        promoCode: promoEligible && appliedPromo?.valid ? appliedPromo.code : promoEligible ? promoCodeInput.trim() || null : null,
+        promoCode: promoCodeForCheckout,
         restaurantId: primaryRestaurantId,
         // Omitted for "order now", so an immediate order sends the payload it
         // always sent. The server re-validates this and 412s an invalid slot.
@@ -525,12 +640,19 @@ export default function CartScreen() {
           orderId,
         },
       } as never);
-    } catch {
+    } catch (error) {
+      // This used to discard the server's message and blame the network for
+      // everything, so "This restaurant is paused right now.", "This restaurant
+      // does not deliver to your selected location yet." and a real connection
+      // drop were indistinguishable and none named the thing to fix. The
+      // server's rejections are already written to be client-safe; only a
+      // genuine transport failure gets the fallback copy.
+      const failureReason = resolveCheckoutFailureReason(error);
       trackAnalyticsEvent('customer_checkout_failed', {
         reason: 'payment_flow_error',
       });
       if (isCheckoutScreenFocusedRef.current) {
-        setCheckoutError(CHECKOUT_FAILURE_MESSAGE);
+        setCheckoutError(failureReason ?? CHECKOUT_NETWORK_FAILURE_MESSAGE);
       }
     } finally {
       if (isMountedRef.current) {
@@ -615,7 +737,11 @@ export default function CartScreen() {
                   <View style={styles.summarySplit}>
                     <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
                     <Text style={styles.summaryDetailValue}>
-                      {fulfillmentType === 'delivery' ? formatMoney(summary.deliveryFee) : 'No delivery fee'}
+                      {fulfillmentType !== 'delivery'
+                        ? 'No delivery fee'
+                        : summary.deliveryFee === null
+                          ? PENDING_AMOUNT_LABEL
+                          : formatMoney(summary.deliveryFee)}
                     </Text>
                   </View>
                   {summary.warning ? (
@@ -866,7 +992,7 @@ export default function CartScreen() {
             <View style={styles.summaryCard}>
               {checkoutError ? (
                 <View style={styles.checkoutErrorCard}>
-                  <Text style={styles.checkoutErrorTitle}>Payment failed</Text>
+                  <Text style={styles.checkoutErrorTitle}>{CHECKOUT_FAILURE_TITLE}</Text>
                   <Text style={styles.checkoutErrorCopy}>{checkoutError}</Text>
                 </View>
               ) : null}
@@ -878,7 +1004,11 @@ export default function CartScreen() {
               <View style={styles.summarySplit}>
                 <Text style={styles.summaryDetailLabel}>Delivery fee</Text>
                 <Text style={styles.summaryDetailValue}>
-                  {fulfillmentType === 'delivery' ? formatMoney(pricingPreview.deliveryFee) : 'No delivery fee'}
+                  {fulfillmentType !== 'delivery'
+                    ? 'No delivery fee'
+                    : deliveryFeesKnown
+                      ? formatMoney(pricingPreview.deliveryFee)
+                      : PENDING_AMOUNT_LABEL}
                 </Text>
               </View>
               <View style={styles.summarySplit}>
@@ -909,23 +1039,26 @@ export default function CartScreen() {
               </View>
               {!promoEligible ? <Text style={styles.promoAuto}>Promo codes are unavailable for mixed baskets.</Text> : null}
               {promoMessage ? <Text style={styles.promoError}>{promoMessage}</Text> : null}
-              {autoOffers.length > 0 && !appliedPromo?.valid ? (
+              {autoDiscount > 0 ? (
                 <Text style={styles.promoAuto}>
-                  Offer applied automatically: {formatMoney(autoOffers[0].discount)} off
+                  Offer applied automatically{discountCode ? ` (${discountCode})` : ''}: {formatMoney(autoDiscount)} off
                 </Text>
               ) : null}
               {promoDiscount > 0 ? (
                 <View style={styles.summarySplit}>
-                  <Text style={styles.summaryDetailLabel}>
-                    Discount{appliedPromo?.applied?.code ? ` (${appliedPromo.applied.code})` : ''}
-                  </Text>
+                  <Text style={styles.summaryDetailLabel}>Discount{discountCode ? ` (${discountCode})` : ''}</Text>
                   <Text style={styles.summaryDiscountValue}>-{formatMoney(promoDiscount)}</Text>
                 </View>
               ) : null}
 
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Order total</Text>
-                <Text style={styles.summaryValue}>{formatMoney(effectiveTotal)}</Text>
+                {/* The total embeds the delivery fee, so it inherits the same
+                    unknown: a total that silently omits an unloaded fee is the
+                    same lie as the fee line one row up. */}
+                <Text style={styles.summaryValue}>
+                  {deliveryFeesKnown ? formatMoney(effectiveTotal) : PENDING_AMOUNT_LABEL}
+                </Text>
               </View>
               <TouchableOpacity
                 style={[styles.checkoutButton, checkoutDisabled ? styles.checkoutButtonDisabled : null]}
