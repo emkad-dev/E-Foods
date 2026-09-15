@@ -32,6 +32,7 @@ import {
   getDiscoveryEmptyState,
   getDiscoverySections,
   getRestaurantAvailability,
+  getRestaurantCardStatusLabel,
   getRestaurantOperatingHoursLabel,
   isRestaurantVisibleToCustomers,
   matchesRestaurantQuery,
@@ -240,15 +241,30 @@ export default function HomeScreen() {
     deliveryLocation: isCovered ? deliveryLocation : null,
   });
 
+  const trimmedSearch = search.trim();
+
+  // This screen filters CARD payloads, and a card carries no menu (see
+  // supabase/functions/public-catalog/catalog.ts's toRestaurantCard), so
+  // matchesRestaurantQuery above can only ever compare a restaurant's name and
+  // cuisine. A dish therefore matches nothing here even when several kitchens
+  // serve it — so the honest end of the road is the Search tab, which reads the
+  // full catalogue meal-first. Offered wherever the name/cuisine filter comes
+  // back empty on a real term.
+  const canHandOffToMealSearch = trimmedSearch.length > 0 && discoveryResults.length === 0;
+
+  // Submit used to only trim-and-track: filtering already happens on change, so
+  // the button and the return key did nothing visible and the customer was left
+  // pressing a control with no effect. It now performs the meal-search handoff.
   const handleSearchSubmit = () => {
-    setSearch((currentSearch) => {
-      const nextSearch = currentSearch.trim();
-      trackAnalyticsEvent('customer_restaurant_search_submitted', {
-        query_length: nextSearch.length,
-      });
-      return nextSearch;
-    });
+    if (!trimmedSearch) {
+      return;
+    }
+
     Keyboard.dismiss();
+    trackAnalyticsEvent('customer_restaurant_search_submitted', {
+      query_length: trimmedSearch.length,
+    });
+    router.push({ pathname: '/search', params: { q: trimmedSearch } });
   };
 
   const handleRetryCatalog = async () => {
@@ -316,11 +332,11 @@ export default function HomeScreen() {
             onSubmitEditing={handleSearchSubmit}
           />
           <TouchableOpacity
-            style={[styles.searchAction, search.trim() ? styles.searchActionActive : styles.searchActionIdle]}
+            style={[styles.searchAction, trimmedSearch ? styles.searchActionActive : styles.searchActionDisabled]}
             onPress={handleSearchSubmit}
-            disabled={!search.trim()}
+            disabled={!trimmedSearch}
           >
-            <FontAwesome name="arrow-right" size={15} color="#fff" />
+            <FontAwesome name="arrow-right" size={15} color={trimmedSearch ? '#fff' : customerTheme.textMuted} />
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -434,6 +450,13 @@ export default function HomeScreen() {
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>{emptyState.title}</Text>
           <Text style={styles.emptyCopy}>{emptyState.copy}</Text>
+          {canHandOffToMealSearch ? (
+            <TouchableOpacity style={styles.emptyAction} onPress={handleSearchSubmit}>
+              <Text style={styles.emptyActionText} numberOfLines={1}>
+                Search meals for &quot;{trimmedSearch}&quot;
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
 
@@ -465,11 +488,15 @@ export default function HomeScreen() {
                     <Text style={styles.unavailableName}>{restaurant.name}</Text>
                     <View style={[styles.unavailableBadge, isClosed ? styles.unavailableBadgeClosed : null]}>
                       <Text style={[styles.unavailableBadgeText, isClosed ? styles.unavailableBadgeTextClosed : null]}>
-                        {availability.reason === 'delivery_disabled'
-                          ? 'Pickup only'
-                          : availability.reason === 'closed'
-                            ? 'Closed'
-                            : 'Out of area'}
+                        {/* Was a local ternary that labelled `delivery_disabled`
+                            "Pickup only" — backwards. That reason is only
+                            reached when supportsPickup is ALSO false (the
+                            pickup_only branch above it catches the
+                            delivery-off/pickup-on case), so it told a customer
+                            they could collect from a kitchen that had switched
+                            collection off. The shared helper is the one answer
+                            all three discovery screens now give. */}
+                        {getRestaurantCardStatusLabel(restaurant, availability) ?? 'Out of area'}
                       </Text>
                     </View>
                   </View>
@@ -619,9 +646,13 @@ const styles = StyleSheet.create({
   searchActionActive: {
     backgroundColor: customerTheme.brandGreen,
   },
-  searchActionIdle: {
-    backgroundColor: customerTheme.brandOrange,
-    opacity: 0.72,
+  // A disabled control has to LOOK disabled. This was the solid brand orange at
+  // 0.72 opacity, which reads as a live button, so an empty field offered a
+  // press that silently did nothing.
+  searchActionDisabled: {
+    backgroundColor: customerTheme.surfaceMuted,
+    borderColor: customerTheme.border,
+    borderWidth: 1,
   },
   catalogStatusCard: {
     backgroundColor: customerTheme.warningSoft,
@@ -1101,6 +1132,19 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 8,
     textAlign: 'center',
+  },
+  emptyAction: {
+    backgroundColor: customerTheme.brandGreen,
+    borderRadius: 14,
+    marginTop: 14,
+    maxWidth: '100%',
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+  },
+  emptyActionText: {
+    color: customerTheme.textOnBrand,
+    fontSize: 14,
+    fontWeight: '800',
   },
   unavailableSection: {
     marginTop: 20,

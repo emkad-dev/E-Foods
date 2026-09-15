@@ -88,10 +88,21 @@ const parseOperatingMinutes = (value: string | null | undefined) => {
   return hours * 60 + minutes;
 };
 
+const hasKnownOperatingWindow = (restaurant: DiscoveryRestaurant) =>
+  parseOperatingMinutes(restaurant.openingTime) !== null && parseOperatingMinutes(restaurant.closingTime) !== null;
+
 const isInsideOperatingWindow = (restaurant: DiscoveryRestaurant, now = new Date()) => {
   const openingMinutes = parseOperatingMinutes(restaurant.openingTime);
   const closingMinutes = parseOperatingMinutes(restaurant.closingTime);
 
+  // Fails open when the hours are unknown, and that is deliberate: a card from
+  // customerGetRestaurantList carries no openingTime/closingTime at all (same
+  // slimmed projection that drops `menu`), so hiding a restaurant we cannot
+  // prove is shut would empty the feed on a data gap. What must NOT follow from
+  // this is a screen printing "Open" off the back of it — that is a claim about
+  // a window we never saw, and it is why the feed said Open while the detail
+  // screen (which fetches the full record, hours included) said Closed. Use
+  // getRestaurantOpenState when the question is what to TELL the customer.
   if (openingMinutes === null || closingMinutes === null) {
     return true;
   }
@@ -196,7 +207,11 @@ export const isRestaurantVisibleToCustomers = (restaurant: DiscoveryRestaurant) 
 
 export const getRestaurantAvailability = (
   restaurant: DiscoveryRestaurant,
-  deliveryLocation: AddressRecord | null
+  deliveryLocation: AddressRecord | null,
+  // Injectable so a caller that also asks getRestaurantOpenState a question
+  // (getRestaurantCardStatusLabel does) can hold both to the same clock.
+  // Callers pass nothing; only tests pin the time.
+  now = new Date()
 ): RestaurantAvailability => {
   if (restaurant.isOpen === false) {
     return {
@@ -207,7 +222,7 @@ export const getRestaurantAvailability = (
     };
   }
 
-  if (!isInsideOperatingWindow(restaurant)) {
+  if (!isInsideOperatingWindow(restaurant, now)) {
     return {
       isAvailable: false,
       reason: 'closed',
@@ -329,10 +344,18 @@ export const getDiscoveryEmptyState = (params: {
 }) => {
   const normalizedQuery = normalizeRestaurantQuery(params.query);
 
+  // WHY THIS NO LONGER SAYS "we have not listed that yet": home filters the CARD
+  // projection, which carries no `menu` (supabase/functions/public-catalog/
+  // catalog.ts's toRestaurantCard emits no such key, on purpose, for bandwidth).
+  // matchesRestaurantQuery therefore only ever compares a restaurant's name and
+  // cuisine here, so typing a dish matched nothing and this copy told the
+  // customer the dish did not exist — while the Search tab, which reads the full
+  // catalogue meal-first, was serving it. Claim only what this filter actually
+  // checked; home pairs this with a handoff to the meal search.
   if (normalizedQuery && params.matchedCount === 0) {
     return {
-      title: 'Coming soon',
-      copy: `We have not listed "${params.query.trim()}" yet, but more cuisines and categories are on the way.`,
+      title: 'No matching restaurants',
+      copy: `No restaurant name or cuisine here matches "${params.query.trim()}" — but it may still be on a menu.`,
     };
   }
 
@@ -362,6 +385,69 @@ export const getDiscoveryEmptyState = (params: {
       ? 'Try another food, restaurant name, cuisine, or category.'
       : 'Restaurant listings will appear here once partners are available.',
   };
+};
+
+export type RestaurantOpenState = 'open' | 'closed' | 'unknown';
+
+/**
+ * Is this restaurant open right now — and do we actually know?
+ *
+ * WHY THE THIRD STATE: openness has two inputs, the partner's `isOpen` switch
+ * and the operating window, and a card payload carries only the first. Every
+ * card screen used to answer with a bare `isOpen === false ? 'Closed' : 'Open'`,
+ * which silently promoted "no hours in this payload" to "open", so a restaurant
+ * an hour past closing read Open on the feed and Closed on its own page. The
+ * availability gate above still fails open on unknown hours (see
+ * isInsideOperatingWindow — the alternative is hiding restaurants on a data
+ * gap); what changes here is that 'unknown' is returned as itself, so a caller
+ * can decline to make a claim instead of guessing in the customer's face.
+ */
+export const getRestaurantOpenState = (
+  restaurant: DiscoveryRestaurant,
+  now = new Date()
+): RestaurantOpenState => {
+  // The partner's own switch is authoritative and IS on every card, so a
+  // deliberate "closed" is never downgraded to unknown.
+  if (restaurant.isOpen === false) {
+    return 'closed';
+  }
+
+  if (!hasKnownOperatingWindow(restaurant)) {
+    return 'unknown';
+  }
+
+  return isInsideOperatingWindow(restaurant, now) ? 'open' : 'closed';
+};
+
+/**
+ * The one status line a discovery card may show, or `null` when the honest
+ * answer is "we cannot tell from this payload" and the card should say nothing.
+ *
+ * WHY IT IS SHARED: home, search and favorites each grew their own answer to
+ * "can I order from this kitchen", and favorites' answer — a raw `isOpen`
+ * read — knew nothing about operating hours, delivery range or pickup-only
+ * partners, so the same restaurant could read three different ways in one
+ * session. Every card surface routes through here instead.
+ */
+export const getRestaurantCardStatusLabel = (
+  restaurant: DiscoveryRestaurant,
+  availability: RestaurantAvailability,
+  now = new Date()
+): string | null => {
+  switch (availability.reason) {
+    case 'closed':
+      return 'Closed';
+    case 'out_of_area':
+      return 'Out of area';
+    case 'delivery_disabled':
+      return 'Delivery unavailable';
+    case 'pickup_only':
+      return 'Pickup only';
+    default:
+      // Orderable as far as the gate can tell — but "Open" is a statement about
+      // the operating window, so only say it when the window was actually read.
+      return getRestaurantOpenState(restaurant, now) === 'open' ? 'Open' : null;
+  }
 };
 
 export const getRestaurantAvailabilityBadge = (availability: RestaurantAvailability) => {

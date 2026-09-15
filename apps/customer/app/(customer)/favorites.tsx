@@ -8,10 +8,17 @@ import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useCart } from '../../src/contexts/CartContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getRestaurantList } from '../../src/services/publicRestaurantReadModel';
 import { customerTheme } from '../../src/theme/palette';
-import { getRestaurantRatingLabel, type DiscoveryRestaurant } from '../../src/utils/restaurantAvailability';
+import {
+  getRestaurantAvailability,
+  getRestaurantCardStatusLabel,
+  getRestaurantRatingLabel,
+  isRestaurantVisibleToCustomers,
+  type DiscoveryRestaurant,
+} from '../../src/utils/restaurantAvailability';
 
 type FavoriteRestaurant = DiscoveryRestaurant & {
   image?: string;
@@ -23,6 +30,7 @@ export default function CustomerFavoritesScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { favoriteRestaurantIds, loading: favoritesLoading, refreshFavorites } = useFavorites();
+  const { deliveryLocation } = useCart();
   const [restaurants, setRestaurants] = useState<FavoriteRestaurant[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,12 +81,21 @@ export default function CustomerFavoritesScreen() {
     let cancelled = false;
     setLoadingCatalog(true);
 
-    // Cards only — this screen renders image/logoImage/name/cuisine/deliveryTime/
-    // isOpen, all of which are on the card; it never needed the full menu.
+    // Cards only — this screen renders image/logoImage/name/cuisine/deliveryTime
+    // plus the availability inputs (isOpen/coordinates/radius/supportsDelivery),
+    // all of which are on the card; it never needed the full menu. What a card
+    // does NOT carry is the operating window, which is why the status label
+    // below has to be allowed to say nothing.
     getRestaurantList()
       .then(({ restaurants: catalog }) => {
         if (!cancelled) {
-          setRestaurants(catalog as FavoriteRestaurant[]);
+          // The same visibility gate home and search apply. Without it a
+          // favorite that the partner later unpublished stayed on this list
+          // and tapped through to "Restaurant not found" -- the favorite id
+          // outlives the listing, so the catalogue is what decides.
+          setRestaurants(
+            catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as FavoriteRestaurant[]
+          );
           setError(null);
         }
       })
@@ -123,6 +140,12 @@ export default function CustomerFavoritesScreen() {
   // the effect's own timing.
   const catalogPending = favoriteRestaurantIds.length > 0 && !catalogSettled;
 
+  // Saved kitchens exist, but none of them are listed any more (the visibility
+  // filter above removed them all). "No favorites yet -- tap the heart" would be
+  // advice for the wrong problem: they did tap the heart, and the restaurant
+  // left the catalogue afterwards.
+  const hasOnlyUnlistedFavorites = favoriteRestaurantIds.length > 0 && favoriteRestaurants.length === 0;
+
   // Signed-out visitors used to land on "No favorites yet / Tap the heart on
   // any restaurant" — advice that could not work, since favorites are a
   // signed-in feature. Checked before the loading branch: there is nothing to
@@ -164,45 +187,65 @@ export default function CustomerFavoritesScreen() {
 
       {!error && favoriteRestaurants.length === 0 ? (
         <View style={styles.stateCard}>
-          <Text style={styles.stateTitle}>No favorites yet</Text>
-          <Text style={styles.stateCopy}>Tap the heart on any restaurant.</Text>
+          <Text style={styles.stateTitle}>
+            {hasOnlyUnlistedFavorites ? 'Your saved kitchens are not listed' : 'No favorites yet'}
+          </Text>
+          <Text style={styles.stateCopy}>
+            {hasOnlyUnlistedFavorites
+              ? 'They are unavailable on FEASTY right now. They will show up here again if they come back.'
+              : 'Tap the heart on any restaurant.'}
+          </Text>
         </View>
       ) : null}
 
-      {favoriteRestaurants.map((restaurant) => (
-        <TouchableOpacity
-          key={restaurant.id}
-          activeOpacity={0.92}
-          onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
-          style={styles.card}
-        >
-          <RemoteImage
-            uri={restaurant.image}
-            style={styles.cardImage}
-            fallback={
-              <View style={styles.cardImageFallback}>
-                <Text style={styles.cardImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
+      {favoriteRestaurants.map((restaurant) => {
+        // The same answer home and search give, from the same helper: a raw
+        // `isOpen` read here was a third, weaker opinion -- it knew nothing
+        // about operating hours, delivery range or pickup-only kitchens, and
+        // printed "Open" for every one of them.
+        const statusLabel = getRestaurantCardStatusLabel(
+          restaurant,
+          getRestaurantAvailability(restaurant, deliveryLocation)
+        );
+
+        return (
+          <TouchableOpacity
+            key={restaurant.id}
+            activeOpacity={0.92}
+            onPress={() => router.push(`/home/restaurant/${restaurant.id}`)}
+            style={styles.card}
+          >
+            <RemoteImage
+              uri={restaurant.image}
+              style={styles.cardImage}
+              fallback={
+                <View style={styles.cardImageFallback}>
+                  <Text style={styles.cardImageFallbackText}>{restaurant.name.slice(0, 1).toUpperCase()}</Text>
+                </View>
+              }
+            />
+            <RestaurantLogoBadge logoImage={restaurant.logoImage} name={restaurant.name} size={40} style={styles.logoBadge} />
+            <View style={styles.cardBody}>
+              <View style={styles.cardTitleRow}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {restaurant.name}
+                </Text>
+                <RestaurantFavoriteButton restaurantId={restaurant.id} size={14} style={styles.favoriteButton} />
               </View>
-            }
-          />
-          <RestaurantLogoBadge logoImage={restaurant.logoImage} name={restaurant.name} size={40} style={styles.logoBadge} />
-          <View style={styles.cardBody}>
-            <View style={styles.cardTitleRow}>
-              <Text style={styles.cardTitle} numberOfLines={1}>
-                {restaurant.name}
+              <Text style={styles.cardMeta} numberOfLines={1}>
+                {restaurant.cuisine ?? 'Kitchen'} | {restaurant.deliveryTime ?? '25-35 min'}
               </Text>
-              <RestaurantFavoriteButton restaurantId={restaurant.id} size={14} style={styles.favoriteButton} />
+              <View style={styles.factRow}>
+                <Text style={styles.fact}>{getRestaurantRatingLabel(restaurant)}</Text>
+                {/* Nothing at all when the payload cannot support a claim: a card
+                    carries no opening/closing time, and guessing "Open" from its
+                    absence is what made the feed contradict the restaurant page. */}
+                {statusLabel ? <Text style={styles.fact}>{statusLabel}</Text> : null}
+              </View>
             </View>
-            <Text style={styles.cardMeta} numberOfLines={1}>
-              {restaurant.cuisine ?? 'Kitchen'} | {restaurant.deliveryTime ?? '25-35 min'}
-            </Text>
-            <View style={styles.factRow}>
-              <Text style={styles.fact}>{getRestaurantRatingLabel(restaurant)}</Text>
-              <Text style={styles.fact}>{restaurant.isOpen === false ? 'Closed' : 'Open'}</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      ))}
+          </TouchableOpacity>
+        );
+      })}
     </ScrollView>
   );
 }

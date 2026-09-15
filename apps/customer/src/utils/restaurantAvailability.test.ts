@@ -5,9 +5,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  getDiscoveryEmptyState,
   getDiscoverySections,
   getPlatformCoverage,
   getRestaurantAvailability,
+  getRestaurantCardStatusLabel,
+  getRestaurantOpenState,
   getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
   NEW_RESTAURANT_RATING_THRESHOLD,
@@ -346,4 +349,120 @@ test('THE INVARIANT: exactly one of the shelf and the empty state ever renders',
       );
     }
   }
+});
+
+// --- the open/closed contradiction: a card has no operating window, so the
+// feed used to print "Open" for a restaurant its own detail page called Closed.
+
+// 10:00, comfortably inside the 09:00-17:00 window used below.
+const MID_MORNING = new Date('2026-09-15T10:00:00');
+// 20:00, three hours past that window's close.
+const EVENING = new Date('2026-09-15T20:00:00');
+
+test('getRestaurantOpenState: a card (no hours in the payload) is unknown, never "open"', () => {
+  // The defect in one assertion: this is the exact card shape the feed renders,
+  // and the old `isOpen === false ? Closed : Open` read called it Open.
+  assert.equal(getRestaurantOpenState(card(), EVENING), 'unknown');
+});
+
+test('getRestaurantOpenState: a full record is answered from its real window', () => {
+  const withHours = (overrides = {}) => ({ ...card(), openingTime: '09:00', closingTime: '17:00', ...overrides });
+
+  assert.equal(getRestaurantOpenState(withHours(), MID_MORNING), 'open');
+  assert.equal(getRestaurantOpenState(withHours(), EVENING), 'closed');
+});
+
+test('getRestaurantOpenState: the partner switch beats everything, hours or not', () => {
+  // isOpen IS on every card, so a deliberate pause is never softened to unknown.
+  assert.equal(getRestaurantOpenState(card({ isOpen: false }), MID_MORNING), 'closed');
+  assert.equal(
+    getRestaurantOpenState({ ...card({ isOpen: false }), openingTime: '09:00', closingTime: '17:00' }, MID_MORNING),
+    'closed'
+  );
+});
+
+test('getRestaurantOpenState: a half-configured window is unknown, not open', () => {
+  assert.equal(getRestaurantOpenState({ ...card(), openingTime: '09:00' }, EVENING), 'unknown');
+  assert.equal(getRestaurantOpenState({ ...card(), openingTime: '9am', closingTime: '5pm' }, EVENING), 'unknown');
+});
+
+test('the availability gate still fails open on unknown hours — hiding a kitchen on a data gap is worse', () => {
+  // Deliberate counterpart to the test above: not knowing the hours must not
+  // remove the restaurant from the feed, it must only stop us CLAIMING it is open.
+  const availability = getRestaurantAvailability(card(), PINNED, EVENING);
+  assert.equal(availability.isAvailable, true);
+  assert.equal(availability.reason, 'available');
+});
+
+// --- getRestaurantCardStatusLabel: one answer for home, search and favorites ---
+
+test('getRestaurantCardStatusLabel: says nothing when the payload cannot support a claim', () => {
+  assert.equal(getRestaurantCardStatusLabel(card(), getRestaurantAvailability(card(), PINNED, EVENING), EVENING), null);
+});
+
+test('getRestaurantCardStatusLabel: says Open only when the window was actually read', () => {
+  const open = { ...card(), openingTime: '09:00', closingTime: '17:00' };
+  assert.equal(getRestaurantCardStatusLabel(open, getRestaurantAvailability(open, PINNED, MID_MORNING), MID_MORNING), 'Open');
+});
+
+test('getRestaurantCardStatusLabel: a paused kitchen reads Closed', () => {
+  const paused = card({ isOpen: false });
+  assert.equal(getRestaurantCardStatusLabel(paused, getRestaurantAvailability(paused, PINNED, MID_MORNING), MID_MORNING), 'Closed');
+});
+
+test('getRestaurantCardStatusLabel: range and pickup answers come from the shared availability gate', () => {
+  // The three things favorites' raw isOpen read could never say.
+  const far = card({ id: 'far', latitude: 9.0765, longitude: 7.3986, deliveryRadiusKm: 5 });
+  assert.equal(getRestaurantCardStatusLabel(far, getRestaurantAvailability(far, PINNED, MID_MORNING), MID_MORNING), 'Out of area');
+
+  const pickupOnly = card({ supportsDelivery: false, supportsPickup: true });
+  assert.equal(
+    getRestaurantCardStatusLabel(pickupOnly, getRestaurantAvailability(pickupOnly, PINNED, MID_MORNING), MID_MORNING),
+    'Pickup only'
+  );
+
+  const neither = card({ supportsDelivery: false, supportsPickup: false });
+  assert.equal(
+    getRestaurantCardStatusLabel(neither, getRestaurantAvailability(neither, PINNED, MID_MORNING), MID_MORNING),
+    'Delivery unavailable'
+  );
+});
+
+// --- the home empty state must not claim a dish does not exist ---
+
+const emptyStateFor = (query: string, overrides: Partial<Parameters<typeof getDiscoveryEmptyState>[0]> = {}) =>
+  getDiscoveryEmptyState({
+    availableCount: 0,
+    matchedCount: 0,
+    unavailableReasons: [],
+    query,
+    unavailableCount: 0,
+    deliveryLocation: null,
+    ...overrides,
+  });
+
+test('an unmatched query never claims the dish is unlisted — home only ever filtered names and cuisines', () => {
+  // Home filters cards, which carry no menu, so "jollof" cannot match a dish
+  // here even when several kitchens serve it. The old copy ("we have not listed
+  // 'jollof' yet") told the customer it did not exist while the Search tab was
+  // serving it.
+  const state = emptyStateFor('jollof');
+  assert.match(state.copy, /restaurant name or cuisine/i);
+  assert.ok(!/not listed/i.test(state.copy), 'must not assert the term is absent from the platform');
+  assert.ok(state.copy.includes('"jollof"'), 'the term is still echoed back');
+});
+
+test('the unmatched-query state stays distinct from the out-of-area and closed states', () => {
+  // Those two are reached with matchedCount > 0, so they must not be swallowed
+  // by the query branch above.
+  const closed = emptyStateFor('', { unavailableReasons: ['closed'], unavailableCount: 1 });
+  assert.equal(closed.title, 'Closed right now');
+
+  const outOfArea = emptyStateFor('', {
+    matchedCount: 2,
+    unavailableReasons: ['out_of_area', 'out_of_area'],
+    unavailableCount: 2,
+    deliveryLocation: PINNED,
+  });
+  assert.equal(outOfArea.title, 'Not available in your area');
 });

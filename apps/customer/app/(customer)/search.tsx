@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../../src/contexts/CartContext';
 import RemoteImage from '../../src/components/RemoteImage';
@@ -76,6 +76,8 @@ export default function SearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { deliveryLocation } = useCart();
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const handoffQuery = typeof q === 'string' ? q.trim() : '';
 
   const loadRestaurants = useCallback(async () => {
     setLoading(true);
@@ -95,6 +97,26 @@ export default function SearchScreen() {
   useEffect(() => {
     void loadRestaurants();
   }, [loadRestaurants]);
+
+  // Home hands its search term over when its own filter finds nothing: home
+  // filters card payloads, which carry no menu, so it can only match a
+  // restaurant name or cuisine and a dish like "jollof" falls through to here,
+  // where the full catalogue is searched meal-first.
+  //
+  // Seeded in an effect rather than as useState's initial value because this is
+  // a tab screen: it stays mounted after the first visit, so a later handoff
+  // arrives at a live component whose initial state is long spent. The param is
+  // cleared once consumed so handing over the SAME term a second time still
+  // reads as a change rather than being swallowed as "already seen".
+  useEffect(() => {
+    if (!handoffQuery) {
+      return;
+    }
+
+    submittedRef.current = false;
+    setQuery(handoffQuery);
+    router.setParams({ q: '' });
+  }, [handoffQuery, router]);
 
   const results = useMemo(
     () => buildMealSearchResults(restaurants, query, deliveryLocation),
