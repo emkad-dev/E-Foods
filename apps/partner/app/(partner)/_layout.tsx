@@ -4,6 +4,7 @@ import { Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View
 import FEASTYWordmark from '../../src/components/PartnerWordmark';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { KitchenAlarmProvider } from '../../src/contexts/KitchenAlarmContext';
 import { resolvePartnerLandingRoute } from '../../src/contexts/partnerAuthFlow';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { partnerTheme } from '../../src/theme/palette';
@@ -187,64 +188,80 @@ export default function PartnerStackLayout() {
     return <Slot />;
   }
 
+  // The alarm provider wraps BOTH shells, and sits above the screens rather than
+  // inside one of them. Inside KitchenBoard it was unreachable on a phone (that board
+  // only mounts at >= 900dp) and it was destroyed every time the orders screen
+  // unmounted to show an order's detail. Here it survives navigation between partner
+  // screens and covers every width, so the alarm keeps sounding while somebody reads
+  // a ticket, and stays silent for orders it has already announced.
+  //
+  // Mounted only on this branch: a partner still completing onboarding has no
+  // restaurant and no kitchen queue, so there is nothing to alarm about and no reason
+  // to hold a wake lock or build an audio player for them.
   if (isWide) {
-    return <SidebarShell />;
+    return (
+      <KitchenAlarmProvider>
+        <SidebarShell />
+      </KitchenAlarmProvider>
+    );
   }
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: partnerTheme.accentStrong,
-        tabBarInactiveTintColor: partnerTheme.textMuted,
-        tabBarItemStyle: {
-          paddingBottom: 4,
-          paddingTop: 5,
-        },
-        tabBarLabelStyle: {
-          fontSize: isCompactMobile ? 10 : 12,
-          fontWeight: '700',
-          paddingBottom: 1,
-        },
-        tabBarStyle: {
-          backgroundColor: partnerTheme.surface,
-          borderTopColor: partnerTheme.border,
-          height: isCompactMobile ? 72 : 74,
-          paddingBottom: isCompactMobile ? 8 : 10,
-          paddingTop: 8,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Dashboard',
-          tabBarIcon: ({ color, focused }) => renderTabIcon('view-dashboard-outline', color, focused),
+    <KitchenAlarmProvider>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: partnerTheme.accentStrong,
+          tabBarInactiveTintColor: partnerTheme.textMuted,
+          tabBarItemStyle: {
+            paddingBottom: 4,
+            paddingTop: 5,
+          },
+          tabBarLabelStyle: {
+            fontSize: isCompactMobile ? 10 : 12,
+            fontWeight: '700',
+            paddingBottom: 1,
+          },
+          tabBarStyle: {
+            backgroundColor: partnerTheme.surface,
+            borderTopColor: partnerTheme.border,
+            height: isCompactMobile ? 72 : 74,
+            paddingBottom: isCompactMobile ? 8 : 10,
+            paddingTop: 8,
+          },
         }}
-      />
-      <Tabs.Screen
-        name="orders"
-        options={{
-          title: 'Orders',
-          tabBarIcon: ({ color, focused }) => renderTabIcon('clipboard-text-outline', color, focused),
-        }}
-      />
-      <Tabs.Screen
-        name="menu"
-        options={{
-          title: 'Menu',
-          tabBarIcon: ({ color, focused }) => renderTabIcon('silverware-fork-knife', color, focused),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Store',
-          tabBarIcon: ({ color, focused }) => renderTabIcon('storefront-outline', color, focused),
-        }}
-      />
-      <Tabs.Screen name="order/[id]" options={{ href: null }} />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Dashboard',
+            tabBarIcon: ({ color, focused }) => renderTabIcon('view-dashboard-outline', color, focused),
+          }}
+        />
+        <Tabs.Screen
+          name="orders"
+          options={{
+            title: 'Orders',
+            tabBarIcon: ({ color, focused }) => renderTabIcon('clipboard-text-outline', color, focused),
+          }}
+        />
+        <Tabs.Screen
+          name="menu"
+          options={{
+            title: 'Menu',
+            tabBarIcon: ({ color, focused }) => renderTabIcon('silverware-fork-knife', color, focused),
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Store',
+            tabBarIcon: ({ color, focused }) => renderTabIcon('storefront-outline', color, focused),
+          }}
+        />
+        <Tabs.Screen name="order/[id]" options={{ href: null }} />
+      </Tabs>
+    </KitchenAlarmProvider>
   );
 }
 

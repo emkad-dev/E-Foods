@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KitchenBoard } from '../../src/components/KitchenBoard';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
+import { useKitchenAlarm } from '../../src/contexts/KitchenAlarmContext';
+import { isOrderAlarming, orderNeedsAcceptDecision } from '../../src/domain/kitchenAlarm';
 import { formatOrderStatusLabel, formatPaymentStatusLabel } from '../../src/domain/orders';
 import { getPartnerStatusColor } from '../../src/theme/statusColors';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
@@ -12,6 +14,7 @@ import {
   formatPartnerMoney,
   getKitchenElapsedLabel,
   getKitchenHistoryBucket,
+  getKitchenLane,
   getKitchenSignal,
   getKitchenSignalColors,
 } from '../../src/utils/partnerQueue';
@@ -41,6 +44,25 @@ export default function PartnerOrdersScreen() {
   } = usePartnerOrders();
   const [selectedView, setSelectedView] = useState<'live' | 'history'>('live');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'delivered' | 'cancelled' | 'failed'>('all');
+  const { state: alarmState, syncNewOrders } = useKitchenAlarm();
+
+  // The alarm keys off the "New" lane only, exactly as the board's columns do --
+  // `getKitchenLane` rather than a `status === 'placed'` test, so a scheduled order
+  // (not yet released to the kitchen) cannot set an alarm off, and a future status
+  // cannot start alarming by accident.
+  const newLaneOrders = useMemo(
+    () => activeOrders.filter((order) => getKitchenLane(order.status) === 'new'),
+    [activeOrders]
+  );
+
+  // THIS screen feeds the alarm, at BOTH widths, and the alarm state itself lives on
+  // the (partner) layout. That split is the fix for two separate defects: the phone
+  // branch below never mounted KitchenBoard, so nothing armed the alarm at all under
+  // 900dp; and the state used to be local to the board, so opening a ticket unmounted
+  // it and coming back re-announced every order in the queue.
+  useEffect(() => {
+    syncNewOrders(newLaneOrders);
+  }, [newLaneOrders, syncNewOrders]);
 
   const historyCounts = useMemo(
     () => ({
@@ -230,6 +252,32 @@ export default function PartnerOrdersScreen() {
                     </View>
                     <Text style={styles.elapsedText}>{getKitchenElapsedLabel(order.createdAt)}</Text>
                   </View>
+
+                  {/*
+                    Same distinction the board draws, on the phone list: an order that
+                    has been acknowledged but not yet accepted reads differently from
+                    one nobody has looked at. Without it both say only "placed", and
+                    the kitchen cannot tell what it has already handled.
+                  */}
+                  {getKitchenLane(order.status) === 'new' && orderNeedsAcceptDecision(alarmState, order.id) ? (
+                    <View
+                      style={[
+                        styles.alarmChip,
+                        isOrderAlarming(alarmState, order.id) ? styles.alarmChipUnseen : styles.alarmChipSeen,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.alarmChipText,
+                          isOrderAlarming(alarmState, order.id)
+                            ? styles.alarmChipUnseenText
+                            : styles.alarmChipSeenText,
+                        ]}
+                      >
+                        {isOrderAlarming(alarmState, order.id) ? 'Unseen · alarming' : 'Seen · not accepted'}
+                      </Text>
+                    </View>
+                  ) : null}
 
                   <Text style={styles.orderMeta}>
                     {order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0} items ·{' '}
@@ -479,5 +527,29 @@ const styles = StyleSheet.create({
     color: partnerTheme.textMuted,
     fontSize: 13,
     marginTop: 8,
+  },
+  alarmChip: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  alarmChipUnseen: {
+    backgroundColor: partnerTheme.accentSoft,
+  },
+  alarmChipSeen: {
+    backgroundColor: partnerTheme.surfaceMuted,
+  },
+  alarmChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  alarmChipUnseenText: {
+    color: partnerTheme.accentStrong,
+  },
+  alarmChipSeenText: {
+    color: partnerTheme.textMuted,
   },
 });

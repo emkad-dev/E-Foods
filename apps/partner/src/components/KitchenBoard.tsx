@@ -11,29 +11,21 @@
 // the fallback below routes anything unmapped into the attention strip rather
 // than dropping it.
 //
-// The alarm-until-acknowledged behaviour is driven entirely by the pure reducer in
-// ../domain/kitchenAlarm.ts via the ../hooks/useKitchenAlarm.ts wiring hook. This
-// component only:
-//  - routes each order into its lane (Needs attention / Scheduled / New /
-//    Preparing / Ready / Handed off);
-//  - renders the full-screen interstitial + per-order Acknowledge button;
-//  - drives the 20s repeat chime and keep-awake as side effects off the hook's
-//    derived `soundActive` boolean and the screen's foreground state -- neither of
-//    which is logic that belongs in the reducer.
-//
-// Web guard: expo-audio and expo-keep-awake both ship web implementations, but
-// browser autoplay policy can block/throw on player.play() without a prior user
-// gesture, and Wake Lock has limited browser support. Every call into either
-// module is wrapped so a failure there degrades to "no sound / no keep-awake"
-// without breaking the board -- the interstitial and columns still work on web.
-import { useEffect, useMemo, useRef } from 'react';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useAudioPlayer } from 'expo-audio';
+// THE ALARM IS NO LONGER THIS COMPONENT'S. The audio player, the 20s repeat, the
+// keep-awake lock, the seen-ids state and the full-screen interstitial all used to
+// live here -- which is why a phone, where orders.tsx never mounts this board, was
+// never told an order had arrived at all, and why walking into an order detail and
+// back re-armed the alarm for the whole queue. They now live in
+// ../contexts/KitchenAlarmContext.tsx, mounted on the (partner) group layout, which
+// survives both the width check and the navigation. What is left here is the board's
+// own job: routing orders into lanes, and showing per ticket whether its alarm has
+// been seen.
+import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
+import { useKitchenAlarm } from '../contexts/KitchenAlarmContext';
 import type { OrderDocument } from '../domain/entities';
+import { isOrderAlarming, orderNeedsAcceptDecision } from '../domain/kitchenAlarm';
 import { formatOrderStatusLabel } from '../domain/orders';
-import { useKitchenAlarm } from '../hooks/useKitchenAlarm';
 import { partnerTheme } from '../theme/palette';
 import {
   KITCHEN_LANES,
@@ -43,9 +35,6 @@ import {
   getKitchenElapsedLabel,
   getKitchenLane,
 } from '../utils/partnerQueue';
-
-const KITCHEN_ALARM_REPEAT_MS = 20000;
-const KITCHEN_ALARM_KEEP_AWAKE_TAG = 'kitchen-board';
 
 const orderItemCount = (order: OrderDocument) => order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0;
 
@@ -81,11 +70,12 @@ type KitchenBoardProps = {
 };
 
 export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: KitchenBoardProps) {
-  const isForeground = useAppStateVisibility();
+  const { setMuted, state } = useKitchenAlarm();
 
   // Task 18 (G2): scheduled orders live in their own lane, NOT "New" — the
   // kitchen should not treat a not-yet-released order as a live ticket (and the
-  // new-order alarm below keys off the "New" lane only).
+  // new-order alarm keys off the "New" lane only -- orders.tsx feeds exactly this
+  // lane to the alarm provider).
   //
   // activeOrders arrives already sorted by usePartnerOrders
   // (sortLiveKitchenOrders), so grouping in order preserves that ordering inside
@@ -108,79 +98,19 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
     return grouped;
   }, [activeOrders]);
 
-  // The new-order alarm keys off the "New" (placed) lane only.
-  const newOrderIds = useMemo(() => lanes.new.map((order) => order.id), [lanes]);
-  const { state, soundActive, interstitialVisible, acknowledge, setMuted } = useKitchenAlarm(newOrderIds);
-
-  const alarmingOrders = useMemo(
-    () => lanes.new.filter((order) => state.alarming.has(order.id)),
-    [lanes, state.alarming]
-  );
-
-  // expo-audio's web implementation is present, but browser autoplay policy can
-  // still block an unprompted play() call -- that failure is caught below and the
-  // board simply stays visual-only until the tab has had a user gesture.
-  const alarmPlayer = useAudioPlayer(require('../../assets/sounds/kitchen-alarm.wav'));
-  const alarmPlayerRef = useRef(alarmPlayer);
-  alarmPlayerRef.current = alarmPlayer;
-
-  const playAlarmTone = () => {
-    const player = alarmPlayerRef.current;
-    if (!player) {
-      return;
-    }
-
-    try {
-      const seekResult = player.seekTo(0);
-      Promise.resolve(seekResult)
-        .catch(() => {})
-        .finally(() => {
-          try {
-            player.play();
-          } catch {
-            // Autoplay blocked (web) or player not ready -- interstitial still shows.
-          }
-        });
-    } catch {
-      // Ignore -- sound is a courtesy on top of the always-visible interstitial.
-    }
-  };
-
-  // Repeat cadence lives here, not in the reducer: while anything is alarming and
-  // unmuted, chime immediately and then every 20s until acknowledge/mute/mute-off
-  // changes `soundActive`, at which point the effect tears the interval down.
-  useEffect(() => {
-    if (!soundActive) {
-      return;
-    }
-
-    playAlarmTone();
-    const intervalId = setInterval(playAlarmTone, KITCHEN_ALARM_REPEAT_MS);
-
-    return () => clearInterval(intervalId);
-  }, [soundActive]);
-
-  // Keep-awake only while this board is mounted AND the app is foregrounded --
-  // deactivating on cleanup covers both background and unmount, so a tablet left
-  // idle overnight is not held awake by a hidden/unmounted screen.
-  useEffect(() => {
-    if (!isForeground) {
-      return;
-    }
-
-    activateKeepAwakeAsync(KITCHEN_ALARM_KEEP_AWAKE_TAG).catch(() => {
-      // Web Wake Lock has limited support / requires a secure context -- degrade silently.
-    });
-
-    return () => {
-      deactivateKeepAwake(KITCHEN_ALARM_KEEP_AWAKE_TAG).catch(() => {});
-    };
-  }, [isForeground]);
-
   // One ticket shape for the columns and both strips, so a lane cannot quietly
   // grow its own reduced version that omits the overdue badge or the modifiers.
   const renderTicket = (order: OrderDocument, lane: KitchenLane) => {
     const modifiedItems = countModifiedOrderItems(order);
+    // "I have seen this" and "I have accepted this" are different facts, and the
+    // board used to render them identically: every ticket in New looked equally
+    // fresh, so an order somebody had already walked over to and acknowledged was
+    // indistinguishable from one that had just landed. The reducer has always
+    // tracked both -- `alarming` (announced, unacknowledged) and `acknowledged`
+    // (seen, still undecided) -- and these two predicates were exported and tested
+    // with nothing calling them. This is the difference, on the ticket.
+    const alarming = isOrderAlarming(state, order.id);
+    const awaitingDecision = orderNeedsAcceptDecision(state, order.id);
 
     return (
       <TouchableOpacity
@@ -206,6 +136,14 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
         {order.needsAttention === true ? (
           <View style={styles.ticketOverdue}>
             <Text style={styles.ticketOverdueText}>Acceptance overdue</Text>
+          </View>
+        ) : null}
+
+        {lane === 'new' && awaitingDecision ? (
+          <View style={[styles.ticketAlarm, alarming ? styles.ticketAlarmUnseen : styles.ticketAlarmSeen]}>
+            <Text style={[styles.ticketAlarmText, alarming ? styles.ticketAlarmUnseenText : styles.ticketAlarmSeenText]}>
+              {alarming ? 'Unseen · alarming' : 'Seen · not accepted'}
+            </Text>
           </View>
         ) : null}
 
@@ -297,28 +235,6 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
           <Text style={styles.handoffTitle}>Handed off · {lanes.handedOff.length}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stripList}>
             {lanes.handedOff.map((order) => renderTicket(order, 'handedOff'))}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {interstitialVisible ? (
-        <View style={styles.interstitial}>
-          <Text style={styles.interstitialTitle}>
-            {alarmingOrders.length > 1 ? `${alarmingOrders.length} new orders` : 'New order'}
-          </Text>
-
-          <ScrollView contentContainerStyle={styles.interstitialList}>
-            {alarmingOrders.map((order) => (
-              <View key={order.id} style={styles.interstitialCard}>
-                <Text style={styles.interstitialOrderNumber}>#{order.id.slice(-6)}</Text>
-                <Text style={styles.interstitialOrderMeta}>
-                  {orderItemCount(order)} items · {formatPartnerMoney(order.pricing?.total ?? 0)}
-                </Text>
-                <TouchableOpacity style={styles.acknowledgeButton} onPress={() => acknowledge(order.id)}>
-                  <Text style={styles.acknowledgeButtonText}>Acknowledge</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
           </ScrollView>
         </View>
       ) : null}
@@ -479,6 +395,32 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
+  ticketAlarm: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  ticketAlarmUnseen: {
+    backgroundColor: partnerTheme.accentSoft,
+  },
+  ticketAlarmSeen: {
+    backgroundColor: partnerTheme.surfaceMuted,
+  },
+  ticketAlarmText: {
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  ticketAlarmUnseenText: {
+    color: partnerTheme.accentStrong,
+  },
+  ticketAlarmSeenText: {
+    // Deliberately quiet: an acknowledged ticket has already had its moment and
+    // must not keep competing with the one that has not been seen yet.
+    color: partnerTheme.textMuted,
+  },
   ticketMeta: {
     color: partnerTheme.textMuted,
     fontSize: 16,
@@ -495,57 +437,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginTop: 8,
-  },
-  interstitial: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(13, 21, 34, 0.96)',
-    bottom: 0,
-    justifyContent: 'center',
-    left: 0,
-    padding: 24,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  interstitialTitle: {
-    color: '#ffffff',
-    fontSize: 44,
-    fontWeight: '900',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  interstitialList: {
-    alignItems: 'center',
-    gap: 16,
-    paddingBottom: 24,
-  },
-  interstitialCard: {
-    alignItems: 'center',
-    backgroundColor: partnerTheme.surface,
-    borderRadius: 24,
-    minWidth: 320,
-    padding: 28,
-  },
-  interstitialOrderNumber: {
-    color: partnerTheme.text,
-    fontSize: 34,
-    fontWeight: '900',
-  },
-  interstitialOrderMeta: {
-    color: partnerTheme.textMuted,
-    fontSize: 18,
-    marginTop: 10,
-  },
-  acknowledgeButton: {
-    backgroundColor: partnerTheme.accent,
-    borderRadius: 999,
-    marginTop: 20,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-  },
-  acknowledgeButtonText: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '800',
   },
 });
