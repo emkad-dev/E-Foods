@@ -7,7 +7,7 @@ import type { OrderDocument, RestaurantDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getPartnerRestaurantOrders } from '../services/partnerReadModel';
 import { supabase } from '../services/supabase/config';
-import { sortKitchenHistoryOrders } from '../utils/partnerQueue';
+import { sortKitchenHistoryOrders, sortLiveKitchenOrders } from '../utils/partnerQueue';
 
 export type PartnerOrder = OrderDocument;
 
@@ -16,6 +16,14 @@ const FALLBACK_MS = 120000;
 export const usePartnerOrders = () => {
   const [orders, setOrders] = useState<PartnerOrder[]>([]);
   const [restaurant, setRestaurant] = useState<RestaurantDocument | null>(null);
+  // "Did a fetch ever succeed?", which `restaurant === null` could not answer.
+  // A load error used to null the restaurant, and both layouts branch on
+  // `!restaurant` BEFORE they reach their error card — so a dropped connection
+  // told the partner "Restaurant profile not linked", a claim about their
+  // account that nothing had established, and sent them to support instead of
+  // to Retry. Only a completed fetch that genuinely returned no restaurant may
+  // say that.
+  const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +39,15 @@ export const usePartnerOrders = () => {
         const nextData = await getPartnerRestaurantOrders();
         setOrders(nextData.orders as PartnerOrder[]);
         setRestaurant(nextData.restaurant);
+        setLoaded(true);
         setError(null);
       } catch (nextError: any) {
         console.error('Error loading partner orders:', nextError);
-        setOrders([]);
-        setRestaurant(null);
+        // Deliberately NOT clearing `orders`/`restaurant`. A failed background
+        // refresh or a tapped Retry used to empty the board mid-service: the
+        // kitchen watched every live ticket disappear because one poll timed
+        // out. The last good snapshot is stale, not wrong — it stays on screen
+        // and the error card says the queue could not be refreshed.
         setError(nextError.message ?? 'Unable to load restaurant orders right now.');
       } finally {
         if (mode === 'refresh') {
@@ -96,8 +108,13 @@ export const usePartnerOrders = () => {
 
   const restaurantOrders = useMemo(() => orders, [orders]);
 
+  // Sorted here rather than in each consumer so the phone list and the kitchen
+  // board agree. The server already sorts this list, but its
+  // `getPartnerKitchenPriority` gives `escalated` the same catch-all rank as an
+  // unknown status, so an escalated ticket arrived below routine ones; this is
+  // a pure reordering of the same array, applied once at the source.
   const activeOrders = useMemo(
-    () => restaurantOrders.filter((order) => !isTerminalOrderStatus(order.status)),
+    () => sortLiveKitchenOrders(restaurantOrders.filter((order) => !isTerminalOrderStatus(order.status))),
     [restaurantOrders]
   );
 
@@ -131,6 +148,9 @@ export const usePartnerOrders = () => {
     error,
     incomingOrders,
     loading,
+    // True only once a fetch has completed and genuinely returned no
+    // restaurant. Never true because a fetch failed.
+    missingRestaurantLink: loaded && !restaurant,
     orders: restaurantOrders,
     preparingOrders,
     refreshing,

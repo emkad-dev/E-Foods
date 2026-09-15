@@ -2,10 +2,20 @@
 // width instead of the phone list. Consumes the SAME usePartnerOrders-derived
 // order list -- no new fetch, no polling.
 //
+// LANES, NOT A STATUS SWITCH. This component used to decide placement with an
+// if/else chain over five statuses while usePartnerOrders handed it everything
+// non-terminal. `escalated`, `picked_up` and `on_the_way` matched no branch and
+// were rendered NOWHERE -- no column, no count, no ticket, no warning. Placement
+// now comes from `getKitchenLane` in ../utils/partnerQueue.ts, whose exhaustive
+// Record makes a new order status a compile error until it is given a lane, and
+// the fallback below routes anything unmapped into the attention strip rather
+// than dropping it.
+//
 // The alarm-until-acknowledged behaviour is driven entirely by the pure reducer in
 // ../domain/kitchenAlarm.ts via the ../hooks/useKitchenAlarm.ts wiring hook. This
 // component only:
-//  - maps order status -> column (New / Preparing / Ready);
+//  - routes each order into its lane (Needs attention / Scheduled / New /
+//    Preparing / Ready / Handed off);
 //  - renders the full-screen interstitial + per-order Acknowledge button;
 //  - drives the 20s repeat chime and keep-awake as side effects off the hook's
 //    derived `soundActive` boolean and the screen's foreground state -- neither of
@@ -22,21 +32,30 @@ import { useAudioPlayer } from 'expo-audio';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { OrderDocument } from '../domain/entities';
-import { normalizeOrderStatus } from '../domain/orders';
+import { formatOrderStatusLabel } from '../domain/orders';
 import { useKitchenAlarm } from '../hooks/useKitchenAlarm';
 import { partnerTheme } from '../theme/palette';
-import { formatPartnerMoney, getKitchenElapsedLabel } from '../utils/partnerQueue';
+import {
+  KITCHEN_LANES,
+  type KitchenLane,
+  countModifiedOrderItems,
+  formatPartnerMoney,
+  getKitchenElapsedLabel,
+  getKitchenLane,
+} from '../utils/partnerQueue';
 
 const KITCHEN_ALARM_REPEAT_MS = 20000;
 const KITCHEN_ALARM_KEEP_AWAKE_TAG = 'kitchen-board';
 
 const orderItemCount = (order: OrderDocument) => order.items?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0;
 
-type KitchenColumn = {
-  key: 'scheduled' | 'new' | 'preparing' | 'ready';
-  title: string;
-  orders: OrderDocument[];
-};
+/** The four lanes the kitchen actually works out of, in board order. */
+const BOARD_COLUMNS: { key: Extract<KitchenLane, 'scheduled' | 'new' | 'preparing' | 'ready'>; title: string }[] = [
+  { key: 'scheduled', title: 'Scheduled' },
+  { key: 'new', title: 'New' },
+  { key: 'preparing', title: 'Preparing' },
+  { key: 'ready', title: 'Ready' },
+];
 
 // Task 18 (G2): a scheduled order shows its slot, not kitchen-elapsed time —
 // the kitchen has not started it yet.
@@ -64,46 +83,38 @@ type KitchenBoardProps = {
 export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: KitchenBoardProps) {
   const isForeground = useAppStateVisibility();
 
-  const columns = useMemo<KitchenColumn[]>(() => {
-    const scheduledOrders: OrderDocument[] = [];
-    const newOrders: OrderDocument[] = [];
-    const preparingOrders: OrderDocument[] = [];
-    const readyOrders: OrderDocument[] = [];
+  // Task 18 (G2): scheduled orders live in their own lane, NOT "New" — the
+  // kitchen should not treat a not-yet-released order as a live ticket (and the
+  // new-order alarm below keys off the "New" lane only).
+  //
+  // activeOrders arrives already sorted by usePartnerOrders
+  // (sortLiveKitchenOrders), so grouping in order preserves that ordering inside
+  // every lane — escalated first in the attention strip, oldest ticket first in
+  // each column.
+  const lanes = useMemo(() => {
+    const grouped = Object.fromEntries(KITCHEN_LANES.map((lane) => [lane, [] as OrderDocument[]])) as Record<
+      KitchenLane,
+      OrderDocument[]
+    >;
 
     for (const order of activeOrders) {
-      const status = normalizeOrderStatus(order.status);
-
-      // Task 18 (G2): scheduled orders live in their own lane, NOT "New" — the
-      // kitchen should not treat a not-yet-released order as a live ticket (and
-      // the new-order alarm below keys off the "New" lane only).
-      if (status === 'scheduled') {
-        scheduledOrders.push(order);
-      } else if (status === 'placed') {
-        newOrders.push(order);
-      } else if (status === 'accepted' || status === 'preparing') {
-        preparingOrders.push(order);
-      } else if (status === 'ready_for_pickup') {
-        readyOrders.push(order);
-      }
+      // `?? 'attention'` is the last line of defence, not dead code: a terminal
+      // status reaching this list (getKitchenLane returns null for those) would
+      // otherwise be dropped exactly the way escalated/picked_up/on_the_way were.
+      // Nothing handed to this board may go unrendered — show it loudly instead.
+      grouped[getKitchenLane(order.status) ?? 'attention'].push(order);
     }
 
-    return [
-      { key: 'scheduled', title: 'Scheduled', orders: scheduledOrders },
-      { key: 'new', title: 'New', orders: newOrders },
-      { key: 'preparing', title: 'Preparing', orders: preparingOrders },
-      { key: 'ready', title: 'Ready', orders: readyOrders },
-    ];
+    return grouped;
   }, [activeOrders]);
 
-  // The new-order alarm keys off the "New" (placed) lane, not scheduled — a
-  // scheduled order must not trip the kitchen alarm until it is released.
-  const newColumn = useMemo(() => columns.find((column) => column.key === 'new') ?? columns[0], [columns]);
-  const newOrderIds = useMemo(() => newColumn.orders.map((order) => order.id), [newColumn]);
+  // The new-order alarm keys off the "New" (placed) lane only.
+  const newOrderIds = useMemo(() => lanes.new.map((order) => order.id), [lanes]);
   const { state, soundActive, interstitialVisible, acknowledge, setMuted } = useKitchenAlarm(newOrderIds);
 
   const alarmingOrders = useMemo(
-    () => newColumn.orders.filter((order) => state.alarming.has(order.id)),
-    [newColumn, state.alarming]
+    () => lanes.new.filter((order) => state.alarming.has(order.id)),
+    [lanes, state.alarming]
   );
 
   // expo-audio's web implementation is present, but browser autoplay policy can
@@ -166,6 +177,65 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
     };
   }, [isForeground]);
 
+  // One ticket shape for the columns and both strips, so a lane cannot quietly
+  // grow its own reduced version that omits the overdue badge or the modifiers.
+  const renderTicket = (order: OrderDocument, lane: KitchenLane) => {
+    const modifiedItems = countModifiedOrderItems(order);
+
+    return (
+      <TouchableOpacity
+        key={order.id}
+        style={[
+          styles.ticketCard,
+          lane === 'attention' || lane === 'handedOff' ? styles.ticketCardStrip : null,
+          lane === 'attention' ? styles.ticketCardAttention : null,
+        ]}
+        activeOpacity={0.9}
+        onPress={() => onSelectOrder(order.id)}
+      >
+        <Text style={styles.ticketNumber}>#{order.id.slice(-6)}</Text>
+
+        {/*
+          The acceptance deadline made visible at last. The sweep leaves this
+          order 'placed' and only raises needsAttention, so the status chip alone
+          cannot tell the kitchen its clock already ran out — and it is the
+          restaurant that pays for the miss. No countdown is shown: the deadline
+          length lives in PlatformSettings and is never sent to this app, so a
+          timer here would be invented rather than measured.
+        */}
+        {order.needsAttention === true ? (
+          <View style={styles.ticketOverdue}>
+            <Text style={styles.ticketOverdueText}>Acceptance overdue</Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.ticketMeta}>
+          {orderItemCount(order)} items · {formatPartnerMoney(order.pricing?.total ?? 0)}
+        </Text>
+
+        {/*
+          Only when something is actually modified. The kitchen reads this board
+          at a glance, and a line that is present-but-empty on the 90% of tickets
+          with no modifiers trains people to stop reading it — which is the same
+          way the modifiers got missed when there was no line at all.
+        */}
+        {modifiedItems > 0 ? (
+          <Text style={styles.ticketModifiers}>
+            {modifiedItems === 1 ? '1 item has options' : `${modifiedItems} items have options`}
+          </Text>
+        ) : null}
+
+        <Text style={styles.ticketElapsed}>
+          {lane === 'scheduled'
+            ? formatScheduledSlot(order.scheduledFor) ?? 'Scheduled'
+            : lane === 'attention' || lane === 'handedOff'
+              ? `${formatOrderStatusLabel(order.status)} · ${getKitchenElapsedLabel(order.createdAt)}`
+              : getKitchenElapsedLabel(order.createdAt)}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.screen}>
       <View style={styles.topBar}>
@@ -180,43 +250,56 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
         </TouchableOpacity>
       </View>
 
+      {/*
+        ABOVE the columns and loud: an escalated order is one dispatch pulled out
+        of the flow, and every partner action on it is disabled — the kitchen
+        cannot fix it, but somebody must see it. Rendered only when occupied, so
+        the ordinary board is unchanged.
+      */}
+      {lanes.attention.length > 0 ? (
+        <View style={styles.attentionStrip}>
+          <Text style={styles.attentionTitle}>Needs attention · {lanes.attention.length}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stripList}>
+            {lanes.attention.map((order) => renderTicket(order, 'attention'))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       <View style={styles.board}>
-        {columns.map((column) => (
+        {BOARD_COLUMNS.map((column) => (
           <View key={column.key} style={styles.column}>
             <View style={styles.columnHeader}>
               <Text style={styles.columnTitle}>{column.title}</Text>
               <View style={styles.columnCount}>
-                <Text style={styles.columnCountText}>{column.orders.length}</Text>
+                <Text style={styles.columnCountText}>{lanes[column.key].length}</Text>
               </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.columnList}>
-              {column.orders.length === 0 ? (
+              {lanes[column.key].length === 0 ? (
                 <Text style={styles.columnEmpty}>No tickets</Text>
               ) : (
-                column.orders.map((order) => (
-                  <TouchableOpacity
-                    key={order.id}
-                    style={styles.ticketCard}
-                    activeOpacity={0.9}
-                    onPress={() => onSelectOrder(order.id)}
-                  >
-                    <Text style={styles.ticketNumber}>#{order.id.slice(-6)}</Text>
-                    <Text style={styles.ticketMeta}>
-                      {orderItemCount(order)} items · {formatPartnerMoney(order.pricing?.total ?? 0)}
-                    </Text>
-                    <Text style={styles.ticketElapsed}>
-                      {column.key === 'scheduled'
-                        ? formatScheduledSlot(order.scheduledFor) ?? 'Scheduled'
-                        : getKitchenElapsedLabel(order.createdAt)}
-                    </Text>
-                  </TouchableOpacity>
-                ))
+                lanes[column.key].map((order) => renderTicket(order, column.key))
               )}
             </ScrollView>
           </View>
         ))}
       </View>
+
+      {/*
+        BELOW the columns and quiet: a rider has this food, so it is no longer
+        the kitchen's work — but it is not finished either, and it used to vanish
+        outright. Present, countable, tappable; not competing with the lanes
+        someone is cooking out of.
+      */}
+      {lanes.handedOff.length > 0 ? (
+        <View style={styles.handoffStrip}>
+          <Text style={styles.handoffTitle}>Handed off · {lanes.handedOff.length}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stripList}>
+            {lanes.handedOff.map((order) => renderTicket(order, 'handedOff'))}
+          </ScrollView>
+        </View>
+      ) : null}
 
       {interstitialVisible ? (
         <View style={styles.interstitial}>
@@ -276,6 +359,38 @@ const styles = StyleSheet.create({
   muteButtonTextMuted: {
     color: partnerTheme.dangerText,
   },
+  attentionStrip: {
+    backgroundColor: partnerTheme.dangerSoft,
+    borderRadius: 20,
+    marginBottom: 16,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  attentionTitle: {
+    color: partnerTheme.dangerText,
+    fontSize: 20,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  handoffStrip: {
+    backgroundColor: partnerTheme.surfaceMuted,
+    borderRadius: 20,
+    marginTop: 16,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  handoffTitle: {
+    color: partnerTheme.textMuted,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  stripList: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 12,
+  },
   board: {
     flex: 1,
     flexDirection: 'row',
@@ -331,14 +446,48 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 16,
   },
+  ticketCardStrip: {
+    // Strips lay tickets out horizontally, so the column's bottom gap becomes a
+    // width floor instead.
+    marginBottom: 0,
+    minWidth: 240,
+  },
+  ticketCardAttention: {
+    // The strip's own fill is already dangerSoft, so the card needs a border to
+    // stay a distinct ticket rather than melting into the band behind it.
+    borderColor: partnerTheme.danger,
+    borderWidth: 2,
+  },
   ticketNumber: {
     color: partnerTheme.text,
     fontSize: 22,
     fontWeight: '800',
   },
+  ticketOverdue: {
+    alignSelf: 'flex-start',
+    backgroundColor: partnerTheme.dangerSoft,
+    borderRadius: 999,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  ticketOverdueText: {
+    // `dangerText` on `dangerSoft`, not the saturated fill red — the pairing
+    // partnerQueue's getKitchenSignalColors settled on for the same surface.
+    color: partnerTheme.dangerText,
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
   ticketMeta: {
     color: partnerTheme.textMuted,
     fontSize: 16,
+    marginTop: 6,
+  },
+  ticketModifiers: {
+    color: partnerTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
     marginTop: 6,
   },
   ticketElapsed: {

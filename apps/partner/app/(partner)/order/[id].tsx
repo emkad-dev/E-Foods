@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +15,10 @@ import {
   rejectPartnerOrder,
 } from '../../../src/services/partnerOrderActions';
 import { partnerTheme } from '../../../src/theme/palette';
-import { formatPartnerMoney } from '../../../src/utils/partnerQueue';
+import { formatOrderItemOptions, formatPartnerMoney } from '../../../src/utils/partnerQueue';
+
+/** The five transitions this screen can fire; at most one may be in flight. */
+type OrderAction = 'accept' | 'preparing' | 'ready' | 'delivered' | 'reject';
 
 export default function PartnerOrderDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -48,56 +52,74 @@ export default function PartnerOrderDetailScreen() {
     showNotice({ tone: 'error', title: 'Update failed', message });
   };
 
-  const handleAccept = async () => {
-    if (!order) return;
+  // Per-action, not one screen-wide flag: the same reason the customer profile
+  // screen keeps its own `busy` rather than reusing the auth context's. Only the
+  // button that was tapped should say "Accepting...".
+  const [busy, setBusy] = useState<OrderAction | null>(null);
+
+  // THE guard. `busy` drives the labels and the disabled styling, but setState
+  // is asynchronous — two taps landing in the same tick both read `busy === null`
+  // and both fire. A double-tapped Accept therefore sent a second request that
+  // the server correctly refused with 412 "Only newly placed orders can be
+  // accepted", and this screen pinned a sticky "Update failed" over an order
+  // that HAD accepted — the one outcome worse than silence, because it tells a
+  // kitchen to redo work that already succeeded. The ref is written before the
+  // first await, so the second tap returns immediately.
+  const busyRef = useRef<OrderAction | null>(null);
+
+  // The order is read once and handed to the callback, so every action works on
+  // the snapshot that was on screen when the button was tapped rather than
+  // whatever realtime has swapped in since.
+  const runAction = async (
+    action: OrderAction,
+    run: (target: NonNullable<typeof order>) => Promise<unknown>,
+    fallbackMessage: string
+  ) => {
+    const target = order;
+    if (!target || busyRef.current) return;
+
+    busyRef.current = action;
+    setBusy(action);
 
     try {
-      await acceptPartnerOrder(order.id, order.timeline ?? null);
+      await run(target);
     } catch (nextError: any) {
-      reportFailure(nextError?.message ?? 'Unable to accept this order.');
+      reportFailure(nextError?.message ?? fallbackMessage);
+    } finally {
+      busyRef.current = null;
+      setBusy(null);
     }
   };
 
-  const handlePreparing = async () => {
-    if (!order) return;
+  const handleAccept = () =>
+    runAction('accept', (target) => acceptPartnerOrder(target.id, target.timeline ?? null), 'Unable to accept this order.');
 
-    try {
-      await markPartnerOrderPreparing(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure(nextError?.message ?? 'Unable to mark this order as preparing.');
-    }
-  };
+  const handlePreparing = () =>
+    runAction(
+      'preparing',
+      (target) => markPartnerOrderPreparing(target.id, target.timeline ?? null),
+      'Unable to mark this order as preparing.'
+    );
 
-  const handleReady = async () => {
-    if (!order) return;
+  const handleReady = () =>
+    runAction('ready', (target) => markPartnerOrderReady(target.id, target.timeline ?? null), 'Unable to mark this order ready.');
 
-    try {
-      await markPartnerOrderReady(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure(nextError?.message ?? 'Unable to mark this order ready.');
-    }
-  };
+  const handleDelivered = () =>
+    runAction(
+      'delivered',
+      (target) => markPartnerOrderDelivered(target.id, target.timeline ?? null),
+      'Unable to complete this order.'
+    );
 
-  const handleDelivered = async () => {
-    if (!order) return;
-
-    try {
-      await markPartnerOrderDelivered(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure(nextError?.message ?? 'Unable to complete this order.');
-    }
-  };
-
-  const handleReject = async () => {
-    if (!order) return;
-
-    try {
-      await rejectPartnerOrder(order.id, order.timeline ?? null);
-      router.back();
-    } catch (nextError: any) {
-      reportFailure(nextError?.message ?? 'Unable to reject this order.');
-    }
-  };
+  const handleReject = () =>
+    runAction(
+      'reject',
+      async (target) => {
+        await rejectPartnerOrder(target.id, target.timeline ?? null);
+        router.back();
+      },
+      'Unable to reject this order.'
+    );
 
   if (loading) {
     return (
@@ -147,22 +169,59 @@ export default function PartnerOrderDetailScreen() {
           </View>
         </View>
 
+        {/*
+          The acceptance deadline, surfaced where the accept decision is made.
+          The sweep leaves the order 'placed' and only raises `needsAttention`,
+          so the status chip above says "Placed" exactly as it did a minute after
+          checkout — nothing on this screen told the restaurant its clock had run
+          out, or that the miss is counted against it.
+
+          No countdown, deliberately: `acceptanceDeadlineMinutes` lives in
+          PlatformSettings and is never sent to this app, so a timer here would be
+          guessed from createdAt rather than measured. The flag is a fact; the
+          remaining seconds are not.
+        */}
+        {order.needsAttention === true ? (
+          <View style={styles.overdueCard}>
+            <Text style={styles.overdueTitle}>Acceptance overdue</Text>
+            <Text style={styles.overdueCopy}>
+              This order passed its acceptance deadline and support has been notified. If it is not accepted, it will be
+              cancelled automatically, refunded in full, and counted as a missed order for this restaurant.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Order items</Text>
-          {order.items?.map((item) => (
-            <View key={item.id ?? item.name} style={styles.itemRow}>
-              <View>
-                <Text style={styles.itemName}>{item.name ?? 'Order item'}</Text>
-                <Text style={styles.itemMeta}>Qty {item.quantity ?? 0}</Text>
+          {order.items?.map((item) => {
+            // Null, not an empty string: most items are ordered plain, and a
+            // permanent empty "Options:" line on every row is how a kitchen
+            // learns to stop reading the row that occasionally says "no onions".
+            const options = formatOrderItemOptions(item);
+
+            return (
+              <View key={item.id ?? item.name} style={styles.itemRow}>
+                <View style={styles.itemDetails}>
+                  <Text style={styles.itemName}>{item.name ?? 'Order item'}</Text>
+                  <Text style={styles.itemMeta}>Qty {item.quantity ?? 0}</Text>
+                  {options ? <Text style={styles.itemOptions}>{options}</Text> : null}
+                </View>
+                <Text style={styles.itemPrice}>{formatPartnerMoney(((item.price ?? 0) * (item.quantity ?? 0)) || 0)}</Text>
               </View>
-              <Text style={styles.itemPrice}>{formatPartnerMoney(((item.price ?? 0) * (item.quantity ?? 0)) || 0)}</Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Handoff notes</Text>
           <Text style={styles.metaLine}>Payment: {order.payment?.status ?? 'pending'}</Text>
+          {/*
+            The server has loaded and sent customerPhone on this response all
+            along (`loadUserPhoneNumber` in partnerGetRestaurantOrder); nothing
+            rendered it, so a kitchen with a question about an order had no way
+            to reach the person who placed it.
+          */}
+          <Text style={styles.metaLine}>Customer phone: {order.customerPhone?.trim() || 'Not provided'}</Text>
           <Text style={styles.metaLine}>
             Pickup/delivery point: {order.deliveryLocation?.shortAddress ?? order.deliveryAddress ?? 'Pending'}
           </Text>
@@ -178,56 +237,71 @@ export default function PartnerOrderDetailScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={[styles.actionRail, isCompactRail ? styles.actionRailCompact : null]}
           >
+            {/*
+              Every button is disabled while ANY action is in flight, not just
+              the one that was tapped: the transitions are a chain, so letting
+              "Start preparing" fire while Accept is still open sends the second
+              request against a status the server has not moved yet and earns the
+              same spurious 412 the double-tap did.
+            */}
             <TouchableOpacity
               style={[
                 styles.actionButton,
                 isCompactRail ? styles.actionButtonCompact : null,
-                normalizedStatus !== 'placed' ? styles.actionButtonDisabled : null,
+                busy !== null || normalizedStatus !== 'placed' ? styles.actionButtonDisabled : null,
               ]}
-              disabled={normalizedStatus !== 'placed'}
+              disabled={busy !== null || normalizedStatus !== 'placed'}
               onPress={handleAccept}
             >
-              <Text style={styles.actionButtonText}>Accept order</Text>
+              <Text style={styles.actionButtonText}>{busy === 'accept' ? 'Accepting...' : 'Accept order'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.actionButton,
                 isCompactRail ? styles.actionButtonCompact : null,
-                !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+                busy !== null || !['accepted', 'placed'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
               ]}
-              disabled={!['accepted', 'placed'].includes(normalizedStatus)}
+              disabled={busy !== null || !['accepted', 'placed'].includes(normalizedStatus)}
               onPress={handlePreparing}
             >
-              <Text style={styles.actionButtonText}>Start preparing</Text>
+              <Text style={styles.actionButtonText}>{busy === 'preparing' ? 'Starting...' : 'Start preparing'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.actionButton,
                 isCompactRail ? styles.actionButtonCompact : null,
-                !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+                busy !== null || !['accepted', 'preparing'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
               ]}
-              disabled={!['accepted', 'preparing'].includes(normalizedStatus)}
+              disabled={busy !== null || !['accepted', 'preparing'].includes(normalizedStatus)}
               onPress={handleReady}
             >
-              <Text style={styles.actionButtonText}>{isPickup ? 'Mark ready for pickup' : 'Mark ready'}</Text>
+              <Text style={styles.actionButtonText}>
+                {busy === 'ready' ? 'Marking...' : isPickup ? 'Mark ready for pickup' : 'Mark ready'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.actionButton, isCompactRail ? styles.actionButtonCompact : null, !canComplete ? styles.actionButtonDisabled : null]}
-              disabled={!canComplete}
+              style={[
+                styles.actionButton,
+                isCompactRail ? styles.actionButtonCompact : null,
+                busy !== null || !canComplete ? styles.actionButtonDisabled : null,
+              ]}
+              disabled={busy !== null || !canComplete}
               onPress={handleDelivered}
             >
-              <Text style={styles.actionButtonText}>{isPickup ? 'Mark collected' : 'Mark delivered'}</Text>
+              <Text style={styles.actionButtonText}>
+                {busy === 'delivered' ? 'Completing...' : isPickup ? 'Mark collected' : 'Mark delivered'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.rejectButton,
                 isCompactRail ? styles.actionButtonCompact : null,
-                !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
+                busy !== null || !['placed', 'accepted'].includes(normalizedStatus) ? styles.actionButtonDisabled : null,
               ]}
-              disabled={!['placed', 'accepted'].includes(normalizedStatus)}
+              disabled={busy !== null || !['placed', 'accepted'].includes(normalizedStatus)}
               onPress={handleReject}
             >
-              <Text style={styles.rejectButtonText}>Reject order</Text>
+              <Text style={styles.rejectButtonText}>{busy === 'reject' ? 'Rejecting...' : 'Reject order'}</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -335,6 +409,28 @@ const styles = StyleSheet.create({
     paddingLeft: 2,
     paddingRight: 2,
   },
+  overdueCard: {
+    backgroundColor: partnerTheme.dangerSoft,
+    borderColor: partnerTheme.danger,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 18,
+  },
+  overdueTitle: {
+    // `dangerText` on `dangerSoft`, never the saturated fill red — same pairing
+    // the kitchen chips settled on for this surface.
+    color: partnerTheme.dangerText,
+    fontSize: 17,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  overdueCopy: {
+    color: partnerTheme.dangerText,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+  },
   itemRow: {
     alignItems: 'center',
     borderTopColor: partnerTheme.border,
@@ -342,6 +438,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: 12,
+  },
+  itemDetails: {
+    // The options line is free text of unbounded length; without a flex bound it
+    // pushes the price off the row instead of wrapping.
+    flex: 1,
+    paddingRight: 12,
   },
   itemName: {
     color: partnerTheme.text,
@@ -351,6 +453,13 @@ const styles = StyleSheet.create({
   itemMeta: {
     color: partnerTheme.textMuted,
     fontSize: 13,
+    marginTop: 4,
+  },
+  itemOptions: {
+    color: partnerTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
     marginTop: 4,
   },
   itemPrice: {

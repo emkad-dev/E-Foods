@@ -33,6 +33,7 @@ export default function PartnerOrdersScreen() {
     historyOrders,
     incomingOrders,
     loading,
+    missingRestaurantLink,
     preparingOrders,
     refreshing,
     reload,
@@ -73,21 +74,48 @@ export default function PartnerOrdersScreen() {
     );
   }
 
+  // ONE error card for both layouts. It used to exist only in the phone branch,
+  // so a kitchen tablet — the device a service is actually run from — showed a
+  // failed queue with no message and no way to retry but a full app restart.
+  const queueErrorCard = error ? (
+    <View style={styles.errorCard}>
+      <Text style={styles.errorTitle}>Kitchen queue unavailable</Text>
+      <Text style={styles.errorText}>{error}</Text>
+      <TouchableOpacity
+        style={[styles.retryButton, refreshing ? styles.retryButtonDisabled : null]}
+        onPress={reload}
+        disabled={refreshing}
+      >
+        <Text style={styles.retryButtonText}>{refreshing ? 'Retrying...' : 'Retry queue'}</Text>
+      </TouchableOpacity>
+    </View>
+  ) : null;
+
+  // `missingRestaurantLink`, not `!restaurant`. Both layouts used to branch on
+  // `!restaurant` before ever reaching an error card, and the hook nulled the
+  // restaurant on ANY load failure — so a dropped connection accused the partner
+  // of an unlinked profile. That claim is now made only when a fetch completed
+  // and genuinely came back without a restaurant.
+  const notLinkedCard = (
+    <View style={styles.emptyCard}>
+      <Text style={styles.emptyTitle}>Restaurant profile not linked</Text>
+      <Text style={styles.emptyCopy}>We need a matching restaurant record before partner orders can be filtered.</Text>
+    </View>
+  );
+
   if (isBoardLayout) {
     return (
       <View style={[styles.boardScreen, { paddingTop: insets.top + 16 }]}>
-        {!restaurant ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Restaurant profile not linked</Text>
-            <Text style={styles.emptyCopy}>We need a matching restaurant record before partner orders can be filtered.</Text>
-          </View>
-        ) : (
+        {queueErrorCard}
+        {restaurant ? (
           <KitchenBoard
             activeOrders={activeOrders}
             restaurantName={restaurant.name}
             onSelectOrder={(orderId) => router.push(`/(partner)/order/${orderId}`)}
           />
-        )}
+        ) : missingRestaurantLink ? (
+          notLinkedCard
+        ) : null}
       </View>
     );
   }
@@ -100,10 +128,10 @@ export default function PartnerOrdersScreen() {
       </Text>
 
       {!restaurant ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Restaurant profile not linked</Text>
-          <Text style={styles.emptyCopy}>We need a matching restaurant record before partner orders can be filtered.</Text>
-        </View>
+        <>
+          {queueErrorCard}
+          {missingRestaurantLink ? notLinkedCard : null}
+        </>
       ) : (
         <>
           <View style={styles.summaryRow}>
@@ -159,19 +187,7 @@ export default function PartnerOrdersScreen() {
             </View>
           ) : null}
 
-          {error ? (
-            <View style={styles.errorCard}>
-              <Text style={styles.errorTitle}>Kitchen queue unavailable</Text>
-              <Text style={styles.errorText}>{error}</Text>
-              <TouchableOpacity
-                style={[styles.retryButton, refreshing ? styles.retryButtonDisabled : null]}
-                onPress={reload}
-                disabled={refreshing}
-              >
-                <Text style={styles.retryButtonText}>{refreshing ? 'Retrying...' : 'Retry queue'}</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          {queueErrorCard}
 
           {visibleOrders.length === 0 ? (
             <View style={styles.emptyCard}>

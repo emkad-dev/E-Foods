@@ -271,6 +271,17 @@ export interface OrderDocument extends DocumentData {
   // immediate order.
   scheduledFor?: unknown | null;
   customerPhone?: string | null;
+  /**
+   * Task 14 (E3): the acceptance-deadline escalation flag, raised by
+   * `sweepUnacceptedOrders` once an order has sat `placed` past
+   * `acceptanceDeadlineMinutes`, and cleared when it is auto-cancelled at 2×.
+   *
+   * The order STAYS `placed` while this is true — escalation is a heads-up, not
+   * a state transition — so `status` alone cannot tell a restaurant that its
+   * clock has already run out. `toOrderSnapshotResponse` has always sent it;
+   * only this declaration was missing, which is why no client read it.
+   */
+  needsAttention?: boolean;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
   orderGroupId?: string | null;

@@ -3,6 +3,8 @@ export type {
   MenuCategoryDocument,
   MenuItemDocument,
   OrderDocument,
+  OrderItemDocument,
+  OrderItemSelectedOptionDocument,
   RestaurantApprovalRecord,
   RestaurantDocument,
   UserDocument,
