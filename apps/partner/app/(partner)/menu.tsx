@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import {
@@ -702,6 +702,8 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   categoryPickerChip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
     borderRadius: radius.pill,
@@ -868,6 +870,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   inlineAction: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: partnerTheme.accentSoft,
     borderRadius: radius.md,
     paddingHorizontal: 12,

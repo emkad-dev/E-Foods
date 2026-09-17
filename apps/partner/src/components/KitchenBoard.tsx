@@ -22,7 +22,7 @@
 // been seen.
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useKitchenAlarm } from '../contexts/KitchenAlarmContext';
 import type { OrderDocument } from '../domain/entities';
 import { isOrderAlarming, orderNeedsAcceptDecision } from '../domain/kitchenAlarm';
@@ -260,6 +260,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   muteButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: partnerTheme.accentSoft,
     borderRadius: radius.pill,
     paddingHorizontal: 20,

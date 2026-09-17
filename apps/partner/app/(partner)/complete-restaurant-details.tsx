@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { NIGERIA_BANKS, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
 import {
@@ -1074,6 +1074,8 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   secondaryButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     marginTop: 12,
     paddingVertical: 12,

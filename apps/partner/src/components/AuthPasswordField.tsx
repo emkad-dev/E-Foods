@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { partnerTheme } from '../theme/palette';
 
 type AuthPasswordFieldProps = {
@@ -66,6 +66,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   toggle: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     marginLeft: 12,
     paddingVertical: 8,
   },

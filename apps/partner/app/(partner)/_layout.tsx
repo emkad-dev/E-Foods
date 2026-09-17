@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, Slot, Tabs, usePathname, useRouter } from 'expo-router';
 import { Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import FEASTYWordmark from '../../src/components/PartnerWordmark';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -318,6 +318,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   navLink: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     borderRadius: radius.md,
     flexDirection: 'row',
@@ -397,6 +399,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   signOutButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     borderColor: partnerTheme.border,
     borderRadius: radius.md,

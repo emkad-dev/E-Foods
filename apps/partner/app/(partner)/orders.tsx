@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { KitchenBoard } from '../../src/components/KitchenBoard';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useKitchenAlarm } from '../../src/contexts/KitchenAlarmContext';
@@ -375,6 +375,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   filterChip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: partnerTheme.surfaceMuted,
     borderRadius: radius.pill,
     marginRight: 10,
@@ -401,6 +403,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   historyFilterChip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
     borderRadius: radius.pill,
@@ -444,6 +448,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   retryButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: partnerTheme.danger,

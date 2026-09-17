@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
@@ -355,6 +355,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   rangeChip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
     borderRadius: radius.pill,
