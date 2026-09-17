@@ -194,12 +194,18 @@ export default function AccessPage() {
           <h3 className="card-title">Platform users</h3>
           <span className="muted">{users.length} accounts</span>
         </div>
-        {loading ? <SkeletonRows count={6} /> : null}
-        {/* `data !== null`, not `!loading`: usePolledRpc settles loading to false
-            whether the read succeeded or threw, so !loading could not tell an
-            empty platform from an unreachable one -- and this page would then
-            assert "No users" to an operator whose fetch had failed. */}
-        {data !== null && users.length === 0 ? (
+        {/* The skeleton REPLACES the table while loading; it used to render
+            above it, so a first load showed shimmer bars stacked on top of a
+            fully drawn header row with nothing under it -- two loading
+            metaphors at once, and an empty table that reads as "no users".
+            `data !== null`, not `!loading`, on the empty state: usePolledRpc
+            settles loading to false whether the read succeeded or threw, so
+            !loading could not tell an empty platform from an unreachable one
+            -- and this page would then assert "No users" to an operator whose
+            fetch had failed. */}
+        {loading ? (
+          <SkeletonRows count={6} />
+        ) : data !== null && users.length === 0 ? (
           <EmptyState title="No users" body="Platform accounts will appear here." />
         ) : (
           <div className="table-wrap">

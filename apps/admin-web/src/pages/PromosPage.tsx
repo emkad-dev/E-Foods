@@ -4,7 +4,6 @@ import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
 import { formatCurrency } from '../lib/format';
-import { useFeatureFlag } from '../lib/useFeatureFlag';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 import { uploadPromoAsset } from '../services/promoAssetUpload';
 
@@ -26,8 +25,21 @@ const isLive = (promo: Promo): boolean => {
 const toIso = (localValue: string): string | null =>
   localValue ? new Date(localValue).toISOString() : null;
 
+/*
+ * The `promo_composer_v2` flag was removed here rather than made real.
+ *
+ * It gated one sentence -- "Experimental composer remains dark until the flag
+ * is enabled" -- shown when the flag was OFF, directly above a composer that
+ * created and sent promos regardless. So the page stated the opposite of what
+ * it did, and the default-closed flag made that the state every operator saw.
+ *
+ * Wiring the flag to actually disable the composer was the other option and is
+ * the wrong one: this composer is the shipped, in-production promo tool, and a
+ * flag that defaults closed would have switched a live capability off. A flag
+ * that gates nothing is removed; it is not promoted to gating something that
+ * has to stay on.
+ */
 export default function PromosPage() {
-  const promoComposerV2 = useFeatureFlag('promo_composer_v2');
   const [promos, setPromos] = useState<Promo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +146,6 @@ export default function PromosPage() {
     <section className="page promos-page">
       <div className="promo-compose card">
         <h3>New promo</h3>
-        {!promoComposerV2 ? <p className="muted">Experimental composer remains dark until the flag is enabled.</p> : null}
         <p className="muted">
           Broadcasts a live in-app banner to every customer currently on the app, and stays fetchable while active.
         </p>

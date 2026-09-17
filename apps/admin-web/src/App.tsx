@@ -82,14 +82,15 @@ export default function App() {
               </Suspense>
             }
           />
-          <Route
-            path="/risk-signals"
-            element={
-              <Suspense fallback={<LoadingBlock label="Loading..." />}>
-                <ObservabilityPage />
-              </Suspense>
-            }
-          />
+          {/* /risk-signals was a second mount of ObservabilityPage, with no
+              nav link and no page of its own -- pages/RiskSignalsPage.tsx was
+              a one-line `export { default } from './ObservabilityPage'` that
+              this route did not even import. Two URLs for one screen, so a
+              redirect rather than a duplicate: any bookmark still lands on
+              the real page, and there is now one canonical address for it.
+              The .risk-signals-* CSS is NOT dead -- ObservabilityPage styles
+              its alert list with it. */}
+          <Route path="/risk-signals" element={<Navigate to="/observability" replace />} />
           <Route
             path="/access"
             element={

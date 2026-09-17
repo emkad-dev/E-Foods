@@ -25,7 +25,7 @@
   --color-surface: #ffffff;
   --color-surface-muted: #edf3f1;
   --color-ink: #0d1522;
-  --color-ink-muted: #5b6978;
+  --color-ink-muted: #54626f;
   --color-hairline: #dde7e3;
 }
 
@@ -36,21 +36,68 @@
   --border: #dde7e3;
   --border-strong: #c2d0ca;
   --text: #0d1522;
-  --text-muted: #5b6978;
-  --text-soft: #6a7d76;
+  /*
+   * ONE secondary grey, not two. These were #5b6978 and #6a7d76, and both
+   * failed AA somewhere: #6a7d76 measured 4.37:1 on white, 4.04:1 on the page
+   * background and 3.89:1 on --surface-muted, all below 4.5:1 and all used at
+   * 11-12px; #5b6978 passed on white (5.62:1) but fell to 4.18:1 once it
+   * landed on --accent-soft, which it does on every SELECTED row (the
+   * .risk-signals-reason inside .risk-signals-item.selected, the
+   * .list-row-sub inside .inbox-item.selected).
+   *
+   * #54626f is the value packages/design-system/src/tokens/color.ts settled on
+   * as `text.secondary` for exactly this problem in the mobile apps, where its
+   * comment rejects BOTH of these legacy greys by name. Admin cannot import
+   * that package, so the value and the reasoning are copied, not the token.
+   * Measured here on every surface this stylesheet actually paints it on:
+   *   #ffffff 6.26:1 · --background 5.80:1 · --surface-muted 5.57:1
+   *   --accent-soft 4.66:1 · --warning-soft 4.94:1 · --danger-soft 4.94:1
+   *   --info-soft 5.35:1
+   * Both names are kept so the ~20 call sites stay put and the roles can
+   * diverge again later, but any new value for either must clear 4.5:1 on all
+   * seven surfaces above.
+   */
+  --text-muted: #54626f;
+  --text-soft: #54626f;
   --brand-green: #2e7d32;
   --brand-orange: #f57c00;
   --accent: #2e7d32;
   --accent-strong: #1b5e20;
   --accent-soft: #c8e6c9;
+  /*
+   * FILL vs TEXT. --info/--warning/--danger are fill colours: saturated enough
+   * to read as a colour block, too light to be words on their own pale tint.
+   * Every status badge paired the fill with its own soft fill and every one of
+   * them failed AA at 12px bold:
+   *   --warning #ef6c00 on --warning-soft  2.43:1
+   *   --danger  #c54a43 on --danger-soft   3.74:1
+   *   --info    #117c6a on --info-soft     4.36:1
+   *   --success #2e7d32 on --success-soft  3.81:1
+   * The split below is the one packages/design-system/src/tokens/color.ts
+   * already makes for the mobile apps, where `brand.accent`, `status.warning`
+   * and `status.danger` are declared FILL ONLY and given `accentText`,
+   * `warningText` and `dangerText` as their accessible counterparts. Admin
+   * does not import that package, so these carry the same values and the same
+   * rule: the plain token fills, the -text token writes.
+   *
+   * --warning-text and --danger-text are lifted verbatim from that file
+   * (`status.warningText` #8a4500, `status.dangerText` #a83b35). There is no
+   * `info` role over there to copy, so --info-text is #117c6a darkened along
+   * its own hue until it cleared the bar with the same margin as the others.
+   * --success needs no counterpart: --accent-strong #1b5e20 is already that
+   * colour's dark sibling and already pairs with --accent-soft at 5.85:1.
+   */
   --info: #117c6a;
   --info-soft: #d7f3ee;
+  --info-text: #0e6658;
   --success: #2e7d32;
   --success-soft: #c8e6c9;
   --warning: #ef6c00;
   --warning-soft: #ffe0b2;
+  --warning-text: #8a4500;
   --danger: #c54a43;
   --danger-soft: #f8dfdc;
+  --danger-text: #a83b35;
   --shadow: 0 10px 30px rgba(9, 15, 29, 0.06);
   --radius: 16px;
 }
@@ -263,7 +310,9 @@ button {
 }
 
 .kpi-delta.down {
-  color: var(--danger);
+  /* Passed on white at 4.74:1, but --danger is a fill and this is a 12px
+     word; --danger-text is the red for words and takes it to 6.28:1. */
+  color: var(--danger-text);
 }
 
 .kpi-delta.flat {
@@ -349,27 +398,30 @@ button {
   border-color: #a5d6a7;
 }
 
+/* Each badge writes with the -text counterpart of its fill, never the fill
+   itself. Measured at the 12px/700 these render at, where 4.5:1 applies:
+   success 5.85:1 · warning 5.65:1 · danger 4.96:1 · info 5.86:1. */
 .badge-success {
   background: var(--success-soft);
-  color: var(--success);
+  color: var(--accent-strong);
   border-color: #a5d6a7;
 }
 
 .badge-warning {
   background: var(--warning-soft);
-  color: var(--warning);
+  color: var(--warning-text);
   border-color: #ffcc80;
 }
 
 .badge-danger {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: #fecaca;
 }
 
 .badge-info {
   background: var(--info-soft);
-  color: var(--info);
+  color: var(--info-text);
   border-color: #99f6e4;
 }
 
@@ -421,7 +473,11 @@ button {
      Close, Assign to me) rendered as the most alarming control on the page
      while Reject, Disable and Delete rendered as the quietest. */
   background: var(--danger);
-  color: var(--danger-soft);
+  /* White, not --danger-soft: the pale tint on the red fill measured 3.74:1,
+     so the loudest button in the console had the least legible label. White
+     on --danger is 4.74:1, and is what .confirm-dialog-confirm -- the dialog
+     this button opens -- already used. */
+  color: #ffffff;
   border-color: var(--danger);
 }
 
@@ -449,8 +505,15 @@ button {
   color: var(--text-muted);
 }
 
+/* textarea belongs in this list. Without it the only styled textareas in the
+   app were the two reached by .inbox-composer/.broadcast-compose descendant
+   rules, and every other one -- all three promo composer fields, the access
+   deletion-reason box -- fell back to the browser default: a thin grey inset
+   box in the UA's own font, sitting inside a .field whose input siblings are
+   bordered and rounded. */
 .field input,
-.field select {
+.field select,
+.field textarea {
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 9px 12px;
@@ -460,8 +523,16 @@ button {
   color: var(--text);
 }
 
+.field textarea {
+  /* Horizontal drag would break the .field column; vertical is the useful axis
+     for a composer and matches the two page-specific textarea rules. */
+  resize: vertical;
+  line-height: 1.5;
+}
+
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   outline: 2px solid var(--accent-soft);
   border-color: var(--accent);
 }
@@ -496,7 +567,9 @@ button {
 .error-banner {
   background: var(--danger-soft);
   border: 1px solid #fecaca;
-  color: var(--danger);
+  /* The fill red on its own tint was 3.74:1 -- the one message on the page
+     that has to be read was the hardest to read. --danger-text is 4.96:1. */
+  color: var(--danger-text);
   border-radius: 12px;
   padding: 12px 16px;
   font-weight: 600;
@@ -860,9 +933,123 @@ button {
   padding-top: 10px;
 }
 
+.broadcast-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* A grid item's min-width defaults to auto, so the wide broadcasts table
+     would size this column to its own content and push the whole page into a
+     horizontal scroll, with .table-wrap's overflow-x never getting a chance
+     to engage. 0 lets the column shrink so the table scrolls instead. */
+  min-width: 0;
+}
+
+.broadcast-list h3 {
+  margin: 0;
+}
+
 @media (max-width: 980px) {
   .broadcasts-page {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Promos ---------- */
+
+/* Same two-column compose/list shape as .broadcasts-page, deliberately: the
+   two pages do the same job (author a message, watch the list of what was
+   sent) and sat side by side in the nav looking like different products. */
+.promos-page {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.promo-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.promo-compose h3,
+.promo-list h3 {
+  margin: 0;
+}
+
+.promo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* Same grid min-width: auto trap as .broadcast-list, here because a promo's
+     action URL can be one long unbroken string. */
+  min-width: 0;
+}
+
+.promo-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* A bare <ul>: without this it keeps the UA's bullets and ~40px indent,
+     which no other list in this console has. */
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Mirrors .feature-flag-row -- the other "row with a body on the left and one
+   toggle button on the right" in the app -- so the two read as one system. */
+.promo-item {
+  align-items: flex-start;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.promo-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.promo-item-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.promo-item-url {
+  color: var(--text-muted);
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  /* Deep links are unbroken strings; without this one of them widens the row
+     and takes the grid column with it. */
+  overflow-wrap: anywhere;
+}
+
+.promo-item-stats {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 980px) {
+  .promos-page {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .promo-item {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
@@ -1011,6 +1198,16 @@ button {
 
 .observability-page .card-title {
   margin: 0;
+}
+
+/* The one thing this grid needs beyond .grid-2: grid items default to
+   min-width: auto, so the metadata <pre> (.risk-signals-json) sizes the
+   detail column to its own longest unbroken line -- a single wide JSON value
+   widens the track past 1.6fr and scrolls the whole page sideways, while the
+   pre's own overflow: auto never engages. 0 lets the column hold its share
+   and the pre scroll inside it. */
+.observability-grid > * {
+  min-width: 0;
 }
 
 .observability-alerts-card,

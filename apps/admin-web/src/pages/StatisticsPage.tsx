@@ -33,6 +33,14 @@ import { formatCurrency, formatNumber, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import { getPaymentChartColor, getStatusChartColor } from '../theme/tones';
 
+/**
+ * How many settlement rows the table renders. It was an inline `.slice(0, 12)`
+ * with nothing on screen admitting to it, so a 12-row month and a 400-row
+ * month looked identical and the operator had no way to know money was being
+ * left off the bottom. Named here, and stated in the card header below.
+ */
+const SETTLEMENT_ROW_CAP = 12;
+
 export default function StatisticsPage() {
   const { snapshot, error, hasData, refresh } = useSnapshot();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
@@ -50,6 +58,10 @@ export default function StatisticsPage() {
   const paymentBreakdown = useMemo(() => buildPaymentBreakdown(windowedOrders), [windowedOrders]);
   const problemSeries = useMemo(() => buildProblemDailySeries(windowedOrders, rangeDays), [windowedOrders, rangeDays]);
   const settlementBreakdown = useMemo(() => buildSettlementBreakdown(windowedOrders), [windowedOrders]);
+  // The settlement table renders only the first SETTLEMENT_ROW_CAP rows. The
+  // full breakdown is computed here in the client, so unlike the alert queue
+  // the true total is known exactly and can simply be stated.
+  const settlementShown = Math.min(settlementBreakdown.length, SETTLEMENT_ROW_CAP);
   const topRestaurants = useMemo(() => buildTopRestaurants(windowedOrders), [windowedOrders]);
   const zoneBreakdown = useMemo(() => buildZoneBreakdown(snapshot.dispatchProfiles), [snapshot.dispatchProfiles]);
   const currency = windowedOrders.find((order) => order.pricing?.currency)?.pricing?.currency ?? 'NGN';
@@ -208,6 +220,13 @@ export default function StatisticsPage() {
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Settlement by restaurant and day</h3>
+              {settlementBreakdown.length > 0 ? (
+                <span className="muted">
+                  {settlementBreakdown.length > SETTLEMENT_ROW_CAP
+                    ? `Showing ${settlementShown} of ${formatNumber(settlementBreakdown.length)} rows`
+                    : `${settlementBreakdown.length} rows`}
+                </span>
+              ) : null}
             </div>
             {settlementBreakdown.length === 0 ? (
               <EmptyState
@@ -229,7 +248,7 @@ export default function StatisticsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {settlementBreakdown.slice(0, 12).map((row) => (
+                    {settlementBreakdown.slice(0, SETTLEMENT_ROW_CAP).map((row) => (
                       <tr key={`${row.dayKey}:${row.restaurantId}`}>
                         <td>{row.dayLabel}</td>
                         <td className="cell-strong">{row.restaurantName}</td>

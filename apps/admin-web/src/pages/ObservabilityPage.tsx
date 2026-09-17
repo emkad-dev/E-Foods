@@ -31,6 +31,25 @@ const getSeverityTone = (severity: OperationalAlertRecord['severity']) => {
   }
 };
 
+/**
+ * How many alerts this page shows at once. There is no pagination, so this is
+ * a cap and never a total -- see ALERT_PROBE_LIMIT.
+ */
+const ALERT_PAGE_SIZE = 50;
+
+/**
+ * One more than we display. The surplus row is fetched, counted and thrown
+ * away: it exists only to answer "is there a 51st?", which is what lets the
+ * header say "50+ alerts" instead of "50 alerts".
+ *
+ * Without it the page rendered `{alerts.length} alerts`, so a backlog of 51
+ * and a backlog of 5,000 both printed "50" -- the number an operator uses to
+ * decide whether anything is wrong was pinned to the size of the fetch. The
+ * probe is safe to send: adminGetOperationalAlerts passes limit straight to
+ * loadOperationalAlerts, which floors it at 1 and applies no upper clamp.
+ */
+const ALERT_PROBE_LIMIT = ALERT_PAGE_SIZE + 1;
+
 const hasMetadata = (metadata: Record<string, unknown> | null) => Boolean(metadata && Object.keys(metadata).length > 0);
 
 const formatMetadata = (metadata: Record<string, unknown> | null) => {
@@ -52,16 +71,19 @@ export default function ObservabilityPage() {
   // "we never got an answer".
   const [loaded, setLoaded] = useState(false);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
+  const [alertsTruncated, setAlertsTruncated] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
     try {
       const [alertResponse, flagResponse] = await Promise.all([
-        getAdminOperationalAlerts({ limit: 50, offset: 0 }),
+        getAdminOperationalAlerts({ limit: ALERT_PROBE_LIMIT, offset: 0 }),
         listAdminFeatureFlags(),
       ]);
 
-      setAlerts(alertResponse.operationalAlerts ?? []);
+      const alertPage = alertResponse.operationalAlerts ?? [];
+      setAlertsTruncated(alertPage.length > ALERT_PAGE_SIZE);
+      setAlerts(alertPage.slice(0, ALERT_PAGE_SIZE));
       setFeatureFlags(flagResponse.featureFlags ?? []);
       setError(null);
       setLoaded(true);
@@ -114,6 +136,14 @@ export default function ObservabilityPage() {
     [featureFlags]
   );
 
+  // "50+" when the probe found a 51st row, plain "12" when it did not. The
+  // suffix is the whole point: it is the only thing separating a count from a
+  // cap on a page with no pagination.
+  const alertCountLabel = `${alerts.length}${alertsTruncated ? '+' : ''}`;
+  const alertCountTitle = alertsTruncated
+    ? `Showing the ${ALERT_PAGE_SIZE} most recent alerts; more exist beyond this page.`
+    : `All ${alerts.length} alerts are shown.`;
+
   return (
     <section className="page observability-page">
       <div className="page-header">
@@ -127,7 +157,9 @@ export default function ObservabilityPage() {
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void refresh()}>
             {busy ? 'Refreshing...' : 'Refresh'}
           </button>
-          <span className="badge badge-neutral">{alerts.length} alerts</span>
+          <span className="badge badge-neutral" title={alertCountTitle}>
+            {alertCountLabel} alerts
+          </span>
           <span className="badge badge-primary">{featureFlags.length} flags</span>
         </div>
       </div>
@@ -139,8 +171,16 @@ export default function ObservabilityPage() {
         <div className="card observability-alerts-card">
           <div className="card-title-row">
             <h3 className="card-title">Operational alerts</h3>
-            <span className="badge badge-warning">{alerts.length} queued</span>
+            <span className="badge badge-warning" title={alertCountTitle}>
+              {alertCountLabel} queued
+            </span>
           </div>
+
+          {alertsTruncated ? (
+            <div className="muted">
+              Showing the {ALERT_PAGE_SIZE} most recent alerts. Older ones are not on this page.
+            </div>
+          ) : null}
 
           {loaded && alerts.length === 0 ? (
             <EmptyState

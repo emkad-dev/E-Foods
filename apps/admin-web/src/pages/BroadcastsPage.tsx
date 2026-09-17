@@ -76,7 +76,34 @@ export default function BroadcastsPage() {
     restaurantId: restaurantId.trim() || null,
   });
 
+  // A recipient count belongs to the segment it was measured for. Nothing used
+  // to clear it, so an operator could preview "50 recipients", then tick two
+  // more roles, and send to an audience of thousands with a stale 50 still on
+  // screen beside the Create draft button vouching for it. Any input that
+  // feeds buildSegment()/previewAudience invalidates the number; re-press
+  // Preview recipients to get one that matches.
+  useEffect(() => {
+    setPreviewCount(null);
+  }, [roles, activity, restaurantId, category]);
+
   const channels = [...(emailChannel ? ['email'] : []), ...(pushChannel ? ['push'] : [])];
+
+  // Create draft used to be enabled on a non-empty title alone, so a draft
+  // with zero channels, no subject and no body was one click away on a screen
+  // that sends real email. Every channel that is ticked must carry the content
+  // it will actually send.
+  const emailReady = !emailChannel || (emailSubject.trim().length > 0 && emailBody.trim().length > 0);
+  const pushReady = !pushChannel || (pushTitle.trim().length > 0 && pushBody.trim().length > 0);
+  const canCreate = title.trim().length > 0 && channels.length > 0 && emailReady && pushReady;
+  const createBlockedReason = !title.trim()
+    ? 'Give the broadcast a title.'
+    : channels.length === 0
+      ? 'Pick at least one channel.'
+      : !emailReady
+        ? 'Email is ticked: fill in the subject and body.'
+        : !pushReady
+          ? 'Push is ticked: fill in the push title and body.'
+          : undefined;
 
   const toggleRole = (role: string) =>
     setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
@@ -275,15 +302,17 @@ export default function BroadcastsPage() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy || !title.trim()}
+            disabled={busy || !canCreate}
+            title={createBlockedReason}
             onClick={() => void onCreate()}
           >
             Create draft
           </button>
+          {createBlockedReason ? <span className="muted">{createBlockedReason}</span> : null}
         </div>
         {selected ? (
           <div className="broadcast-send">
-            <p className="muted">Draft “{selected.title}” created. Send it:</p>
+            <p className="muted">Draft “{selected.title}” selected. Send it:</p>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSendNow()}>
               Send now
             </button>
@@ -302,8 +331,14 @@ export default function BroadcastsPage() {
 
       <div className="broadcast-list card">
         <h3>Broadcasts</h3>
-        {loading ? <SkeletonRows count={5} /> : null}
-        {loaded && broadcasts.length === 0 ? (
+        {/* Same stacked-loading defect AccessPage had: the skeleton rendered
+            above the table rather than instead of it, so a first load drew
+            shimmer bars on top of a complete header row with an empty body
+            under it. `loaded`, not `!loading`, still gates the empty state --
+            loading settles to false on the catch path too. */}
+        {loading ? (
+          <SkeletonRows count={5} />
+        ) : loaded && broadcasts.length === 0 ? (
           <EmptyState title="No broadcasts yet" body="Compose one on the left." />
         ) : (
           <div className="table-wrap">
@@ -338,16 +373,43 @@ export default function BroadcastsPage() {
                         : new Date(broadcast.createdAt).toLocaleString()}
                     </td>
                     <td>
-                      {broadcast.status === 'scheduled' ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          disabled={busy}
-                          onClick={() => void onCancel(broadcast)}
-                        >
-                          Cancel
-                        </button>
-                      ) : null}
+                      <div className="row-actions">
+                        {/* Send now / Schedule used to exist only for the draft
+                            this session had just created, because `selected`
+                            was set nowhere but onCreate. One reload and a
+                            draft was stranded: the table's only control was
+                            Cancel, and only for `scheduled`, so a created-but-
+                            unsent broadcast had no route to being sent or
+                            removed. Selecting it here reopens the same send
+                            panel the compose card shows after a create. */}
+                        {broadcast.status === 'draft' ? (
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${selected?.id === broadcast.id ? 'btn-primary' : 'btn-ghost'}`}
+                            disabled={busy}
+                            aria-pressed={selected?.id === broadcast.id}
+                            onClick={() => {
+                              // Clear any time typed for a previously selected
+                              // draft, so Schedule cannot fire this one at a
+                              // timestamp chosen for a different broadcast.
+                              setSchedAt('');
+                              setSelected(broadcast);
+                            }}
+                          >
+                            {selected?.id === broadcast.id ? 'Selected' : 'Send / schedule'}
+                          </button>
+                        ) : null}
+                        {broadcast.status === 'scheduled' ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={busy}
+                            onClick={() => void onCancel(broadcast)}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
