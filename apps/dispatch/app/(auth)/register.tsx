@@ -10,6 +10,7 @@ import { validateRegisterForm } from '../../src/domain/authFormValidation';
 import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/auth';
 import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function DispatchRegisterScreen() {
   const insets = useSafeAreaInsets();
@@ -253,8 +254,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: dispatchTheme.textOnInverse,
-    fontSize: 31,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   copy: {
     color: dispatchTheme.textOnInverseMuted,

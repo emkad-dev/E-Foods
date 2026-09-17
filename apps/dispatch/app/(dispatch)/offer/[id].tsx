@@ -27,6 +27,7 @@ import { dispatchTheme } from '../../../src/theme/palette';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
 import type { DispatchOfferNoticeKey } from '../../../src/utils/routeNotices';
 import { MIN_TAP_TARGET } from '../../../../../packages/design-system/src/tokens/space';
+import { SCREEN_TOP_INSET } from '../../../src/theme/screenChrome';
 
 const formatCurrency = (value?: number | null) => {
   const amount = typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -155,7 +156,7 @@ export default function DispatchOfferScreen() {
 
   if (!offer || !order) {
     return (
-      <View style={[styles.container, styles.centered, { paddingTop: insets.top + 24 }]}>
+      <View style={[styles.container, styles.centered, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <Text style={styles.emptyTitle}>This offer is no longer available</Text>
         <Text style={styles.emptyBody}>
           {error ?? 'It was accepted by another rider, declined, or it expired.'}
@@ -173,7 +174,7 @@ export default function DispatchOfferScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET, paddingBottom: insets.bottom + 32 }]}
     >
       <View style={[styles.countdownCard, expired && styles.countdownCardExpired]}>
         <Text style={styles.countdownLabel}>{expired ? 'Offer expired' : 'Respond within'}</Text>

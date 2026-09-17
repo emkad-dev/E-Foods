@@ -39,6 +39,7 @@ import { OpenStreetMapLocationService } from '../../src/services/osmLocation';
 import { dispatchTheme } from '../../src/theme/palette';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 type ProfileSection =
   | 'profile'
@@ -559,7 +560,7 @@ export default function ProfileScreen() {
     // positions itself absolutely: inside a ScrollView that would anchor it to
     // the bottom of the CONTENT and let it scroll away.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         {renderHeader()}
         {renderMenu()}
         {renderDetail()}

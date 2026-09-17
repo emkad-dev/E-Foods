@@ -29,6 +29,7 @@ import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
 
@@ -289,7 +290,7 @@ export default function CompleteRiderDetailsScreen() {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 28 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET, paddingBottom: insets.bottom + 28 }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
@@ -620,8 +621,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: dispatchTheme.cream,
-    fontSize: 31,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   copy: {
     color: dispatchTheme.textOnInverseMuted,

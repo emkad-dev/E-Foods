@@ -29,6 +29,7 @@ import { dispatchTheme } from '../../../src/theme/palette';
 import { radius } from '../../../../../packages/design-system/src/tokens/radius';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
 import { toDialablePhoneNumber } from '../../../src/utils/phoneLinking';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../../src/theme/screenChrome';
 import {
   describeExternalLinkFailure,
   openExternalLink,
@@ -317,7 +318,7 @@ export default function DispatchDeliveryDetailScreen() {
     // positions itself absolutely: inside a ScrollView that would anchor it to
     // the bottom of the CONTENT and let it scroll away.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <View style={styles.hero}>
           <Text style={styles.eyebrow}>Dispatch order</Text>
           <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
@@ -565,8 +566,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: dispatchTheme.cream,
-    fontSize: 30,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   heroCopy: {
     color: dispatchTheme.textOnInverseMuted,

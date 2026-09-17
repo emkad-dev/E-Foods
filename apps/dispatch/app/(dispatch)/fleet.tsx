@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { dispatchTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 export default function FleetScreen() {
   const insets = useSafeAreaInsets();
@@ -21,7 +22,7 @@ export default function FleetScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
       <Text style={styles.title}>Fleet pulse</Text>
       <Text style={styles.copy}>
         A friendlier read on rider availability, current zones, and who needs rebalancing.
@@ -94,8 +95,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: dispatchTheme.text,
-    fontSize: 30,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   copy: {
     color: dispatchTheme.textMuted,

@@ -10,6 +10,7 @@ import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { dispatchTheme } from '../../src/theme/palette';
 import { formatDispatchMoney } from '../../src/utils/dispatchQueue';
+import { SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 export default function DispatchDashboard() {
   const router = useRouter();
@@ -71,7 +72,7 @@ export default function DispatchDashboard() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
       <View style={styles.greetingBlock}>
         <Text style={styles.greetingText} numberOfLines={1}>
           HI {greetingName}
