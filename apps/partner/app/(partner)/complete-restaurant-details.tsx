@@ -58,6 +58,7 @@ import { buildPartnerPolicyAcceptance } from '../../src/services/policyAcceptanc
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { supabase } from '../../src/services/supabase/config';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 const cuisineOptions = ['Nigerian', 'Fast Food', 'Pizza', 'Grills', 'Seafood', 'Healthy', 'Desserts'] as const;
 const deliveryTimeOptions = ['15-25 min', '25-35 min', '35-45 min', '45-60 min'] as const;
@@ -379,7 +380,7 @@ export default function CompleteRestaurantDetailsScreen() {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 28 }]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET, paddingBottom: insets.bottom + 28 }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
@@ -768,8 +769,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 26,
-    fontWeight: '900',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
     marginTop: 6,
   },
   copy: {

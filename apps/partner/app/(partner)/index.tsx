@@ -16,6 +16,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 import { getPartnerStatusColor } from '../../src/theme/statusColors';
 import {
   buildPartnerStatusBreakdown,
@@ -138,7 +139,7 @@ export default function PartnerHome() {
     <View style={styles.screen}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingTop: (isWide ? 8 : insets.top) + 16 }]}
+        contentContainerStyle={[styles.content, { paddingTop: (isWide ? 8 : insets.top) + SCREEN_TOP_INSET }]}
       >
         <View style={styles.headerRow}>
           <View style={styles.greetingBlock}>

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 export default function ApplicationUnderReviewScreen() {
   const insets = useSafeAreaInsets();
@@ -27,7 +28,7 @@ export default function ApplicationUnderReviewScreen() {
       style={styles.screen}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 28 },
+        { paddingTop: insets.top + SCREEN_TOP_INSET, paddingBottom: insets.bottom + 28 },
       ]}
     >
       <View style={styles.hero}>
@@ -79,7 +80,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textTransform: 'uppercase',
   },
-  title: { color: partnerTheme.textOnHero, fontSize: 30, fontWeight: '800' },
+  title: { color: partnerTheme.textOnHero, fontSize: SCREEN_TITLE_SIZE, fontWeight: SCREEN_TITLE_WEIGHT },
   copy: { color: partnerTheme.textOnHeroMuted, fontSize: 15, lineHeight: 22, marginTop: 10 },
   card: {
     backgroundColor: partnerTheme.surface,

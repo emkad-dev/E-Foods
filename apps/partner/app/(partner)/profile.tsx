@@ -23,6 +23,7 @@ import { storeSetupGaps } from '../../src/domain/storeSetupForm';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { setPartnerStorePause } from '../../src/services/partnerRestaurantActions';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 // Task 16 (F2): quick pause durations - one tap picks a duration and pauses
 // immediately, no separate confirm step (pausing is fully reversible with
@@ -161,7 +162,7 @@ export default function PartnerStoreScreen() {
     // the bottom of the CONTENT and let it scroll away, instead of pinning it
     // to the bottom of the screen.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <Text style={styles.title}>Store</Text>
         <Text style={styles.subtitle}>Pause or resume orders here. Everything you set up once lives behind the rows below.</Text>
         {error ? (
@@ -287,8 +288,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   subtitle: {
     color: partnerTheme.textMuted,

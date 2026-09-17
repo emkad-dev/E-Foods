@@ -44,6 +44,7 @@ import { useSeededField } from '../../src/hooks/useSeededField';
 import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaurantActions';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 /**
  * Was the literal `#6a7d76`, which `src/theme/palette.ts` documents in its own
@@ -308,7 +309,7 @@ export default function StoreDetailsScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <TouchableOpacity style={styles.backLink} onPress={handleBack}>
           <Text style={styles.backLinkText}>&lsaquo; Store</Text>
         </TouchableOpacity>
@@ -609,8 +610,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   subtitle: {
     color: partnerTheme.textMuted,

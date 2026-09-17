@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { radius } from '@feasty/design-system';
 import { policyCopy } from '../../../../packages/domain/src';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function PartnerPrivacyScreen() {
   return (
@@ -23,7 +24,7 @@ export default function PartnerPrivacyScreen() {
 const styles = StyleSheet.create({
   screen: { backgroundColor: partnerTheme.background, flex: 1 },
   content: { padding: 20, paddingBottom: 36 },
-  title: { color: partnerTheme.text, fontSize: 28, fontWeight: '800' },
+  title: { color: partnerTheme.text, fontSize: SCREEN_TITLE_SIZE, fontWeight: SCREEN_TITLE_WEIGHT },
   note: { color: partnerTheme.textMuted, fontSize: 13, lineHeight: 19, marginTop: 8 },
   section: {
     backgroundColor: partnerTheme.surface,

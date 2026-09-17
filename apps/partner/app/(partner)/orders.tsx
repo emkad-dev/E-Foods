@@ -11,6 +11,7 @@ import { formatOrderStatusLabel, formatPaymentStatusLabel } from '../../src/doma
 import { getPartnerStatusColor } from '../../src/theme/statusColors';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 import {
   formatPartnerMoney,
   getKitchenElapsedLabel,
@@ -128,7 +129,7 @@ export default function PartnerOrdersScreen() {
 
   if (isBoardLayout) {
     return (
-      <View style={[styles.boardScreen, { paddingTop: insets.top + 16 }]}>
+      <View style={[styles.boardScreen, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         {queueErrorCard}
         {restaurant ? (
           <KitchenBoard
@@ -144,7 +145,7 @@ export default function PartnerOrdersScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
       <Text style={styles.title}>{restaurant?.name ?? 'Orders'}</Text>
       <Text style={styles.copy}>
         Kitchen work is now split into live queue and history so new tickets, cooking orders, and handoff pressure stay visible.
@@ -330,8 +331,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   copy: {
     color: partnerTheme.textMuted,

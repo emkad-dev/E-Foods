@@ -15,6 +15,7 @@ import {
   rejectPartnerOrder,
 } from '../../../src/services/partnerOrderActions';
 import { partnerTheme } from '../../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../../src/theme/screenChrome';
 import { formatOrderItemOptions, formatPartnerMoney } from '../../../src/utils/partnerQueue';
 
 /** The five transitions this screen can fire; at most one may be in flight. */
@@ -147,7 +148,7 @@ export default function PartnerOrderDetailScreen() {
     // positions itself absolutely: inside a ScrollView that would anchor it to
     // the bottom of the CONTENT and let it scroll away.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <View style={styles.hero}>
           <Text style={styles.eyebrow}>Kitchen flow</Text>
           <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
@@ -365,8 +366,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.textOnHero,
-    fontSize: 30,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   copy: {
     color: partnerTheme.textOnHero,

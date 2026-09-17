@@ -13,6 +13,7 @@ import { supabase } from '../../src/services/supabase/config';
 import { updateUserDocument } from '../../src/services/supabase/profile';
 import { resolvePartnerSuccessNotice, type PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
@@ -236,8 +237,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
     marginBottom: 10,
   },
   copy: {

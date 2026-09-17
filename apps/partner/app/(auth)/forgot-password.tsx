@@ -8,6 +8,7 @@ import { validateForgotPasswordForm } from '../../src/domain/authFormValidation'
 import { useOtpCooldown } from '../../src/services/supabase/auth';
 import type { PartnerSuccessNoticeKey } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function PartnerForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -137,8 +138,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
     marginBottom: 8,
   },
   copy: {

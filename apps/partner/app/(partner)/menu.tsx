@@ -19,6 +19,7 @@ import {
   type PartnerMenuCategoryInput,
 } from '../../src/services/partnerRestaurantActions';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 // Mirrors _shared/availability.ts's isMenuItemAvailable on the display side
 // only (no order-placement decision is made here — that stays server-side).
@@ -381,7 +382,7 @@ export default function PartnerMenuScreen() {
     // positions itself absolutely: inside a ScrollView that would anchor it to
     // the bottom of the CONTENT and let it scroll away.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <Text style={styles.title}>Menu builder</Text>
         <Text style={styles.subtitle}>
           Shape the dishes customers will see first. Keep names clean, pricing accurate, and descriptions short enough to scan fast.
@@ -605,8 +606,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   subtitle: {
     color: partnerTheme.textMuted,

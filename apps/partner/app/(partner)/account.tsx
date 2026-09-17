@@ -27,6 +27,7 @@ import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 export default function PartnerAccountScreen() {
   const insets = useSafeAreaInsets();
@@ -131,7 +132,7 @@ export default function PartnerAccountScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <TouchableOpacity style={styles.backLink} onPress={handleBack}>
           <Text style={styles.backLinkText}>&lsaquo; Store</Text>
         </TouchableOpacity>
@@ -250,8 +251,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   subtitle: {
     color: partnerTheme.textMuted,

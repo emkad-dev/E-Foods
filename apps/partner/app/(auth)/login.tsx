@@ -8,6 +8,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { validateLoginForm } from '../../src/domain/authFormValidation';
 import { resolvePartnerSuccessNotice } from '../../src/utils/successNotices';
 import { partnerTheme } from '../../src/theme/palette';
+import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function PartnerLoginScreen() {
   const insets = useSafeAreaInsets();
@@ -161,8 +162,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: partnerTheme.textOnHero,
-    fontSize: 31,
-    fontWeight: '800',
+    fontSize: SCREEN_TITLE_SIZE,
+    fontWeight: SCREEN_TITLE_WEIGHT,
   },
   copy: {
     color: partnerTheme.textOnHeroMuted,
