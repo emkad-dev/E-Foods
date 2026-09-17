@@ -31,6 +31,10 @@ export default function PromosPage() {
   const [promos, setPromos] = useState<Promo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
+  // false on the catch path too, so it cannot tell "nothing here" from
+  // "we never got an answer".
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -49,6 +53,7 @@ export default function PromosPage() {
       const res = await listPromos();
       setPromos(res.promos);
       setError(null);
+      setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load promos.');
     } finally {
@@ -226,7 +231,7 @@ export default function PromosPage() {
         <h3>Promos</h3>
         {loading ? (
           <LoadingBlock label="Loading promos…" />
-        ) : promos.length === 0 ? (
+        ) : loaded && promos.length === 0 ? (
           <EmptyState title="No promos yet" body="Create one to broadcast a banner to customers on the app." />
         ) : (
           <ul className="promo-items">

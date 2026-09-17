@@ -47,6 +47,10 @@ export default function ObservabilityPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
+  // false on the catch path too, so it cannot tell "nothing here" from
+  // "we never got an answer".
+  const [loaded, setLoaded] = useState(false);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -60,6 +64,7 @@ export default function ObservabilityPage() {
       setAlerts(alertResponse.operationalAlerts ?? []);
       setFeatureFlags(flagResponse.featureFlags ?? []);
       setError(null);
+      setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load observability data.');
     } finally {
@@ -137,7 +142,7 @@ export default function ObservabilityPage() {
             <span className="badge badge-warning">{alerts.length} queued</span>
           </div>
 
-          {alerts.length === 0 && !loading ? (
+          {loaded && alerts.length === 0 ? (
             <EmptyState
               title="No alerts yet"
               body="Alerts will appear here when dispatch, payment, or acceptance flows cross their threshold."
@@ -231,7 +236,7 @@ export default function ObservabilityPage() {
           <span className="badge badge-primary">{sortedFlags.filter((flag) => flag.enabled).length} enabled</span>
         </div>
 
-        {sortedFlags.length === 0 && !loading ? (
+        {loaded && sortedFlags.length === 0 ? (
           <EmptyState title="No feature flags yet" body="Add a flag to dark-launch risky work behind a server-controlled switch." />
         ) : (
           <div className="feature-flag-list">

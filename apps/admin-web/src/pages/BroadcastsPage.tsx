@@ -32,6 +32,10 @@ export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
+  // false on the catch path too, so it cannot tell "nothing here" from
+  // "we never got an answer".
+  const [loaded, setLoaded] = useState(false);
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<'marketing' | 'transactional'>('marketing');
@@ -54,6 +58,7 @@ export default function BroadcastsPage() {
       const res = await listBroadcasts();
       setBroadcasts(res.broadcasts);
       setError(null);
+      setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load broadcasts.');
     } finally {
@@ -298,7 +303,7 @@ export default function BroadcastsPage() {
       <div className="broadcast-list card">
         <h3>Broadcasts</h3>
         {loading ? <SkeletonRows count={5} /> : null}
-        {!loading && broadcasts.length === 0 ? (
+        {loaded && broadcasts.length === 0 ? (
           <EmptyState title="No broadcasts yet" body="Compose one on the left." />
         ) : (
           <div className="table-wrap">

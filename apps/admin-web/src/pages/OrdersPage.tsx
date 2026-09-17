@@ -125,7 +125,10 @@ export default function OrdersPage() {
       {loading ? <SkeletonRows count={8} /> : null}
 
       <div className="card">
-        {filteredOrders.length === 0 && !loading ? (
+        {/* hasData, not !loading -- the snapshot context keeps an EMPTY_SNAPSHOT
+            on its catch path, so !loading would assert "no orders in this
+            window" about a window that never loaded. */}
+        {hasData && filteredOrders.length === 0 ? (
           <EmptyState title="No orders in this window" body="Try a wider date range or a different status filter." />
         ) : (
           <div className="table-wrap">

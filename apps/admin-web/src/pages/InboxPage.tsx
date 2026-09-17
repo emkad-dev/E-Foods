@@ -26,6 +26,10 @@ export default function InboxPage() {
   const [reply, setReply] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
+  // false on the catch path too, so it cannot tell "nothing here" from
+  // "we never got an answer".
+  const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
 
   const loadInbox = useCallback(async () => {
@@ -36,6 +40,7 @@ export default function InboxPage() {
       });
       setConversations(res.conversations);
       setError(null);
+      setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load the inbox.');
     } finally {
@@ -133,7 +138,7 @@ export default function InboxPage() {
         </div>
         {loading ? <SkeletonRows count={6} /> : null}
         {error ? <ErrorBanner message={error} /> : null}
-        {!loading && conversations.length === 0 ? (
+        {loaded && conversations.length === 0 ? (
           <EmptyState title="No conversations" body="Customer messages will show up here." />
         ) : (
           <div className="inbox-items">

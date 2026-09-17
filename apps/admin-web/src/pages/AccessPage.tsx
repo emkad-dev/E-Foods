@@ -195,7 +195,11 @@ export default function AccessPage() {
           <span className="muted">{users.length} accounts</span>
         </div>
         {loading ? <SkeletonRows count={6} /> : null}
-        {!loading && users.length === 0 ? (
+        {/* `data !== null`, not `!loading`: usePolledRpc settles loading to false
+            whether the read succeeded or threw, so !loading could not tell an
+            empty platform from an unreachable one -- and this page would then
+            assert "No users" to an operator whose fetch had failed. */}
+        {data !== null && users.length === 0 ? (
           <EmptyState title="No users" body="Platform accounts will appear here." />
         ) : (
           <div className="table-wrap">
