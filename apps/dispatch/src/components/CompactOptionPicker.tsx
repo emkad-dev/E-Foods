@@ -1,6 +1,7 @@
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { radius } from '@feasty/design-system';
 import { dispatchTheme } from '../theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 
 type CompactOptionPickerProps = {
   disabled?: boolean;
@@ -116,6 +117,8 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   option: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.cream,
     borderRadius: radius.md,
     marginBottom: 8,

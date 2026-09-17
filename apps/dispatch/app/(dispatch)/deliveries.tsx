@@ -8,6 +8,7 @@ import { formatOrderStatusLabel, formatPaymentStatusLabel, getOrderStatusColor }
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { resolveDispatchOfferNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import {
   formatDispatchMoney,
   getDispatchAssignmentLabel,
@@ -293,6 +294,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   offerRow: {
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     backgroundColor: dispatchTheme.surface,
     borderRadius: radius.md,
@@ -373,6 +375,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   filterChip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.surfaceMuted,
     borderRadius: radius.pill,
     marginRight: 10,
@@ -399,6 +403,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   historyFilterChip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
     borderRadius: radius.pill,
@@ -464,6 +470,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   retryButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: dispatchTheme.danger,

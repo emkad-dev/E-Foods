@@ -38,6 +38,7 @@ import {
 import { OpenStreetMapLocationService } from '../../src/services/osmLocation';
 import { dispatchTheme } from '../../src/theme/palette';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 
 type ProfileSection =
   | 'profile'
@@ -692,6 +693,8 @@ const styles = StyleSheet.create({
     width: 34,
   },
   smallAction: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.accentTint,
     borderRadius: radius.pill,
     marginLeft: 'auto',
@@ -735,6 +738,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   chip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.surfaceMuted,
     borderRadius: radius.pill,
     marginBottom: 8,
@@ -815,6 +820,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   secondaryButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     alignItems: 'center',
     backgroundColor: dispatchTheme.accentTint,
     borderRadius: radius.lg,

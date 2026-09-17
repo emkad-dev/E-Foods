@@ -26,6 +26,7 @@ import { acceptDispatchOffer, declineDispatchOffer } from '../../../src/services
 import { dispatchTheme } from '../../../src/theme/palette';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
 import type { DispatchOfferNoticeKey } from '../../../src/utils/routeNotices';
+import { MIN_TAP_TARGET } from '../../../../../packages/design-system/src/tokens/space';
 
 const formatCurrency = (value?: number | null) => {
   const amount = typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -355,6 +356,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   secondaryButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.surface,
     borderRadius: radius.md,
     marginTop: 20,

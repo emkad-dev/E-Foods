@@ -28,6 +28,7 @@ import { buildDispatchPolicyAcceptance } from '../../src/services/policyAcceptan
 import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 
 const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
 
@@ -736,6 +737,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   chip: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
     borderRadius: radius.pill,
