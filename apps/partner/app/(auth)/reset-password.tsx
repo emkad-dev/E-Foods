@@ -134,7 +134,7 @@ export default function PartnerResetPasswordScreen() {
       <TextInput
         style={styles.input}
         placeholder="Partner email"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={partnerTheme.textSoft}
         value={email}
         onChangeText={clearErrorAnd(setEmail)}
         autoCapitalize="none"
@@ -147,7 +147,7 @@ export default function PartnerResetPasswordScreen() {
       <TextInput
         style={styles.codeInput}
         placeholder="000000"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={partnerTheme.textSoft}
         value={code}
         onChangeText={clearErrorAnd((value) => setCode(value.replace(/\D/g, '').slice(0, 6)))}
         keyboardType="number-pad"
@@ -161,7 +161,7 @@ export default function PartnerResetPasswordScreen() {
       <TextInput
         style={styles.input}
         placeholder="New password"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={partnerTheme.textSoft}
         value={password}
         onChangeText={clearErrorAnd(setPassword)}
         secureTextEntry
@@ -171,7 +171,7 @@ export default function PartnerResetPasswordScreen() {
       <TextInput
         style={styles.input}
         placeholder="Confirm new password"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={partnerTheme.textSoft}
         value={confirmPassword}
         onChangeText={clearErrorAnd(setConfirmPassword)}
         secureTextEntry

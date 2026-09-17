@@ -149,7 +149,7 @@ export default function PartnerRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Contact name"
-            placeholderTextColor="#8e8e8e"
+            placeholderTextColor={partnerTheme.textSoft}
             value={contactName}
             onChangeText={handleFieldChange(setContactName)}
             editable={!loading}
@@ -157,7 +157,7 @@ export default function PartnerRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor="#8e8e8e"
+            placeholderTextColor={partnerTheme.textSoft}
             autoCapitalize="none"
             keyboardType="email-address"
             value={email}

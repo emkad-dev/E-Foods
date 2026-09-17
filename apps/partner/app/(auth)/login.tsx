@@ -95,7 +95,7 @@ export default function PartnerLoginScreen() {
         <TextInput
           style={styles.input}
           placeholder="Partner email"
-          placeholderTextColor="#8e8e8e"
+          placeholderTextColor={partnerTheme.textSoft}
           autoCapitalize="none"
           keyboardType="email-address"
           value={email}

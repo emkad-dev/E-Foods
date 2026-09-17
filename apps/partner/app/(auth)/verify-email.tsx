@@ -165,7 +165,7 @@ export default function PartnerVerifyEmailScreen() {
       <TextInput
         style={styles.input}
         placeholder="Partner email"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={partnerTheme.textSoft}
         value={email}
         onChangeText={clearFeedbackAnd(setEmail)}
         autoCapitalize="none"
@@ -178,7 +178,7 @@ export default function PartnerVerifyEmailScreen() {
       <TextInput
         style={styles.codeInput}
         placeholder="000000"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={partnerTheme.textSoft}
         value={code}
         onChangeText={clearFeedbackAnd((value) => setCode(value.replace(/\D/g, '').slice(0, 6)))}
         keyboardType="number-pad"

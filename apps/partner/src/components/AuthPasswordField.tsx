@@ -26,7 +26,7 @@ export default function AuthPasswordField({
         <TextInput
           style={styles.input}
           placeholder={placeholder}
-          placeholderTextColor="#8e8e8e"
+          placeholderTextColor={partnerTheme.textSoft}
           value={value}
           onChangeText={onChangeText}
           secureTextEntry={!showPassword}
