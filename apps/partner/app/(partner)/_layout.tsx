@@ -1,6 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, Slot, Tabs, usePathname, useRouter } from 'expo-router';
 import { Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import FEASTYWordmark from '../../src/components/PartnerWordmark';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -81,7 +82,7 @@ const renderTabIcon = (
   focused: boolean
 ) => (
   <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
-    <MaterialCommunityIcons name={iconName} size={focused ? 22 : 21} color={focused ? '#ffffff' : color} />
+    <MaterialCommunityIcons name={iconName} size={focused ? 22 : 21} color={focused ? partnerTheme.textOnBrand : color} />
   </View>
 );
 
@@ -318,7 +319,7 @@ const styles = StyleSheet.create({
   },
   navLink: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: radius.md,
     flexDirection: 'row',
     gap: 12,
     marginBottom: 4,
@@ -330,7 +331,7 @@ const styles = StyleSheet.create({
   },
   navDot: {
     backgroundColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 8,
     width: 8,
   },
@@ -362,7 +363,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.background,
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 10,
@@ -371,13 +372,13 @@ const styles = StyleSheet.create({
   storeAvatar: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 10,
+    borderRadius: radius.md,
     height: 36,
     justifyContent: 'center',
     width: 36,
   },
   storeAvatarText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '800',
   },
@@ -398,7 +399,7 @@ const styles = StyleSheet.create({
   signOutButton: {
     alignItems: 'center',
     borderColor: partnerTheme.border,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     paddingVertical: 11,
   },
@@ -409,7 +410,7 @@ const styles = StyleSheet.create({
   },
   tabIconWrap: {
     alignItems: 'center',
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 32,
     justifyContent: 'center',
     width: 32,
@@ -454,7 +455,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.background,
     borderColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 8,
@@ -469,7 +470,7 @@ const styles = StyleSheet.create({
   },
   topBarStatusDot: {
     backgroundColor: partnerTheme.success,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 8,
     width: 8,
   },

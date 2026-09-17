@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, useConfirm, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useConfirm, useNotice } from '@feasty/design-system';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
   restaurantRow: {
     alignItems: 'center',
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
   linkButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 12,
+    borderRadius: radius.md,
     justifyContent: 'center',
     minHeight: MIN_TAP_TARGET,
     minWidth: 74,
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accentStrong,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     justifyContent: 'center',
     marginTop: 8,
     minHeight: MIN_TAP_TARGET,
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   deleteButton: {
     alignItems: 'center',
     borderColor: partnerTheme.danger,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     justifyContent: 'center',
     marginTop: 12,

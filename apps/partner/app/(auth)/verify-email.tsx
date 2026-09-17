@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { radius } from '@feasty/design-system';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
 import {
   formatAuthError,
@@ -260,7 +261,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     height: 54,
@@ -270,7 +271,7 @@ const styles = StyleSheet.create({
   codeInput: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 26,
@@ -283,7 +284,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginBottom: 12,
     paddingVertical: 16,
   },
@@ -299,7 +300,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.background,
     borderColor: partnerTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     paddingVertical: 16,
   },

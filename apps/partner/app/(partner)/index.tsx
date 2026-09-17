@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNotice } from '@feasty/design-system';
+import { radius, useNotice } from '@feasty/design-system';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
   rangeChip: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   rangeChipActiveText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
   kpiCard: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     minHeight: 104,
     padding: 16,
@@ -434,7 +434,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     padding: 18,
   },
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   breakdownBar: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flexDirection: 'row',
     height: 14,
     marginTop: 14,
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   legendDot: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
     width: 10,
   },
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   orderRow: {
     alignItems: 'center',
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 10,
@@ -510,7 +510,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   statusPill: {
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -527,7 +527,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: partnerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 14,
     padding: 18,
   },

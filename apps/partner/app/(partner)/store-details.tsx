@@ -28,7 +28,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import {
   draftFromStore,
@@ -632,7 +632,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 14,
@@ -661,7 +661,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   inputError: {
-    backgroundColor: '#fff6f6',
+    backgroundColor: partnerTheme.dangerSoft,
     borderColor: partnerTheme.danger,
   },
   fieldColumn: {
@@ -705,7 +705,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     justifyContent: 'center',
     marginTop: 18,
     minHeight: MIN_TAP_TARGET,
@@ -731,7 +731,7 @@ const styles = StyleSheet.create({
   assetButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     justifyContent: 'center',
     marginTop: 10,
     minHeight: MIN_TAP_TARGET,
@@ -757,7 +757,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     height: 86,
     justifyContent: 'center',

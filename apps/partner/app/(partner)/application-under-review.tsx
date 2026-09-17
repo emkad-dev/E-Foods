@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { partnerTheme } from '../../src/theme/palette';
 
@@ -67,7 +68,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20 },
   hero: {
     backgroundColor: partnerTheme.hero,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     padding: 24,
   },
   eyebrow: {
@@ -83,7 +84,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
@@ -93,7 +94,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 20,
     paddingVertical: 14,
   },
@@ -102,7 +103,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 20,
     paddingVertical: 14,

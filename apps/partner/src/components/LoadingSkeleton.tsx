@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Animated, Easing, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { partnerTheme } from '../theme/palette';
 
 type LoadingSkeletonMode =
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
   authCard: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 20,
     width: '100%',
@@ -348,7 +349,7 @@ const styles = StyleSheet.create({
   },
   brandMark: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     height: 52,
     marginRight: 12,
     width: 52,
@@ -363,17 +364,17 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
   },
   title: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 20,
   },
   copy: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
     marginTop: 10,
   },
@@ -383,12 +384,12 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 50,
   },
   button: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     height: 50,
   },
   linkStack: {
@@ -397,7 +398,7 @@ const styles = StyleSheet.create({
   },
   linkPill: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 28,
   },
   policyRow: {
@@ -408,7 +409,7 @@ const styles = StyleSheet.create({
   },
   checkbox: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     height: 22,
     width: 22,
   },
@@ -419,13 +420,13 @@ const styles = StyleSheet.create({
   },
   policyLine: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
   },
   sectionCard: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 12,
     padding: 18,
@@ -435,7 +436,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 16,
   },
   topRow: {
@@ -456,7 +457,7 @@ const styles = StyleSheet.create({
   },
   chip: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 32,
     width: 74,
   },
@@ -472,7 +473,7 @@ const styles = StyleSheet.create({
   metricCard: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     height: 100,
     width: '47.5%',
@@ -492,7 +493,7 @@ const styles = StyleSheet.create({
   },
   chartBlock: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     height: 180,
     marginTop: 14,
   },
@@ -506,7 +507,7 @@ const styles = StyleSheet.create({
   },
   legendPill: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 28,
   },
   row: {
@@ -514,9 +515,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 12,
   },
+  // `pill`, not the `lg` every other 16 in this file collapsed to: 16 is exactly
+  // half of 32, so this block renders as a circle today and only `pill` keeps it
+  // one if `lg` ever moves.
   rowAvatar: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 16,
+    borderRadius: radius.pill,
     height: 32,
     marginRight: 12,
     width: 32,
@@ -527,17 +531,17 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 14,
   },
   rowSubtitle: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 12,
   },
   rowBadge: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 24,
     marginLeft: 12,
     width: 60,
@@ -550,7 +554,7 @@ const styles = StyleSheet.create({
   },
   menuThumb: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     height: 48,
     width: 48,
   },
@@ -560,7 +564,7 @@ const styles = StyleSheet.create({
   },
   togglePill: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 28,
     width: 52,
   },
@@ -571,7 +575,7 @@ const styles = StyleSheet.create({
   },
   avatarLarge: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     height: 56,
     width: 56,
   },
@@ -588,7 +592,7 @@ const styles = StyleSheet.create({
   },
   settingRow: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     height: 46,
     marginTop: 10,
   },

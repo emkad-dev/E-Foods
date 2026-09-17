@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -231,7 +232,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: partnerTheme.hero,
     borderColor: partnerTheme.hero,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 24,
   },
@@ -257,7 +258,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 15,
@@ -310,7 +311,7 @@ const styles = StyleSheet.create({
   checkbox: {
     alignItems: 'center',
     borderColor: partnerTheme.border,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     borderWidth: 1,
     height: 22,
     justifyContent: 'center',
@@ -323,7 +324,7 @@ const styles = StyleSheet.create({
   },
   checkboxDot: {
     backgroundColor: partnerTheme.textOnBrand,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
     width: 10,
   },
@@ -340,7 +341,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 18,
     paddingVertical: 16,
   },

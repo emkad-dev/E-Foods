@@ -23,6 +23,7 @@
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import type { OrderDocument } from '../domain/entities';
 import { partnerTheme } from '../theme/palette';
 import { formatPartnerMoney } from '../utils/partnerQueue';
@@ -180,7 +181,7 @@ const styles = StyleSheet.create({
   headerButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.18)',
     borderColor: partnerTheme.textOnHero,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: partnerTheme.surface,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     minWidth: 220,
     padding: 14,
   },
@@ -225,7 +226,7 @@ const styles = StyleSheet.create({
   },
   cardButton: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
@@ -244,7 +245,7 @@ const styles = StyleSheet.create({
   },
   notice: {
     backgroundColor: partnerTheme.dangerSoft,
-    borderRadius: 12,
+    borderRadius: radius.md,
     marginTop: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,

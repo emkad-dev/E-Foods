@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNotice } from '@feasty/design-system';
+import { radius, useNotice } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import {
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
   summaryPill: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     flex: 1,
     paddingHorizontal: 14,
@@ -647,7 +647,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: partnerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 14,
     padding: 18,
   },
@@ -667,7 +667,7 @@ const styles = StyleSheet.create({
   editorIntro: {
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 12,
     padding: 14,
@@ -704,7 +704,7 @@ const styles = StyleSheet.create({
   categoryPickerChip: {
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     marginRight: 8,
     paddingHorizontal: 13,
@@ -720,14 +720,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   categoryPickerChipTextActive: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 12,
     fontWeight: '800',
   },
   input: {
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 14,
@@ -767,21 +767,21 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingVertical: 14,
   },
   primaryButtonDisabled: {
     opacity: 0.55,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingVertical: 14,
   },
   secondaryButtonText: {
@@ -797,7 +797,7 @@ const styles = StyleSheet.create({
   emptyPanel: {
     backgroundColor: partnerTheme.surfaceMuted,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginTop: 12,
     padding: 16,
@@ -826,7 +826,7 @@ const styles = StyleSheet.create({
   },
   categoryCountPill: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -838,7 +838,7 @@ const styles = StyleSheet.create({
   },
   itemRow: {
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginTop: 12,
     padding: 14,
@@ -869,7 +869,7 @@ const styles = StyleSheet.create({
   },
   inlineAction: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 12,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -879,7 +879,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   inlineDanger: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: partnerTheme.dangerSoft,
   },
   inlineDangerText: {
     color: partnerTheme.dangerText,

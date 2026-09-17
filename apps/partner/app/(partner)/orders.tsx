@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import { KitchenBoard } from '../../src/components/KitchenBoard';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useKitchenAlarm } from '../../src/contexts/KitchenAlarmContext';
@@ -346,7 +347,7 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     padding: 16,
     width: '48.2%',
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginRight: 10,
     marginTop: 8,
     paddingHorizontal: 14,
@@ -390,7 +391,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   filterChipActiveText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -402,7 +403,7 @@ const styles = StyleSheet.create({
   historyFilterChip: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     marginRight: 10,
     marginTop: 8,
@@ -419,14 +420,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   historyFilterChipActiveText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 12,
     fontWeight: '700',
   },
   errorCard: {
     backgroundColor: partnerTheme.dangerSoft,
     borderColor: '#efc4bd',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 16,
@@ -446,7 +447,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: partnerTheme.danger,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -455,13 +456,13 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   retryButtonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },
   emptyCard: {
     backgroundColor: partnerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 14,
     padding: 18,
   },
@@ -478,7 +479,7 @@ const styles = StyleSheet.create({
   },
   orderCard: {
     backgroundColor: partnerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 12,
     padding: 18,
   },
@@ -492,7 +493,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   statusPill: {
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -509,7 +510,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   signalChip: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -530,7 +531,7 @@ const styles = StyleSheet.create({
   },
   alarmChip: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,

@@ -2,6 +2,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
 import { useOtpCooldown } from '../../src/services/supabase/auth';
@@ -154,7 +155,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 15,
@@ -164,7 +165,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 18,
     paddingVertical: 16,
   },

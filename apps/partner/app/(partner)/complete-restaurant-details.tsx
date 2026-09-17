@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNotice } from '@feasty/design-system';
+import { radius, useNotice } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { NIGERIA_BANKS, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
 import {
@@ -720,7 +720,7 @@ export default function CompleteRestaurantDetailsScreen() {
           style={[styles.primaryButton, submitting || !currentStepComplete ? styles.buttonDisabled : null]}
         >
           {submitting ? (
-            <ActivityIndicator color="#ffffff" />
+            <ActivityIndicator color={partnerTheme.textOnBrand} />
           ) : (
             <Text style={styles.primaryButtonText}>Submit for review</Text>
           )}
@@ -785,7 +785,7 @@ const styles = StyleSheet.create({
   },
   progressSegment: {
     backgroundColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flex: 1,
     height: 5,
   },
@@ -801,7 +801,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 18,
   },
@@ -824,7 +824,7 @@ const styles = StyleSheet.create({
   identityBubble: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 44,
     justifyContent: 'center',
     width: 44,
@@ -850,7 +850,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: partnerTheme.text,
     fontSize: 15,
@@ -873,7 +873,7 @@ const styles = StyleSheet.create({
   },
   bankList: {
     borderColor: partnerTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginTop: 8,
     maxHeight: 260,
@@ -892,7 +892,7 @@ const styles = StyleSheet.create({
   },
   verifiedCard: {
     backgroundColor: partnerTheme.successSoft,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 12,
     padding: 14,
   },
@@ -912,7 +912,7 @@ const styles = StyleSheet.create({
   uploadButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     paddingVertical: 14,
   },
   uploadButtonDone: {
@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     height: 72,
     justifyContent: 'center',
@@ -952,7 +952,7 @@ const styles = StyleSheet.create({
   },
   logoButton: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
@@ -985,7 +985,7 @@ const styles = StyleSheet.create({
   chip: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1000,7 +1000,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   chipTextActive: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
   },
   coordinatesRow: {
     flexDirection: 'row',
@@ -1044,7 +1044,7 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     backgroundColor: partnerTheme.cream,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     padding: 14,
   },
@@ -1061,12 +1061,12 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 18,
     paddingVertical: 16,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '900',
   },

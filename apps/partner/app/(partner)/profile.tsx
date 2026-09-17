@@ -17,7 +17,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, useNotice } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { storeSetupGaps } from '../../src/domain/storeSetupForm';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   statusPill: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 14,
     paddingVertical: 6,
   },
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
   pauseChip: {
     alignItems: 'center',
     backgroundColor: partnerTheme.warningSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     justifyContent: 'center',
     minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 18,
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   pausedBanner: {
     backgroundColor: partnerTheme.warningSoft,
     borderColor: '#efcf96',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     padding: 16,
   },
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     justifyContent: 'center',
     marginTop: 14,
     minHeight: MIN_TAP_TARGET,
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
   warningCard: {
     backgroundColor: partnerTheme.warningSoft,
     borderColor: '#efcf96',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 16,
@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,

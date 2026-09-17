@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNotice } from '@feasty/design-system';
+import { radius, useNotice } from '@feasty/design-system';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
@@ -352,7 +352,7 @@ const styles = StyleSheet.create({
   },
   hero: {
     backgroundColor: partnerTheme.hero,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     padding: 22,
   },
   eyebrow: {
@@ -376,7 +376,7 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     alignSelf: 'flex-start',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 14,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: partnerTheme.surface,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 14,
     padding: 18,
   },
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
   overdueCard: {
     backgroundColor: partnerTheme.dangerSoft,
     borderColor: partnerTheme.danger,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -476,7 +476,7 @@ const styles = StyleSheet.create({
   actionButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     justifyContent: 'center',
     marginTop: 10,
     minWidth: 158,
@@ -489,17 +489,23 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   actionButtonDisabled: {
-    backgroundColor: '#d7d2c7',
+    // Was backgroundColor '#d7d2c7', a cream-era leftover that put the white
+    // label at 1.51:1 -- and since only one action is valid per status, most of
+    // these five buttons are disabled most of the time, so staff could not read
+    // which was which. Dimming the whole control keeps the label's contrast
+    // against its own fill and matches the controlDisabled pattern the Store
+    // screens use.
+    opacity: 0.5,
   },
   actionButtonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '800',
   },
   rejectButton: {
     alignItems: 'center',
     backgroundColor: partnerTheme.danger,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     justifyContent: 'center',
     marginTop: 10,
     minWidth: 158,
@@ -507,7 +513,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   rejectButtonText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '800',
   },

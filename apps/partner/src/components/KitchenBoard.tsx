@@ -22,6 +22,7 @@
 // been seen.
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { useKitchenAlarm } from '../contexts/KitchenAlarmContext';
 import type { OrderDocument } from '../domain/entities';
 import { isOrderAlarming, orderNeedsAcceptDecision } from '../domain/kitchenAlarm';
@@ -260,7 +261,7 @@ const styles = StyleSheet.create({
   },
   muteButton: {
     backgroundColor: partnerTheme.accentSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
@@ -277,7 +278,7 @@ const styles = StyleSheet.create({
   },
   attentionStrip: {
     backgroundColor: partnerTheme.dangerSoft,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginBottom: 16,
     paddingBottom: 14,
     paddingHorizontal: 16,
@@ -291,7 +292,7 @@ const styles = StyleSheet.create({
   },
   handoffStrip: {
     backgroundColor: partnerTheme.surfaceMuted,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     marginTop: 16,
     paddingBottom: 14,
     paddingHorizontal: 16,
@@ -315,7 +316,7 @@ const styles = StyleSheet.create({
   column: {
     backgroundColor: partnerTheme.surface,
     borderColor: partnerTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     flex: 1,
     overflow: 'hidden',
@@ -336,13 +337,13 @@ const styles = StyleSheet.create({
   },
   columnCount: {
     backgroundColor: partnerTheme.hero,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     minWidth: 36,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   columnCountText: {
-    color: '#ffffff',
+    color: partnerTheme.textOnBrand,
     fontSize: 18,
     fontWeight: '800',
     textAlign: 'center',
@@ -358,7 +359,7 @@ const styles = StyleSheet.create({
   },
   ticketCard: {
     backgroundColor: partnerTheme.background,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginBottom: 12,
     padding: 16,
   },
@@ -382,7 +383,7 @@ const styles = StyleSheet.create({
   ticketOverdue: {
     alignSelf: 'flex-start',
     backgroundColor: partnerTheme.dangerSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -397,7 +398,7 @@ const styles = StyleSheet.create({
   },
   ticketAlarm: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
