@@ -29,8 +29,41 @@ import {
   describeExternalLinkFailure,
   openExternalLink,
 } from '../../../../../packages/runtime/src/externalLink';
-import { buildOrderTrackingSummary } from '../../../src/utils/orderTrackingSummary';
+import {
+  buildOrderItemRows,
+  buildOrderReceipt,
+  buildOrderTrackingSummary,
+  type OrderTrackingSummaryItem,
+} from '../../../src/utils/orderTrackingSummary';
 import { formatMoney } from '../../../src/utils/formatting';
+
+/**
+ * The lines the customer actually ordered.
+ *
+ * Returns null on an empty list rather than an empty container: a legacy order
+ * with no `items` must show nothing at all, not an "Items" heading over blank
+ * space. The same reason `options` is branched on per row.
+ */
+const OrderItemRows = ({ items }: { items: OrderTrackingSummaryItem[] }) => {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.itemList}>
+      {items.map((item) => (
+        <View key={item.key} style={styles.itemRow}>
+          <Text style={styles.itemQuantity}>{item.quantity}×</Text>
+          <View style={styles.itemCopy}>
+            <Text style={styles.itemName}>{item.name}</Text>
+            {item.options ? <Text style={styles.itemOptions}>{item.options}</Text> : null}
+          </View>
+          <Text style={styles.itemAmount}>{formatMoney(item.total)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+};
 
 // Task 18 (G2): render the scheduled slot on the tracking screen.
 const formatScheduledSlot = (value: unknown): string | null => {
@@ -138,6 +171,18 @@ export default function OrderTracking() {
   const groupSummary = buildOrderTrackingSummary(order);
   const checkoutTotal = groupSummary?.total ?? order.pricing?.total ?? order.total;
   const restaurantTotal = order.pricing?.total ?? order.total;
+  // In a grouped checkout every member order's lines are already printed under
+  // its own restaurant in the group card, and `order` is one of those members —
+  // rendering them here too would show the primary restaurant's food twice.
+  const orderItems = groupSummary ? [] : buildOrderItemRows(order.items);
+  // The money breakdown for THIS restaurant's order. Printing subtotal and
+  // discount is what lets the column add up to the total above it; the screen
+  // used to print only delivery fee and tip, which cannot.
+  const receipt = buildOrderReceipt({
+    pricing: order.pricing,
+    restaurantScoped: Boolean(groupSummary),
+    total: restaurantTotal,
+  });
   const paymentTotalLabel = groupSummary ? 'Shared checkout total' : 'Total';
   const paymentStatus = formatPaymentStatusLabel(order.payment?.status, order.payment?.method);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
@@ -359,16 +404,29 @@ export default function OrderTracking() {
           </View>
           {groupSummary.lines.map((line) => (
             <View key={line.id} style={styles.groupLine}>
-              <View style={styles.groupLineCopy}>
-                <Text style={styles.groupLineTitle}>{line.restaurantName}</Text>
-                <Text style={styles.groupLineMeta}>
-                  {line.itemCount} {line.itemCount === 1 ? 'item' : 'items'}
-                  {line.isPrimary ? ' · primary order' : ''}
-                </Text>
+              <View style={styles.groupLineHeader}>
+                <View style={styles.groupLineCopy}>
+                  <Text style={styles.groupLineTitle}>{line.restaurantName}</Text>
+                  <Text style={styles.groupLineMeta}>
+                    {line.itemCount} {line.itemCount === 1 ? 'item' : 'items'}
+                    {line.isPrimary ? ' · primary order' : ''}
+                  </Text>
+                </View>
+                <Text style={styles.groupLineAmount}>{formatMoney(line.subtotal)}</Text>
               </View>
-              <Text style={styles.groupLineAmount}>{formatMoney(line.subtotal)}</Text>
+              {/* Nested under the restaurant that is cooking them: a mixed
+                  basket flattened into one list attributes the wrong food to
+                  the wrong kitchen. */}
+              <OrderItemRows items={line.items} />
             </View>
           ))}
+        </View>
+      ) : null}
+
+      {orderItems.length > 0 ? (
+        <View style={styles.itemsCard}>
+          <Text style={styles.sectionTitle}>Items</Text>
+          <OrderItemRows items={orderItems} />
         </View>
       ) : null}
 
@@ -401,17 +459,18 @@ export default function OrderTracking() {
             <Text style={styles.etaSummaryHint}>{etaSummaryHint}</Text>
           </View>
         ) : null}
-        {groupSummary ? <Text style={styles.detailLine}>Restaurant order total: {formatMoney(restaurantTotal)}</Text> : null}
-        <Text style={styles.detailLine}>
-          {groupSummary ? 'Restaurant delivery fee' : 'Delivery fee'}: {formatMoney(order.pricing?.deliveryFee ?? 0)}
-        </Text>
-        {order.pricing?.serviceFee ? (
-          <Text style={styles.detailLine}>
-            {groupSummary ? 'Restaurant service fee' : 'Service fee'}: {formatMoney(order.pricing.serviceFee)}
+        {/* Subtotal ± the fees, then the total they sum to. A deduction is
+            printed with its sign so reading the column down actually reaches
+            the figure at the bottom. */}
+        {receipt.lines.map((line) => (
+          <Text key={line.id} style={styles.detailLine}>
+            {line.label}: {line.amount < 0 ? `−${formatMoney(Math.abs(line.amount))}` : formatMoney(line.amount)}
           </Text>
+        ))}
+        {groupSummary ? (
+          <Text style={styles.detailLineTotal}>Restaurant order total: {formatMoney(restaurantTotal)}</Text>
         ) : null}
-        <Text style={styles.detailLine}>{groupSummary ? 'Restaurant tip' : 'Tip'}: {formatMoney(order.pricing?.tip ?? 0)}</Text>
-        <Text style={styles.detailLine}>Payment method: {paymentMethod}</Text>
+        <Text style={[styles.detailLine, styles.detailLineSpaced]}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
         {order.payment?.reference ? <Text style={styles.detailLine}>Reference: {order.payment.reference}</Text> : null}
         {typeof order.payment?.refundAmount === 'number' && order.payment.refundAmount > 0 ? (
@@ -732,13 +791,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   groupLine: {
-    alignItems: 'flex-start',
     borderTopColor: customerTheme.border,
     borderTopWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     marginTop: 12,
     paddingTop: 12,
+  },
+  groupLineHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   groupLineCopy: {
     flex: 1,
@@ -801,6 +862,60 @@ const styles = StyleSheet.create({
     color: customerTheme.textMuted,
     fontSize: 13,
     lineHeight: 20,
+  },
+  detailLineTotal: {
+    color: customerTheme.text,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  detailLineSpaced: {
+    marginTop: 10,
+  },
+  itemsCard: {
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 18,
+  },
+  itemList: {
+    marginTop: 10,
+  },
+  itemRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    marginTop: 8,
+  },
+  itemQuantity: {
+    color: customerTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+    minWidth: 30,
+  },
+  itemCopy: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  itemName: {
+    color: customerTheme.text,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  itemOptions: {
+    color: customerTheme.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  itemAmount: {
+    color: customerTheme.text,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
   },
   note: {
     color: customerTheme.text,
