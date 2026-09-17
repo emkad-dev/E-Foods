@@ -415,14 +415,20 @@ button {
 }
 
 .btn-danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border-color: #fecaca;
+  /* Solid, because this is the loud one. These two rule bodies were swapped:
+     .btn-ghost carried the solid --danger fill and .btn-danger the pale tint,
+     so every routine action in the console (Retry, Sign out, Save, Refresh,
+     Close, Assign to me) rendered as the most alarming control on the page
+     while Reject, Disable and Delete rendered as the quietest. */
+  background: var(--danger);
+  color: var(--danger-soft);
+  border-color: var(--danger);
 }
 
 .btn-ghost {
-  background: var(--danger);
-  color: var(--danger-soft);
+  /* The quietest button in the app, which is what "ghost" has to mean. */
+  background: transparent;
+  color: var(--text);
   border-color: var(--border-strong);
 }
 

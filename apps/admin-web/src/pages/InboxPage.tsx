@@ -88,20 +88,32 @@ export default function InboxPage() {
     }
   };
 
+  // Both of these were bare awaits. A refused Close/Reopen/Assign threw past
+  // them as an unhandled rejection: no banner, and loadInbox() never ran -- so
+  // the row stayed exactly as it was and the operator could not tell a refusal
+  // from a success. onSend already had this shape; these two did not.
   const onStatus = async (status: SupportStatus) => {
     if (!selectedId) {
       return;
     }
-    await setStatus(selectedId, status);
-    await loadInbox();
+    try {
+      await setStatus(selectedId, status);
+      await loadInbox();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Unable to update this conversation.');
+    }
   };
 
   const onAssignMe = async () => {
     if (!selectedId) {
       return;
     }
-    await assignConversation(selectedId, 'me');
-    await loadInbox();
+    try {
+      await assignConversation(selectedId, 'me');
+      await loadInbox();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Unable to assign this conversation.');
+    }
   };
 
   return (

@@ -78,8 +78,16 @@ export default function ApprovalsPage() {
   const dataState = resolveViewState({ hasData: data !== null, error });
 
   const rejectWithReason = (id: string, review: (reason?: string) => Promise<unknown>) => {
-    const reason = window.prompt('Rejection reason (optional):') ?? undefined;
-    void runAction(id, () => review(reason?.trim() ? reason.trim() : undefined));
+    const reason = window.prompt('Rejection reason (optional):');
+
+    // `null` is Cancel/Esc; '' is "rejected, no reason given". Coalescing the
+    // two -- which `?? undefined` did -- meant dismissing the prompt REJECTED
+    // the application anyway.
+    if (reason === null) {
+      return;
+    }
+
+    void runAction(id, () => review(reason.trim() ? reason.trim() : undefined));
   };
 
   return (
