@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { dispatchTheme } from '../theme/palette';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 
@@ -134,6 +134,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   optionTextSelected: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
   },
 });

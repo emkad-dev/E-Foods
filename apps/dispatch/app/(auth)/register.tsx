@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { Link, useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

@@ -756,7 +756,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   chipTextActive: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
   },
   input: {
     backgroundColor: dispatchTheme.cream,
@@ -800,7 +800,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
   },

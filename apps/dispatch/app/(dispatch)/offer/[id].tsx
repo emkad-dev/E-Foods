@@ -16,7 +16,7 @@
 // offer is live; it does not itself expire anything.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../../packages/design-system/src/tokens/radius';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

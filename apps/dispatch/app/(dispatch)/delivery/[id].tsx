@@ -544,7 +544,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   backButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -668,7 +668,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   mapButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '900',
   },
@@ -680,7 +680,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   callButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '900',
   },
@@ -735,7 +735,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#d7c7b7',
   },
   actionButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'center',

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { dispatchTheme } from '../theme/palette';
 
 // Standalone rider dispatch is shelved for the MVP — restaurants self-provision

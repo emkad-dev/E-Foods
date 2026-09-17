@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';

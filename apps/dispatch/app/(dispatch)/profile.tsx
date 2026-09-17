@@ -756,7 +756,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   chipTextActive: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
   },
   primaryAction: {
     alignItems: 'center',
@@ -766,7 +766,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
   },
   primaryActionText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '900',
   },
@@ -952,7 +952,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
   },
   signOutButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '900',
   },

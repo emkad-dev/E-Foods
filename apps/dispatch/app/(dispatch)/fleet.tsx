@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';

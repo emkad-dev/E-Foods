@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { policyCopy } from '../../../../packages/domain/src';
 import { dispatchTheme } from '../../src/theme/palette';
 

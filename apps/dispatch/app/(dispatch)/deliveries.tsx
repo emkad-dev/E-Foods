@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   filterChipActiveText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   historyFilterChipActiveText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   retryButtonText: {
-    color: '#ffffff',
+    color: dispatchTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '700',
   },

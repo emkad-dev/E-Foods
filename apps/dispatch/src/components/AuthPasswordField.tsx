@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { radius } from '@feasty/design-system';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { dispatchTheme } from '../theme/palette';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
