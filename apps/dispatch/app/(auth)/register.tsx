@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { Link, useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -150,7 +151,7 @@ export default function DispatchRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Full name"
-            placeholderTextColor="#8e8e8e"
+            placeholderTextColor={dispatchTheme.textSoft}
             value={displayName}
             onChangeText={handleFieldChange(setDisplayName)}
             editable={!loading}
@@ -158,7 +159,7 @@ export default function DispatchRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor="#8e8e8e"
+            placeholderTextColor={dispatchTheme.textSoft}
             keyboardType="email-address"
             autoCapitalize="none"
             value={email}
@@ -238,7 +239,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: dispatchTheme.hero,
     borderColor: dispatchTheme.heroSecondary,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 24,
   },
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
@@ -295,7 +296,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     fontSize: 15,
@@ -317,7 +318,7 @@ const styles = StyleSheet.create({
   checkbox: {
     alignItems: 'center',
     borderColor: dispatchTheme.border,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     borderWidth: 1,
     height: 22,
     justifyContent: 'center',
@@ -330,7 +331,7 @@ const styles = StyleSheet.create({
   },
   checkboxDot: {
     backgroundColor: dispatchTheme.textOnBrand,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
     width: 10,
   },
@@ -347,7 +348,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 18,
     paddingVertical: 16,
   },

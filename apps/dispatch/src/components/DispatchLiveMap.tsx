@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { radius } from '@feasty/design-system';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -173,7 +174,7 @@ export default function DispatchLiveMap({ region, riders }: DispatchLiveMapProps
 const styles = StyleSheet.create({
   container: {
     backgroundColor: '#f5f7f6',
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     overflow: 'hidden',
   },
   webView: {

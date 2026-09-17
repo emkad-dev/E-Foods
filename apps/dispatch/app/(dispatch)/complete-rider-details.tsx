@@ -27,6 +27,7 @@ import { submitDispatchApplication } from '../../src/services/dispatchApplicatio
 import { buildDispatchPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 
 const vehicleOptions = ['Bike', 'Scooter', 'Car', 'Van'] as const;
 
@@ -528,7 +529,7 @@ const styles = StyleSheet.create({
   },
   progressSegment: {
     backgroundColor: dispatchTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flex: 1,
     height: 5,
   },
@@ -580,7 +581,7 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     padding: 14,
   },
@@ -604,7 +605,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: dispatchTheme.hero,
     borderColor: dispatchTheme.heroSecondary,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 24,
   },
@@ -630,7 +631,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
@@ -652,7 +653,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 14,
@@ -661,7 +662,7 @@ const styles = StyleSheet.create({
   identityBubble: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accentSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 46,
     justifyContent: 'center',
     width: 46,
@@ -686,7 +687,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   statusBanner: {
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginBottom: 8,
     padding: 14,
   },
@@ -737,7 +738,7 @@ const styles = StyleSheet.create({
   chip: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -757,7 +758,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     fontSize: 15,
@@ -773,7 +774,7 @@ const styles = StyleSheet.create({
   documentButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accentTint,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 10,
     paddingVertical: 13,
   },
@@ -791,7 +792,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 18,
     paddingVertical: 16,
   },
@@ -804,7 +805,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     paddingVertical: 14,

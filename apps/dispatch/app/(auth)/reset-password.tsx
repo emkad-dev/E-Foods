@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
@@ -131,7 +132,7 @@ export default function DispatchResetPasswordScreen() {
       <TextInput
         style={styles.input}
         placeholder="Dispatch email"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={dispatchTheme.textSoft}
         value={email}
         onChangeText={clearErrorAnd(setEmail)}
         autoCapitalize="none"
@@ -144,7 +145,7 @@ export default function DispatchResetPasswordScreen() {
       <TextInput
         style={styles.codeInput}
         placeholder="000000"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={dispatchTheme.textSoft}
         value={code}
         onChangeText={clearErrorAnd((value) => setCode(value.replace(/\D/g, '').slice(0, 6)))}
         keyboardType="number-pad"
@@ -158,7 +159,7 @@ export default function DispatchResetPasswordScreen() {
       <TextInput
         style={styles.input}
         placeholder="New password"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={dispatchTheme.textSoft}
         value={password}
         onChangeText={clearErrorAnd(setPassword)}
         secureTextEntry
@@ -168,7 +169,7 @@ export default function DispatchResetPasswordScreen() {
       <TextInput
         style={styles.input}
         placeholder="Confirm new password"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={dispatchTheme.textSoft}
         value={confirmPassword}
         onChangeText={clearErrorAnd(setConfirmPassword)}
         secureTextEntry
@@ -227,7 +228,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     height: 54,
@@ -237,7 +238,7 @@ const styles = StyleSheet.create({
   codeInput: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     fontSize: 26,
@@ -250,7 +251,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     paddingVertical: 16,
   },
   buttonText: {

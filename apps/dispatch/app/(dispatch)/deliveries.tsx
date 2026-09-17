@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -270,7 +271,7 @@ const styles = StyleSheet.create({
   offerBanner: {
     backgroundColor: dispatchTheme.accentTint,
     borderColor: dispatchTheme.accentSoft,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginBottom: 14,
     padding: 14,
@@ -294,7 +295,7 @@ const styles = StyleSheet.create({
   offerRow: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 10,
+    borderRadius: radius.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 6,
@@ -344,7 +345,7 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     padding: 16,
     width: '48.2%',
@@ -373,7 +374,7 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginRight: 10,
     marginTop: 8,
     paddingHorizontal: 14,
@@ -400,7 +401,7 @@ const styles = StyleSheet.create({
   historyFilterChip: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     marginRight: 10,
     marginTop: 8,
@@ -427,7 +428,7 @@ const styles = StyleSheet.create({
   offerNoticeCard: {
     backgroundColor: dispatchTheme.dangerSoft,
     borderColor: '#efc4bd',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 16,
@@ -446,7 +447,7 @@ const styles = StyleSheet.create({
   errorCard: {
     backgroundColor: dispatchTheme.dangerSoft,
     borderColor: '#efc4bd',
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 16,
@@ -466,7 +467,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: dispatchTheme.danger,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -481,7 +482,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     marginTop: 14,
     padding: 18,
   },
@@ -495,7 +496,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   priorityPill: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -512,7 +513,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   signalChip: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -574,7 +575,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     marginTop: 14,
     padding: 20,
   },

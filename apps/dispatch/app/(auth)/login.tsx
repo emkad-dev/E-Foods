@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -94,7 +95,7 @@ export default function DispatchLoginScreen() {
         <TextInput
           style={styles.input}
           placeholder="Dispatch email"
-          placeholderTextColor="#8e8e8e"
+          placeholderTextColor={dispatchTheme.textSoft}
           autoCapitalize="none"
           keyboardType="email-address"
           value={email}
@@ -137,7 +138,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: dispatchTheme.hero,
     borderColor: dispatchTheme.heroSecondary,
-    borderRadius: 28,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 24,
   },
@@ -163,7 +164,7 @@ const styles = StyleSheet.create({
   formCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 16,
     padding: 20,
@@ -184,7 +185,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     fontSize: 15,
@@ -195,7 +196,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginTop: 18,
     paddingVertical: 16,
   },

@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import { radius } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
   metricCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginBottom: 12,
     padding: 18,
@@ -263,7 +264,7 @@ const styles = StyleSheet.create({
   deliveryCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -286,12 +287,12 @@ const styles = StyleSheet.create({
     maxWidth: 220,
   },
   statusBadge: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   liveStatusBadge: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -315,14 +316,14 @@ const styles = StyleSheet.create({
   },
   progressTrack: {
     backgroundColor: '#dbeafe',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: 10,
     marginTop: 14,
     overflow: 'hidden',
   },
   progressFill: {
     backgroundColor: '#0ea5e9',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     height: '100%',
   },
   deliveryNote: {
@@ -334,7 +335,7 @@ const styles = StyleSheet.create({
   emptyCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 14,
     padding: 20,
@@ -353,7 +354,7 @@ const styles = StyleSheet.create({
   alertCard: {
     backgroundColor: dispatchTheme.warningSoft,
     borderColor: '#ebcf9e',
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 12,
     padding: 16,
@@ -372,7 +373,7 @@ const styles = StyleSheet.create({
   neutralCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 12,
     padding: 16,
@@ -392,7 +393,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -417,7 +418,7 @@ const styles = StyleSheet.create({
   },
   zoneTag: {
     alignSelf: 'center',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flexShrink: 0,
     paddingHorizontal: 12,
     paddingVertical: 8,

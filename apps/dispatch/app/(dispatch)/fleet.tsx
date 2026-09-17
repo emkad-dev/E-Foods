@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
@@ -110,7 +111,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     marginTop: 14,
     padding: 20,
   },
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     marginTop: 14,
     padding: 18,
   },
@@ -147,7 +148,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   badge: {
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },

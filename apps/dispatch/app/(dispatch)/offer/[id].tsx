@@ -16,6 +16,7 @@
 // offer is live; it does not itself expire anything.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -250,7 +251,7 @@ const styles = StyleSheet.create({
   acceptButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 20,
     paddingVertical: 16,
   },
@@ -269,7 +270,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 14,
     padding: 16,
   },
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
   countdownCard: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingVertical: 20,
   },
   countdownCardExpired: {
@@ -309,7 +310,7 @@ const styles = StyleSheet.create({
   declineButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 12,
     paddingVertical: 16,
   },
@@ -355,7 +356,7 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     backgroundColor: dispatchTheme.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     marginTop: 20,
     paddingHorizontal: 20,
     paddingVertical: 12,

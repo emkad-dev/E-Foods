@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { dispatchTheme } from '../theme/palette';
 
@@ -25,7 +26,7 @@ export default function AuthPasswordField({
         <TextInput
           style={styles.input}
           placeholder={placeholder}
-          placeholderTextColor="#8e8e8e"
+          placeholderTextColor={dispatchTheme.textSoft}
           value={value}
           onChangeText={onChangeText}
           secureTextEntry={!showPassword}
@@ -52,7 +53,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     minHeight: 54,

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { radius } from '@feasty/design-system';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
@@ -159,7 +160,7 @@ export default function DispatchVerifyEmailScreen() {
       <TextInput
         style={styles.input}
         placeholder="Dispatch email"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={dispatchTheme.textSoft}
         value={email}
         onChangeText={clearFeedbackAnd(setEmail)}
         autoCapitalize="none"
@@ -172,7 +173,7 @@ export default function DispatchVerifyEmailScreen() {
       <TextInput
         style={styles.codeInput}
         placeholder="000000"
-        placeholderTextColor="#8e8e8e"
+        placeholderTextColor={dispatchTheme.textSoft}
         value={code}
         onChangeText={clearFeedbackAnd((value) => setCode(value.replace(/\D/g, '').slice(0, 6)))}
         keyboardType="number-pad"
@@ -252,7 +253,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     height: 54,
@@ -262,7 +263,7 @@ const styles = StyleSheet.create({
   codeInput: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     color: dispatchTheme.text,
     fontSize: 26,
@@ -275,7 +276,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     marginBottom: 12,
     paddingVertical: 16,
   },
@@ -291,7 +292,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.accent,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     paddingVertical: 16,
   },

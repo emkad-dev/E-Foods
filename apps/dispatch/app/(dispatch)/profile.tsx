@@ -37,6 +37,7 @@ import {
 } from '../../src/services/dispatchRiderActions';
 import { OpenStreetMapLocationService } from '../../src/services/osmLocation';
 import { dispatchTheme } from '../../src/theme/palette';
+import { radius } from '../../../../packages/design-system/src/tokens/radius';
 
 type ProfileSection =
   | 'profile'
@@ -606,7 +607,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -626,7 +627,7 @@ const styles = StyleSheet.create({
   pointsPill: {
     alignItems: 'center',
     backgroundColor: '#13f28a',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     flexDirection: 'row',
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -640,7 +641,7 @@ const styles = StyleSheet.create({
   menuCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 14,
     overflow: 'hidden',
@@ -668,7 +669,7 @@ const styles = StyleSheet.create({
   detailCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 24,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -692,7 +693,7 @@ const styles = StyleSheet.create({
   },
   smallAction: {
     backgroundColor: dispatchTheme.accentTint,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginLeft: 'auto',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -713,7 +714,7 @@ const styles = StyleSheet.create({
   readOnlyInput: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     justifyContent: 'center',
     minHeight: 58,
@@ -735,7 +736,7 @@ const styles = StyleSheet.create({
   },
   chip: {
     backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginBottom: 8,
     marginRight: 8,
     paddingHorizontal: 12,
@@ -755,7 +756,7 @@ const styles = StyleSheet.create({
   primaryAction: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 18,
     paddingVertical: 15,
   },
@@ -767,12 +768,12 @@ const styles = StyleSheet.create({
   earningsHero: {
     alignItems: 'center',
     backgroundColor: '#f1f5f2',
-    borderRadius: 22,
+    borderRadius: radius['2xl'],
     padding: 18,
   },
   balanceLabel: {
     backgroundColor: '#13f28a',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     color: '#07140c',
     fontSize: 11,
     fontWeight: '900',
@@ -798,7 +799,7 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     backgroundColor: dispatchTheme.cream,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     flex: 1,
     padding: 14,
   },
@@ -816,7 +817,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accentTint,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 12,
     paddingVertical: 12,
   },
@@ -833,7 +834,7 @@ const styles = StyleSheet.create({
   },
   payoutCard: {
     backgroundColor: '#f1f5f2',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 10,
     padding: 14,
   },
@@ -859,7 +860,7 @@ const styles = StyleSheet.create({
   transactionRow: {
     alignItems: 'center',
     backgroundColor: '#f1f5f2',
-    borderRadius: 14,
+    borderRadius: radius.lg,
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 10,
@@ -882,7 +883,7 @@ const styles = StyleSheet.create({
   },
   shiftCard: {
     backgroundColor: '#f1f5f2',
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 12,
     padding: 14,
   },
@@ -900,7 +901,7 @@ const styles = StyleSheet.create({
   },
   shiftDemandBadge: {
     backgroundColor: dispatchTheme.accentTint,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
@@ -916,7 +917,7 @@ const styles = StyleSheet.create({
   },
   mapCard: {
     borderColor: dispatchTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 12,
     overflow: 'hidden',
@@ -939,7 +940,7 @@ const styles = StyleSheet.create({
   signOutButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.text,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     marginTop: 10,
     paddingVertical: 15,
   },
@@ -951,7 +952,7 @@ const styles = StyleSheet.create({
   deleteButton: {
     alignItems: 'center',
     borderColor: dispatchTheme.danger,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     marginTop: 12,
     paddingVertical: 15,

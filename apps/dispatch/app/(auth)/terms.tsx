@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { policyCopy } from '../../../../packages/domain/src';
 import { dispatchTheme } from '../../src/theme/palette';
 
@@ -27,7 +28,7 @@ const styles = StyleSheet.create({
   section: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 16,

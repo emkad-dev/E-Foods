@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { dispatchTheme } from '../theme/palette';
 
 type CompactOptionPickerProps = {
@@ -67,7 +68,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -103,7 +104,7 @@ const styles = StyleSheet.create({
   panel: {
     backgroundColor: dispatchTheme.surfaceMuted,
     borderColor: dispatchTheme.border,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 10,
     overflow: 'hidden',
@@ -116,7 +117,7 @@ const styles = StyleSheet.create({
   },
   option: {
     backgroundColor: dispatchTheme.cream,
-    borderRadius: 12,
+    borderRadius: radius.md,
     marginBottom: 8,
     paddingHorizontal: 14,
     paddingVertical: 12,

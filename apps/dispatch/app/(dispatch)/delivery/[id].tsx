@@ -26,6 +26,7 @@ import {
   markDispatchOrderPickedUp,
 } from '../../../src/services/dispatchOrderActions';
 import { dispatchTheme } from '../../../src/theme/palette';
+import { radius } from '../../../../../packages/design-system/src/tokens/radius';
 import { calculateDistanceKm } from '../../../src/utils/deliveryDistance';
 import { toDialablePhoneNumber } from '../../../src/utils/phoneLinking';
 import {
@@ -537,7 +538,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 16,
     paddingHorizontal: 18,
     paddingVertical: 14,
@@ -550,7 +551,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: dispatchTheme.hero,
     borderColor: dispatchTheme.border,
-    borderRadius: 26,
+    borderRadius: radius['2xl'],
     borderWidth: 1,
     padding: 22,
   },
@@ -575,7 +576,7 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginTop: 16,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -590,7 +591,7 @@ const styles = StyleSheet.create({
   sectionCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,
     padding: 18,
@@ -618,7 +619,7 @@ const styles = StyleSheet.create({
   liveBadge: {
     alignSelf: 'flex-start',
     backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginBottom: 10,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -641,7 +642,7 @@ const styles = StyleSheet.create({
   coordinateChip: {
     backgroundColor: dispatchTheme.cream,
     borderColor: dispatchTheme.border,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     borderWidth: 1,
     flex: 1,
     padding: 12,
@@ -662,7 +663,7 @@ const styles = StyleSheet.create({
   mapButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.hero,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     paddingVertical: 13,
   },
@@ -674,7 +675,7 @@ const styles = StyleSheet.create({
   callButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 14,
+    borderRadius: radius.lg,
     marginTop: 14,
     paddingVertical: 13,
   },
@@ -715,7 +716,7 @@ const styles = StyleSheet.create({
   actionButton: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
@@ -765,7 +766,7 @@ const styles = StyleSheet.create({
   riderCard: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.cream,
-    borderRadius: 18,
+    borderRadius: radius.xl,
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 10,

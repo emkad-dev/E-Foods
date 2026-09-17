@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { radius } from '@feasty/design-system';
 import { dispatchTheme } from '../theme/palette';
 
 // Standalone rider dispatch is shelved for the MVP — restaurants self-provision
@@ -29,7 +30,7 @@ const styles = StyleSheet.create({
   },
   badge: {
     backgroundColor: dispatchTheme.accentSoft,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     marginBottom: 20,
     paddingHorizontal: 14,
     paddingVertical: 6,
