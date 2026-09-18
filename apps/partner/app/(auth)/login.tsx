@@ -1,8 +1,8 @@
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateLoginForm } from '../../src/domain/authFormValidation';
@@ -115,21 +115,30 @@ export default function PartnerLoginScreen() {
           <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Open dashboard'}</Text>
         </TouchableOpacity>
 
+        {/* `asChild` so each link is a real box rather than a run of inline
+            text. A bare <Link> renders as Text, which react-native-web gives
+            `display: inline` -- and CSS ignores min-height on an inline box,
+            so the obvious fix does nothing. Each of these was the 14pt default
+            line box: 20pt. */}
         <Link
           href={redirectTo ? { pathname: '/(auth)/register', params: { redirectTo } } : '/(auth)/register'}
-          style={styles.link}
+          asChild
         >
-          Need a partner login? Create one
+          <Pressable style={styles.linkPressable}>
+            <Text style={styles.link}>Need a partner login? Create one</Text>
+          </Pressable>
         </Link>
         <Link
           href={redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'}
-          style={styles.linkSecondary}
+          asChild
         >
-          Forgot password?
+          <Pressable style={styles.linkPressable}>
+            <Text style={styles.linkSecondary}>Forgot password?</Text>
+          </Pressable>
         </Link>
-        <Text style={styles.linkSecondary} onPress={() => Linking.openURL('https://feasty.com.ng')}>
-          Looking to order food? Visit feasty.com.ng
-        </Text>
+        <Pressable style={styles.linkPressable} onPress={() => Linking.openURL('https://feasty.com.ng')}>
+          <Text style={styles.linkSecondary}>Looking to order food? Visit feasty.com.ng</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );
@@ -215,14 +224,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The spacing moved off the labels and onto the boxes that now hold them,
+  // and shrank: a 44pt box already carries its own air, so keeping the old
+  // 16/12 margins on top of it would have pushed the three links most of a
+  // thumb's width further down the screen.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: partnerTheme.accentStrong,
-    marginTop: 16,
     textAlign: 'center',
   },
   linkSecondary: {
     color: partnerTheme.textMuted,
-    marginTop: 12,
     textAlign: 'center',
   },
 });
