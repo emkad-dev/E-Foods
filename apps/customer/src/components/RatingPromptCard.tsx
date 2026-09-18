@@ -18,6 +18,10 @@ import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppSt
 import { useAuth } from '../contexts/AuthContext';
 import { isValidScore, selectNextPendingRating, type PendingRating } from '../domain/ratingPrompt';
 import { getPendingOrderRatings, submitOrderRating } from '../services/customerRatings';
+import {
+  readDismissedRatingOrderIds,
+  rememberDismissedRatingOrderId,
+} from '../services/ratingPromptDismissals';
 import { customerTheme } from '../theme/palette';
 
 const StarRow = ({
@@ -58,10 +62,24 @@ export default function RatingPromptCard() {
   const { user } = useAuth();
   const isVisible = useAppStateVisibility();
   const [pending, setPending] = useState<PendingRating[]>([]);
-  // Session-only: an orderId this component has already resolved (submitted,
-  // or hit the already_rated outcome) since the last successful fetch — see
-  // selectNextPendingRating's own doc comment for why this exists.
+  // Orders this prompt is done with: submitted, already_rated, or declined.
+  //
+  // Seeded from storage on mount, so "Not now" survives a relaunch. It used to
+  // be session-only, which meant a customer who declined to rate was covered by
+  // this full-screen card again on the very next launch, and the one after, for
+  // as long as the order stayed unrated -- which is forever, because declining
+  // is not rating. See domain/ratingPromptDismissals.ts.
   const [handledOrderIds, setHandledOrderIds] = useState<Set<string>>(new Set());
+  // Held back until the dismissals have loaded. Rendering the card first and
+  // hiding it a tick later would flash the prompt for orders the customer
+  // already said no to -- the exact thing this is meant to stop.
+  const [dismissalsLoaded, setDismissalsLoaded] = useState(false);
+  // A failed submit used to be swallowed entirely, on the reasoning that the
+  // prompt staying up let the customer retry. But nothing said it had failed,
+  // so the card just sat there looking untouched: tap Submit, nothing happens,
+  // tap again. Silence on a control the customer pressed is the other half of
+  // what makes this feel like a loop.
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [restaurantScore, setRestaurantScore] = useState<number | null>(null);
   const [courierScore, setCourierScore] = useState<number | null>(null);
   const [comment, setComment] = useState('');
@@ -92,8 +110,19 @@ export default function RatingPromptCard() {
     if (!user) {
       setPending([]);
       setHandledOrderIds(new Set());
+      // Reset so the next sign-in re-reads rather than trusting the last
+      // account's list.
+      setDismissalsLoaded(false);
       return;
     }
+
+    void (async () => {
+      const dismissed = await readDismissedRatingOrderIds();
+      if (activeRef.current) {
+        setHandledOrderIds((previous) => new Set([...previous, ...dismissed]));
+        setDismissalsLoaded(true);
+      }
+    })();
 
     void refresh();
 
@@ -113,15 +142,21 @@ export default function RatingPromptCard() {
 
   const current = selectNextPendingRating(pending, handledOrderIds);
 
-  // Reset the form whenever a new order becomes current.
+  // Reset the form whenever a new order becomes current. The error goes with
+  // it: a failure belongs to the order it was raised for, and carrying it onto
+  // the next card would blame a submit that never happened.
   useEffect(() => {
     setRestaurantScore(null);
     setCourierScore(null);
     setComment('');
+    setSubmitError(null);
   }, [current?.orderId]);
 
   const markHandled = useCallback((orderId: string) => {
     setHandledOrderIds((previous) => new Set(previous).add(orderId));
+    // Fire-and-forget: the in-memory set above is what hides the card now, and
+    // a storage failure must not block that or raise anything at the customer.
+    void rememberDismissedRatingOrderId(orderId);
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -130,6 +165,7 @@ export default function RatingPromptCard() {
     }
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await submitOrderRating({
         comment: comment.trim() || null,
@@ -142,10 +178,18 @@ export default function RatingPromptCard() {
       // already_rated (the UNIQUE constraint is the real guard; see its own
       // doc comment), so reaching here at all already covers both cases.
       markHandled(current.orderId);
-    } catch {
-      // A genuine failure (network, ownership, status) — leave the prompt up
-      // so the customer can retry, rather than silently discarding the rating
-      // they just entered.
+    } catch (error) {
+      // Still leave the prompt up so the rating they typed is not discarded --
+      // but SAY so. `clientErrorMessage`-style sanitising already happens
+      // server-side; whatever arrives here is safe to show, and a generic line
+      // covers the case where it is not readable.
+      if (activeRef.current) {
+        setSubmitError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'That did not go through. Check your connection and try again.'
+        );
+      }
     } finally {
       if (activeRef.current) {
         setSubmitting(false);
@@ -159,7 +203,9 @@ export default function RatingPromptCard() {
     }
   }, [current, markHandled]);
 
-  if (!user || !current) {
+  // `dismissalsLoaded` gates the first paint only; once loaded it stays true
+  // for the session, so this never re-hides a prompt mid-use.
+  if (!user || !dismissalsLoaded || !current) {
     return null;
   }
 
@@ -190,6 +236,12 @@ export default function RatingPromptCard() {
           multiline
           maxLength={500}
         />
+
+        {submitError ? (
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
+            {submitError}
+          </Text>
+        ) : null}
 
         <View style={styles.actionsRow}>
           <TouchableOpacity onPress={handleSkip} style={styles.skipButton} disabled={submitting}>
@@ -284,6 +336,12 @@ const styles = StyleSheet.create({
     minHeight: 64,
     padding: 12,
     textAlignVertical: 'top',
+  },
+  errorText: {
+    color: customerTheme.dangerText,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 12,
   },
   actionsRow: {
     flexDirection: 'row',
