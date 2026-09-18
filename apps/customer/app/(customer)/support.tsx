@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
@@ -211,6 +211,10 @@ const styles = StyleSheet.create({
     color: customerTheme.text,
     flex: 1,
     maxHeight: 120,
+    // 2*10 + a 14pt line + 2*1 border = 42. It grows with the message and is
+    // capped at 120, so a floor only affects the empty state -- which is the
+    // state someone is in when they go to type.
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },

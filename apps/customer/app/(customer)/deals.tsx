@@ -108,7 +108,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center',
   },
   retryText: { color: customerTheme.textOnBrand, fontSize: 16, fontWeight: '800' },
-  card: { backgroundColor: customerTheme.surface, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: customerTheme.border },
+  card: {
+    // ui-contract: allow-small -- this is a container, not a control. Its
+    // height comes from the 150pt image and the card body below it, so the
+    // scanner's line-box estimate says nothing useful about it.
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   image: { width: '100%', height: 150 },
   imagePlaceholder: { backgroundColor: customerTheme.accentSoft },
   cardBody: { padding: 14, gap: 4 },

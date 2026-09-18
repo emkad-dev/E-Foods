@@ -753,12 +753,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
+  // The padding moved to the button below. This footer is a plain View, so
+  // every one of these 14 points looked like the cart bar and none of it took
+  // a tap -- the same defect as the Input whose 48pt field only accepted a
+  // press in its middle 22. Identical pixels, and now the whole bar is live.
   cartFooter: {
     ...elevation.lg,
     backgroundColor: customerTheme.hero,
     borderRadius: radius['2xl'],
     left: 14,
-    padding: 14,
     position: 'absolute',
     right: 14,
   },
@@ -766,6 +769,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
+    padding: 14,
   },
   viewCartLabel: {
     color: customerTheme.accentSoft,

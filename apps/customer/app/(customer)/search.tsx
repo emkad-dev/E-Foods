@@ -392,6 +392,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   resultCard: {
+    // ui-contract: allow-small -- a container, not a control: the 78pt
+    // thumbnail sets its height, so a line-box estimate is meaningless here.
     alignItems: 'center',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,

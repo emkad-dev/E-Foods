@@ -176,11 +176,21 @@ test(`no touchable style composes below the ${MIN_TAP_TARGET}pt floor`, () => {
 
       // Only styles actually attached to something pressable.
       const touchable = new Set<string>();
+      // TextInput belongs here as much as a button does: it is a control you
+      // have to hit. Leaving it out is how a 41pt promo field sat under the
+      // floor with this test green.
       for (const m of stripped.matchAll(
-        /<(?:TouchableOpacity|TouchableHighlight|Pressable|TouchableWithoutFeedback)\b[\s\S]{0,400}?>/g
+        /<(?:TouchableOpacity|TouchableHighlight|Pressable|TouchableWithoutFeedback|TextInput)\b[\s\S]{0,400}?>/g
       )) {
-        for (const s of m[0].matchAll(new RegExp(`${parsed.objectName}\\.([A-Za-z0-9_]+)`, 'g'))) {
-          touchable.add(s[1]!);
+        // ONLY THE FIRST style ref in each `style=` counts. A control is
+        // usually `style={[styles.chip, active ? styles.chipActive : null]}`,
+        // where the base carries the geometry and the variant carries a
+        // colour. Judging `chipActive` on its own reports "2*0 + 20 = 20pt"
+        // for a style that has no geometry to have -- twenty-odd false
+        // alarms, which is exactly how a test like this gets switched off.
+        for (const attr of m[0].matchAll(/style=\{([\s\S]*?)\}\s*(?:[a-zA-Z-]+=|\/?>)/g)) {
+          const first = attr[1]!.match(new RegExp(`${parsed.objectName}\\.([A-Za-z0-9_]+)`));
+          if (first) touchable.add(first[1]!);
         }
       }
 
@@ -199,10 +209,14 @@ test(`no touchable style composes below the ${MIN_TAP_TARGET}pt floor`, () => {
         // construction; only a literal can be too small.
         if (/\b(?:minHeight|height):/.test(block.body)) continue;
 
+        // A control with NO padding declared is not one this test has nothing to
+        // say about -- it is the smallest on the screen. Skipping it let a 48x16
+        // Remove button sit in the cart with this suite green, and it is the
+        // same shape as partner's Sign out, which had no style at all. Absent
+        // padding means zero, so compute it.
         const padMatch =
           block.body.match(/paddingVertical: (\d+)/) ?? block.body.match(/padding: (\d+)/);
-        if (!padMatch) continue;
-        const pad = Number(padMatch[1]);
+        const pad = padMatch ? Number(padMatch[1]) : 0;
         const borderMatch = block.body.match(/borderWidth: (\d+)/);
         const border = borderMatch ? Number(borderMatch[1]) : 0;
 

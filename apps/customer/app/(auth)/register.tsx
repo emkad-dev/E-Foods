@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
@@ -300,11 +300,16 @@ const styles = StyleSheet.create({
     color: customerTheme.link,
     fontWeight: '800',
   },
+  // The same 20pt consent row partner and dispatch had. I fixed those two by
+  // hand and never looked at customer's, which is the exact asymmetry this
+  // whole sweep keeps turning up -- and the one app of the three whose signup
+  // is open to the public.
   policyRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
     marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
   },
   policyText: {
     color: customerTheme.textMuted,

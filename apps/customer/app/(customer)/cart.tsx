@@ -1200,8 +1200,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginHorizontal: 12,
   },
+  // 48x16 as measured on the running cart -- the smallest control anywhere in
+  // this app, and the only way to take something out of a basket. It carried no
+  // padding and no height at all, so its target was exactly the 12pt label's
+  // line box. It sits in the same row as the quantity steppers, which are now
+  // 44, so the floor costs the row nothing.
   removeButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
     marginLeft: 'auto',
+    minHeight: MIN_TAP_TARGET,
   },
   removeButtonText: {
     color: customerTheme.dangerText,
@@ -1558,14 +1566,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 4,
   },
+  // 41pt, three short. Also two raw hexes that escaped the palette sweep: the
+  // fill is the app's surface and the border is its border token, both of which
+  // already exist and both of which a theme change would otherwise skip.
   promoInput: {
-    backgroundColor: '#fff',
-    borderColor: '#e5e7eb',
+    backgroundColor: customerTheme.surface,
+    borderColor: customerTheme.border,
     borderRadius: radius.md,
     borderWidth: 1,
     color: customerTheme.text,
     flex: 1,
     fontSize: 14,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
