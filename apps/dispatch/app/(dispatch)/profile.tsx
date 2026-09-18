@@ -1,4 +1,3 @@
-import { FontAwesome } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -39,19 +38,13 @@ import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/sp
 import { SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
 /**
- * The three sections a rider can actually use.
+ * The empty draft, used before a rider record has loaded.
  *
- * There were eleven. Six of them -- availableSessions, mySessions, inbox,
- * recentDeliveries, payments, rewards -- were `renderPlaceholder` calls with a
- * hard-coded sentence and no state, no fetch and no backing RPC anywhere in
- * `DISPATCH_ACTIONS`. They rendered "No rewards yet." forever. Two more,
- * shiftSlots and activity, showed real reads of fabricated or fleet-wide data;
- * see the removal notes where they used to be.
- *
- * What is left is what is true: who the rider is and where they work, what
- * they earned, and how to leave.
+ * `acceptanceRate` and `completedTrips` are inert here: the server keeps
+ * `existingRider?.acceptanceRate` and `existingRider?.completedTrips` on every
+ * save, so neither field this object carries can ever reach the database. They
+ * are present because DispatchRiderDraft requires them.
  */
-type ProfileSection = 'profile' | 'weeklyEarnings' | 'session';
 const createDefaultDraft = (): DispatchRiderDraft => ({
   acceptanceRate: 85,
   completedTrips: 0,
@@ -62,11 +55,19 @@ const createDefaultDraft = (): DispatchRiderDraft => ({
   zone: '',
 });
 
-const menuItems: { icon: keyof typeof FontAwesome.glyphMap; key: ProfileSection; label: string }[] = [
-  { icon: 'user-o', key: 'profile', label: 'My profile' },
-  { icon: 'line-chart', key: 'weeklyEarnings', label: 'Weekly earnings' },
-  { icon: 'sign-out', key: 'session', label: 'Session' },
-];
+/*
+  There is no ProfileSection type and no menuItems array any more.
+
+  Both were navigation, and this screen has nothing left to navigate. Eleven
+  destinations behind a menu was a reasonable shape; three is not -- it made a
+  rider tap twice to reach the thing they open this screen for, and tap again
+  to get back. The menu was the last piece of the eleven-section design still
+  standing after the other ten were found to be placeholders or fiction.
+
+  One scroll instead, in the order a rider cares about: what I earned, who I am
+  and where I work, and how to leave. Destructive last, which is where the
+  customer app puts it too.
+*/
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
@@ -100,7 +101,6 @@ export default function ProfileScreen() {
   // inside the profile editor; this one sits beside the delete button.
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { error: earningsError, loading: earningsLoading, refresh: refreshEarnings, refreshing, report } = useWeeklyEarnings();
-  const [selectedSection, setSelectedSection] = useState<ProfileSection>('profile');
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
   const [saving, setSaving] = useState(false);
@@ -268,26 +268,6 @@ export default function ProfileScreen() {
     </View>
   );
 
-  const renderMenu = () => (
-    <View style={styles.menuCard}>
-      {menuItems.map((item) => {
-        const isActive = selectedSection === item.key;
-
-        return (
-          <TouchableOpacity
-            key={item.key}
-            activeOpacity={0.85}
-            onPress={() => setSelectedSection(item.key)}
-            style={[styles.menuItem, isActive ? styles.menuItemActive : null]}
-          >
-            <FontAwesome name={item.icon} size={15} color={isActive ? dispatchTheme.textOnHighlight : dispatchTheme.textMuted} />
-            <Text style={[styles.menuItemText, isActive ? styles.menuItemTextActive : null]}>{item.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-
   const renderProfileEditor = () => (
     <View style={styles.detailCard}>
       <View style={styles.detailHeader}>
@@ -346,12 +326,7 @@ export default function ProfileScreen() {
 
   const renderWeeklyEarnings = () => (
     <View style={styles.detailCard}>
-      <View style={styles.detailHeader}>
-        <TouchableOpacity style={styles.backIcon} onPress={() => setSelectedSection('profile')}>
-          <FontAwesome name="arrow-left" size={14} color={dispatchTheme.text} />
-        </TouchableOpacity>
-        <Text style={styles.detailTitle}>Weekly earnings</Text>
-      </View>
+      <Text style={styles.detailTitle}>Weekly earnings</Text>
       {earningsLoading ? (
         <ActivityIndicator color={dispatchTheme.accent} />
       ) : (
@@ -453,18 +428,6 @@ export default function ProfileScreen() {
     </View>
   );
 
-  const renderDetail = () => {
-    switch (selectedSection) {
-      case 'weeklyEarnings':
-        return renderWeeklyEarnings();
-      case 'session':
-        return renderSession();
-      case 'profile':
-      default:
-        return renderProfileEditor();
-    }
-  };
-
   return (
     // Wrapped rather than used as the root because the floating notice
     // positions itself absolutely: inside a ScrollView that would anchor it to
@@ -472,8 +435,11 @@ export default function ProfileScreen() {
     <View style={styles.screen}>
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         {renderHeader()}
-        {renderMenu()}
-        {renderDetail()}
+        {/* Earnings first. It is the reason a rider opens this screen, and it
+            used to be two taps away behind a menu. */}
+        {renderWeeklyEarnings()}
+        {renderProfileEditor()}
+        {renderSession()}
         {confirmDialog}
       </ScrollView>
       {notice}
@@ -502,12 +468,6 @@ function ReadOnlyValue({ hint, value }: { hint: string; value: string | number }
     </View>
   );
 }
-
-// The back arrow's glyph box. Kept at its drawn size and grown only for the
-// touch target: BACK_ICON_INSET is the half-difference the negative margins
-// below hand straight back to the layout.
-const BACK_ICON_SIZE = 34;
-const BACK_ICON_INSET = (MIN_TAP_TARGET - BACK_ICON_SIZE) / 2;
 
 const styles = StyleSheet.create({
   screen: {
@@ -542,34 +502,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 4,
   },
-  menuCard: {
-    backgroundColor: dispatchTheme.surface,
-    borderColor: dispatchTheme.border,
-    borderRadius: radius['2xl'],
-    borderWidth: 1,
-    marginTop: 14,
-    overflow: 'hidden',
-  },
-  menuItem: {
-    alignItems: 'center',
-    borderBottomColor: dispatchTheme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-  },
-  menuItemActive: {
-    backgroundColor: dispatchTheme.highlight,
-  },
-  menuItemText: {
-    color: dispatchTheme.text,
-    fontSize: 14,
-    fontWeight: '800',
-    marginLeft: 12,
-  },
-  menuItemTextActive: {
-    color: dispatchTheme.textOnHighlight,
-  },
   detailCard: {
     backgroundColor: dispatchTheme.surface,
     borderColor: dispatchTheme.border,
@@ -596,15 +528,6 @@ const styles = StyleSheet.create({
   // the same x. The glyph is drawn where it always was; only the reachable
   // area moved, outward into the card's own 18pt padding, where nothing else
   // is.
-  backIcon: {
-    alignItems: 'center',
-    height: MIN_TAP_TARGET,
-    justifyContent: 'center',
-    marginLeft: -BACK_ICON_INSET,
-    marginRight: 10 - BACK_ICON_INSET,
-    marginVertical: -BACK_ICON_INSET,
-    width: MIN_TAP_TARGET,
-  },
   smallAction: {
     justifyContent: 'center',
     minHeight: MIN_TAP_TARGET,
