@@ -1,4 +1,16 @@
 import type { OrderDocument, OrderItemDocument, OrderPriceBreakdown } from '../domain/entities';
+// ONE definition of how an order is worded. This was implemented here and
+// again, identically, in apps/partner for the kitchen ticket -- two copies of
+// that rule is a promise the receipt and the ticket eventually disagree about
+// what was ordered, and the divergence would surface as a support call rather
+// than a failing test.
+//
+// Reached through the package path with an explicit extension rather than the
+// local `../domain/orders` shim: this module is executed directly by
+// `node --test --experimental-strip-types`, which does no extension guessing,
+// and that shim re-exports its target extensionlessly. Same reason
+// profileSummary.ts reaches past it.
+import { formatOrderItemOptions } from '../../../../packages/domain/src/orders.ts';
 
 /** One ordered line, ready to print: what it was, how many, what it cost. */
 export type OrderTrackingSummaryItem = {
@@ -55,52 +67,9 @@ const toFiniteNumber = (value: unknown, fallback: number) => {
  *  receipt assembled here balances against a total computed there. */
 const roundCurrency = (value: number) => Math.round(value * 100) / 100;
 
-/**
- * The customer's modifier choices on one line — "Protein: Beef · Extras: Extra
- * pepper" — or `null` when the item was ordered plain.
- *
- * A deliberate customer-side twin of `formatOrderItemOptions` in
- * `apps/partner/src/utils/partnerQueue.ts`: the apps are separate Expo builds
- * with their own `src/domain/entities.ts`, and nothing in this repo imports
- * across `apps/*`. Promoting it to `packages/domain` would be the way to share
- * it for real; that is a refactor of partner code, not part of this fix.
- *
- * `null` rather than an empty string because MOST items carry no options, and a
- * caller that renders a permanent empty "Options" label on every row is the
- * empty-label defect this screen is being fixed for. Callers must branch on it.
- *
- * `specialInstructions` is deliberately NOT read: it is declared on
- * `OrderItemDocument` but is never written at placement, has no `OrderItem`
- * column, and is not projected — rendering it would print an always-blank field.
- */
-export const formatOrderItemOptions = (item: OrderItemDocument): string | null => {
-  const options = Array.isArray(item?.selectedOptions) ? item.selectedOptions : [];
-
-  const parts = options
-    .map((option) => {
-      // Labels are a snapshot taken at order time and can be absent on older
-      // rows; the id is the only thing guaranteed present, and a raw id beats
-      // dropping the customer's modifier off their own receipt entirely.
-      const label =
-        typeof option?.optionLabel === 'string' && option.optionLabel.trim()
-          ? option.optionLabel.trim()
-          : typeof option?.optionId === 'string'
-            ? option.optionId.trim()
-            : '';
-
-      if (!label) {
-        return '';
-      }
-
-      const group =
-        typeof option?.groupLabel === 'string' && option.groupLabel.trim() ? `${option.groupLabel.trim()}: ` : '';
-
-      return `${group}${label}`;
-    })
-    .filter(Boolean);
-
-  return parts.length > 0 ? parts.join(' · ') : null;
-};
+// Re-exported so the screens and tests that already reach for it here keep
+// working; the definition itself is shared (see the import at the top).
+export { formatOrderItemOptions };
 
 /**
  * The printable lines of one restaurant's order.

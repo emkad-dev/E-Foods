@@ -3,8 +3,13 @@
 // `getKitchenSignalColors` by loading this module under
 // `node --test --experimental-strip-types`, and Node's ESM resolver will not
 // infer an extension. Metro and tsc both resolve the explicit path unchanged.
-import type { OrderDocument, OrderItemDocument } from '../domain/entities.ts';
-import { isTerminalOrderStatus, normalizeOrderStatus, type OrderStatus } from '../domain/orders.ts';
+import type { OrderDocument } from '../domain/entities.ts';
+import {
+  formatOrderItemOptions,
+  isTerminalOrderStatus,
+  normalizeOrderStatus,
+  type OrderStatus,
+} from '../domain/orders.ts';
 import { partnerTheme } from '../theme/palette.ts';
 
 type QueueTone = 'danger' | 'warning' | 'accent' | 'success' | 'muted';
@@ -269,50 +274,11 @@ export const getKitchenElapsedLabel = (value: unknown) => {
   return minutes === 0 ? `${hours} hr open` : `${hours} hr ${minutes} min open`;
 };
 
-/**
- * The customer's modifier choices on one line — "Protein: Beef · Extras: Extra
- * pepper" — or `null` when the item was ordered plain.
- *
- * `null` rather than an empty string because MOST items carry no options, and a
- * caller that renders a permanent empty "Options:" label on every row teaches
- * the kitchen to stop reading the row. Callers must branch on the null.
- *
- * `selectedOptions` is the only per-item customer instruction that actually
- * reaches this app: the server projects it in `toOrderSnapshotResponse`
- * (`supabase/functions/_shared/orders.ts`) and the placement path writes it
- * (`_shared/domains/orders.ts`). `OrderItemDocument.specialInstructions` is
- * declared on the type but is NOT written by the live placement path, NOT a
- * column on `OrderItem`, and NOT projected into the response — rendering it
- * would print an always-empty field, so it is deliberately not read here.
- */
-export const formatOrderItemOptions = (item: OrderItemDocument): string | null => {
-  const options = Array.isArray(item?.selectedOptions) ? item.selectedOptions : [];
-
-  const parts = options
-    .map((option) => {
-      // Labels are a snapshot taken at order time and can be absent on older
-      // rows; the id is the only thing guaranteed present, and a raw id in the
-      // kitchen beats dropping the modifier entirely.
-      const label = typeof option?.optionLabel === 'string' && option.optionLabel.trim()
-        ? option.optionLabel.trim()
-        : typeof option?.optionId === 'string'
-          ? option.optionId.trim()
-          : '';
-
-      if (!label) {
-        return '';
-      }
-
-      const group = typeof option?.groupLabel === 'string' && option.groupLabel.trim()
-        ? `${option.groupLabel.trim()}: `
-        : '';
-
-      return `${group}${label}`;
-    })
-    .filter(Boolean);
-
-  return parts.length > 0 ? parts.join(' · ') : null;
-};
+// ONE definition, now in packages/domain/src/orders.ts -- this file and
+// apps/customer each carried an identical copy. Re-exported because the order
+// screen imports it from here, and imported at the top because
+// countItemsWithOptions below calls it.
+export { formatOrderItemOptions };
 
 /** How many lines of an order carry modifiers, for the board ticket's one-line hint. */
 export const countModifiedOrderItems = (order: OrderDocument) =>

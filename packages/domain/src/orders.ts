@@ -216,3 +216,74 @@ export const getCustomerRefundPolicyLabel = (status: string | null | undefined) 
     return 'Not cancellable';
   }
 };
+/**
+ * The shape this formatter needs, stated structurally rather than imported.
+ *
+ * Each app builds its own `OrderItemDocument` in its own
+ * `src/domain/entities.ts`, and nothing in this repo imports across `apps/*`.
+ * Naming the two fields that matter lets one implementation serve all of them
+ * without dragging an app's entity model into the shared package.
+ */
+export type OrderItemOptionLike = {
+  groupLabel?: string | null;
+  optionId?: string | null;
+  optionLabel?: string | null;
+};
+
+export type OrderItemWithOptions = {
+  selectedOptions?: OrderItemOptionLike[] | null;
+};
+
+/**
+ * One line of a customer's modifier choices — "Protein: Beef · Extras: Extra
+ * pepper" — or `null` when the item was ordered plain.
+ *
+ * WHY IT LIVES HERE: this existed twice, once in
+ * `apps/partner/src/utils/partnerQueue.ts` for the kitchen ticket and once in
+ * `apps/customer/src/utils/orderTrackingSummary.ts` for the receipt, with
+ * identical logic and different comments. Two copies of the rule that decides
+ * how an order is WORDED is a promise that the kitchen and the customer will
+ * eventually disagree about what was ordered — and the divergence would show
+ * up as a support call, not a test failure.
+ *
+ * `null` rather than an empty string because most items carry no options at
+ * all, and a caller that renders a permanent empty "Options" label on every
+ * row is exactly the empty-label defect this was written to avoid. Callers
+ * must branch on it.
+ *
+ * Labels are a snapshot taken at order time and can be absent on older rows.
+ * The id is the only field guaranteed present, so a raw id is the fallback: in
+ * the kitchen it still tells staff something, and on a receipt it beats
+ * dropping the customer's modifier off their own order entirely.
+ *
+ * `specialInstructions` is deliberately NOT read. It is declared on the item
+ * type but never written at placement, has no column, and is not projected —
+ * rendering it would print an always-blank field on every ticket.
+ */
+export const formatOrderItemOptions = (item: OrderItemWithOptions): string | null => {
+  const options = Array.isArray(item?.selectedOptions) ? item.selectedOptions : [];
+
+  const parts = options
+    .map((option) => {
+      const label =
+        typeof option?.optionLabel === 'string' && option.optionLabel.trim()
+          ? option.optionLabel.trim()
+          : typeof option?.optionId === 'string'
+            ? option.optionId.trim()
+            : '';
+
+      if (!label) {
+        return '';
+      }
+
+      const group =
+        typeof option?.groupLabel === 'string' && option.groupLabel.trim()
+          ? `${option.groupLabel.trim()}: `
+          : '';
+
+      return `${group}${label}`;
+    })
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts.join(' · ') : null;
+};
