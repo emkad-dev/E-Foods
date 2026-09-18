@@ -71,6 +71,7 @@ export const ADMIN_ACTIONS = [
   'adminSetRestaurantPublished',
   'adminGetDashboardSnapshot',
   'adminGetAccessOverview',
+  'adminGetAuditLog',
   'adminGetRiskEvents',
   'adminListFeatureFlags',
   'adminUpsertFeatureFlag',

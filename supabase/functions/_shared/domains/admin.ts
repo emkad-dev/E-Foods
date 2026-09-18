@@ -945,6 +945,125 @@ const adminGetRiskEvents: Handler = async ({ context, data }) => {
   });
 };
 
+/**
+ * How many audit rows one page may carry.
+ *
+ * Capped rather than trusted: `limit` arrives from the client, and an
+ * uncapped page size on an append-only table that only grows is a way to ask
+ * the database for every privileged action ever taken, in one request.
+ */
+const AUDIT_LOG_MAX_LIMIT = 100;
+
+/**
+ * Read the admin audit trail.
+ *
+ * WHY THIS EXISTS. Every privileged mutation has written a row to
+ * AdminAuditLog since the console was built -- approvals, role grants, access
+ * changes, publish toggles -- and nothing could read them. There was no action
+ * on ADMIN_ACTIONS that returned them and no screen that showed them, so the
+ * answer to "who approved this restaurant" existed and was unreachable without
+ * direct database access. A record nobody can consult does not satisfy the
+ * obligation that made it worth writing.
+ *
+ * Read-only by construction. There is no update or delete counterpart here and
+ * there should never be one: the table is service-role only precisely so that
+ * an admin client cannot edit its own history.
+ */
+const adminGetAuditLog: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+
+  const limit = Math.min(Math.max(parseInteger(data.limit, 50), 1), AUDIT_LOG_MAX_LIMIT);
+  const offset = Math.max(parseInteger(data.offset, 0), 0);
+  const action = sanitizeOptionalText(data.action);
+  const actorUid = sanitizeOptionalText(data.actorUid);
+  const targetType = sanitizeOptionalText(data.targetType);
+  const targetId = sanitizeOptionalText(data.targetId);
+
+  let query = serviceClient
+    .from('AdminAuditLog')
+    .select('id,actorUid,action,targetType,targetId,details,createdAt')
+    // Newest first is the default question this table answers. The matching
+    // index arrives with 20260918_admin_audit_log.sql; without it this sorts
+    // the whole table on every page.
+    .order('createdAt', { ascending: false })
+    // Inclusive on both ends, hence the -1: `range(0, 49)` is fifty rows.
+    .range(offset, offset + limit - 1);
+
+  if (action) {
+    query = query.eq('action', action);
+  }
+  if (actorUid) {
+    query = query.eq('actorUid', actorUid);
+  }
+  if (targetType) {
+    query = query.eq('targetType', targetType);
+  }
+  if (targetId) {
+    query = query.eq('targetId', targetId);
+  }
+
+  const { data: rows, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const entries = (rows ?? []) as Array<{
+    actorUid?: string | null;
+    action: string;
+    createdAt: string;
+    details?: Record<string, unknown> | null;
+    id: string;
+    targetId?: string | null;
+    targetType: string;
+  }>;
+
+  // A log of raw uids is technically complete and practically unreadable --
+  // the reviewer would have to look up every actor by hand to answer the one
+  // question they came with. One batched lookup turns the page into names.
+  const actorUids = [...new Set(entries.map((entry) => entry.actorUid).filter((uid): uid is string => Boolean(uid)))];
+  const actorsByUid = new Map<string, { displayName: string | null; email: string | null }>();
+
+  if (actorUids.length > 0) {
+    const { data: actors, error: actorsError } = await serviceClient
+      .from('UserAccount')
+      .select('uid,email,displayName')
+      .in('uid', actorUids);
+
+    if (actorsError) {
+      // Deliberately not fatal. The audit entries themselves are the record;
+      // failing the whole read because the display names could not be resolved
+      // would hide the history to protect a convenience.
+      console.warn('Audit log actor lookup failed; returning uids only.', actorsError.message);
+    } else {
+      for (const actor of (actors ?? []) as Array<{ displayName?: string | null; email?: string | null; uid: string }>) {
+        actorsByUid.set(actor.uid, {
+          displayName: sanitizeOptionalText(actor.displayName),
+          email: sanitizeOptionalText(actor.email),
+        });
+      }
+    }
+  }
+
+  return json(200, {
+    data: {
+      entries: entries.map((entry) => ({
+        ...entry,
+        actorDisplayName: entry.actorUid ? (actorsByUid.get(entry.actorUid)?.displayName ?? null) : null,
+        actorEmail: entry.actorUid ? (actorsByUid.get(entry.actorUid)?.email ?? null) : null,
+        details: entry.details ?? {},
+      })),
+      // The caller asked for `limit` and got `entries.length`. Equality means
+      // there is probably another page; it is a hint for a "load more" control,
+      // not a count, because counting an append-only table on every read costs
+      // more than the read itself.
+      hasMore: entries.length === limit,
+      limit,
+      offset,
+    },
+  });
+};
+
 const adminListFeatureFlags: Handler = async ({ context }) => {
   ensureRole(context.role, ['admin']);
 
@@ -1324,6 +1443,18 @@ const promoList: Handler = async ({ context }) => {
   if (statsError) {
     console.error('Promo stats lookup failed.', statsError);
   }
+  // A FAILED STATS LOOKUP AND A GENUINELY IDLE PROMO MUST NOT LOOK THE SAME.
+  //
+  // The error was logged here and then discarded, and every promo was mapped
+  // through `?? 0` regardless -- so an outage of ebuy_promo_stats serialised to
+  // literal zeros that were byte-identical to a promo nobody had seen yet. An
+  // operator reading "0 impressions" had no way to tell a dead campaign from a
+  // dead query, and the client could not infer it either: an all-zero list is
+  // also what a brand-new promo looks like.
+  //
+  // The distinction only exists at this point in the code, so it has to be
+  // carried out of here explicitly.
+  const statsAvailable = !statsError;
   const statById = new Map<string, {
     promoId: string; impressions: number; clicks: number;
     attributedOrders: number; attributedRevenue: number;
@@ -1334,7 +1465,17 @@ const promoList: Handler = async ({ context }) => {
     }) => [s.promoId, s]),
   );
   const withStats = (promos ?? []).map((p) => {
+    // No metric fields at all when the lookup failed, rather than zeros. The
+    // admin client already treats an absent metric as "stats unavailable" and
+    // a present zero as a real zero, which is the whole point of omitting them.
+    if (!statsAvailable) {
+      return { ...p };
+    }
+
     const s = statById.get(p.id);
+
+    // `?? 0` is correct HERE and only here: the lookup succeeded, so a promo
+    // with no row in it genuinely has no recorded events.
     return {
       ...p,
       impressions: s?.impressions ?? 0,
@@ -1343,7 +1484,7 @@ const promoList: Handler = async ({ context }) => {
       attributedRevenue: s?.attributedRevenue ?? 0,
     };
   });
-  return json(200, { data: { promos: withStats } });
+  return json(200, { data: { promos: withStats, statsAvailable } });
 };
 
 const promoCreate: Handler = async ({ context, data }) => {
@@ -1648,6 +1789,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,
     adminGetOperationalAlerts,
+    adminGetAuditLog,
     adminGetRiskEvents,
     adminListFeatureFlags,
     adminListPromoCodes,
