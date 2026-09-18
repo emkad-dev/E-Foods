@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
@@ -345,7 +345,10 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: radius.pill,
+    // 38pt.
+    justifyContent: 'center',
     marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },

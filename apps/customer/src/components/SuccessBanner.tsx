@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 import { FontAwesome } from '@expo/vector-icons';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 type SuccessBannerProps = {
@@ -123,6 +123,16 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   dismiss: {
+    alignItems: 'center',
+    // A 2pt padding around a 14pt glyph is an 18pt target -- the smallest in the
+    // customer app. It carried hitSlop={10}, which is exactly the trap: on
+    // the web build RNW 0.21 reads hitSlop only from the legacy Touchable
+    // mixin, so the one thing standing between this and an 18pt button did
+    // nothing at all on app.feasty.com.ng. The hitSlop stays for native, where
+    // it still widens the target beyond the floor.
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
+    minWidth: MIN_TAP_TARGET,
     padding: 2,
   },
 });

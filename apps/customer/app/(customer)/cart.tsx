@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { radius, useAuthPrompt } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useAuthPrompt } from '@feasty/design-system';
 import { useFocusEffect } from '@react-navigation/native';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
@@ -1180,9 +1180,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.accent,
     borderRadius: radius.md,
-    height: 30,
+    // 30pt. Changing how much of something you are buying is the single most
+    // repeated action in a cart, and it was the smallest target on the screen.
+    // Grown rather than given a negative-margin halo: the fill is on this same
+    // element, so a bigger box IS a bigger button either way, and at 44 the
+    // pair still reads as steppers beside the quantity.
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    width: 30,
+    width: MIN_TAP_TARGET,
   },
   quantityButtonText: {
     color: customerTheme.textOnBrand,
@@ -1308,6 +1313,9 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
+    // 2*10 + a 13pt line = 38pt, on the delivery-or-pickup choice. Getting this
+    // wrong costs the customer a wasted trip, so it should not also be fiddly.
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
@@ -1485,10 +1493,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tipChip: {
+    alignItems: 'center',
     backgroundColor: customerTheme.background,
     borderColor: customerTheme.border,
     borderRadius: radius.pill,
     borderWidth: 1,
+    // 2*10 + a 12pt line + 2*1 border = 39pt.
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },

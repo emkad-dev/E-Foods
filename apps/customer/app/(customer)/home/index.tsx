@@ -552,11 +552,12 @@ const styles = StyleSheet.create({
   searchAction: {
     alignItems: 'center',
     borderRadius: radius.lg,
-    // The submit affordance is a 32pt disc by design -- a 44pt one would
-    // dominate the field it sits in. The BOX grows to the floor while the disc
-    // keeps its size: negative margin pulls the surrounding row back so the
-    // shell does not get taller. (hitSlop is not an option -- on web, RNW 0.21
-    // reads it only from the legacy Touchable mixin, so it does nothing here.)
+    // Was 32pt. The fill lives on this same element, so the disc itself grows
+    // to the floor -- there is no separate touch halo, and an earlier comment
+    // here claimed otherwise. The negative margin is what keeps the search
+    // shell from growing by the full 12pt in response. (hitSlop could not have
+    // done this: on web RNW 0.21 reads it only from the legacy Touchable
+    // mixin, so it is inert.)
     height: MIN_TAP_TARGET,
     justifyContent: 'center',
     marginVertical: -(MIN_TAP_TARGET - 32) / 2,
@@ -602,7 +603,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: radius.pill,
+    justifyContent: 'center',
     marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
@@ -633,6 +636,11 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.surface,
     borderRadius: radius.pill,
     flexDirection: 'row',
+    // 2*8 + an 11pt line = 31pt, the smallest control on the feed. It only
+    // appears once a shelf has more than four kitchens, which is why the
+    // browse-only walk of the running app never rendered it.
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },

@@ -318,11 +318,11 @@ const styles = StyleSheet.create({
   },
   clearButton: {
     alignItems: 'center',
-    // Same treatment as home's search submit: the 32pt glyph keeps its size so
-    // it does not crowd the field, and the BOX grows to the floor, pulled back
-    // by an equal negative margin so the shell height is unchanged. hitSlop
-    // cannot do this on web -- RNW 0.21 reads it only from the legacy Touchable
-    // mixin, so it is inert here.
+    // Same treatment as home's search submit: was 32pt, grown to the floor,
+    // with an equal negative margin so the shell height barely moves. This
+    // control has no background of its own, so only the touch box changes.
+    // hitSlop could not have done it -- on web RNW 0.21 reads it only from the
+    // legacy Touchable mixin, so it is inert.
     height: MIN_TAP_TARGET,
     justifyContent: 'center',
     marginVertical: -(MIN_TAP_TARGET - 32) / 2,
@@ -471,9 +471,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   retryButton: {
+    alignItems: 'center',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: radius.pill,
+    // 38pt. A retry button is only ever seen by someone something has already
+    // gone wrong for.
+    justifyContent: 'center',
     marginTop: 16,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 20,
     paddingVertical: 10,
   },

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
-import { radius, useConfirm } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, useConfirm } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
 import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn';
@@ -699,7 +699,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: radius.lg,
+    // 2*12 + a 13pt line = 42pt. One of three buttons on this screen that
+    // landed two points short, and the one a customer stabs at when the rider
+    // is outside and not answering.
+    justifyContent: 'center',
     marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
     paddingVertical: 12,
   },
   callButtonText: {
@@ -927,11 +932,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.hero,
     borderRadius: radius.md,
+    justifyContent: 'center',
     marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
     paddingVertical: 12,
   },
   refreshButtonText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1027,11 +1034,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: customerTheme.hero,
     borderRadius: radius.md,
+    justifyContent: 'center',
     marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
     paddingVertical: 12,
   },
   mapButtonText: {
-    color: '#fff',
+    color: customerTheme.textOnBrand,
     fontSize: 13,
     fontWeight: '800',
   },
