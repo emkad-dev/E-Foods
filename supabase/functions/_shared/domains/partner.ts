@@ -62,6 +62,7 @@ import type { JsonObject } from '../rpc/coercion.ts';
 import {
   buildNameKey,
   nowIso,
+  parseInteger,
   parseNumber,
   roundCurrency,
   sanitizeOptionalText,
@@ -500,6 +501,71 @@ const partnerGetRestaurantOrders: Handler = async ({ context }) => {
         )
       ),
       restaurant: buildRestaurantResponse(managedRestaurant.restaurant, managedRestaurant.approval),
+    },
+  });
+};
+
+/** One page of feedback. Capped for the same reason every other list here is. */
+const RESTAURANT_RATINGS_MAX_LIMIT = 50;
+
+/**
+ * What customers actually said about this restaurant.
+ *
+ * WHY IT EXISTS: OrderRating has been collecting scores and comments, and
+ * RestaurantRecord.ratingAverage has been moving, with no way for the
+ * restaurant to see either. Being rated without being told is not feedback.
+ *
+ * WHAT IS DELIBERATELY WITHHELD: `customerId`. The restaurant learns WHAT was
+ * said, never WHO said it. A one-star review attached to a name -- on a
+ * platform where that name also carries a delivery address the restaurant can
+ * read off the order -- is a retaliation surface, and no part of this feature
+ * needs it. `orderId` is withheld for the same reason: it is one join away
+ * from the customer, and the restaurant already has its own order list.
+ *
+ * `courierScore` is withheld because it is not theirs. It rates the rider.
+ */
+const partnerGetRestaurantRatings: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['restaurant', 'admin']);
+  const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role);
+
+  if (!managedRestaurant.restaurant) {
+    return json(200, { data: { ratingAverage: null, ratingCount: 0, ratings: [], hasMore: false } });
+  }
+
+  const limit = Math.min(Math.max(parseInteger(data.limit, 20), 1), RESTAURANT_RATINGS_MAX_LIMIT);
+  const offset = Math.max(parseInteger(data.offset, 0), 0);
+
+  const { data: rows, error } = await serviceClient
+    .from('OrderRating')
+    .select('id,restaurantScore,comment,createdAt')
+    .eq('restaurantId', managedRestaurant.restaurant.id)
+    .order('createdAt', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const ratings = (rows ?? []) as Array<{
+    comment?: string | null;
+    createdAt: string;
+    id: string;
+    restaurantScore: number;
+  }>;
+
+  return json(200, {
+    data: {
+      // The stored aggregate, not a recomputation over this page -- the page is
+      // twenty rows and the average is over all of them.
+      ratingAverage: managedRestaurant.restaurant.ratingAverage ?? null,
+      ratingCount: managedRestaurant.restaurant.ratingCount ?? 0,
+      ratings: ratings.map((rating) => ({
+        comment: sanitizeOptionalText(rating.comment),
+        createdAt: rating.createdAt,
+        id: rating.id,
+        restaurantScore: rating.restaurantScore,
+      })),
+      hasMore: ratings.length === limit,
     },
   });
 };
@@ -1541,6 +1607,7 @@ export const partnerDomain = defineRpcDomain<AuthenticatedRequestContext>({
     partnerGetRestaurantContext,
     partnerGetRestaurantOrder,
     partnerGetRestaurantOrders,
+    partnerGetRestaurantRatings,
     partnerSetMenuItemAvailability,
     partnerSetStorePause,
     partnerUpdateOrderStatus,

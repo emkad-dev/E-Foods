@@ -44,6 +44,9 @@ export type RestaurantRecordRow = {
   // (_shared/availability.ts) — paused while this is a future timestamp,
   // auto-resumed (no write) once it is in the past.
   pausedUntil?: string | null;
+  /** Maintained by ebuy_submit_order_rating; see 20260820_order_ratings.sql. */
+  ratingAverage?: number | null;
+  ratingCount?: number | null;
   paystackSubaccountCode?: string | null;
   supportsDelivery?: boolean | null;
   supportsPickup?: boolean | null;
@@ -51,7 +54,7 @@ export type RestaurantRecordRow = {
 };
 
 export const RESTAURANT_COLUMNS =
-  'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,missedOrderCount,pausedUntil,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,createdAt,updatedAt';
+  'id,ownerId,name,nameKey,cuisine,address,description,image,logoImage,menu,deliveryFee,deliveryRadiusKm,deliveryTime,openingTime,closingTime,latitude,longitude,minOrder,missedOrderCount,pausedUntil,paystackSubaccountCode,supportsDelivery,supportsPickup,isOpen,isPublished,ratingAverage,ratingCount,createdAt,updatedAt';
 
 export const RESTAURANT_APPROVAL_COLUMNS = 'restaurantId,status,approvedByUid,approvedAt';
 

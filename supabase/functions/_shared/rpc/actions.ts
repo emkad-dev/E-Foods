@@ -46,6 +46,7 @@ export const DISPATCH_ACTIONS = [
 export const PARTNER_ACTIONS = [
   'partnerGetRestaurantContext',
   'partnerGetRestaurantOrders',
+  'partnerGetRestaurantRatings',
   'partnerGetRestaurantOrder',
   'upsertPartnerRestaurantProfile',
   'claimPartnerRestaurantLink',
