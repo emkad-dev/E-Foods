@@ -4,14 +4,35 @@
     {
       "name": "customer-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "apps/customer", "run", "web"],
+      "runtimeArgs": [
+        "--prefix",
+        "apps/customer",
+        "run",
+        "web"
+      ],
       "port": 8084
     },
     {
       "name": "admin-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "apps/admin-web", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "apps/admin-web",
+        "run",
+        "dev"
+      ],
       "port": 5173
+    },
+    {
+      "name": "partner-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "apps/partner",
+        "run",
+        "web"
+      ],
+      "port": 8082
     }
   ]
 }

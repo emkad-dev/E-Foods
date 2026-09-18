@@ -7,4 +7,5 @@
 
 export * from './tokens';
 export * from './primitives';
+export { installWebFocusRing } from './a11y/focusRing';
 export { useFeastyFonts } from './fonts';

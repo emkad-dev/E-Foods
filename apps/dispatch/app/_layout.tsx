@@ -8,7 +8,13 @@ import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions'
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import DispatchComingSoon from '../src/components/DispatchComingSoon';
+import { installWebFocusRing } from '../../../packages/design-system/src/a11y/focusRing';
 import { dispatchTheme } from '../src/theme/palette';
+
+// Runs once, at module load, so the very first paint already has it. No-ops
+// off web; see focusRing.ts for why this is one rule rather than an onFocus
+// handler on every control.
+installWebFocusRing();
 
 const initializeSentry = createSentryInitializer({
   loadNativeSdk: () => import('@sentry/react-native'),

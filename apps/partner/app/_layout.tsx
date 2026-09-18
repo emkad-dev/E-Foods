@@ -1,9 +1,14 @@
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../src/contexts/AuthContext';
-import { useFeastyFonts } from '@feasty/design-system';
+import { installWebFocusRing, useFeastyFonts } from '@feasty/design-system';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
+
+// Runs once, at module load, so the very first paint already has it. No-ops
+// off web; see focusRing.ts for why this is one rule rather than an onFocus
+// handler on every control.
+installWebFocusRing();
 
 const initializeSentry = createSentryInitializer({
   loadNativeSdk: () => import('@sentry/react-native'),

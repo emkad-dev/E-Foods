@@ -12,7 +12,12 @@ import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRou
 import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { customerTheme } from '../src/theme/palette';
-import { useFeastyFonts } from '@feasty/design-system';
+import { installWebFocusRing, useFeastyFonts } from '@feasty/design-system';
+
+// Runs once, at module load, so the very first paint already has it. No-ops
+// off web; see focusRing.ts for why this is one rule rather than an onFocus
+// handler on every control.
+installWebFocusRing();
 
 const initializeSentry = createSentryInitializer({
   loadNativeSdk: () => import('@sentry/react-native'),
