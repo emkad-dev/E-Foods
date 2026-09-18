@@ -76,13 +76,27 @@ const getPartnerShellLoadingMode = (pathname: string | null | undefined): Partne
   return 'dashboard';
 };
 
+// THE ACTIVE TAB'S ICON IS THE ONE YOU CANNOT SEE.
+//
+// `textOnBrand` is white, and it is the correct ink for `accent` -- the solid
+// brand green. But the pill this icon sits on is `accentSoft`, the tint. White
+// on #c8e6c9 is 1.34:1, so the icon of the tab you are currently on rendered as
+// an empty green circle while the three you are NOT on were perfectly legible
+// at 6.26:1. Measured on the running partner console, then confirmed by eye.
+//
+// There is no conditional to get right here. react-navigation already passes
+// `tabBarActiveTintColor` as `color` when focused and `tabBarInactiveTintColor`
+// otherwise, and the active one is `accentStrong` -- 3.81:1 on the soft pill,
+// past the 3:1 that WCAG 1.4.11 asks of a graphical object. Using it also makes
+// the icon exactly the colour of the label printed underneath it, which the
+// override quietly broke.
 const renderTabIcon = (
   iconName: React.ComponentProps<typeof MaterialCommunityIcons>['name'],
   color: string,
   focused: boolean
 ) => (
   <View style={[styles.tabIconWrap, focused ? styles.tabIconWrapActive : null]}>
-    <MaterialCommunityIcons name={iconName} size={focused ? 22 : 21} color={focused ? partnerTheme.textOnBrand : color} />
+    <MaterialCommunityIcons name={iconName} size={focused ? 22 : 21} color={color} />
   </View>
 );
 
@@ -274,6 +288,24 @@ export default function PartnerStackLayout() {
         {/* Reached from the Store tab, never from the tab bar - see STORE_SUB_ROUTES. */}
         <Tabs.Screen name="store-details" options={{ href: null }} />
         <Tabs.Screen name="account" options={{ href: null }} />
+        {/*
+          Onboarding screens, and the ONLY reason they are declared here is to
+          keep them out of the tab bar. Tabs registers every route in its
+          directory unless the route says otherwise, so without these two lines
+          a signed-in restaurant saw six tabs -- the four below plus
+          "application-under-review" and "complete-restaurant-details",
+          labelled with their raw route names and a fallback chevron. Measured
+          on the running console: six items at 150px each, so the four real
+          tabs had lost a third of their width, and at phone width the labels
+          have nowhere to go at all.
+
+          They are also dead ends for this user. Both are rendered by the
+          `user.role !== 'restaurant'` branch above, which an approved
+          restaurant never takes; tapping one sent an already-approved partner
+          into the setup form they had finished.
+        */}
+        <Tabs.Screen name="application-under-review" options={{ href: null }} />
+        <Tabs.Screen name="complete-restaurant-details" options={{ href: null }} />
       </Tabs>
     </KitchenAlarmProvider>
   );
