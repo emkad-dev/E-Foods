@@ -45,7 +45,7 @@ import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaura
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
-import { switchControlStyle } from '../../src/theme/switchControl';
+import { switchColorProps, switchControlStyle } from '../../src/theme/switchControl';
 
 /**
  * Was the literal `#6a7d76`, which `src/theme/palette.ts` documents in its own
@@ -471,8 +471,7 @@ export default function StoreDetailsScreen() {
                 clearFieldError('fulfilment');
                 setSupportsDelivery(value);
               }}
-              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-              thumbColor={supportsDelivery ? partnerTheme.accent : '#f3f4f6'}
+              {...switchColorProps(supportsDelivery, partnerTheme.accentSoft, partnerTheme.accent)}
             />
           </View>
           <View style={styles.toggleRow}>
@@ -487,8 +486,7 @@ export default function StoreDetailsScreen() {
                 clearFieldError('fulfilment');
                 setSupportsPickup(value);
               }}
-              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-              thumbColor={supportsPickup ? partnerTheme.accent : '#f3f4f6'}
+              {...switchColorProps(supportsPickup, partnerTheme.accentSoft, partnerTheme.accent)}
             />
           </View>
           <FieldError message={fieldErrors.fulfilment} />
@@ -548,8 +546,7 @@ export default function StoreDetailsScreen() {
               style={switchControlStyle}
               value={isPublished}
               onValueChange={handlePublishToggle}
-              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-              thumbColor={isPublished ? partnerTheme.accent : '#f3f4f6'}
+              {...switchColorProps(isPublished, partnerTheme.accentSoft, partnerTheme.accent)}
             />
           </View>
           <View style={styles.toggleRow}>
@@ -564,8 +561,7 @@ export default function StoreDetailsScreen() {
               style={switchControlStyle}
               value={isOpen}
               onValueChange={setIsOpen}
-              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-              thumbColor={isOpen ? partnerTheme.accent : '#f3f4f6'}
+              {...switchColorProps(isOpen, partnerTheme.accentSoft, partnerTheme.accent)}
             />
           </View>
 

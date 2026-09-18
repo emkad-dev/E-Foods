@@ -20,7 +20,7 @@ import {
 } from '../../src/services/partnerRestaurantActions';
 import { partnerTheme } from '../../src/theme/palette';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
-import { switchControlStyle } from '../../src/theme/switchControl';
+import { switchColorProps, switchControlStyle } from '../../src/theme/switchControl';
 
 // Mirrors _shared/availability.ts's isMenuItemAvailable on the display side
 // only (no order-placement decision is made here — that stays server-side).
@@ -499,8 +499,7 @@ export default function PartnerMenuScreen() {
               style={switchControlStyle}
               value={isAvailable}
               onValueChange={setIsAvailable}
-              trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
-              thumbColor={isAvailable ? partnerTheme.accent : '#f3f4f6'}
+              {...switchColorProps(isAvailable, partnerTheme.accentSoft, partnerTheme.accent)}
             />
           </View>
 
