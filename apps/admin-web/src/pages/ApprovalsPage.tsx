@@ -61,6 +61,15 @@ const formatVehicleLine = (application: {
   return `${label}${application.vehiclePlateNumber ? ` · ${application.vehiclePlateNumber}` : ''}`;
 };
 
+/**
+ * Warning tone only when the number means work.
+ *
+ * Amber is the console saying "look at this". A queue at zero is the opposite
+ * of that, and rendering it amber spends the operator's attention on good
+ * news -- which makes the amber that DOES matter worth less.
+ */
+const countBadgeClass = (count: number) => `badge ${count > 0 ? 'badge-warning' : 'badge-neutral'}`;
+
 export default function ApprovalsPage() {
   const { data, error, refresh } = usePolledRpc(getAdminApprovalQueue);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -80,6 +89,11 @@ export default function ApprovalsPage() {
         return left.name.localeCompare(right.name);
       }),
     [data?.restaurants]
+  );
+
+  const unpublishedCount = useMemo(
+    () => restaurants.filter((restaurant) => restaurant.isPublished !== true).length,
+    [restaurants]
   );
 
   const partnerApplications = useMemo(
@@ -147,12 +161,17 @@ export default function ApprovalsPage() {
       ) : null}
       {dataState === 'loading' ? <SkeletonRows count={5} /> : null}
 
+      {/* A count badge is warning-toned only when there is something to act on.
+          All three of these were `badge-warning` unconditionally, so a clear
+          queue announced itself in amber -- three times, on the first screen an
+          operator opens, saying "attention needed" while the card underneath
+          said "nothing here". Seen by looking at it; no measurement finds this. */}
       {dataState === 'ready' ? (
         <>
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Partner applications</h3>
-              <span className="badge badge-warning">{partnerApplications.length} pending</span>
+              <span className={countBadgeClass(partnerApplications.length)}>{partnerApplications.length} pending</span>
             </div>
             {partnerApplications.length === 0 ? (
               <EmptyState title="No pending partner applications" body="New restaurant partner requests will land here." />
@@ -209,7 +228,7 @@ export default function ApprovalsPage() {
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Dispatch applications</h3>
-              <span className="badge badge-warning">{dispatchApplications.length} pending</span>
+              <span className={countBadgeClass(dispatchApplications.length)}>{dispatchApplications.length} pending</span>
             </div>
             {dispatchApplications.length === 0 ? (
               <EmptyState title="No pending dispatch applications" body="New rider applications will land here." />
@@ -264,8 +283,8 @@ export default function ApprovalsPage() {
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Restaurant publishing</h3>
-              <span className="badge badge-warning">
-                {restaurants.filter((restaurant) => restaurant.isPublished !== true).length} unpublished
+              <span className={countBadgeClass(unpublishedCount)}>
+                {unpublishedCount} unpublished
               </span>
             </div>
             {restaurants.length === 0 ? (
