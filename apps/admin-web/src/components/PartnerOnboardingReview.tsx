@@ -33,6 +33,13 @@ export default function PartnerOnboardingReview({
     );
   }
 
+  // `documents` is optional-chained below even though the type declares it
+  // required. The guard above admits a review that has `kyc` but says nothing
+  // about `documents`, so a payload omitting that block satisfies TypeScript
+  // and throws at render -- and this component sits inside the approvals
+  // queue, so the crash takes down the page that gates every partner and
+  // rider joining the platform. The type is a promise about the server, not a
+  // guarantee from it.
   const { kyc, payout, documents } = review;
 
   return (
@@ -46,15 +53,15 @@ export default function PartnerOnboardingReview({
             <span className="list-row-sub">Doc •••• {kyc.documentLast4}</span>
           ) : null}
           <span className="onboarding-review-docs">
-            {documents.frontUrl ? (
-              <a href={documents.frontUrl} target="_blank" rel="noreferrer" className="onboarding-review-doc-link">
+            {documents?.frontUrl ? (
+              <a href={documents?.frontUrl} target="_blank" rel="noreferrer" className="onboarding-review-doc-link">
                 View front
               </a>
             ) : (
               <span className="list-row-sub">No front doc</span>
             )}
-            {documents.backUrl ? (
-              <a href={documents.backUrl} target="_blank" rel="noreferrer" className="onboarding-review-doc-link">
+            {documents?.backUrl ? (
+              <a href={documents?.backUrl} target="_blank" rel="noreferrer" className="onboarding-review-doc-link">
                 View back
               </a>
             ) : null}

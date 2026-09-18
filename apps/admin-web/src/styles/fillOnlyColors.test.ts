@@ -8,20 +8,21 @@
  *
  * The design system states this for the token layer (`a11y.fillOnly` in
  * packages/design-system/src/tokens/color.ts, asserted by its own tests). This
- * file is the same rule for admin's stylesheet, which is hand-written CSS and
- * was never covered by anything.
+ * file is the same rule for admin, which is hand-written CSS with its own hex
+ * values and no link to that package.
  *
- * It exists because the rule was broken twice in one sweep, both times by the
- * same value:
+ * It exists because the rule was broken three times in one sweep:
  *
  *   - customer's focused tab icon was forced to #ffffff on #c8e6c9 -- 1.34:1,
  *     so tapping a tab made its icon disappear
  *   - admin's own focus ring drew #c8e6c9 at 1.34:1 against the field and
  *     1.25:1 against the page: an indicator present in the DOM and invisible
  *     on screen
+ *   - the provisioning notice wrote in `var(--success)`, a fill token, from a
+ *     `style` prop where no CSS rule and no linter was looking
  *
- * Twice is a pattern, and a pattern belongs in a test rather than in someone's
- * memory.
+ * Three times is not carelessness, it is a rule nobody can see. So it goes in
+ * a test rather than in someone's memory.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -104,9 +105,68 @@ test('no fill-only colour is used to draw a line or text', () => {
   );
 });
 
+/**
+ * The stylesheet is only half the surface. React can write a colour straight
+ * into a `style` prop, where no CSS rule and no linter looks -- and that is
+ * exactly where the last one was hiding.
+ *
+ * The plain role tokens are the fills; each has a counterpart for writing.
+ * `--success` is the odd one out with no `--success-text`, because
+ * `--accent-strong` is already that colour's dark sibling -- which the
+ * stylesheet says in so many words.
+ */
+const WRITING_COUNTERPART: Record<string, string> = {
+  '--success': '--accent-strong',
+  '--danger': '--danger-text',
+  '--warning': '--warning-text',
+  '--info': '--info-text',
+  '--accent-soft': '--accent-strong',
+  '--brand-orange': '--warning-text',
+};
+
+test('no inline style writes text in a fill token', () => {
+  const srcDir = path.join(import.meta.dirname, '..');
+  const offences: string[] = [];
+
+  const walk = (current: string) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const next = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        walk(next);
+        continue;
+      }
+      if (!entry.name.endsWith('.tsx')) continue;
+
+      const source = fs.readFileSync(next, 'utf8');
+      source.split('\n').forEach((line, index) => {
+        // `color:` only. A fill token under `background` is the correct use.
+        const match = line.match(/\bcolor:\s*'var\((--[a-z-]+)\)'/);
+        if (!match) return;
+
+        const fix = WRITING_COUNTERPART[match[1]!];
+        if (!fix) return;
+
+        const where = path.relative(srcDir, next).split(path.sep).join('/');
+        offences.push(`${where}:${index + 1}  color: var(${match[1]}) -> use var(${fix})`);
+      });
+    }
+  };
+
+  walk(srcDir);
+
+  assert.deepEqual(
+    offences,
+    [],
+    'These tokens fill; their counterparts write. The stylesheet states the rule ' +
+      'and the CSS test above enforces it, but a `style` prop is not CSS and nothing ' +
+      'was checking it.\n  ' +
+      offences.join('\n  ')
+  );
+});
+
 test('the focus indicator is the strong accent, and offset clear of the control', () => {
   // Pinning the fix from this sweep: the ring was --accent-soft at offset 0,
-  // which is why the rule above exists at all.
+  // which is why the rules above exist at all.
   const css = stripComments(fs.readFileSync(cssPath, 'utf8'));
   const rule = css.match(/:focus-visible\s*\{([^}]*)\}/);
 

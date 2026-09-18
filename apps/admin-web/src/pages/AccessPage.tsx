@@ -142,8 +142,14 @@ export default function AccessPage() {
         <div className="card-title-row">
           <h3 className="card-title">Provision staff account</h3>
         </div>
+        {/* --accent-strong, not --success. The stylesheet's own comment sets the
+            rule -- "the plain token fills, the -text token writes" -- and names
+            --accent-strong as the one this colour writes with. On white today
+            --success measures 5.13:1 and passes, so this was a latent failure
+            rather than a live one: move the notice onto --success-soft, which is
+            where a success message naturally lands, and it drops to 3.81:1. */}
         {provisionNotice ? (
-          <p style={{ color: 'var(--success)', fontWeight: 600, marginTop: 0 }}>{provisionNotice}</p>
+          <p style={{ color: 'var(--accent-strong)', fontWeight: 600, marginTop: 0 }}>{provisionNotice}</p>
         ) : null}
         <form className="form-grid" onSubmit={handleProvision}>
           <div className="field">
