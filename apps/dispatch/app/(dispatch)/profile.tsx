@@ -319,7 +319,7 @@ export default function ProfileScreen() {
             onPress={() => setSelectedSection(item.key)}
             style={[styles.menuItem, isActive ? styles.menuItemActive : null]}
           >
-            <FontAwesome name={item.icon} size={15} color={isActive ? '#07140c' : dispatchTheme.textMuted} />
+            <FontAwesome name={item.icon} size={15} color={isActive ? dispatchTheme.textOnHighlight : dispatchTheme.textMuted} />
             <Text style={[styles.menuItemText, isActive ? styles.menuItemTextActive : null]}>{item.label}</Text>
           </TouchableOpacity>
         );
@@ -634,7 +634,7 @@ const styles = StyleSheet.create({
   },
   pointsPill: {
     alignItems: 'center',
-    backgroundColor: '#13f28a',
+    backgroundColor: dispatchTheme.highlight,
     borderRadius: radius.pill,
     flexDirection: 'row',
     paddingHorizontal: 10,
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   menuItemActive: {
-    backgroundColor: '#13f28a',
+    backgroundColor: dispatchTheme.highlight,
   },
   menuItemText: {
     color: dispatchTheme.text,
@@ -672,7 +672,7 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   menuItemTextActive: {
-    color: '#07140c',
+    color: dispatchTheme.textOnHighlight,
   },
   detailCard: {
     backgroundColor: dispatchTheme.surface,
@@ -789,14 +789,14 @@ const styles = StyleSheet.create({
   },
   earningsHero: {
     alignItems: 'center',
-    backgroundColor: '#f1f5f2',
+    backgroundColor: dispatchTheme.surfaceMuted,
     borderRadius: radius['2xl'],
     padding: 18,
   },
   balanceLabel: {
-    backgroundColor: '#13f28a',
+    backgroundColor: dispatchTheme.highlight,
     borderRadius: radius.pill,
-    color: '#07140c',
+    color: dispatchTheme.textOnHighlight,
     fontSize: 11,
     fontWeight: '900',
     paddingHorizontal: 10,
@@ -857,7 +857,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   payoutCard: {
-    backgroundColor: '#f1f5f2',
+    backgroundColor: dispatchTheme.surfaceMuted,
     borderRadius: radius.lg,
     marginTop: 10,
     padding: 14,
@@ -883,7 +883,7 @@ const styles = StyleSheet.create({
   },
   transactionRow: {
     alignItems: 'center',
-    backgroundColor: '#f1f5f2',
+    backgroundColor: dispatchTheme.surfaceMuted,
     borderRadius: radius.lg,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -906,7 +906,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   shiftCard: {
-    backgroundColor: '#f1f5f2',
+    backgroundColor: dispatchTheme.surfaceMuted,
     borderRadius: radius.lg,
     marginTop: 12,
     padding: 14,

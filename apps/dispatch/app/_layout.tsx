@@ -115,7 +115,7 @@ function RootLayoutNav() {
 
   if (loading && !hasBootstrappedRef.current) {
     return (
-      <View style={{ alignItems: 'center', backgroundColor: '#111315', flex: 1, justifyContent: 'center' }}>
+      <View style={{ alignItems: 'center', backgroundColor: dispatchTheme.hero, flex: 1, justifyContent: 'center' }}>
         <ActivityIndicator size="large" color={dispatchTheme.accent} />
       </View>
     );

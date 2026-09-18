@@ -92,4 +92,18 @@ export const dispatchTheme = {
    */
   dangerText: status.dangerText,
   tabBackground: surface.default,
+  /**
+   * The bright mint used for the rider's points pill, balance chip and the
+   * selected menu row, with its ink.
+   *
+   * Named here rather than added to the shared token layer because nothing
+   * else in the product uses it -- it is a dispatch-only treatment. It was
+   * three raw hexes scattered through profile.tsx, which meant a palette
+   * change would have repainted the app around them and left these three
+   * alone. The values are unchanged; this only gives them somewhere to live.
+   *
+   * The pairing is sound: #07140c on #13f28a measures 12.65:1.
+   */
+  highlight: '#13f28a',
+  textOnHighlight: '#07140c',
 };
