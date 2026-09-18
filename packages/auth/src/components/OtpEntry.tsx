@@ -126,7 +126,16 @@ const makeStyles = (theme: PhoneComponentTheme) =>
     },
     cellActive: { borderColor: theme.accent },
     cellText: { fontSize: 22, fontWeight: '700', color: theme.text },
-    hiddenInput: { position: 'absolute', opacity: 0, height: 1, width: 1 },
+    hiddenInput: {
+      // ui-contract: allow-small -- deliberately 1x1 and invisible. This input
+      // exists to catch keystrokes; what a person actually taps is the row of
+      // visible code boxes, which route focus here. A 44pt transparent overlay
+      // would sit on top of those boxes and swallow the taps.
+      position: 'absolute',
+      opacity: 0,
+      height: 1,
+      width: 1,
+    },
     errorText: { color: theme.dangerText, fontSize: 13, marginTop: 10, textAlign: 'center' },
     channelRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 16 },
     // The same 33pt chip as PhoneInput's country selector, here choosing where

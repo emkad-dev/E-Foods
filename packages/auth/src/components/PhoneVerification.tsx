@@ -3,6 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { OtpEntry, type OtpChannel } from './OtpEntry';
 import { PhoneInput, type PhoneComponentTheme, type PhoneInputChange } from './PhoneInput';
+import { MIN_TAP_TARGET } from '../../../design-system/src/tokens/space';
 
 type RequestCode = (e164: string, channel: OtpChannel) => Promise<{ resendInSeconds: number }>;
 type VerifyCode = (e164: string, code: string) => Promise<void>;
@@ -111,6 +112,16 @@ const makeStyles = (theme: PhoneComponentTheme) =>
     buttonDisabled: { opacity: 0.5 },
     buttonText: { color: theme.surface, fontSize: 16, fontWeight: '700' },
     errorText: { color: theme.dangerText, fontSize: 13, marginTop: 8 },
-    linkButton: { marginTop: 16, alignItems: 'center' },
+    // "Change phone number" -- the way out when someone has typed the wrong
+    // one, on a screen that will otherwise keep texting a stranger. No padding,
+    // so the target was the 14pt label's line box: 20pt. Same shape as
+    // OtpEntry's resend button, and in the same shared package, so it is wrong
+    // in all three apps at once.
+    linkButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 16,
+      minHeight: MIN_TAP_TARGET,
+    },
     linkText: { color: theme.accent, fontSize: 14, fontWeight: '600' },
   });

@@ -25,7 +25,18 @@ import { test } from 'node:test';
 
 import { MIN_TAP_TARGET } from '../packages/design-system/src/tokens/space.ts';
 
-const APPS = ['apps/customer', 'apps/partner', 'apps/dispatch'];
+// The shared packages belong here most of all: a control that is wrong in
+// `packages/design-system` or `packages/auth` is wrong in three apps at once.
+// Leaving them out is how a 33pt country-code chip and a 20pt "resend code"
+// button -- both on the path to having an account, in every app -- went
+// unnoticed until someone measured partner's register screen by hand.
+const APPS = [
+  'apps/customer',
+  'apps/partner',
+  'apps/dispatch',
+  'packages/design-system/src',
+  'packages/auth/src',
+];
 const SKIP_DIRS = new Set(['node_modules', '.expo', 'dist', 'build', '.next']);
 
 /** Opt out of the tap-target rule on one style, with the reason required. */
@@ -91,9 +102,26 @@ function stripComments(source: string): string {
 type StyleBlock = { name: string; body: string; raw: string };
 
 function parseStyleSheet(stripped: string, raw: string) {
-  const header = stripped.match(/const (\w+) = StyleSheet\.create\(\{/);
+  const header = stripped.match(/StyleSheet\.create\(\{/);
   if (!header) return null;
-  const objectName = header[1]!;
+
+  /*
+   * Two ways this repo declares a stylesheet, and the second one hid three
+   * real defects.
+   *
+   *   const styles = StyleSheet.create({ ... })              <- the apps
+   *   const makeStyles = (theme) => StyleSheet.create({...}) <- packages/auth
+   *
+   * Only the first was recognised, so PhoneInput and OtpEntry -- the country
+   * picker and the "resend code" button, on the path to having an account in
+   * every one of the three apps -- were invisible to this test. For the
+   * factory form the name that matters is what the CONSUMER binds, since that
+   * is what `styles.x` references resolve against.
+   */
+  const direct = stripped.match(/const (\w+) = StyleSheet\.create\(\{/);
+  const viaFactory = stripped.match(/const (\w+) = useMemo\(\(\) => \w+\(/);
+  const objectName = direct?.[1] ?? viaFactory?.[1];
+  if (!objectName) return null;
 
   // A name-based reference check is only sound when the object is never used
   // as a whole. Spread it, index it, or pass it somewhere and a key can be
@@ -104,7 +132,8 @@ function parseStyleSheet(stripped: string, raw: string) {
     new RegExp(`[({,=]\\s*${objectName}\\s*[),}]`).test(stripped);
   if (dynamic) return null;
 
-  const body = stripped.slice(header.index! + header[0].length);
+  const createAt = stripped.indexOf('StyleSheet.create({');
+  const body = stripped.slice(createAt + 'StyleSheet.create({'.length);
   const blocks: StyleBlock[] = [];
   let depth = 1;
   let i = 0;
@@ -124,7 +153,7 @@ function parseStyleSheet(stripped: string, raw: string) {
           else if (body[j] === '}') d--;
           j++;
         }
-        const absStart = header.index! + header[0].length + start;
+        const absStart = createAt + 'StyleSheet.create({'.length + start;
         blocks.push({
           name: km[1]!,
           body: body.slice(start, j - 1),
