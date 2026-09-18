@@ -256,39 +256,6 @@ export const callBackendRpc = async <T>(
     data: data ?? {},
   };
 
-  const parseResponseError = async (response: Response) => {
-    const responseForJson = response.clone();
-    let parsedMessage: string | null = null;
-
-    try {
-      const body = await responseForJson.json();
-      const message =
-        typeof body === 'object' && body !== null
-          ? (body as { message?: unknown }).message ??
-            (body as { error?: unknown }).error ??
-            (body as { msg?: unknown }).msg
-          : null;
-
-      if (typeof message === 'string' && message.trim()) {
-        parsedMessage = message.trim();
-      }
-    } catch {
-      // Ignore JSON parse errors and fall back to text below.
-    }
-
-    if (parsedMessage) {
-      return parsedMessage;
-    }
-
-    const text = await response.text().catch(() => '');
-
-    if (text.trim()) {
-      return text.trim();
-    }
-
-    return `Backend RPC ${action} failed with HTTP ${response.status}.`;
-  };
-
   const callViaDirectUrl = async () => {
     if (!env.backendRpcUrl?.trim()) {
       return null;
@@ -320,7 +287,7 @@ export const callBackendRpc = async <T>(
     });
 
     if (!response.ok) {
-      throw new Error(await parseResponseError(response));
+      throw await backendRpcErrorFromResponse(response, action);
     }
 
     const responseData = (await response.json().catch(() => null)) as { data?: T } | T | null;
@@ -337,8 +304,24 @@ export const callBackendRpc = async <T>(
       return directResponse;
     }
   } catch (error) {
-    // Fall back to the Supabase function relay if the direct URL path fails.
-    console.warn(`Backend RPC ${action} direct URL fallback failed:`, error);
+    // A RESPONSE IS AN ANSWER. Only a transport failure justifies retrying.
+    //
+    // This catch used to be unconditional, so a well-formed HTTP 400 carrying
+    // the server's own rejection was treated as a broken connection: logged as
+    // a "fallback failure" and sent again through the relay, which reaches the
+    // same function and fails identically. Three costs, none of them paid for
+    // anything -- every rejection billed two invocations on a plan where
+    // invocations are the actual spend, a warning in the console for what is a
+    // normal outcome, and the error the caller finally sees arriving from the
+    // second attempt rather than the first.
+    //
+    // A BackendRpcError means the server answered. Retrying cannot change its
+    // mind.
+    if (isBackendRpcError(error)) {
+      throw error;
+    }
+
+    console.warn(`Backend RPC ${action} direct URL transport failure, retrying via relay:`, error);
   }
 
   const { data: responseData, error } = await supabase.functions.invoke<T>(targetFunction, {
@@ -350,36 +333,7 @@ export const callBackendRpc = async <T>(
       const response = error.context as Response | undefined;
 
       if (response) {
-        const responseForJson = response.clone();
-        let parsedMessage: string | null = null;
-
-        try {
-          const body = await responseForJson.json();
-          const message =
-            typeof body === 'object' && body !== null
-              ? (body as { message?: unknown }).message ??
-                (body as { error?: unknown }).error ??
-                (body as { msg?: unknown }).msg
-              : null;
-
-          if (typeof message === 'string' && message.trim()) {
-            parsedMessage = message.trim();
-          }
-        } catch {
-          // Ignore JSON parse errors and fall back to text below.
-        }
-
-        if (parsedMessage) {
-          throw new Error(parsedMessage);
-        }
-
-        const text = await response.text().catch(() => '');
-
-        if (text.trim()) {
-          throw new Error(text.trim());
-        }
-
-        throw new Error(`Backend RPC ${action} failed with HTTP ${response.status}.`);
+        throw await backendRpcErrorFromResponse(response, action);
       }
     }
 
