@@ -3,7 +3,8 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
-import { formatCurrency } from '../lib/format';
+import { formatCurrency, formatDateTime } from '../lib/format';
+import { resolveViewState } from '../lib/viewState';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 import { uploadPromoAsset } from '../services/promoAssetUpload';
 
@@ -25,6 +26,27 @@ const isLive = (promo: Promo): boolean => {
 const toIso = (localValue: string): string | null =>
   localValue ? new Date(localValue).toISOString() : null;
 
+/**
+ * The scheduling window the composer captures. `isLive` reads both ends of it
+ * to decide the Live/Off badge, but the row printed neither, so a single "Off"
+ * covered three unrelated situations -- scheduled for later, already expired,
+ * and switched off by hand -- and the toggle offered "Deactivate" on a promo
+ * that had not started. The dates are already on the payload; the only thing
+ * missing was showing them.
+ */
+const scheduleLabel = (promo: Promo): string | null => {
+  if (!promo.startsAt && !promo.endsAt) {
+    return null;
+  }
+  if (!promo.endsAt) {
+    return `From ${formatDateTime(promo.startsAt)}`;
+  }
+  if (!promo.startsAt) {
+    return `Until ${formatDateTime(promo.endsAt)}`;
+  }
+  return `${formatDateTime(promo.startsAt)} – ${formatDateTime(promo.endsAt)}`;
+};
+
 /*
  * The `promo_composer_v2` flag was removed here rather than made real.
  *
@@ -41,11 +63,12 @@ const toIso = (localValue: string): string | null =>
  */
 export default function PromosPage() {
   const [promos, setPromos] = useState<Promo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
-  // false on the catch path too, so it cannot tell "nothing here" from
-  // "we never got an answer".
+  // Only a SUCCESSFUL read may license an empty state, so `loaded` and `error`
+  // are the whole story: "still waiting" is simply neither of them, which is
+  // what resolveViewState derives below. A separate `loading` flag settled to
+  // false on the catch path as well and only ever created a second, wrong
+  // answer to the same question.
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -68,8 +91,6 @@ export default function PromosPage() {
       setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load promos.');
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -141,6 +162,12 @@ export default function PromosPage() {
   };
 
   const canSubmit = title.trim().length > 0 && body.trim().length > 0 && !busy && !uploading;
+
+  // `loaded`, not `!loading`: the catch path settles `loading` too, so the
+  // previous chain fell through to an empty <ul> under the "Promos" heading
+  // after a failed read -- a card that looks exactly like "you have no
+  // promos" while actually meaning "we never got an answer".
+  const listState = resolveViewState({ hasData: loaded, error, isEmpty: promos.length === 0 });
 
   return (
     <section className="page promos-page">
@@ -240,47 +267,51 @@ export default function PromosPage() {
 
       <div className="promo-list card">
         <h3>Promos</h3>
-        {loading ? (
+        {listState === 'loading' ? (
           <LoadingBlock label="Loading promos…" />
-        ) : loaded && promos.length === 0 ? (
+        ) : listState === 'empty' ? (
           <EmptyState title="No promos yet" body="Create one to broadcast a banner to customers on the app." />
-        ) : (
+        ) : listState !== 'ready' ? null : (
           <ul className="promo-items">
-            {promos.map((promo) => (
-              <li key={promo.id} className="promo-item">
-                <div className="promo-item-main">
-                  <div className="promo-item-head">
-                    <strong>{promo.title}</strong>
-                    <StatusBadge tone={isLive(promo) ? 'success' : 'neutral'} label={isLive(promo) ? 'Live' : 'Off'} />
+            {promos.map((promo) => {
+              const promoSchedule = scheduleLabel(promo);
+              const live = isLive(promo);
+              const impressions = promo.impressions ?? 0;
+              const clicks = promo.clicks ?? 0;
+              const attributedOrders = promo.attributedOrders ?? 0;
+              const attributedRevenue = promo.attributedRevenue ?? 0;
+              // A ratio with an empty denominator has no value, and "0% CTR"
+              // is not that -- it is the reading for a promo that was seen and
+              // ignored, which is the opposite conclusion from one nobody has
+              // been shown yet.
+              const ctr = impressions > 0 ? `${Math.round((clicks / impressions) * 100)}%` : '—';
+
+              return (
+                <li key={promo.id} className="promo-item">
+                  <div className="promo-item-main">
+                    <div className="promo-item-head">
+                      <strong>{promo.title}</strong>
+                      <StatusBadge tone={live ? 'success' : 'neutral'} label={live ? 'Live' : 'Off'} />
+                    </div>
+                    <span className="muted">{promo.body}</span>
+                    {promo.actionUrl ? <span className="promo-item-url">{promo.actionUrl}</span> : null}
+                    {promoSchedule ? <span className="muted">{promoSchedule}</span> : null}
+                    <span className="promo-item-stats">
+                      {impressions} impr · {clicks} clicks · {ctr} CTR · {attributedOrders} orders ·{' '}
+                      {formatCurrency(attributedRevenue)}
+                    </span>
                   </div>
-                  <span className="muted">{promo.body}</span>
-                  {promo.actionUrl ? <span className="promo-item-url">{promo.actionUrl}</span> : null}
-                  <span className="promo-item-stats">
-                    {(() => {
-                      const impressions = promo.impressions ?? 0;
-                      const clicks = promo.clicks ?? 0;
-                      const attributedOrders = promo.attributedOrders ?? 0;
-                      const attributedRevenue = promo.attributedRevenue ?? 0;
-                      const ctr = impressions > 0 ? Math.round((clicks / impressions) * 100) : 0;
-                      return (
-                        <>
-                          {impressions} impr · {clicks} clicks · {ctr}% CTR ·{' '}
-                          {attributedOrders} orders · {formatCurrency(attributedRevenue)}
-                        </>
-                      );
-                    })()}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={busy}
-                  onClick={() => void onToggle(promo)}
-                >
-                  {promo.active ? 'Deactivate' : 'Reactivate'}
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    onClick={() => void onToggle(promo)}
+                  >
+                    {promo.active ? 'Deactivate' : 'Reactivate'}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

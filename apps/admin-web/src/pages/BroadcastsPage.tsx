@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import { resolveViewState } from '../lib/viewState';
 import {
   broadcastTone,
   cancelBroadcast,
@@ -30,11 +32,12 @@ const SEGMENT_ROLES = ['customer', 'restaurant', 'dispatch'] as const;
 
 export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
-  // false on the catch path too, so it cannot tell "nothing here" from
-  // "we never got an answer".
+  // Only a SUCCESSFUL read may license an empty state. There is deliberately
+  // no separate `loading` flag any more: it settled to false on the catch
+  // path too, so it could never distinguish "nothing here" from "we never got
+  // an answer", and resolveViewState derives the spinner from this plus the
+  // error instead.
   const [loaded, setLoaded] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -52,6 +55,13 @@ export default function BroadcastsPage() {
   const [selected, setSelected] = useState<Broadcast | null>(null);
   const [schedAt, setSchedAt] = useState('');
   const [busy, setBusy] = useState(false);
+  // Send now is the one control on this screen that cannot be taken back --
+  // broadcastSchedule with no timestamp stamps `now`, so the runner can pick
+  // the broadcast up before the operator has let go of the mouse. Schedule
+  // and Cancel both stay unconfirmed on purpose: the server lets a scheduled,
+  // canceled or failed broadcast be scheduled again, so neither of those is
+  // a one-way door.
+  const [sendConfirm, setSendConfirm] = useState<Broadcast | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -61,8 +71,6 @@ export default function BroadcastsPage() {
       setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load broadcasts.');
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -87,6 +95,12 @@ export default function BroadcastsPage() {
   }, [roles, activity, restaurantId, category]);
 
   const channels = [...(emailChannel ? ['email'] : []), ...(pushChannel ? ['push'] : [])];
+
+  const listState = resolveViewState({
+    hasData: loaded,
+    error,
+    isEmpty: broadcasts.length === 0,
+  });
 
   // Create draft used to be enabled on a non-empty title alone, so a draft
   // with zero channels, no subject and no body was one click away on a screen
@@ -144,19 +158,17 @@ export default function BroadcastsPage() {
     }
   };
 
-  const onSendNow = async () => {
-    if (!selected) {
-      return;
-    }
+  const onSendNow = async (broadcast: Broadcast) => {
     setBusy(true);
     try {
-      await scheduleBroadcast(selected.id);
+      await scheduleBroadcast(broadcast.id);
       setSelected(null);
       await load();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Send failed.');
     } finally {
       setBusy(false);
+      setSendConfirm(null);
     }
   };
 
@@ -192,7 +204,10 @@ export default function BroadcastsPage() {
     <section className="page broadcasts-page">
       <div className="broadcast-compose card">
         <h3>New broadcast</h3>
-        {error ? <ErrorBanner message={error} /> : null}
+        {/* This page reads once on mount and never polls, so without a retry
+            a failed first load left the list permanently blank with a full
+            browser reload as the only way out. */}
+        {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
         <div className="field">
           <label htmlFor="bc-title">Title</label>
           <input id="bc-title" value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -313,7 +328,7 @@ export default function BroadcastsPage() {
         {selected ? (
           <div className="broadcast-send">
             <p className="muted">Draft “{selected.title}” selected. Send it:</p>
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSendNow()}>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => setSendConfirm(selected)}>
               Send now
             </button>
             <input type="datetime-local" value={schedAt} onChange={(event) => setSchedAt(event.target.value)} />
@@ -334,19 +349,24 @@ export default function BroadcastsPage() {
         {/* Same stacked-loading defect AccessPage had: the skeleton rendered
             above the table rather than instead of it, so a first load drew
             shimmer bars on top of a complete header row with an empty body
-            under it. `loaded`, not `!loading`, still gates the empty state --
-            loading settles to false on the catch path too. */}
-        {loading ? (
-          <SkeletonRows count={5} />
-        ) : loaded && broadcasts.length === 0 ? (
-          <EmptyState title="No broadcasts yet" body="Compose one on the left." />
-        ) : (
+            under it. `loaded` kept the empty state honest, but the last
+            branch was still the table, so a failed load simply said "no
+            broadcasts" in header rows instead of in words. */}
+        {listState === 'loading' ? <SkeletonRows count={5} /> : null}
+        {listState === 'empty' ? <EmptyState title="No broadcasts yet" body="Compose one on the left." /> : null}
+        {listState === 'ready' ? (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Title</th>
                   <th>Status</th>
+                  {/* Every row already carried its channels and category and
+                      the table showed neither, so two broadcasts with the
+                      same title and status were indistinguishable -- and
+                      nothing on screen said whether a send had honoured
+                      marketing opt-out or ignored it as transactional. */}
+                  <th>Sent as</th>
                   <th>Recipients</th>
                   <th>Sent</th>
                   <th>When</th>
@@ -360,6 +380,12 @@ export default function BroadcastsPage() {
                     <td>
                       <StatusBadge label={broadcast.status} tone={broadcastTone(broadcast.status)} />
                     </td>
+                    <td>
+                      <div>{broadcast.channels.length > 0 ? broadcast.channels.join(' + ') : 'no channel'}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {broadcast.category}
+                      </div>
+                    </td>
                     <td>{broadcast.recipientCount}</td>
                     <td>
                       {broadcast.sentEmail + broadcast.sentPush}
@@ -367,10 +393,12 @@ export default function BroadcastsPage() {
                         ? ` (${broadcast.failedEmail + broadcast.failedPush} failed)`
                         : ''}
                     </td>
+                    {/* sentAt outranks the other two and was never read, so a
+                        broadcast that went out late showed the time it was
+                        *meant* to go -- under a column headed "When" and a
+                        status reading "sent". */}
                     <td>
-                      {broadcast.scheduledAt
-                        ? new Date(broadcast.scheduledAt).toLocaleString()
-                        : new Date(broadcast.createdAt).toLocaleString()}
+                      {new Date(broadcast.sentAt ?? broadcast.scheduledAt ?? broadcast.createdAt).toLocaleString()}
                     </td>
                     <td>
                       <div className="row-actions">
@@ -416,8 +444,38 @@ export default function BroadcastsPage() {
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
       </div>
+
+      {sendConfirm ? (
+        <ConfirmDialog
+          title="Send this broadcast now?"
+          body={
+            <>
+              <p>
+                <strong>{sendConfirm.title}</strong> goes out immediately over{' '}
+                {sendConfirm.channels.length > 0 ? sendConfirm.channels.join(' and ') : 'no channel'}, as a{' '}
+                {sendConfirm.category} send.
+              </p>
+              <p>
+                {sendConfirm.category === 'marketing'
+                  ? 'Marketing sends skip anyone who has unsubscribed.'
+                  : 'Transactional sends have no opt-out: every matching recipient is contacted.'}
+              </p>
+              <p>
+                This cannot be recalled. Once the runner picks it up the mail is with the provider. Use Schedule
+                instead if you want a window in which to change your mind.
+              </p>
+            </>
+          }
+          busy={busy}
+          busyLabel="Sending…"
+          cancelLabel="Cancel"
+          confirmLabel="Send now"
+          onCancel={() => setSendConfirm(null)}
+          onConfirm={() => void onSendNow(sendConfirm)}
+        />
+      ) : null}
     </section>
   );
 }

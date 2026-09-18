@@ -7,10 +7,11 @@ import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { getOrderDate, type RangeDays } from '../lib/analytics';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
+import { resolveViewState } from '../lib/viewState';
 import { getOrderTone, getPaymentTone } from '../theme/tones';
 
 export default function OrdersPage() {
-  const { snapshot, loading, error, hasData, refresh } = useSnapshot();
+  const { snapshot, error, hasData, refresh } = useSnapshot();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
@@ -77,6 +78,18 @@ export default function OrdersPage() {
 
   const currency = filteredOrders.find((order) => order.pricing?.currency)?.pricing?.currency ?? 'NGN';
 
+  // The `hasData &&` guards below stopped the console *claiming* "no orders"
+  // after a failed fetch, but the other half of the claim was never closed:
+  // both false branches fell through to the table, so a failed fetch drew a
+  // full header row with nothing under it -- which is the same sentence, only
+  // spelled in table furniture. resolveViewState names the fourth outcome, so
+  // 'error' can render nothing at all and leave the banner to speak.
+  const ordersState = resolveViewState({
+    hasData,
+    error,
+    isEmpty: filteredOrders.length === 0,
+  });
+
   return (
     <div className="page">
       <div className="page-header">
@@ -122,15 +135,17 @@ export default function OrdersPage() {
       </div>
 
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-      {loading ? <SkeletonRows count={8} /> : null}
 
       <div className="card">
-        {/* hasData, not !loading -- the snapshot context keeps an EMPTY_SNAPSHOT
-            on its catch path, so !loading would assert "no orders in this
-            window" about a window that never loaded. */}
-        {hasData && filteredOrders.length === 0 ? (
+        {/* The skeleton belongs INSIDE the card, in place of the table. As a
+            sibling above it, a first load painted shimmer bars and a complete
+            empty table at the same time: two loading metaphors, one of which
+            reads as an answer. */}
+        {ordersState === 'loading' ? <SkeletonRows count={8} /> : null}
+        {ordersState === 'empty' ? (
           <EmptyState title="No orders in this window" body="Try a wider date range or a different status filter." />
-        ) : (
+        ) : null}
+        {ordersState === 'ready' ? (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -152,6 +167,16 @@ export default function OrdersPage() {
                     <td className="muted">{humanizeStatus(order.fulfillmentType)}</td>
                     <td>
                       <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
+                      {/* An escalated order stays `placed` -- the acceptance
+                          sweep raises this flag instead of moving the status,
+                          so `status` alone cannot tell the operator that the
+                          restaurant's clock already ran out. The snapshot has
+                          carried the flag all along and nothing read it. */}
+                      {order.needsAttention === true ? (
+                        <span className="badge badge-warning" title="Past its acceptance deadline and escalated.">
+                          Needs attention
+                        </span>
+                      ) : null}
                     </td>
                     <td>
                       <StatusBadge
@@ -168,7 +193,7 @@ export default function OrdersPage() {
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

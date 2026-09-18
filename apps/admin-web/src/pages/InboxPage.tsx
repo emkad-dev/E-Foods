@@ -4,6 +4,7 @@ import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useSupportRealtime } from '../lib/useSupportRealtime';
+import { resolveViewState } from '../lib/viewState';
 import {
   assignConversation,
   getConversation,
@@ -24,11 +25,17 @@ export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [reply, setReply] = useState('');
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Only a SUCCESSFUL read may license an empty state: `loading` settles to
-  // false on the catch path too, so it cannot tell "nothing here" from
-  // "we never got an answer".
+  // The thread keeps its own error rather than sharing the list's. They fail
+  // independently and both are cleared by their own next success, so pooling
+  // them let a successful thread read wipe a banner that was still telling
+  // the truth about a stale conversation list.
+  const [threadError, setThreadError] = useState<string | null>(null);
+  // Only a SUCCESSFUL read may license an empty state. There is deliberately
+  // no separate `loading` flag any more: it settled to false on the catch
+  // path too, so it could never distinguish "nothing here" from "we never got
+  // an answer", and resolveViewState derives the spinner from this plus the
+  // error instead.
   const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -43,14 +50,24 @@ export default function InboxPage() {
       setLoaded(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load the inbox.');
-    } finally {
-      setLoading(false);
     }
   }, [statusFilter]);
 
+  // The only fetch on this page that was still a bare await. A refused or
+  // failed thread read threw as an unhandled rejection and left `messages`
+  // holding the PREVIOUS conversation -- so the header named one customer
+  // while the bubbles under it belonged to another, with nothing on screen
+  // admitting the read had failed. Emptying the thread is the honest
+  // outcome: better a blank thread and a banner than someone else's words.
   const loadThread = useCallback(async (id: string) => {
-    const res = await getConversation(id);
-    setMessages(res.messages);
+    try {
+      const res = await getConversation(id);
+      setMessages(res.messages);
+      setThreadError(null);
+    } catch (nextError) {
+      setMessages([]);
+      setThreadError(nextError instanceof Error ? nextError.message : 'Unable to load this conversation.');
+    }
   }, []);
 
   useEffect(() => {
@@ -58,6 +75,12 @@ export default function InboxPage() {
   }, [loadInbox]);
 
   useEffect(() => {
+    // Clear first, then fetch. Without this the new conversation's header
+    // renders over the old one's messages for as long as the read takes --
+    // the same misattribution as above, just briefer.
+    setMessages([]);
+    setThreadError(null);
+
     if (selectedId) {
       void loadThread(selectedId);
     }
@@ -76,6 +99,12 @@ export default function InboxPage() {
     () => conversations.find((conversation) => conversation.id === selectedId) ?? null,
     [conversations, selectedId]
   );
+
+  const listState = resolveViewState({
+    hasData: loaded,
+    error,
+    isEmpty: conversations.length === 0,
+  });
 
   const onSend = async () => {
     if (!selectedId || !reply.trim()) {
@@ -136,11 +165,17 @@ export default function InboxPage() {
             </button>
           ))}
         </div>
-        {loading ? <SkeletonRows count={6} /> : null}
-        {error ? <ErrorBanner message={error} /> : null}
-        {loaded && conversations.length === 0 ? (
+        {error ? <ErrorBanner message={error} onRetry={() => void loadInbox()} /> : null}
+        {/* `loaded` already kept the empty state honest, but its false branch
+            was the list container, so a first load drew the skeleton and an
+            empty list at once and a failed load drew an empty list under the
+            banner. The view state names 'error' separately, so that case can
+            render nothing and let the banner speak for itself. */}
+        {listState === 'loading' ? <SkeletonRows count={6} /> : null}
+        {listState === 'empty' ? (
           <EmptyState title="No conversations" body="Customer messages will show up here." />
-        ) : (
+        ) : null}
+        {listState === 'ready' ? (
           <div className="inbox-items">
             {conversations.map((conversation) => (
               <button
@@ -157,7 +192,7 @@ export default function InboxPage() {
               </button>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="inbox-thread card">
@@ -185,6 +220,10 @@ export default function InboxPage() {
                 </button>
               </div>
             </header>
+
+            {threadError ? (
+              <ErrorBanner message={threadError} onRetry={() => void loadThread(selected.id)} />
+            ) : null}
 
             <div className="inbox-messages">
               {messages.map((message) => (

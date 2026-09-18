@@ -3,7 +3,8 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
-import { formatDateTime, humanizeStatus } from '../lib/format';
+import { formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
+import { resolveViewState } from '../lib/viewState';
 import {
   getAdminOperationalAlerts,
   listAdminFeatureFlags,
@@ -136,13 +137,32 @@ export default function ObservabilityPage() {
     [featureFlags]
   );
 
+  // Both panels resolve against `loaded`, never `loading`: `loading` settles
+  // to false on the catch path as well, so it cannot separate a quiet platform
+  // from an unreachable one.
+  const alertsState = resolveViewState({ hasData: loaded, error, isEmpty: alerts.length === 0 });
+  const flagsState = resolveViewState({ hasData: loaded, error, isEmpty: sortedFlags.length === 0 });
+
   // "50+" when the probe found a 51st row, plain "12" when it did not. The
   // suffix is the whole point: it is the only thing separating a count from a
   // cap on a page with no pagination.
-  const alertCountLabel = `${alerts.length}${alertsTruncated ? '+' : ''}`;
-  const alertCountTitle = alertsTruncated
-    ? `Showing the ${ALERT_PAGE_SIZE} most recent alerts; more exist beyond this page.`
-    : `All ${alerts.length} alerts are shown.`;
+  //
+  // The dash before a read lands matters just as much. `alerts` starts empty
+  // and stays empty when the fetch throws, so these badges previously read
+  // "0 alerts" / "0 queued" on a page whose entire purpose is telling an
+  // operator whether anything is wrong -- an unreachable alert queue rendered
+  // as an all-clear, which is the worst answer this page could give.
+  const alertCountLabel = loaded ? `${alerts.length}${alertsTruncated ? '+' : ''}` : '—';
+  const alertCountTitle = !loaded
+    ? 'The alert queue has not loaded, so no count can be shown.'
+    : alertsTruncated
+      ? `Showing the ${ALERT_PAGE_SIZE} most recent alerts; more exist beyond this page.`
+      : `All ${alerts.length} alerts are shown.`;
+
+  // Same reasoning for the flag chrome: "0 flags" and "0 enabled" are claims
+  // about configuration, and a failed read is not evidence for either.
+  const flagCountLabel = loaded ? formatNumber(featureFlags.length) : '—';
+  const enabledFlagLabel = loaded ? formatNumber(sortedFlags.filter((flag) => flag.enabled).length) : '—';
 
   return (
     <section className="page observability-page">
@@ -160,7 +180,7 @@ export default function ObservabilityPage() {
           <span className="badge badge-neutral" title={alertCountTitle}>
             {alertCountLabel} alerts
           </span>
-          <span className="badge badge-primary">{featureFlags.length} flags</span>
+          <span className="badge badge-primary">{flagCountLabel} flags</span>
         </div>
       </div>
 
@@ -182,12 +202,12 @@ export default function ObservabilityPage() {
             </div>
           ) : null}
 
-          {loaded && alerts.length === 0 ? (
+          {alertsState === 'empty' ? (
             <EmptyState
               title="No alerts yet"
               body="Alerts will appear here when dispatch, payment, or acceptance flows cross their threshold."
             />
-          ) : (
+          ) : alertsState !== 'ready' ? null : (
             <div className="risk-signals-list">
               {alerts.map((alert) => {
                 const isSelected = alert.id === selectedAlertId;
@@ -224,7 +244,11 @@ export default function ObservabilityPage() {
         </div>
 
         <div className="card observability-detail-card">
-          {!selectedAlert ? (
+          {!loaded ? null : !selectedAlert ? (
+            // Gated on `loaded` because "choose an alert from the queue" is an
+            // instruction, and instructing an operator to pick from a queue we
+            // failed to fetch points them at a list that is empty for reasons
+            // this panel is not admitting to.
             <EmptyState
               title="Select an alert"
               body="Choose an alert from the queue to inspect its metadata and trace the triggering subject."
@@ -273,12 +297,12 @@ export default function ObservabilityPage() {
             <h3 className="card-title">Feature flags</h3>
             <div className="muted">Flags default closed until explicitly enabled by an admin.</div>
           </div>
-          <span className="badge badge-primary">{sortedFlags.filter((flag) => flag.enabled).length} enabled</span>
+          <span className="badge badge-primary">{enabledFlagLabel} enabled</span>
         </div>
 
-        {loaded && sortedFlags.length === 0 ? (
+        {flagsState === 'empty' ? (
           <EmptyState title="No feature flags yet" body="Add a flag to dark-launch risky work behind a server-controlled switch." />
-        ) : (
+        ) : flagsState !== 'ready' ? null : (
           <div className="feature-flag-list">
             {sortedFlags.map((flag) => (
               <div key={flag.key} className="feature-flag-row">

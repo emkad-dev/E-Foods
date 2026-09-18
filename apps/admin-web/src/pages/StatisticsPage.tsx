@@ -41,6 +41,16 @@ import { getPaymentChartColor, getStatusChartColor } from '../theme/tones';
  */
 const SETTLEMENT_ROW_CAP = 12;
 
+/**
+ * How many restaurants the revenue leaderboard lists. buildTopRestaurants caps
+ * at six by default and the page never passed or mentioned a limit, so the
+ * other money table on this screen had exactly the defect the settlement table
+ * above was fixed for: six rows look the same whether the platform has six
+ * restaurants or six hundred. Passed explicitly here so the cap is visible at
+ * the call site, and stated in the card header below.
+ */
+const TOP_RESTAURANT_ROW_CAP = 6;
+
 export default function StatisticsPage() {
   const { snapshot, error, hasData, refresh } = useSnapshot();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
@@ -62,7 +72,19 @@ export default function StatisticsPage() {
   // full breakdown is computed here in the client, so unlike the alert queue
   // the true total is known exactly and can simply be stated.
   const settlementShown = Math.min(settlementBreakdown.length, SETTLEMENT_ROW_CAP);
-  const topRestaurants = useMemo(() => buildTopRestaurants(windowedOrders), [windowedOrders]);
+  const topRestaurants = useMemo(
+    () => buildTopRestaurants(windowedOrders, TOP_RESTAURANT_ROW_CAP),
+    [windowedOrders]
+  );
+  // The leaderboard is truncated, so its own length can never be the total.
+  // Counting the distinct restaurants in the window here -- keyed exactly the
+  // way buildTopRestaurants keys them, so the two agree -- is what lets the
+  // header say how many performers are being left off the bottom.
+  const restaurantsInWindow = useMemo(
+    () =>
+      new Set(windowedOrders.map((order) => order.restaurantId || order.restaurantName || 'unknown')).size,
+    [windowedOrders]
+  );
   const zoneBreakdown = useMemo(() => buildZoneBreakdown(snapshot.dispatchProfiles), [snapshot.dispatchProfiles]);
   const currency = windowedOrders.find((order) => order.pricing?.currency)?.pricing?.currency ?? 'NGN';
 
@@ -285,6 +307,13 @@ export default function StatisticsPage() {
             <div className="card">
               <div className="card-title-row">
                 <h3 className="card-title">Top restaurants by revenue</h3>
+                {restaurantsInWindow > 0 ? (
+                  <span className="muted">
+                    {restaurantsInWindow > TOP_RESTAURANT_ROW_CAP
+                      ? `Top ${topRestaurants.length} of ${formatNumber(restaurantsInWindow)}`
+                      : `${formatNumber(restaurantsInWindow)} restaurants`}
+                  </span>
+                ) : null}
               </div>
               {topRestaurants.length === 0 ? (
                 <EmptyState title="No restaurant activity" body="Top performers appear once orders exist in this window." />

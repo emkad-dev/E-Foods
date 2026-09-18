@@ -9,6 +9,7 @@ import type { AppRole, UserDocument } from '../../../../packages/domain/src';
 import { canDeleteAdminAccess, canDeleteUserAccountOnRequest } from '../lib/adminOffboarding';
 import { formatDateTime } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
+import { resolveViewState } from '../lib/viewState';
 import {
   assignUserRole,
   deleteAdminAccess,
@@ -27,7 +28,7 @@ const STAFF_ROLES = ['restaurant', 'dispatch', 'admin'] as const;
 
 export default function AccessPage() {
   const { session } = useAuth();
-  const { data, loading, error, refresh } = usePolledRpc(getAdminAccessOverview);
+  const { data, error, refresh } = usePolledRpc(getAdminAccessOverview);
   const [pendingUid, setPendingUid] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, AppRole>>({});
@@ -51,6 +52,18 @@ export default function AccessPage() {
     () => [...(data?.users ?? [])].sort((left, right) => (left.email ?? '').localeCompare(right.email ?? '')),
     [data?.users]
   );
+
+  // The empty state was already gated on `data !== null`, but the false branch
+  // of that same ternary was the table, so a failed fetch swapped one claim
+  // for another: instead of "No users" the operator got a complete header row
+  // with nothing under it, which says the same thing more confidently. Naming
+  // 'error' as its own outcome lets the body render nothing and the banner
+  // above it carry the whole message.
+  const usersState = resolveViewState({
+    hasData: data !== null,
+    error,
+    isEmpty: users.length === 0,
+  });
 
   const runAction = async (uid: string, action: () => Promise<unknown>) => {
     setPendingUid(uid);
@@ -192,22 +205,23 @@ export default function AccessPage() {
       <div className="card">
         <div className="card-title-row">
           <h3 className="card-title">Platform users</h3>
-          <span className="muted">{users.length} accounts</span>
+          {/* A headcount is a claim about the platform, so it waits for data
+              like every other claim: ungated it read "0 accounts" through the
+              whole first load and forever after a failed one. */}
+          {usersState !== 'loading' && usersState !== 'error' ? (
+            <span className="muted">{users.length} accounts</span>
+          ) : null}
         </div>
         {/* The skeleton REPLACES the table while loading; it used to render
             above it, so a first load showed shimmer bars stacked on top of a
             fully drawn header row with nothing under it -- two loading
             metaphors at once, and an empty table that reads as "no users".
-            `data !== null`, not `!loading`, on the empty state: usePolledRpc
-            settles loading to false whether the read succeeded or threw, so
-            !loading could not tell an empty platform from an unreachable one
-            -- and this page would then assert "No users" to an operator whose
-            fetch had failed. */}
-        {loading ? (
-          <SkeletonRows count={6} />
-        ) : data !== null && users.length === 0 ? (
-          <EmptyState title="No users" body="Platform accounts will appear here." />
-        ) : (
+            The view state, not `!loading`, decides: usePolledRpc settles
+            loading to false whether the read succeeded or threw, so !loading
+            could not tell an empty platform from an unreachable one. */}
+        {usersState === 'loading' ? <SkeletonRows count={6} /> : null}
+        {usersState === 'empty' ? <EmptyState title="No users" body="Platform accounts will appear here." /> : null}
+        {usersState === 'ready' ? (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -270,6 +284,17 @@ export default function AccessPage() {
                         ) : (
                           <span className="badge badge-success">Active</span>
                         )}
+                        {/* The overview has always returned emailVerified and
+                            nothing read it, so an account that never confirmed
+                            its address was indistinguishable from one that did
+                            -- which matters most on the very rows an operator
+                            is about to grant a staff role to. Shown only when
+                            it is false; "verified" is the unremarkable case. */}
+                        {user.emailVerified === false ? (
+                          <span className="badge badge-warning" title="This account has never confirmed its email address.">
+                            Email unverified
+                          </span>
+                        ) : null}
                       </td>
                       <td className="muted">{formatDateTime(user.createdAt)}</td>
                       <td>
@@ -336,6 +361,15 @@ export default function AccessPage() {
                             >
                               Save
                             </button>
+                            {/* restaurantName rides along on the same record
+                                and was dropped, leaving the operator to check
+                                an opaque UUID against another screen before
+                                daring to edit it. */}
+                            {user.restaurantName ? (
+                              <span className="muted" style={{ fontSize: 12 }}>
+                                {user.restaurantName}
+                              </span>
+                            ) : null}
                           </div>
                         ) : (
                           <span className="muted">—</span>
@@ -405,7 +439,7 @@ export default function AccessPage() {
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
       </div>
 
       {deleteTarget ? (
