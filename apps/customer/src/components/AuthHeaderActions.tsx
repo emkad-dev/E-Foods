@@ -1,6 +1,6 @@
 import { usePathname, useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useAuth } from '../contexts/AuthContext';
 import { customerTheme } from '../theme/palette';
 import { resolveAuthRedirectTo } from '../utils/authPrompt';
@@ -39,10 +39,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginRight: 8,
   },
+  // Sign in and Sign up in the header: 2*8 of padding around a 12pt label is
+  // 38pt and 36pt. These are the two controls the whole signed-out app exists
+  // to funnel someone towards.
   secondaryButton: {
+    alignItems: 'center',
     borderColor: customerTheme.accent,
     borderRadius: radius.pill,
     borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -52,9 +58,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   primaryButton: {
+    alignItems: 'center',
     backgroundColor: customerTheme.brandOrange,
     borderRadius: radius.pill,
+    justifyContent: 'center',
     marginLeft: 8,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },

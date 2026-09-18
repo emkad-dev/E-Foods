@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { customerTheme } from '../theme/palette';
 
 type AuthPasswordFieldProps = {
@@ -72,8 +72,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     paddingVertical: 12,
   },
+  // Show/hide password, at 33pt. Partner's copy of this component was raised
+  // to the floor earlier in this sweep and customer's was not, which is the
+  // whole argument for checking this mechanically rather than by eye.
   toggle: {
+    justifyContent: 'center',
     marginLeft: 12,
+    minHeight: MIN_TAP_TARGET,
     paddingVertical: 8,
   },
   toggleText: {

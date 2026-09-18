@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { elevation, radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, elevation, radius } from '@feasty/design-system';
 import { promoHasRichContent, type PromoContent } from '../domain/promoContent';
 import { supabase } from '../services/supabase/config';
 import { trackPromoClick, trackPromoImpression } from '../services/promoTracking';
@@ -190,11 +190,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 4,
   },
+  // Dismiss, drawn as a 24pt disc. The banner is a slim strip, so a 44pt
+  // control would set its height; the box grows to the floor and an equal
+  // negative margin hands the difference back, leaving the strip as it was.
   close: {
     alignItems: 'center',
-    height: 24,
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    width: 24,
+    margin: -(MIN_TAP_TARGET - 24) / 2,
+    width: MIN_TAP_TARGET,
   },
   closeText: {
     color: customerTheme.textOnBrand,
