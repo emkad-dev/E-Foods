@@ -113,6 +113,14 @@ export const buildRestaurantResponse = (
   ownerId: sanitizeOptionalText(restaurant.ownerId),
   pausedUntil: restaurant.pausedUntil ?? null,
   paystackSubaccountCode: sanitizeOptionalText(restaurant.paystackSubaccountCode),
+  // Emitted, unlike missedOrderCount above, and for the opposite reason. That
+  // one is a private operational metric. These two are already public -- the
+  // customer catalog has served them since ratings shipped -- so withholding
+  // them from the restaurant's OWN read while showing them to every shopper
+  // would be the strange choice. They were being selected from the database
+  // and dropped here, one function after being read.
+  ratingAverage: restaurant.ratingAverage ?? null,
+  ratingCount: restaurant.ratingCount ?? 0,
   supportsDelivery: restaurant.supportsDelivery !== false,
   supportsPickup: restaurant.supportsPickup !== false,
   updatedAt: restaurant.updatedAt ?? null,

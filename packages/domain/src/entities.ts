@@ -136,7 +136,17 @@ export interface RestaurantDocument extends DocumentData {
   image?: string;
   logoImage?: string | null;
   cuisine?: string | null;
+  /**
+   * Legacy and unpopulated. Nothing writes it and nothing should read it --
+   * the real figures are `ratingAverage`/`ratingCount` below, maintained by
+   * ebuy_submit_order_rating. Left in place only because removing a field from
+   * this shared document type is a wider change than it looks.
+   */
   rating?: number;
+  /** Maintained by ebuy_submit_order_rating; null until the first rating. */
+  ratingAverage?: number | null;
+  /** 0 means unrated, which is NOT the same as a rating of 0. */
+  ratingCount?: number;
   deliveryTime?: string | number | null;
   openingTime?: string | null;
   closingTime?: string | null;
