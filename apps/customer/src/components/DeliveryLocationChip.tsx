@@ -1,7 +1,7 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StyleProp, StyleSheet, Text, TouchableOpacity, ViewStyle } from 'react-native';
-import { radius, space } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, space } from '@feasty/design-system';
 import { useCart } from '../contexts/CartContext';
 import { customerTheme } from '../theme/palette';
 
@@ -53,6 +53,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
+    // Measured at 36pt on the running build. The label is 13pt and the chip is
+    // a horizontal pill, so growing the padding would fatten it visually --
+    // minHeight adds the missing 8pt without changing how it reads.
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },

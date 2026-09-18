@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
 import { getCurrentCoordinates, reverseGeocode } from '../src/services/deviceLocation';
@@ -231,7 +231,11 @@ const styles = StyleSheet.create({
   },
   skipButton: {
     alignItems: 'center',
+    // 39pt as measured on the running build, on the one control that lets a
+    // visitor past the first screen without handing over a location.
+    justifyContent: 'center',
     marginTop: 28,
+    minHeight: MIN_TAP_TARGET,
     paddingVertical: 10,
   },
   skipText: {

@@ -16,6 +16,7 @@ import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../..
 import type { RealtimeResourceSubscribe } from '../../../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../../../packages/runtime/src/useAppStateVisibility';
+import ImagePlaceholder from '../../../../src/components/ImagePlaceholder';
 import RemoteImage from '../../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
@@ -391,9 +392,7 @@ export default function RestaurantDetail() {
                   uri={menuItem.image}
                   style={styles.menuItemImage}
                   fallback={
-                    <View style={[styles.menuItemImage, styles.menuItemImagePlaceholder]}>
-                      <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
-                    </View>
+                    <ImagePlaceholder style={styles.menuItemImage} size={20} />
                   }
                 />
                 <View style={styles.menuItemInfo}>
@@ -686,10 +685,6 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     backgroundColor: customerTheme.surfaceMuted,
     width: 104,
-  },
-  menuItemImagePlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   menuItemInfo: {
     flex: 1,

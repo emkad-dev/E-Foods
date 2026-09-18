@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
+import ImagePlaceholder from '../../src/components/ImagePlaceholder';
 import RemoteImage from '../../src/components/RemoteImage';
 import DeliveryLocationChip from '../../src/components/DeliveryLocationChip';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
@@ -162,9 +163,7 @@ export default function SearchScreen() {
           uri={item.itemImage}
           style={styles.resultImage}
           fallback={
-            <View style={[styles.resultImage, styles.resultImagePlaceholder]}>
-              <FontAwesome name="cutlery" size={20} color={customerTheme.textSoft} />
-            </View>
+            <ImagePlaceholder style={styles.resultImage} size={20} />
           }
         />
         <View style={styles.resultInfo}>
@@ -395,11 +394,6 @@ const styles = StyleSheet.create({
   resultImage: {
     height: 78,
     width: 78,
-  },
-  resultImagePlaceholder: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surfaceMuted,
-    justifyContent: 'center',
   },
   resultInfo: {
     flex: 1,

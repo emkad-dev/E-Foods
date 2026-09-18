@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { radius } from '@feasty/design-system';
+import ImagePlaceholder from './ImagePlaceholder';
 import RemoteImage from './RemoteImage';
 import { customerTheme } from '../theme/palette';
 
@@ -79,7 +80,11 @@ export default function RestaurantDiscoveryRow({
       activeOpacity={0.92}
       onPress={onPress}
     >
-      <RemoteImage uri={imageUri} style={styles.image} />
+      <RemoteImage
+        uri={imageUri}
+        style={styles.image}
+        fallback={<ImagePlaceholder style={styles.image} />}
+      />
       <View style={styles.info}>
         <View style={styles.header}>
           {/* One line on both shelves. The out-of-zone copy let a long name wrap

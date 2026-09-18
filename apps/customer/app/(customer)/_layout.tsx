@@ -102,7 +102,19 @@ export default function CustomerLayout() {
             tabBarActiveTintColor: customerTheme.accentStrong,
             tabBarInactiveTintColor: customerTheme.textMuted,
             tabBarLabelStyle: { fontSize: 10, fontWeight: '700', paddingBottom: 0 },
-            tabBarItemStyle: { paddingVertical: 2 },
+            // The pill is 58pt tall but the PRESSABLE inside it was 41pt: the
+            // bar owned the vertical padding, so the top and bottom 8pt of every
+            // tab looked tappable and was not. Measured on the running web build
+            // at 375pt -- all five items came back 65x41, under the 44pt floor
+            // this repo already enforces in partner and dispatch.
+            //
+            // The padding moves from the bar to the item. Same pixels in the same
+            // places; the difference is that they now belong to the button.
+            // No paddingVertical: expo-router renders each tab as an <a>, and
+            // tabBarItemStyle lands on the WRAPPER around it. Padding here shrinks
+            // the anchor -- which is the thing that actually takes the tap -- back
+            // below the floor. Height on the wrapper, centring inside it, no padding.
+            tabBarItemStyle: { height: "100%" },
             tabBarStyle: {
               ...elevation.lg,
               backgroundColor: customerTheme.surface,
@@ -117,8 +129,10 @@ export default function CustomerLayout() {
               // the pill snaps back to the screen edge instead of sitting centred.
               end: tabBarSideInset,
               height: 58,
-              paddingBottom: 6,
-              paddingTop: 6,
+              // Zero, deliberately: see tabBarItemStyle above. Padding here
+              // shrinks the touch target instead of the content.
+              paddingBottom: 0,
+              paddingTop: 0,
               position: 'absolute',
               start: tabBarSideInset,
             },

@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { elevation, radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, elevation, radius } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../packages/auth/src';
@@ -521,10 +521,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 149, 31, 0.55)',
     borderRadius: radius.xl,
     borderWidth: 1,
-    height: 40,
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
     marginLeft: 10,
-    width: 40,
+    width: MIN_TAP_TARGET,
   },
   avatarButtonText: {
     color: customerTheme.textOnBrand,
@@ -546,15 +546,21 @@ const styles = StyleSheet.create({
     color: customerTheme.text,
     flex: 1,
     fontSize: 15,
-    height: 40,
+    height: MIN_TAP_TARGET,
     marginLeft: 8,
   },
   searchAction: {
     alignItems: 'center',
     borderRadius: radius.lg,
-    height: 32,
+    // The submit affordance is a 32pt disc by design -- a 44pt one would
+    // dominate the field it sits in. The BOX grows to the floor while the disc
+    // keeps its size: negative margin pulls the surrounding row back so the
+    // shell does not get taller. (hitSlop is not an option -- on web, RNW 0.21
+    // reads it only from the legacy Touchable mixin, so it does nothing here.)
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    width: 32,
+    marginVertical: -(MIN_TAP_TARGET - 32) / 2,
+    width: MIN_TAP_TARGET,
   },
   searchActionActive: {
     backgroundColor: customerTheme.brandGreen,
