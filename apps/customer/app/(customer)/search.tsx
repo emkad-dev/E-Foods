@@ -19,6 +19,7 @@ import ImagePlaceholder from '../../src/components/ImagePlaceholder';
 import RemoteImage from '../../src/components/RemoteImage';
 import DeliveryLocationChip from '../../src/components/DeliveryLocationChip';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
+import RestaurantRating from '../../src/components/RestaurantRating';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
@@ -180,6 +181,11 @@ export default function SearchScreen() {
             <Text style={styles.resultRestaurant} numberOfLines={1}>
               {item.restaurant.name}
             </Text>
+            {/* The dish is the headline here, but the kitchen behind it is
+                still what is being chosen, so it carries the same rating the
+                feed shows. `resultRestaurant` is flex:1, so this keeps its
+                intrinsic width and the name truncates around it. */}
+            <RestaurantRating restaurant={item.restaurant} style={styles.resultRating} />
           </View>
           <View style={styles.resultMetaRow}>
             <Text style={styles.resultPrice}>{formatMoney(item.price)}</Text>
@@ -417,6 +423,12 @@ const styles = StyleSheet.create({
     color: customerTheme.text,
     fontSize: 16,
     fontWeight: '800',
+  },
+  resultRating: {
+    // Zeroes the shared row's feed-card top margin: this is a column inside an
+    // already-spaced row, not a stacked line.
+    marginLeft: 8,
+    marginTop: 0,
   },
   resultRestaurantRow: {
     alignItems: 'center',

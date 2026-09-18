@@ -3,6 +3,8 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { radius } from '@feasty/design-system';
 import ImagePlaceholder from './ImagePlaceholder';
 import RemoteImage from './RemoteImage';
+import RestaurantRating from './RestaurantRating';
+import type { RatedRestaurant } from '../domain/restaurantRating';
 import { customerTheme } from '../theme/palette';
 
 /**
@@ -28,6 +30,15 @@ type RestaurantDiscoveryRowProps = {
   meta: string;
   name: string;
   onPress: () => void;
+  /**
+   * The restaurant's raw rating fields, not a formatted string.
+   *
+   * REQUIRED, deliberately: an optional rating is an optional line, and a line
+   * that is present on some rows and absent on others is what gives one feed
+   * two card heights. Making the compiler ask for it on every shelf is also the
+   * only thing that keeps the two shelves showing the same facts.
+   */
+  rating: RatedRestaurant;
   tone: RestaurantDiscoveryRowTone;
   /**
    * The one control the row's header may carry on its trailing edge: a heart on
@@ -62,6 +73,7 @@ export default function RestaurantDiscoveryRow({
   meta,
   name,
   onPress,
+  rating,
   tone,
   trailing,
 }: RestaurantDiscoveryRowProps) {
@@ -99,6 +111,11 @@ export default function RestaurantDiscoveryRow({
         <Text style={[styles.cuisine, isMuted ? styles.cuisineMuted : null]} numberOfLines={1}>
           {cuisine}
         </Text>
+        {/* Always rendered, in both states, and at a fixed height -- see
+            RestaurantRating. The available row's content box comes to ~116pt
+            with this line in it, still inside the 132pt the thumbnail fixes, so
+            the orderable shelf's card height does not move at all. */}
+        <RestaurantRating restaurant={rating} />
         <Text
           style={[styles.meta, isMuted ? styles.metaMuted : null]}
           // The orderable row's meta is a fixed-shape chip line (distance, ETA)

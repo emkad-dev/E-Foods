@@ -358,6 +358,7 @@ export default function HomeScreen() {
               imageUri={restaurant.image}
               name={restaurant.name}
               cuisine={getRestaurantCuisineLabel(restaurant)}
+              rating={restaurant}
               meta={[
                 availability.distanceKm
                   ? formatDistanceAway(availability.distanceKm)
@@ -425,6 +426,7 @@ export default function HomeScreen() {
                 imageUri={restaurant.image}
                 name={restaurant.name}
                 cuisine={getRestaurantCuisineLabel(restaurant)}
+                rating={restaurant}
                 meta={
                   availability.distanceKm && availability.radiusKm
                     ? `${formatDistanceAway(availability.distanceKm)}, outside ${availability.radiusKm.toFixed(0)} km range`

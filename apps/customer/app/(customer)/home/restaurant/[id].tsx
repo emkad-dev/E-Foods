@@ -20,6 +20,7 @@ import ImagePlaceholder from '../../../../src/components/ImagePlaceholder';
 import RemoteImage from '../../../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../../../src/components/RestaurantLogoBadge';
+import RestaurantRating from '../../../../src/components/RestaurantRating';
 import ScreenColumn, { screenColumn } from '../../../../src/components/ScreenColumn';
 import { SkeletonDetail, SkeletonScreen } from '../../../../src/components/Skeleton';
 import { useCart } from '../../../../src/contexts/CartContext';
@@ -41,7 +42,6 @@ import {
   getRestaurantAvailability,
   getRestaurantAvailabilityBadge,
   getRestaurantOperatingHoursLabel,
-  getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
 } from '../../../../src/utils/restaurantAvailability';
 
@@ -314,7 +314,11 @@ export default function RestaurantDetail() {
                   </View>
 
                   <View style={styles.factsRow}>
-                    <Text style={styles.factPill}>{getRestaurantRatingLabel(restaurant)}</Text>
+                    {/* First pill in the row, so the rating reads before the
+                        logistics. An unrated kitchen shows "New" here rather
+                        than dropping the pill: the facts row wraps, and a pill
+                        that comes and goes reflows the ones after it. */}
+                    <RestaurantRating restaurant={restaurant} variant="pill" />
                     {/* No pill at all when the partner published no estimate. The
                         old `?? '25-35 min'` quoted every unconfigured kitchen the
                         same invented delivery promise, right beside the facts that

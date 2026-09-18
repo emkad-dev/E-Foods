@@ -462,32 +462,6 @@ export const getRestaurantAvailabilityBadge = (availability: RestaurantAvailabil
   return null;
 };
 
-// A restaurant with fewer than this many ratings shows "New" instead of an
-// average — too few data points to be a trustworthy signal. This is a client
-// display rule only: the server (public-catalog/catalog.ts's toRestaurantCard
-// / toRestaurantDetail) never suppresses ratingAverage/ratingCount, it always
-// emits the raw values.
-export const NEW_RESTAURANT_RATING_THRESHOLD = 5;
-
-/**
- * "New" below NEW_RESTAURANT_RATING_THRESHOLD ratings, otherwise the average
- * formatted to one decimal with the count in parentheses (e.g. "4.3 ★ (12)").
- * ratingAverage/ratingCount are optional on the type (older cached shapes,
- * legacy full-catalog rows) so both default safely to "no ratings yet".
- */
-export const getRestaurantRatingLabel = (
-  restaurant: Pick<DiscoveryRestaurant, 'ratingAverage' | 'ratingCount'>
-): string => {
-  const count = restaurant.ratingCount ?? 0;
-
-  if (count < NEW_RESTAURANT_RATING_THRESHOLD) {
-    return 'New';
-  }
-
-  const average = restaurant.ratingAverage ?? 0;
-  return `${average.toFixed(1)} ★ (${count})`;
-};
-
 /**
  * The cuisine line a discovery card shows, or a stated placeholder when the
  * partner published none.

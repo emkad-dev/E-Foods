@@ -48,10 +48,13 @@ export interface RestaurantDocument extends DocumentData {
   /**
    * From RestaurantRecord.ratingAverage/ratingCount (Task 12/E1), maintained
    * incrementally server-side on every customerSubmitOrderRating. Present on
-   * both a card and a detail fetch. `ratingCount < 5` means "too few ratings
-   * to trust the average" — apps/customer/src/utils/restaurantAvailability.ts's
-   * getRestaurantRatingLabel is where that "New" display threshold lives; the
-   * raw values here are never suppressed server-side.
+   * both a card and a detail fetch, and never suppressed server-side.
+   *
+   * `ratingCount === 0` with a null average is an UNRATED restaurant, not a
+   * zero-scored one. apps/customer/src/domain/restaurantRating.ts owns what may
+   * be said about these two values — the rounding rule, the "New" presentation
+   * and the requirement that the count always travels with the average — and
+   * every customer surface renders them through it.
    */
   ratingAverage?: number | null;
   ratingCount?: number;

@@ -6,6 +6,7 @@ import AuthPromptCard from '../../src/components/AuthPromptCard';
 import RemoteImage from '../../src/components/RemoteImage';
 import RestaurantFavoriteButton from '../../src/components/RestaurantFavoriteButton';
 import RestaurantLogoBadge from '../../src/components/RestaurantLogoBadge';
+import RestaurantRating from '../../src/components/RestaurantRating';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonCard, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -18,7 +19,6 @@ import {
   getRestaurantAvailability,
   getRestaurantCardStatusLabel,
   getRestaurantCuisineLabel,
-  getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
   type DiscoveryRestaurant,
 } from '../../src/utils/restaurantAvailability';
@@ -244,7 +244,7 @@ export default function CustomerFavoritesScreen() {
                   .join(' | ')}
               </Text>
               <View style={styles.factRow}>
-                <Text style={styles.fact}>{getRestaurantRatingLabel(restaurant)}</Text>
+                <RestaurantRating restaurant={restaurant} style={styles.factRating} />
                 {/* Nothing at all when the payload cannot support a claim: a card
                     carries no opening/closing time, and guessing "Open" from its
                     absence is what made the feed contradict the restaurant page. */}
@@ -321,7 +321,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginRight: 12,
   },
+  factRating: {
+    // The shared rating row carries its own 6pt top margin for the feed cards;
+    // here it is a column in an already-spaced fact row, so it is zeroed out
+    // rather than stacking and dropping the rating below its own siblings.
+    marginRight: 12,
+    marginTop: 0,
+  },
   factRow: {
+    alignItems: 'center',
     flexDirection: 'row',
     marginTop: 10,
   },

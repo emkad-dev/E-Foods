@@ -12,9 +12,7 @@ import {
   getRestaurantCardStatusLabel,
   getRestaurantCuisineLabel,
   getRestaurantOpenState,
-  getRestaurantRatingLabel,
   isRestaurantVisibleToCustomers,
-  NEW_RESTAURANT_RATING_THRESHOLD,
   type DiscoveryRestaurant,
 } from './restaurantAvailability.ts';
 import type { AddressRecord } from '../domain/entities.ts';
@@ -252,29 +250,10 @@ test('getRestaurantCuisineLabel: an all-whitespace cuisine falls back too — th
   assert.equal(getRestaurantCuisineLabel({ cuisine: '' }), 'Kitchen update pending');
 });
 
-// --- getRestaurantRatingLabel: the "New" threshold flips at ratingCount === 5 ---
-
-test('getRestaurantRatingLabel: ratingCount 0 (no ratings at all) shows New', () => {
-  assert.equal(getRestaurantRatingLabel({ ratingAverage: null, ratingCount: 0 }), 'New');
-});
-
-test('getRestaurantRatingLabel: one below the threshold (ratingCount 4) still shows New', () => {
-  assert.equal(getRestaurantRatingLabel({ ratingAverage: 5, ratingCount: NEW_RESTAURANT_RATING_THRESHOLD - 1 }), 'New');
-});
-
-test('getRestaurantRatingLabel: exactly the threshold (ratingCount 5) shows the average, not New — the flip point', () => {
-  const label = getRestaurantRatingLabel({ ratingAverage: 4.2, ratingCount: NEW_RESTAURANT_RATING_THRESHOLD });
-  assert.notEqual(label, 'New');
-  assert.equal(label, '4.2 ★ (5)');
-});
-
-test('getRestaurantRatingLabel: well above the threshold formats the average to one decimal with the count', () => {
-  assert.equal(getRestaurantRatingLabel({ ratingAverage: 3.6667, ratingCount: 42 }), '3.7 ★ (42)');
-});
-
-test('getRestaurantRatingLabel: missing ratingAverage/ratingCount defaults to New (undefined count treated as 0)', () => {
-  assert.equal(getRestaurantRatingLabel({ ratingAverage: undefined, ratingCount: undefined }), 'New');
-});
+// getRestaurantRatingLabel moved to src/domain/restaurantRating.ts, which
+// replaced the "New below 5 ratings" threshold: suppressing the average for
+// counts 1-4 also suppressed the COUNT, and the count is the context that
+// makes a small sample readable. Its tests live beside it.
 
 test('zero eligible candidates because no restaurant has coordinates, but the catalogue is non-empty -> covered (live production scenario)', () => {
   // This is the exact defect scenario: 6 published restaurants, none of them both
