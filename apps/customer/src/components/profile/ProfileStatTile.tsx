@@ -4,9 +4,9 @@ import { Card, Text, space } from '@feasty/design-system';
 type ProfileStatTileProps = {
   label: string;
   /**
-   * `null` renders the tile with no figure at all — the honest state when the
-   * count has not resolved or the fetch failed. The tile still navigates, which
-   * is the part that must never depend on a network call.
+   * `null` means the count has not resolved, or its fetch failed. The tile
+   * still navigates, which is the part that must never depend on a network
+   * call.
    */
   value: string | null;
   onPress: () => void;
@@ -24,17 +24,27 @@ type ProfileStatTileProps = {
 export default function ProfileStatTile({ label, value, onPress }: ProfileStatTileProps) {
   return (
     // The tiles sit in a `flexDirection: 'row'` whose default `alignItems:
-    // 'stretch'` keeps them the same height even when only one has a figure, so
-    // no minHeight is needed to stop a missing count shrinking its tile.
+    // 'stretch'` keeps them the same height, and both now always render a
+    // figure line, so neither can shrink or sit shorter than the other.
     <Card onPress={onPress} padding="md" style={styles.tile}>
       <Text variant="callout" tone="secondary" numberOfLines={1}>
         {label}
       </Text>
-      {value ? (
-        <Text variant="title3" numberOfLines={1} style={styles.value}>
-          {value}
-        </Text>
-      ) : null}
+      {/* A dash, NOT nothing. Rendering null here was my own choice and seeing
+          it beside Saved's "0" is what showed it up: two tiles of identical
+          size, one carrying a figure and one carrying a void, does not read as
+          "we do not know yet" -- it reads as a tile that failed to draw. The
+          dash holds the slot and says the figure is absent, at secondary tone
+          so it cannot be mistaken for a count of its own. Nothing about this
+          was measurable; it only appears when you look at the screen. */}
+      <Text
+        variant="title3"
+        tone={value ? undefined : 'secondary'}
+        numberOfLines={1}
+        style={styles.value}
+      >
+        {value ?? '—'}
+      </Text>
     </Card>
   );
 }

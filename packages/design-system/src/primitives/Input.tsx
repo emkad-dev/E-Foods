@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
+  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -36,6 +37,7 @@ export function Input({
 }: InputProps) {
   const [focused, setFocused] = useState(false);
   const invalid = Boolean(error);
+  const inputRef = useRef<TextInput>(null);
 
   return (
     <View style={containerStyle}>
@@ -45,7 +47,22 @@ export function Input({
         </Text>
       ) : null}
 
-      <View
+      {/* Pressable, not View. The field is inset 14pt on each side so the
+          text clears the border, and that inset belonged to nobody: a tap on
+          it landed on the wrapper and focused nothing, on a control that is
+          unmistakably a text field. Focusing from here gives the whole 315pt
+          box to the input without moving the text off the border.
+
+          Guarded on `focused` because calling focus() on an already-focused
+          input can move the caret -- the press that lands inside the input
+          itself must be left alone to place the cursor where the user aimed. */}
+      <Pressable
+        accessible={false}
+        onPress={() => {
+          if (!focused) {
+            inputRef.current?.focus();
+          }
+        }}
         style={[
           styles.field,
           focused ? styles.focused : null,
@@ -54,6 +71,7 @@ export function Input({
       >
         {leading}
         <TextInput
+          ref={inputRef}
           {...rest}
           accessibilityLabel={rest.accessibilityLabel ?? label}
           // RN has no cross-platform "invalid" flag; surface it in the hint so
@@ -71,7 +89,7 @@ export function Input({
           }}
         />
         {trailing}
-      </View>
+      </Pressable>
 
       {error ? (
         <Text variant="callout" tone="primary" style={styles.error}>
@@ -115,6 +133,24 @@ const styles = StyleSheet.create({
     color: textColor.primary,
     // Android adds vertical padding that breaks the 44pt alignment.
     paddingVertical: 0,
+    /**
+     * WITHOUT THIS THE FIELD IS A LIE. The wrapper above is 48pt with
+     * `alignItems: 'center'`, and zeroing the padding leaves the TextInput at
+     * exactly its line box -- measured on the web build at 287x22 inside a
+     * 315x48 box. The 13pt above and below looked like field and was not:
+     * dispatching a real pointer sequence there left `document.activeElement`
+     * on `body`, so a tap near the top or bottom edge of something that is
+     * unmistakably a text field did nothing at all.
+     *
+     * Stretching the input across the wrapper's cross axis hands those 26pt to
+     * the control itself. `leading` and `trailing` keep the wrapper's
+     * centring because this overrides `alignItems` for one child only, and
+     * `textAlignVertical` keeps Android's text centred now that the box is
+     * taller than the line -- which is what the zeroed padding was protecting
+     * in the first place.
+     */
+    alignSelf: 'stretch',
+    textAlignVertical: 'center',
   },
   error: {
     marginTop: space.xs,
