@@ -153,12 +153,21 @@ export default function InboxPage() {
   return (
     <section className="page inbox-page">
       <div className="inbox-list card">
+        {/* `aria-pressed`, because the `active` class is the ONLY thing that
+            said which filter was on. A sighted operator reads it instantly
+            from the fill; a screen reader got five identically-announced
+            buttons and no way to tell which one was applied -- so the list
+            below could be filtered to "open" with nothing saying so. The two
+            other toggle groups in this console (BroadcastsPage, and the risk
+            signals list) already set it, so this was an inconsistency rather
+            than an open question. */}
         <div className="inbox-filters">
           {STATUS_FILTERS.map((filter) => (
             <button
               key={filter}
               type="button"
               className={`btn btn-ghost ${statusFilter === filter ? 'active' : ''}`}
+              aria-pressed={statusFilter === filter}
               onClick={() => setStatusFilter(filter)}
             >
               {filter}
@@ -182,6 +191,9 @@ export default function InboxPage() {
                 key={conversation.id}
                 type="button"
                 className={`inbox-item ${selectedId === conversation.id ? 'selected' : ''}`}
+                // `aria-current`, not `aria-pressed`: this is "which item in
+                // the list am I looking at", not a control that stays pushed.
+                aria-current={selectedId === conversation.id}
                 onClick={() => setSelectedId(conversation.id)}
               >
                 <div className="inbox-item-head">

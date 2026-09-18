@@ -101,9 +101,25 @@ export default function OverviewPage() {
             <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} />
             <KpiCard label="Dispatch online" value={formatNumber(kpis.dispatchOnline)} />
             <KpiCard label="Pending approvals" value={formatNumber(kpis.pendingApprovals)} />
-            <KpiCard label={`Failed payments (${rangeDays}d)`} value={formatNumber(problemCounts.failedPayments)} />
-            <KpiCard label={`Pending payments (${rangeDays}d)`} value={formatNumber(problemCounts.pendingPayments)} />
-            <KpiCard label={`Cancelled orders (${rangeDays}d)`} value={formatNumber(problemCounts.cancelledOrders)} />
+            {/* These three are windowed and have no prior period, so they must
+                not inherit KpiCard's "Live count" default -- it contradicted
+                the (30d) in their own labels. The three above them ARE live
+                counts and keep it. */}
+            <KpiCard
+              label={`Failed payments (${rangeDays}d)`}
+              value={formatNumber(problemCounts.failedPayments)}
+              caption="Window total"
+            />
+            <KpiCard
+              label={`Pending payments (${rangeDays}d)`}
+              value={formatNumber(problemCounts.pendingPayments)}
+              caption="Window total"
+            />
+            <KpiCard
+              label={`Cancelled orders (${rangeDays}d)`}
+              value={formatNumber(problemCounts.cancelledOrders)}
+              caption="Window total"
+            />
           </div>
 
           <div className="grid-2">
