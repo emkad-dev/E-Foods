@@ -8,6 +8,7 @@ import {
   phoneRejectionMessage,
 } from '../../../domain/src/phone';
 import type { PhoneCountry, PhoneResult } from '../../../domain/src/phone';
+import { MIN_TAP_TARGET } from '../../../design-system/src/tokens/space';
 
 /** Palette subset every app theme already provides (customer/partner/dispatch). */
 export type PhoneComponentTheme = {
@@ -128,10 +129,16 @@ export const PhoneInput = ({ theme, onChange, initialValue, editable = true, aut
 const makeStyles = (theme: PhoneComponentTheme) =>
   StyleSheet.create({
     row: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+    // 2*6 of padding around a 14pt label is a 33pt control, measured on
+    // partner's register screen. This is how someone chooses +234 or +44 --
+    // get it wrong and the number is rejected -- and it is the same chip in
+    // customer, partner and dispatch, so one miss here is three apps.
     countryChip: {
       borderWidth: 1,
       borderColor: theme.border,
       borderRadius: 999,
+      justifyContent: 'center',
+      minHeight: MIN_TAP_TARGET,
       paddingVertical: 6,
       paddingHorizontal: 14,
       backgroundColor: theme.surface,

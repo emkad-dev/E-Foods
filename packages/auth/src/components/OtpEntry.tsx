@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import type { PhoneComponentTheme } from './PhoneInput';
+import { MIN_TAP_TARGET } from '../../../design-system/src/tokens/space';
 
 export type OtpChannel = 'sms' | 'whatsapp';
 
@@ -128,10 +129,15 @@ const makeStyles = (theme: PhoneComponentTheme) =>
     hiddenInput: { position: 'absolute', opacity: 0, height: 1, width: 1 },
     errorText: { color: theme.dangerText, fontSize: 13, marginTop: 10, textAlign: 'center' },
     channelRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 16 },
+    // The same 33pt chip as PhoneInput's country selector, here choosing where
+    // the code is sent. Email confirmation is OTP-only across this product, so
+    // this screen is on the signup path for every account in every app.
     channelChip: {
       borderWidth: 1,
       borderColor: theme.border,
       borderRadius: 999,
+      justifyContent: 'center',
+      minHeight: MIN_TAP_TARGET,
       paddingVertical: 6,
       paddingHorizontal: 16,
       backgroundColor: theme.surface,
@@ -139,7 +145,15 @@ const makeStyles = (theme: PhoneComponentTheme) =>
     channelChipActive: { borderColor: theme.accent, backgroundColor: theme.accentSoft },
     channelText: { color: theme.textMuted, fontSize: 14, fontWeight: '600' },
     channelTextActive: { color: theme.text },
-    resendButton: { marginTop: 14, alignItems: 'center' },
+    // No padding at all, so the target was the 14pt label's line box -- about
+    // 20pt -- on the control someone reaches for precisely when the first code
+    // did not arrive.
+    resendButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 14,
+      minHeight: MIN_TAP_TARGET,
+    },
     resendText: { color: theme.accent, fontSize: 14, fontWeight: '600' },
     resendTextDisabled: { color: theme.textMuted },
   });
