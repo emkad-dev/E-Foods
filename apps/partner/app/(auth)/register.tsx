@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -301,10 +301,18 @@ const styles = StyleSheet.create({
   phoneField: {
     marginTop: 14,
   },
+  // The whole row is the checkbox — tapping the sentence toggles it — and the
+  // row has no padding of its own, so its height is whatever the tallest child
+  // comes to: a 22pt box against a 14pt/20pt line of text. On a narrow phone
+  // the sentence wraps to two lines and the row happens to clear 44pt; on
+  // anything wide enough to keep it on one line it collapses to 22pt. A target
+  // that is legal only when the text wraps is not a target, and this is the
+  // consent gate — nobody registers without pressing it.
   policyRow: {
     alignItems: 'center',
     flexDirection: 'row',
     marginTop: 18,
+    minHeight: MIN_TAP_TARGET,
   },
   policyRowMuted: {
     opacity: 0.94,

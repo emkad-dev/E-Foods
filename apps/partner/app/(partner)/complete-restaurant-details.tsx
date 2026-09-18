@@ -507,7 +507,7 @@ export default function CompleteRestaurantDetailsScreen() {
                   <Text style={styles.logoButtonText}>{form.logoImage ? 'Change' : 'Add logo'}</Text>
                 </TouchableOpacity>
                 {form.logoImage ? (
-                  <TouchableOpacity onPress={() => setField('logoImage', null)}>
+                  <TouchableOpacity onPress={() => setField('logoImage', null)} style={styles.removeLogoButton}>
                     <Text style={styles.removeLogoText}>Remove</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -951,9 +951,15 @@ const styles = StyleSheet.create({
   logoActions: {
     marginLeft: 14,
   },
+  // Nothing in this block reads as wrong, which is the point: 10 + 10 of padding
+  // around a 13pt label whose line box is 18pt comes to 38pt. The pill keeps its
+  // padding and grows to the floor instead.
   logoButton: {
+    alignItems: 'center',
     backgroundColor: partnerTheme.accentSoft,
     borderRadius: radius.pill,
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
@@ -962,11 +968,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
   },
+  // "Remove" was a bare touchable wrapping this text, so the target was the
+  // 12pt label's 17pt line box plus its own 8pt top margin: 25pt, and the only
+  // way to undo a wrong logo. The spacing moves off the label and onto the
+  // button so that centring inside the 44pt box actually centres the glyph
+  // rather than sitting it 8pt low.
+  removeLogoButton: {
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   removeLogoText: {
     color: partnerTheme.dangerText,
     fontSize: 12,
     fontWeight: '800',
-    marginTop: 8,
     textAlign: 'center',
   },
   sectionLabel: {
@@ -983,11 +998,18 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  // 10 + 10 of padding, a 13pt/800 label measuring 18pt, and 1pt of border top
+  // and bottom: 40pt. These chips are how a partner picks cuisine, prep time
+  // and ID document during signup — three steps of the one flow that has to
+  // succeed before a restaurant can trade at all — and every one of them was
+  // four points under.
   chip: {
     backgroundColor: partnerTheme.cream,
     borderColor: partnerTheme.border,
     borderRadius: radius.pill,
     borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },

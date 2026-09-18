@@ -153,7 +153,7 @@ export default function PartnerHome() {
             ) : null}
           </View>
           {!isWide ? (
-            <TouchableOpacity onPress={handleSignOut}>
+            <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
               <Text style={styles.signOutLink}>Sign out</Text>
             </TouchableOpacity>
           ) : null}
@@ -251,7 +251,7 @@ export default function PartnerHome() {
               <View style={[styles.card, isWide ? styles.splitCardWide : null]}>
                 <View style={styles.cardTitleRow}>
                   <Text style={styles.cardTitle}>Orders history</Text>
-                  <TouchableOpacity onPress={() => router.push('/(partner)/orders')}>
+                  <TouchableOpacity style={styles.moreLinkButton} onPress={() => router.push('/(partner)/orders')}>
                     <Text style={styles.moreLink}>more →</Text>
                   </TouchableOpacity>
                 </View>
@@ -343,6 +343,15 @@ const styles = StyleSheet.create({
     color: partnerTheme.textMuted,
     fontSize: 14,
     marginTop: 2,
+  },
+  // The only way out of the app on a phone, and it had no style at all: the
+  // touchable was exactly as tall as the words inside it, 13pt/700 with no
+  // padding, so 18pt of line box was the whole target. The greeting block
+  // beside it already stands 56pt tall (24pt name + 14pt store line), so the
+  // floor costs nothing here — the row does not move.
+  signOutButton: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
   },
   signOutLink: {
     color: partnerTheme.dangerText,
@@ -450,6 +459,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  // "more →" is the link off the dashboard into the orders list, and like the
+  // sign-out above it was an unstyled touchable: 13pt/700 with no padding is an
+  // 18pt box. It sits opposite a 16pt card title in a centred row, so simply
+  // growing it would have pushed every card header from 22pt to 44pt and opened
+  // a gap under each title. The box grows and an equal negative margin gives the
+  // height back to the row, so the card chrome is unchanged. The extra 11pt top
+  // and bottom lands in the card's own 18pt padding and in the 12pt gap above
+  // the first order row — no other control to collide with. hitSlop would have
+  // been the obvious alternative and is not one: RNW 0.21 reads it only from the
+  // legacy Touchable mixin, so it is inert on the web build partner ships.
+  moreLinkButton: {
+    justifyContent: 'center',
+    marginVertical: -(MIN_TAP_TARGET - 22) / 2,
+    minHeight: MIN_TAP_TARGET,
   },
   moreLink: {
     color: partnerTheme.accentStrong,
