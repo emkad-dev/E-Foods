@@ -19,7 +19,8 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, Vi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
-import { storeSetupGaps } from '../../src/domain/storeSetupForm';
+import { VERIFIED_LINK_MESSAGE } from '../../src/domain/restaurantLinkCopy';
+import { storeSetupGaps, storeTradingState } from '../../src/domain/storeSetupForm';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { setPartnerStorePause } from '../../src/services/partnerRestaurantActions';
 import { partnerTheme } from '../../src/theme/palette';
@@ -139,19 +140,36 @@ export default function PartnerStoreScreen() {
   const paused = isStoreCurrentlyPaused(restaurant?.pausedUntil);
   const pausedUntilLabel = restaurant?.pausedUntil ? formatPausedUntil(restaurant.pausedUntil) : null;
   const visible = restaurant?.isPublished === true;
-  const openNow = restaurant?.isOpen !== false;
+  // `isOpen` is a switch the partner last touched at some unknown point in the
+  // past, so on its own it said "Taking orders" at 3am for a store that closes
+  // at 22:00. The saved trading window is the other half of the answer, and a
+  // store that never saved one has no window to be outside of - 'unknown' is
+  // NOT treated as closed, because the customer app's own gate fails open on
+  // missing hours, so such a store really is orderable.
+  const tradingState = storeTradingState(restaurant);
+  const openNow = restaurant?.isOpen !== false && tradingState !== 'closed';
   const gaps = storeSetupGaps(restaurant);
   const pauseDisabled = pauseActionPending || !restaurant;
 
   // Read straight off the SAVED record. The dump this replaces mirrored saved
   // state next to the live switches that edited it, so it contradicted them for
   // as long as an edit went unsaved; there are no switches on this screen.
+  //
+  // PAUSE OUTRANKS HIDDEN, which is the reverse of what this used to do. The
+  // pill sat directly above a body that renders the pause banner whenever the
+  // store is paused, regardless of visibility - so a hidden, paused store read
+  // "Hidden from customers" in the pill while the line underneath it said new
+  // orders were off until a time. The body is the half that cannot change: it
+  // carries "Resume now", and suppressing that for a hidden store would leave
+  // pausedUntil set and the store silently paused the moment it is published.
+  // So the pill follows the body. Nothing is lost by demoting hidden: it is
+  // stated again below, with the action attached, whenever it applies.
   const status = !restaurant
     ? { label: 'No store yet', pill: styles.statusPillMuted, text: styles.statusTextMuted }
-    : !visible
-      ? { label: 'Hidden from customers', pill: styles.statusPillMuted, text: styles.statusTextMuted }
-      : paused
-        ? { label: 'Paused', pill: styles.statusPillWarning, text: styles.statusTextWarning }
+    : paused
+      ? { label: 'Paused', pill: styles.statusPillWarning, text: styles.statusTextWarning }
+      : !visible
+        ? { label: 'Hidden from customers', pill: styles.statusPillMuted, text: styles.statusTextMuted }
         : !openNow
           ? { label: 'Closed', pill: styles.statusPillWarning, text: styles.statusTextWarning }
           : { label: 'Taking orders', pill: styles.statusPillLive, text: styles.statusTextLive };
@@ -186,6 +204,7 @@ export default function PartnerStoreScreen() {
                   : 'New orders are off. Tap below to start taking them again.'}
               </Text>
               <TouchableOpacity
+                accessibilityRole="button"
                 style={[styles.primaryButton, pauseActionPending ? styles.controlDisabled : null]}
                 onPress={handleResumeStore}
                 disabled={pauseActionPending}
@@ -203,6 +222,11 @@ export default function PartnerStoreScreen() {
                 {PAUSE_DURATION_OPTIONS.map((option) => (
                   <TouchableOpacity
                     key={option.label}
+                    accessibilityRole="button"
+                    // "30 min" alone is not an instruction. The visible label
+                    // only means anything next to the paragraph above it, which
+                    // a screen reader lands on separately (or not at all).
+                    accessibilityLabel={`Pause new orders for ${option.label}`}
                     // Defect: every disabled control on the old screen looked
                     // identical to an enabled one, so a tap that did nothing
                     // read as a broken app. Each one now dims.
@@ -219,6 +243,19 @@ export default function PartnerStoreScreen() {
               ) : null}
             </View>
           )}
+          {/* Says in the body what the pill can no longer always say, so the
+              two never carry different stories about the same store. */}
+          {restaurant && !visible ? (
+            <Text style={styles.helperNote}>
+              Customers cannot see this store at all while it is hidden. Make it visible in store details.
+            </Text>
+          ) : null}
+          {restaurant && visible && !paused && tradingState === 'closed' ? (
+            <Text style={styles.helperNote}>
+              Your saved trading hours ({restaurant.openingTime} - {restaurant.closingTime}) have you closed right now.
+              Customers see you again at {restaurant.openingTime}.
+            </Text>
+          ) : null}
         </View>
 
         {gaps.length > 0 ? (
@@ -229,7 +266,11 @@ export default function PartnerStoreScreen() {
                 {gap}
               </Text>
             ))}
-            <TouchableOpacity style={styles.warningAction} onPress={() => router.push('/store-details' as never)}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.warningAction}
+              onPress={() => router.push('/store-details' as never)}
+            >
               <Text style={styles.warningActionText}>Open store details</Text>
             </TouchableOpacity>
           </View>
@@ -238,32 +279,38 @@ export default function PartnerStoreScreen() {
         {requiresVerifiedLink ? (
           <View style={styles.warningCard}>
             <Text style={styles.warningTitle}>Verified link needed</Text>
-            <Text style={styles.warningCopy}>
-              We found a restaurant owned by this account, but your partner profile is not explicitly linked to it yet. Confirm the link
-              so future access stays pinned to the correct restaurant.
-            </Text>
-            <TouchableOpacity style={styles.warningAction} onPress={() => router.push('/account' as never)}>
+            {/* One sentence, in one place - this screen and the account screen
+                used to carry their own, and both described the opposite of the
+                condition the backend actually raises. */}
+            <Text style={styles.warningCopy}>{VERIFIED_LINK_MESSAGE}</Text>
+            <TouchableOpacity accessibilityRole="button" style={styles.warningAction} onPress={() => router.push('/account' as never)}>
               <Text style={styles.warningActionText}>Open account</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
-        <TouchableOpacity style={styles.navRow} onPress={() => router.push('/store-details' as never)}>
+        <TouchableOpacity accessibilityRole="button" style={styles.navRow} onPress={() => router.push('/store-details' as never)}>
           <View style={styles.navRowText}>
             <Text style={styles.navRowTitle}>Store details</Text>
             <Text style={styles.navRowCopy}>
               Name, photos, address, trading hours, delivery and whether customers can see you.
             </Text>
           </View>
-          <Text style={styles.navRowChevron}>&rsaquo;</Text>
+          {/* Drawn, not typed. As a 24pt `&rsaquo;` it was a glyph in a text
+              node, so it grew with the OS font-size setting while the row's
+              minHeight did not, and at the larger accessibility sizes it pushed
+              out of the row. A bordered box is the same 10pt at every setting,
+              and being textless it is skipped by screen readers rather than
+              announced as punctuation. */}
+          <View style={styles.navRowChevron} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.navRow} onPress={() => router.push('/account' as never)}>
+        <TouchableOpacity accessibilityRole="button" style={styles.navRow} onPress={() => router.push('/account' as never)}>
           <View style={styles.navRowText}>
             <Text style={styles.navRowTitle}>Account</Text>
             <Text style={styles.navRowCopy}>Your sign-in, the restaurant this account is linked to, and sign out.</Text>
           </View>
-          <Text style={styles.navRowChevron}>&rsaquo;</Text>
+          <View style={styles.navRowChevron} />
         </TouchableOpacity>
       </ScrollView>
       {notice}
@@ -476,8 +523,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   navRowChevron: {
-    color: partnerTheme.textMuted,
-    fontSize: 24,
-    fontWeight: '800',
+    borderColor: partnerTheme.textMuted,
+    borderRightWidth: 2,
+    borderTopWidth: 2,
+    height: 10,
+    transform: [{ rotate: '45deg' }],
+    width: 10,
   },
 });

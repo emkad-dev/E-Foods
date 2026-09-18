@@ -25,6 +25,7 @@ import {
 } from '../../../../packages/domain/src/accountDeletion';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { VERIFIED_LINK_MESSAGE } from '../../src/domain/restaurantLinkCopy';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { partnerTheme } from '../../src/theme/palette';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
@@ -49,6 +50,16 @@ export default function PartnerAccountScreen() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [linkPending, setLinkPending] = useState<string | null>(null);
 
+  // Derived here rather than taken from the hook: the server's own
+  // `claimableRestaurants` keeps the restaurant this login already manages in
+  // the list, which would put a "Confirm link" button on the store the partner
+  // already controls. The rule this screen wants is "everything except the one
+  // already linked", so the hook no longer keeps the server's copy at all.
+  //
+  // NOTE the `?? restaurant?.id` fallback. It makes this filter and the
+  // server's `requiresVerifiedLink` read the linked id from two different
+  // places, which is what keeps the empty state below reachable - see the
+  // comment on it.
   const linkedRestaurantId = user?.restaurantId ?? restaurant?.id ?? null;
   const claimableRestaurants = [...restaurants]
     .filter((candidate) => candidate.id !== linkedRestaurantId)
@@ -133,7 +144,9 @@ export default function PartnerAccountScreen() {
   return (
     <View style={styles.screen}>
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
-        <TouchableOpacity style={styles.backLink} onPress={handleBack}>
+        {/* Labelled because the visible text leads with a bare `&lsaquo;`,
+            which a screen reader either reads out as punctuation or drops. */}
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back to Store" style={styles.backLink} onPress={handleBack}>
           <Text style={styles.backLinkText}>&lsaquo; Store</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Account</Text>
@@ -165,7 +178,7 @@ export default function PartnerAccountScreen() {
             <Text style={styles.cardTitle}>Link a restaurant</Text>
             <Text style={styles.helperText}>
               {requiresVerifiedLink
-                ? 'A restaurant owned by this account is not explicitly linked to your partner profile yet. Confirm it so future access stays pinned to the right restaurant.'
+                ? VERIFIED_LINK_MESSAGE
                 : 'These restaurants are owned by this account. Linking one makes it the restaurant this login controls.'}
             </Text>
             {claimableRestaurants.map((candidate) => (
@@ -177,6 +190,10 @@ export default function PartnerAccountScreen() {
                   </Text>
                 </View>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  // "Confirm link" is identical on every row; which restaurant
+                  // it links is only in the text beside it.
+                  accessibilityLabel={`Confirm link to ${candidate.name}`}
                   style={[styles.linkButton, accountBusy ? styles.controlDisabled : null]}
                   onPress={() => handleLinkRestaurant(candidate.id, candidate.name)}
                   disabled={accountBusy}
@@ -187,6 +204,18 @@ export default function PartnerAccountScreen() {
                 </TouchableOpacity>
               </View>
             ))}
+            {/* KEPT, and not because it is hard to reach - it is reachable.
+                The block above renders when `requiresVerifiedLink || length > 0`,
+                so this line needs the flag true AND an empty list. The flag is
+                raised server-side from `UserAccount.restaurantId`; the list is
+                filtered client-side by `user.restaurantId ?? restaurant.id`.
+                Those two agree only while the cached user profile is current.
+                AuthContext hydrates `user` from the stored profile on cold start
+                and again on the offline fallback, so a profile cached before the
+                account was linked has no `restaurantId` - the filter then falls
+                back to the managed restaurant's own id and removes it from the
+                list, leaving nothing, while the server still reports a dangling
+                link. A partner who owns exactly one restaurant lands here. */}
             {claimableRestaurants.length === 0 ? (
               <Text style={styles.metaLine}>
                 No other restaurant is attached to this account. Saving your store details will link the one you own.
@@ -202,6 +231,7 @@ export default function PartnerAccountScreen() {
             backend will block self-removal while admin-controlled business records are still attached.
           </Text>
           <TouchableOpacity
+            accessibilityRole="button"
             style={[styles.secondaryButton, accountBusy ? styles.controlDisabled : null]}
             onPress={handleSignOut}
             disabled={accountBusy}
@@ -209,6 +239,7 @@ export default function PartnerAccountScreen() {
             <Text style={styles.secondaryButtonText}>Sign out</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="button"
             style={[styles.deleteButton, accountBusy ? styles.controlDisabled : null]}
             onPress={handleDeleteAccount}
             disabled={accountBusy}

@@ -208,12 +208,14 @@ export default function StoreDetailsScreen() {
 
     // The publish-only errors stop applying the moment the store is hidden
     // again, so they are cleared rather than left standing over valid fields.
+    // The delivery radius is NOT one of them any more: it is asked for by the
+    // delivery switch now (see isDeliveryRadiusMissing), so clearing it here
+    // would wipe a message that still applies.
     if (!value) {
       setFieldErrors((current) => {
         const next = { ...current };
         delete next.latitude;
         delete next.longitude;
-        delete next.deliveryRadiusKm;
         return next;
       });
     }
@@ -469,6 +471,12 @@ export default function StoreDetailsScreen() {
               value={supportsDelivery}
               onValueChange={(value) => {
                 clearFieldError('fulfilment');
+                // Turning delivery off retires the radius requirement with it,
+                // so a standing "add a delivery distance" must not outlive the
+                // switch that asked for it.
+                if (!value) {
+                  clearFieldError('deliveryRadiusKm');
+                }
                 setSupportsDelivery(value);
               }}
               {...switchColorProps(supportsDelivery, partnerTheme.accentSoft, partnerTheme.accent)}

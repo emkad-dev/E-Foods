@@ -21,7 +21,9 @@ import {
   STORE_SETUP_MESSAGES,
   draftFromStore,
   hasStoreSetupErrors,
+  isDeliveryRadiusMissing,
   storeSetupGaps,
+  storeTradingState,
   toNumberOrNull,
   validateStoreSetup,
   type StoreSetupDraft,
@@ -126,21 +128,117 @@ test('both coordinates blank is fine while the store is hidden', () => {
   assert.equal(errors.longitude, undefined);
 });
 
-test('making the store visible requires coordinates and a delivery distance above zero', () => {
+test('making the store visible requires coordinates', () => {
   const missing = validateStoreSetup(validDraft({ isPublished: true }));
   assert.equal(missing.latitude, STORE_SETUP_MESSAGES.location);
   assert.equal(missing.longitude, STORE_SETUP_MESSAGES.location);
+
+  const complete = validateStoreSetup(validDraft({ isPublished: true, latitude: '6.43', longitude: '3.42' }));
+  assert.equal(hasStoreSetupErrors(complete), false);
+});
+
+test('a store that delivers needs a distance above zero, published or not', () => {
+  const missing = validateStoreSetup(validDraft({ supportsDelivery: true }));
   assert.equal(missing.deliveryRadiusKm, STORE_SETUP_MESSAGES.deliveryRadiusKm);
 
-  const zeroRadius = validateStoreSetup(
-    validDraft({ isPublished: true, latitude: '6.43', longitude: '3.42', deliveryRadiusKm: '0' })
-  );
-  assert.equal(zeroRadius.deliveryRadiusKm, STORE_SETUP_MESSAGES.deliveryRadiusKm);
+  const zero = validateStoreSetup(validDraft({ supportsDelivery: true, deliveryRadiusKm: '0' }));
+  assert.equal(zero.deliveryRadiusKm, STORE_SETUP_MESSAGES.deliveryRadiusKm);
 
-  const complete = validateStoreSetup(
-    validDraft({ isPublished: true, latitude: '6.43', longitude: '3.42', deliveryRadiusKm: '8' })
+  const set = validateStoreSetup(validDraft({ supportsDelivery: true, deliveryRadiusKm: '8' }));
+  assert.equal(set.deliveryRadiusKm, undefined);
+
+  // The radius belongs to delivery, not to visibility: a published pickup-only
+  // store is not asked for a number it has no use for.
+  const publishedPickupOnly = validateStoreSetup(
+    validDraft({ isPublished: true, latitude: '6.43', longitude: '3.42' })
   );
-  assert.equal(hasStoreSetupErrors(complete), false);
+  assert.equal(publishedPickupOnly.deliveryRadiusKm, undefined);
+});
+
+/**
+ * The drift guard. `storeSetupGaps` (the Store tab) and `validateStoreSetup`
+ * (the store-details Save button) used to disagree about the delivery radius,
+ * so a store could be shown as fully set up on one screen and refused on the
+ * other. Every combination is asserted to give the SAME verdict from both.
+ */
+test('the Store tab and the Save button answer the delivery radius identically', () => {
+  const cases = [
+    { supportsDelivery: false, deliveryRadiusKm: '', isPublished: false },
+    { supportsDelivery: false, deliveryRadiusKm: '', isPublished: true },
+    { supportsDelivery: false, deliveryRadiusKm: '0', isPublished: true },
+    { supportsDelivery: true, deliveryRadiusKm: '', isPublished: false },
+    { supportsDelivery: true, deliveryRadiusKm: '0', isPublished: false },
+    { supportsDelivery: true, deliveryRadiusKm: '8', isPublished: false },
+    { supportsDelivery: true, deliveryRadiusKm: '', isPublished: true },
+    { supportsDelivery: true, deliveryRadiusKm: '8', isPublished: true },
+  ];
+
+  for (const testCase of cases) {
+    const saveRefuses = Boolean(
+      validateStoreSetup(validDraft({ ...testCase, latitude: '6.43', longitude: '3.42' })).deliveryRadiusKm
+    );
+    const tabWarns = storeSetupGaps({
+      address: '12 Admiralty Way, Lekki',
+      openingTime: '08:00',
+      closingTime: '22:00',
+      latitude: 6.43,
+      longitude: 3.42,
+      supportsDelivery: testCase.supportsDelivery,
+      deliveryRadiusKm: testCase.deliveryRadiusKm === '' ? null : Number(testCase.deliveryRadiusKm),
+      isPublished: testCase.isPublished,
+    }).some((gap) => /delivery distance/.test(gap));
+
+    assert.equal(tabWarns, saveRefuses, `disagreement on ${JSON.stringify(testCase)}`);
+    assert.equal(
+      saveRefuses,
+      isDeliveryRadiusMissing({
+        deliveryRadiusKm: testCase.deliveryRadiusKm,
+        supportsDelivery: testCase.supportsDelivery,
+      })
+    );
+  }
+});
+
+test('trading state is unknown until both hours are saved in HH:mm', () => {
+  const at = (hours: number, minutes = 0) => new Date(2026, 8, 18, hours, minutes);
+
+  assert.equal(storeTradingState(null, at(12)), 'unknown');
+  assert.equal(storeTradingState({ openingTime: '08:00', closingTime: null }, at(12)), 'unknown');
+  assert.equal(storeTradingState({ openingTime: '8am', closingTime: '10pm' }, at(12)), 'unknown');
+  assert.equal(storeTradingState({ openingTime: '24:00', closingTime: '22:00' }, at(12)), 'unknown');
+});
+
+test('a same-day window is open between the hours and closed outside them', () => {
+  const window = { openingTime: '08:00', closingTime: '22:00' };
+  const at = (hours: number, minutes = 0) => new Date(2026, 8, 18, hours, minutes);
+
+  assert.equal(storeTradingState(window, at(3)), 'closed');
+  assert.equal(storeTradingState(window, at(7, 59)), 'closed');
+  assert.equal(storeTradingState(window, at(8)), 'open');
+  assert.equal(storeTradingState(window, at(21, 59)), 'open');
+  // Closing time is the minute service stops, not a minute of it.
+  assert.equal(storeTradingState(window, at(22)), 'closed');
+  assert.equal(storeTradingState(window, at(23, 30)), 'closed');
+});
+
+test('a window that wraps past midnight stays open through its busiest hours', () => {
+  const window = { openingTime: '18:00', closingTime: '02:00' };
+  const at = (hours: number, minutes = 0) => new Date(2026, 8, 18, hours, minutes);
+
+  assert.equal(storeTradingState(window, at(17, 59)), 'closed');
+  assert.equal(storeTradingState(window, at(18)), 'open');
+  assert.equal(storeTradingState(window, at(23, 59)), 'open');
+  assert.equal(storeTradingState(window, at(0)), 'open');
+  assert.equal(storeTradingState(window, at(1, 59)), 'open');
+  assert.equal(storeTradingState(window, at(2)), 'closed');
+  assert.equal(storeTradingState(window, at(12)), 'closed');
+});
+
+test('equal opening and closing times mean around the clock, not a zero-length window', () => {
+  const window = { openingTime: '00:00', closingTime: '00:00' };
+
+  assert.equal(storeTradingState(window, new Date(2026, 8, 18, 3)), 'open');
+  assert.equal(storeTradingState(window, new Date(2026, 8, 18, 15)), 'open');
 });
 
 test('amounts must be numbers, and negative ones are refused', () => {

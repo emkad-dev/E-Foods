@@ -18,7 +18,6 @@ const FALLBACK_MS = 120000;
 export const usePartnerRestaurant = () => {
   const { user } = useAuth();
   const [restaurants, setRestaurants] = useState<RestaurantProfile[]>([]);
-  const [claimableRestaurants, setClaimableRestaurants] = useState<RestaurantProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requiresVerifiedLink, setRequiresVerifiedLink] = useState(false);
@@ -41,8 +40,16 @@ export const usePartnerRestaurant = () => {
         return;
       }
 
+      // `nextContext.claimableRestaurants` is deliberately dropped rather than
+      // stored. The backend builds that list with a different rule - it keeps
+      // the restaurant the account already manages in it - so rendering it
+      // would offer a "Confirm link" button for the store this login already
+      // controls. The account screen derives its own list by excluding the
+      // linked restaurant, and that is the rule the UI wants. Holding the
+      // server list in state as well meant a set of rows nothing read, redrawing
+      // the hook's consumers on every realtime refresh. The response shape is
+      // untouched; only this client stops keeping a copy.
       setRestaurants(nextContext.restaurants);
-      setClaimableRestaurants(nextContext.claimableRestaurants);
       setRestaurant(nextContext.restaurant);
       setRequiresVerifiedLink(nextContext.requiresVerifiedLink);
       setError(null);
@@ -53,7 +60,6 @@ export const usePartnerRestaurant = () => {
 
       console.error('Error loading partner restaurant:', nextError);
       setRestaurants([]);
-      setClaimableRestaurants([]);
       setRestaurant(null);
       setRequiresVerifiedLink(false);
       setError(nextError.message ?? 'Unable to load restaurant context right now.');
@@ -67,7 +73,6 @@ export const usePartnerRestaurant = () => {
   useEffect(() => {
     if (!user) {
       setRestaurants([]);
-      setClaimableRestaurants([]);
       setRestaurant(null);
       setLoading(false);
       return;
@@ -97,7 +102,6 @@ export const usePartnerRestaurant = () => {
   });
 
   return {
-    claimableRestaurants,
     error,
     loading,
     restaurants,

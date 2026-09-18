@@ -90,7 +90,7 @@ export const STORE_SETUP_MESSAGES = {
   negative: 'Use zero or more.',
   coordinatePair: 'Latitude and longitude go together - add both, or clear both.',
   location: 'Add both latitude and longitude before making this store visible.',
-  deliveryRadiusKm: 'Add a delivery distance above zero before making this store visible.',
+  deliveryRadiusKm: 'Add a delivery distance above zero, or turn delivery off.',
 } as const;
 
 /** `''` for anything the record does not hold. Never a stand-in value. */
@@ -181,6 +181,94 @@ const numberProblem = (value: string, options: { allowNegative: boolean }) => {
   return !options.allowNegative && parsedValue < 0 ? STORE_SETUP_MESSAGES.negative : null;
 };
 
+/**
+ * THE one rule behind "does this store still owe us a delivery distance?".
+ *
+ * It existed twice, with two different thresholds: `validateStoreSetup` asked
+ * for a radius above zero whenever the store was PUBLISHED (so a published
+ * pickup-only store was blocked on a number it has no use for), while
+ * `storeSetupGaps` asked for one only when DELIVERY was on, and accepted a
+ * saved zero. The two are surfaced on two screens, so the Store tab could list
+ * no outstanding gaps for a store whose Save the very next screen refused.
+ *
+ * Reconciled on the delivery reading, because the radius is a delivery
+ * property: a store that delivers needs to say how far, published or not, and
+ * a store that does not deliver never needs one. Both callers below ask this
+ * function and nothing else, so they cannot drift apart again.
+ */
+export const isDeliveryRadiusMissing = (input: {
+  deliveryRadiusKm: string;
+  supportsDelivery: boolean;
+}): boolean => {
+  if (!input.supportsDelivery) {
+    return false;
+  }
+
+  const radius = toNumberOrNull(input.deliveryRadiusKm);
+  return radius === null || radius <= 0;
+};
+
+export type StoreTradingState = 'open' | 'closed' | 'unknown';
+
+/** `null` for anything that is not the `HH:mm` shape the record is validated to. */
+const operatingMinutes = (value: string | null | undefined): number | null => {
+  const trimmed = textOf(value).trim();
+
+  if (!OPERATING_TIME_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  const [hours, minutes] = trimmed.split(':');
+  return Number.parseInt(hours, 10) * 60 + Number.parseInt(minutes, 10);
+};
+
+/**
+ * Is the store inside its saved trading window right now?
+ *
+ * WHY THE THIRD STATE: the Store tab used to answer openness from `isOpen`
+ * alone, which is a switch the partner last touched at some point in the past -
+ * so a store that closes at 22:00 still read "Taking orders" at 3am. Hours are
+ * the other half of that answer, and a store that never saved any has no window
+ * to be inside or outside of. Returning 'unknown' as itself lets the caller
+ * decline to make a claim rather than guess; collapsing it into 'closed' would
+ * tell every partner who has not filled in their hours yet that they are shut.
+ *
+ * TIMEZONE: `openingTime`/`closingTime` are bare wall-clock strings with no
+ * offset, meant as local time at the restaurant, and they are compared against
+ * the local clock of the device standing in that restaurant. This is the same
+ * reading apps/customer's isInsideOperatingWindow takes, deliberately: partner
+ * and customer must not disagree about whether the kitchen is open.
+ *
+ * THE WRAP CASE IS THE POINT: a closing time at or before the opening time is a
+ * window that crosses midnight (18:00-02:00), and reading it as a plain
+ * `current >= opening && current < closing` returns false for every minute of
+ * it - telling a late-night kitchen it is closed throughout its busiest hours.
+ * Equal times are read as trading around the clock, not as a zero-length window.
+ */
+export const storeTradingState = (
+  store: StoreRecordLike | null | undefined,
+  now: Date = new Date()
+): StoreTradingState => {
+  const opening = operatingMinutes(store?.openingTime);
+  const closing = operatingMinutes(store?.closingTime);
+
+  if (opening === null || closing === null) {
+    return 'unknown';
+  }
+
+  if (opening === closing) {
+    return 'open';
+  }
+
+  const current = now.getHours() * 60 + now.getMinutes();
+
+  if (closing > opening) {
+    return current >= opening && current < closing ? 'open' : 'closed';
+  }
+
+  return current >= opening || current < closing ? 'open' : 'closed';
+};
+
 export type StoreSetupErrors = Partial<Record<StoreSetupFieldKey, string>>;
 
 export const validateStoreSetup = (draft: StoreSetupDraft): StoreSetupErrors => {
@@ -247,6 +335,16 @@ export const validateStoreSetup = (draft: StoreSetupDraft): StoreSetupErrors => 
     }
   }
 
+  // The radius is asked for by the delivery switch, not by the publish switch -
+  // see isDeliveryRadiusMissing. It is checked outside the publish gate because
+  // that is the reading storeSetupGaps also uses.
+  if (
+    !errors.deliveryRadiusKm &&
+    isDeliveryRadiusMissing({ deliveryRadiusKm: draft.deliveryRadiusKm, supportsDelivery: draft.supportsDelivery })
+  ) {
+    errors.deliveryRadiusKm = STORE_SETUP_MESSAGES.deliveryRadiusKm;
+  }
+
   if (draft.isPublished) {
     if (!hasLatitude && !errors.latitude) {
       errors.latitude = STORE_SETUP_MESSAGES.location;
@@ -254,11 +352,6 @@ export const validateStoreSetup = (draft: StoreSetupDraft): StoreSetupErrors => 
 
     if (!hasLongitude && !errors.longitude) {
       errors.longitude = STORE_SETUP_MESSAGES.location;
-    }
-
-    const radius = toNumberOrNull(draft.deliveryRadiusKm);
-    if (!errors.deliveryRadiusKm && (radius === null || radius <= 0)) {
-      errors.deliveryRadiusKm = STORE_SETUP_MESSAGES.deliveryRadiusKm;
     }
   }
 
@@ -292,8 +385,14 @@ export const storeSetupGaps = (store: StoreRecordLike | null | undefined): strin
     gaps.push('No map location saved, which your store needs before it can be visible.');
   }
 
-  if (store.supportsDelivery === true && toNumberOrNull(textOf(store.deliveryRadiusKm)) === null) {
-    gaps.push('Delivery is on but no delivery distance is saved.');
+  // Same question, same answer as the Save button on store-details.
+  if (
+    isDeliveryRadiusMissing({
+      deliveryRadiusKm: textOf(store.deliveryRadiusKm),
+      supportsDelivery: store.supportsDelivery === true,
+    })
+  ) {
+    gaps.push('Delivery is on but no delivery distance above zero is saved.');
   }
 
   return gaps;
