@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import PartnerOnboardingReview from '../components/PartnerOnboardingReview';
+import RestaurantRating from '../components/RestaurantRating';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { formatDateTime } from '../lib/format';
@@ -384,6 +385,15 @@ export default function ApprovalsPage() {
                   <div>
                     <div className="list-row-title">{restaurant.name}</div>
                     <div className="list-row-sub">{restaurant.address ?? 'Address pending'}</div>
+                    {/* Publish and Unpublish are judgements about whether this
+                        restaurant should be in front of customers, and the
+                        customers who have already eaten there have been
+                        answering that question into a void -- the aggregate
+                        moved on every order rated and no operator surface read
+                        it. It belongs next to the button, not a query away. */}
+                    <div className="restaurant-rating-line">
+                      <RestaurantRating restaurant={restaurant} />
+                    </div>
                   </div>
                   <div className="row-actions">
                     <StatusBadge

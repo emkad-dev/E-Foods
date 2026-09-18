@@ -6,6 +6,7 @@ import type {
   RestaurantDocument,
   UserDocument,
 } from '../../../../packages/domain/src';
+import type { AuditLogEntry } from '../lib/auditLog';
 import { callAdminRpc } from '../lib/rpc';
 
 export type AdminDashboardSnapshot = {
@@ -99,3 +100,36 @@ export const upsertAdminFeatureFlag = (input: {
   enabled: boolean;
   key: string;
 }) => callAdminRpc<AdminUpsertFeatureFlagResponse>('adminUpsertFeatureFlag', input);
+
+/* ---------------------------------------------------------------- audit log */
+
+export type AdminAuditLogRequest = {
+  action?: string;
+  actorUid?: string;
+  /** Server clamps to 1..100; anything larger comes back as 100. */
+  limit?: number;
+  offset?: number;
+  targetId?: string;
+  targetType?: string;
+};
+
+export type AdminAuditLogResponse = {
+  entries: AuditLogEntry[];
+  /**
+   * The server sets this when the page came back FULL, i.e. `entries.length
+   * === limit`. It is a hint, not a count -- counting an append-only table on
+   * every read costs more than the read -- so it can be true with nothing on
+   * the next page. The pager treats it as "offer Older", never as a total.
+   */
+  hasMore: boolean;
+  limit: number;
+  offset: number;
+};
+
+/**
+ * Read-only by construction: `adminGetAuditLog` has no update or delete
+ * counterpart and AdminAuditLog is service-role-only, so there is deliberately
+ * no mutating export beside this one.
+ */
+export const getAdminAuditLog = (input?: AdminAuditLogRequest) =>
+  callAdminRpc<AdminAuditLogResponse>('adminGetAuditLog', input as Record<string, unknown> | undefined);

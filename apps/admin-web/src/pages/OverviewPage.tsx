@@ -6,6 +6,7 @@ import ErrorBanner from '../components/ErrorBanner';
 import KpiCard from '../components/KpiCard';
 import { SkeletonRows } from '../components/Skeleton';
 import RangePicker from '../components/RangePicker';
+import RestaurantRating from '../components/RestaurantRating';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import {
@@ -160,6 +161,15 @@ export default function OverviewPage() {
                       <div>
                         <div className="list-row-title">{restaurant.name}</div>
                         <div className="list-row-sub">{restaurant.address ?? 'Address pending'}</div>
+                        {/* This queue is restaurants awaiting review, so most
+                            rows will honestly read "No ratings yet" -- a new
+                            partner has not served anyone. The ones that do
+                            carry a score are the interesting case: a
+                            previously-published restaurant back in the queue,
+                            where the rating is the fastest signal available. */}
+                        <div className="restaurant-rating-line">
+                          <RestaurantRating restaurant={restaurant} />
+                        </div>
                       </div>
                       <StatusBadge
                         label={restaurant.approvalStatus ?? (restaurant.isPublished === true ? 'approved' : 'pending')}

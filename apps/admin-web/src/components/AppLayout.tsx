@@ -8,6 +8,7 @@ const ADMIN_NAV = [
   { to: '/orders', label: 'Orders' },
   { to: '/approvals', label: 'Approvals' },
   { to: '/observability', label: 'Observability' },
+  { to: '/audit', label: 'Audit log' },
   { to: '/access', label: 'Access' },
   { to: '/dispatch', label: 'Dispatch' },
   { to: '/statistics', label: 'Statistics' },

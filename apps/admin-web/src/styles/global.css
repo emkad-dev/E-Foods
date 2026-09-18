@@ -1459,3 +1459,283 @@ button {
   border-color: var(--danger);
 }
 
+
+/* ---------- Audit log ---------- */
+
+/*
+ * Colour note for this whole block: every declaration below that draws TEXT
+ * uses --text, --text-muted or --accent-strong. --accent-soft and
+ * --brand-orange are fills on this palette and fail contrast as a line (see
+ * the :root comment and styles/fillOnlyColors.test.ts), so they appear here
+ * only as `background`.
+ *
+ * Target-size note: this console's floor is 24px (WCAG 2.5.8,
+ * styles/targetSize.test.ts). The controls added here are three selects, a
+ * text input, the pager buttons, the per-entry target-id filter and the raw
+ * JSON disclosure -- every one of them is given an explicit min-height below
+ * rather than being left to whatever a 12-13px line box happens to measure,
+ * which is how the two defects that test was written for got in.
+ */
+
+.audit-note {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 14px;
+}
+
+.audit-filters {
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.audit-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.audit-filter-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-select,
+.audit-input {
+  min-height: 32px;
+}
+
+.audit-input {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 10px;
+  min-width: 190px;
+}
+
+.audit-control {
+  min-height: 32px;
+}
+
+.audit-filter-note {
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+
+.audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.audit-entry {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+}
+
+.audit-entry:first-child {
+  padding-top: 0;
+}
+
+.audit-entry:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.audit-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.audit-entry-identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-entry-target {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/*
+ * The id is a control, not a label: clicking it filters the log to that
+ * target, which is the question this page was built to answer. It therefore
+ * has to clear the 24px floor, and a bare 12px monospace id measures about
+ * 14px tall -- the exact shape of defect targetSize.test.ts exists for. The
+ * negative margin cancels the padding so the row keeps its height.
+ */
+.audit-target-id {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  margin: -3px 0;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.audit-target-id:hover {
+  border-color: var(--border-strong);
+}
+
+.audit-entry-no-target {
+  font-style: italic;
+}
+
+.audit-entry-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.audit-entry-actor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.audit-actor-name {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.audit-actor-meta {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.audit-detail-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/*
+ * `details` is free-form jsonb with a different shape per action, so it is
+ * rendered as every leaf it contains, addressed by path, rather than as a set
+ * of known keys. auto-fit keeps one field per row on a narrow window and two
+ * on a wide one without the page needing to know how many fields there are.
+ */
+.audit-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 6px 18px;
+  margin: 0;
+}
+
+.audit-detail-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 34%) 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-detail-path {
+  color: var(--text-muted);
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.audit-detail-value {
+  color: var(--text);
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-raw {
+  margin-top: 4px;
+}
+
+.audit-raw-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.audit-raw .risk-signals-json {
+  margin-top: 8px;
+}
+
+.audit-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .audit-entry-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .audit-detail-field {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+/* ---------- Restaurant rating ---------- */
+
+.restaurant-rating-line {
+  margin-top: 6px;
+}
+
+/*
+ * The two non-figure states. Muted and italic so they read as an absence
+ * rather than as a score -- see components/RestaurantRating.tsx for why only
+ * a real rating is allowed to look like a badge.
+ *
+ * --text-muted is a WRITING token (5.80:1 on --background, 6.26:1 on white).
+ * The rated case's star inherits .badge-neutral's --text-soft. Neither uses a
+ * fill token, which is what styles/fillOnlyColors.test.ts checks.
+ */
+.restaurant-rating-absent {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}

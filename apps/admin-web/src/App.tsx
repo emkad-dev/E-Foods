@@ -14,6 +14,7 @@ const OverviewPage = lazy(() => import('./pages/OverviewPage'));
 const OrdersPage = lazy(() => import('./pages/OrdersPage'));
 const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
 const ObservabilityPage = lazy(() => import('./pages/ObservabilityPage'));
+const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
 const AccessPage = lazy(() => import('./pages/AccessPage'));
 const DispatchPage = lazy(() => import('./pages/DispatchPage'));
 const StatisticsPage = lazy(() => import('./pages/StatisticsPage'));
@@ -91,6 +92,18 @@ export default function App() {
               The .risk-signals-* CSS is NOT dead -- ObservabilityPage styles
               its alert list with it. */}
           <Route path="/risk-signals" element={<Navigate to="/observability" replace />} />
+          {/* Its own route rather than a panel on /observability: that page
+              answers "is something wrong now" and owns a WRITE (the feature
+              flag toggles). This one answers "what did we do, and who did it"
+              and must be unambiguously read-only. See AuditLogPage.tsx. */}
+          <Route
+            path="/audit"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
+                <AuditLogPage />
+              </Suspense>
+            }
+          />
           <Route
             path="/access"
             element={
