@@ -313,18 +313,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     width: '100%',
   },
-  loadingState: {
-    alignItems: 'center',
-    backgroundColor: partnerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  loadingCopy: {
-    color: partnerTheme.textMuted,
-    fontSize: 15,
-    marginTop: 12,
-  },
   headerRow: {
     alignItems: 'center',
     flexDirection: 'row',

@@ -316,19 +316,6 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingBottom: 30,
   },
-  loadingState: {
-    alignItems: 'center',
-    backgroundColor: dispatchTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  loadingCopy: {
-    color: dispatchTheme.textMuted,
-    fontSize: 15,
-    marginTop: 12,
-    textAlign: 'center',
-  },
   title: {
     color: dispatchTheme.text,
     fontSize: SCREEN_TITLE_SIZE,

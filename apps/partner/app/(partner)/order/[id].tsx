@@ -334,11 +334,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  loadingCopy: {
-    color: partnerTheme.textMuted,
-    fontSize: 15,
-    marginTop: 12,
-  },
   errorTitle: {
     color: partnerTheme.text,
     fontSize: 24,

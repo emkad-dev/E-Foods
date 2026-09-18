@@ -536,18 +536,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: 6,
   },
-  availabilityBadge: {
-    backgroundColor: customerTheme.accentTint,
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  availabilityBadgeText: {
-    color: customerTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
   closedBadge: {
     backgroundColor: customerTheme.warningSoft,
     borderRadius: radius.pill,

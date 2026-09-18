@@ -296,12 +296,6 @@ export default function OrdersList() {
 }
 
 const styles = StyleSheet.create({
-  centered: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-  },
   emptyStateCard: {
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,

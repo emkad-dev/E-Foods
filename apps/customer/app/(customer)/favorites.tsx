@@ -267,12 +267,6 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 96,
   },
-  centered: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-  },
   promptContainer: {
     backgroundColor: customerTheme.background,
     flex: 1,

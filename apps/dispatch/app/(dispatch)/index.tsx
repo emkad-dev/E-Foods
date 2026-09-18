@@ -192,19 +192,6 @@ const styles = StyleSheet.create({
     backgroundColor: dispatchTheme.background,
     flex: 1,
   },
-  loadingState: {
-    alignItems: 'center',
-    backgroundColor: dispatchTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  loadingCopy: {
-    color: dispatchTheme.textMuted,
-    fontSize: 15,
-    marginTop: 12,
-    textAlign: 'center',
-  },
   content: {
     padding: 18,
     paddingBottom: 30,
@@ -287,11 +274,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     maxWidth: 220,
   },
-  statusBadge: {
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
   liveStatusBadge: {
     borderRadius: radius.pill,
     paddingHorizontal: 10,
@@ -314,18 +296,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginRight: 14,
     marginTop: 4,
-  },
-  progressTrack: {
-    backgroundColor: '#dbeafe',
-    borderRadius: radius.pill,
-    height: 10,
-    marginTop: 14,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    backgroundColor: '#0ea5e9',
-    borderRadius: radius.pill,
-    height: '100%',
   },
   deliveryNote: {
     color: dispatchTheme.textMuted,

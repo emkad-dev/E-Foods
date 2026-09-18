@@ -317,18 +317,6 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
     width: '100%',
   },
-  loadingState: {
-    alignItems: 'center',
-    backgroundColor: partnerTheme.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  loadingCopy: {
-    color: partnerTheme.textMuted,
-    fontSize: 15,
-    marginTop: 12,
-  },
   title: {
     color: partnerTheme.text,
     fontSize: SCREEN_TITLE_SIZE,

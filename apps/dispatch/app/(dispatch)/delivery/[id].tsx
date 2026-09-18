@@ -520,11 +520,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  loadingText: {
-    color: dispatchTheme.textMuted,
-    fontSize: 15,
-    marginTop: 12,
-  },
   errorTitle: {
     color: dispatchTheme.text,
     fontSize: 22,

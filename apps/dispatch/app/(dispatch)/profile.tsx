@@ -946,10 +946,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     overflow: 'hidden',
   },
-  map: {
-    height: 220,
-    width: '100%',
-  },
   emptyText: {
     color: dispatchTheme.textMuted,
     fontSize: 14,

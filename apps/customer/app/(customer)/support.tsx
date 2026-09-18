@@ -147,11 +147,6 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.background,
     flex: 1,
   },
-  centered: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
   promptWrap: {
     backgroundColor: customerTheme.background,
     flex: 1,
