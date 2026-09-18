@@ -45,6 +45,7 @@ import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaura
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
+import { switchControlStyle } from '../../src/theme/switchControl';
 
 /**
  * Was the literal `#6a7d76`, which `src/theme/palette.ts` documents in its own
@@ -464,6 +465,7 @@ export default function StoreDetailsScreen() {
               </Text>
             </View>
             <Switch
+              style={switchControlStyle}
               value={supportsDelivery}
               onValueChange={(value) => {
                 clearFieldError('fulfilment');
@@ -479,6 +481,7 @@ export default function StoreDetailsScreen() {
               <Text style={styles.toggleCaption}>Pickup orders, collected from your address.</Text>
             </View>
             <Switch
+              style={switchControlStyle}
               value={supportsPickup}
               onValueChange={(value) => {
                 clearFieldError('fulfilment');
@@ -542,6 +545,7 @@ export default function StoreDetailsScreen() {
               <Text style={styles.toggleCaption}>Takes effect as soon as you save. Nobody has to approve it.</Text>
             </View>
             <Switch
+              style={switchControlStyle}
               value={isPublished}
               onValueChange={handlePublishToggle}
               trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
@@ -557,6 +561,7 @@ export default function StoreDetailsScreen() {
               </Text>
             </View>
             <Switch
+              style={switchControlStyle}
               value={isOpen}
               onValueChange={setIsOpen}
               trackColor={{ false: '#d1d5db', true: partnerTheme.accentSoft }}
