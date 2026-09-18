@@ -1,8 +1,8 @@
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
 import { useOtpCooldown } from '../../src/services/supabase/auth';
@@ -116,11 +116,18 @@ export default function PartnerForgotPasswordScreen() {
         </Text>
       </TouchableOpacity>
 
+      {/* `asChild` so this is a real box rather than a run of inline text. A
+          bare <Link> renders as Text, which react-native-web gives
+          `display: inline`, and CSS ignores min-height on an inline box -- so
+          the obvious fix does nothing. This was the 14pt default line box:
+          20pt, the only way back off this screen. */}
       <Link
         href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
-        style={styles.link}
+        asChild
       >
-        Back to sign in
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Back to sign in</Text>
+        </Pressable>
       </Link>
     </ScrollView>
   );
@@ -178,9 +185,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The spacing moved off the label and onto the box that now holds it, and
+  // shrank from 16 to 4: a 44pt box that centres its label already contributes
+  // about 12pt of air above it, so the old margin on top would have pushed the
+  // link most of a thumb's width down the screen.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: partnerTheme.accentStrong,
-    marginTop: 16,
     textAlign: 'center',
   },
 });

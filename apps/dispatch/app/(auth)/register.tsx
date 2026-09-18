@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { Link, useRouter } from 'expo-router';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
@@ -134,16 +134,25 @@ export default function DispatchRegisterScreen() {
                 // was confirmed, enter the code if the resent confirmation just landed.
                 // The address rides along so the code screen — which runs signed out —
                 // does not make the rider retype it.
+                //
+                // These two are a row of siblings, not words inside the
+                // message above, so each can become a box without touching a
+                // sentence. Both were the 14pt line box: 20pt, on the only
+                // route out of an account that already exists.
                 <View style={styles.errorActions}>
-                  <Link href="/(auth)/login" style={styles.errorActionLink}>
-                    Sign in
+                  <Link href="/(auth)/login" asChild>
+                    <Pressable style={styles.errorActionPressable}>
+                      <Text style={styles.errorActionLink}>Sign in</Text>
+                    </Pressable>
                   </Link>
                   <Text style={styles.errorActionSeparator}>·</Text>
                   <Link
                     href={{ pathname: '/(auth)/verify-email', params: { email: email.trim() } }}
-                    style={styles.errorActionLink}
+                    asChild
                   >
-                    Enter your code
+                    <Pressable style={styles.errorActionPressable}>
+                      <Text style={styles.errorActionLink}>Enter your code</Text>
+                    </Pressable>
                   </Link>
                 </View>
               ) : null}
@@ -219,8 +228,14 @@ export default function DispatchRegisterScreen() {
             <Text style={styles.buttonText}>{loading ? 'Creating login...' : 'Create login'}</Text>
           </TouchableOpacity>
 
-          <Link href="/(auth)/login" style={styles.link}>
-            Already have a login? Sign in
+          {/* `asChild` so the link is a real box rather than a run of inline
+              text: a bare <Link> renders as Text, which react-native-web gives
+              `display: inline`, and CSS ignores min-height on an inline box.
+              This was the 14pt default line box: 20pt. */}
+          <Link href="/(auth)/login" asChild>
+            <Pressable style={styles.linkPressable}>
+              <Text style={styles.link}>Already have a login? Sign in</Text>
+            </Pressable>
           </Link>
         </View>
       </ScrollView>
@@ -280,11 +295,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  // The 8pt gap under the message moved into the boxes: each one now holds
+  // 12pt of air above its label, so keeping the margin as well would have
+  // pushed the two routes further from the error that offers them.
   errorActions: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
+  },
+  // `minWidth` as well as `minHeight`, unlike the full-width links elsewhere
+  // on these screens: these two sit side by side and size to their labels, and
+  // "Sign in" is about 45pt of text -- a target that is only accidentally wide
+  // enough, and would stop being so the moment the wording got shorter.
+  errorActionPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
+    minWidth: MIN_TAP_TARGET,
   },
   errorActionLink: {
     color: dispatchTheme.accentStrong,
@@ -370,9 +397,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The 16pt margin moved off the label and onto the box, and shrank: a 44pt
+  // box already carries 12pt of air above a 20pt label, so keeping 16 on top
+  // would have pushed the only route back to sign-in down the screen.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: dispatchTheme.accentStrong,
-    marginTop: 16,
     textAlign: 'center',
   },
 });

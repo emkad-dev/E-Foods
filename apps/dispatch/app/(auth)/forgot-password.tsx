@@ -1,13 +1,14 @@
 import { Link, useRouter } from 'expo-router';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateForgotPasswordForm } from '../../src/domain/authFormValidation';
 import { useOtpCooldown } from '../../src/services/supabase/auth';
 import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function DispatchForgotPasswordScreen() {
@@ -114,8 +115,15 @@ export default function DispatchForgotPasswordScreen() {
           </Text>
         </TouchableOpacity>
 
-        <Link href="/(auth)/login" style={styles.link}>
-          Back to sign in
+        {/* `asChild` so this is a real box rather than a run of inline text.
+            A bare <Link> renders as Text, which react-native-web gives
+            `display: inline`, and CSS ignores min-height on an inline box --
+            so the obvious fix would have read as done and changed nothing.
+            This was the 14pt default line box: 20pt. */}
+        <Link href="/(auth)/login" asChild>
+          <Pressable style={styles.linkPressable}>
+            <Text style={styles.link}>Back to sign in</Text>
+          </Pressable>
         </Link>
       </View>
     </ScrollView>
@@ -198,9 +206,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The 16pt margin moved off the label and onto the box, and shrank: the
+  // 44pt box already holds 12pt of air above a 20pt label, so keeping 16 as
+  // well would have pushed the only way back out of this screen downward.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: dispatchTheme.accentStrong,
-    marginTop: 16,
     textAlign: 'center',
   },
 });

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
 import {
   formatAuthError,
@@ -141,18 +141,21 @@ export default function PartnerVerifyEmailScreen() {
       </Text>
 
       {notice && !error && !info ? (
-        <Text
-          accessibilityLiveRegion="polite"
-          role="alert"
-          style={styles.noticeText}
-          onPress={() => setDismissedNotice(true)}
-        >
-          {notice}
-        </Text>
+        // The dismiss used to hang off the <Text> itself, and Text is inline on
+        // react-native-web: on the desktop build, where this message fits on
+        // one line, the whole affordance was a 20pt strip. The Pressable
+        // carries the target; the Text keeps the live region.
+        <Pressable style={styles.noticePressable} onPress={() => setDismissedNotice(true)}>
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+            {notice}
+          </Text>
+        </Pressable>
       ) : null}
 
+      {/* Not pressable -- nothing dismisses it -- so it keeps its own bottom
+          spacing instead of borrowing the box above's. */}
       {info && !error ? (
-        <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+        <Text accessibilityLiveRegion="polite" role="alert" style={[styles.noticeText, styles.noticeStandalone]}>
           {info}
         </Text>
       ) : null}
@@ -215,11 +218,18 @@ export default function PartnerVerifyEmailScreen() {
         </Text>
       </TouchableOpacity>
 
+      {/* `asChild` so this is a real box rather than a run of inline text. A
+          bare <Link> renders as Text, which react-native-web gives
+          `display: inline`, and CSS ignores min-height on an inline box -- so
+          the obvious fix does nothing. This was the 14pt default line box:
+          20pt, directly under a 54pt button. */}
       <Link
         href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
-        style={styles.link}
+        asChild
       >
-        Back to sign in
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Back to sign in</Text>
+        </Pressable>
       </Link>
     </ScrollView>
   );
@@ -247,10 +257,22 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 24,
   },
+  // Bottom spacing moved onto whichever box wraps the message, because the
+  // dismissible one now sits in a Pressable and the resend confirmation does
+  // not. On the Pressable it halved to 8: centring a 20pt line in 44pt already
+  // leaves about 12pt below it. Only `justifyContent` there -- `alignItems:
+  // 'center'` would shrink-wrap and centre what is a left-aligned paragraph.
+  noticePressable: {
+    justifyContent: 'center',
+    marginBottom: 8,
+    minHeight: MIN_TAP_TARGET,
+  },
   noticeText: {
     color: partnerTheme.accentStrong,
     fontSize: 14,
     lineHeight: 20,
+  },
+  noticeStandalone: {
     marginBottom: 16,
   },
   errorText: {
@@ -310,9 +332,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  // The spacing moved off the label and onto the box, and shrank from 24 to 8
+  // rather than to 4: the 44pt box contributes about 12pt of air above the
+  // label, so 8 holds roughly the deliberate gap this screen had after its two
+  // stacked buttons, where the other screens only had one.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: partnerTheme.accentStrong,
-    marginTop: 24,
     textAlign: 'center',
   },
 });

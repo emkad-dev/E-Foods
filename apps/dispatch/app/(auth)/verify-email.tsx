@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
 import {
@@ -13,6 +13,7 @@ import { supabase } from '../../src/services/supabase/config';
 import { updateUserDocument } from '../../src/services/supabase/profile';
 import { resolveDispatchSuccessNotice, type DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
@@ -136,14 +137,18 @@ export default function DispatchVerifyEmailScreen() {
       </Text>
 
       {notice && !error && !info ? (
-        <Text
-          accessibilityLiveRegion="polite"
-          role="alert"
-          style={styles.noticeText}
-          onPress={() => setDismissedNotice(true)}
-        >
-          {notice}
-        </Text>
+        // Dismissing used to be an `onPress` hung on the paragraph itself: a
+        // 14pt/20pt line box, so a 20pt target when the notice fits one line
+        // and 40pt when it wraps -- under the floor either way. The press and
+        // the geometry moved to a box around it; the wording is untouched,
+        // and so is the live-region announcement, which stays on the Text.
+        // (The `info` message below reuses `noticeText` and takes no press,
+        // so it stays a plain Text.)
+        <Pressable style={styles.noticePressable} onPress={() => setDismissedNotice(true)}>
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+            {notice}
+          </Text>
+        </Pressable>
       ) : null}
 
       {info && !error ? (
@@ -210,8 +215,16 @@ export default function DispatchVerifyEmailScreen() {
         </Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/login" style={styles.link}>
-        Back to sign in
+      {/* `asChild` so this is a real box rather than a run of inline text.
+          A bare <Link> renders as Text, which react-native-web gives
+          `display: inline`, and CSS ignores min-height on an inline box --
+          the obvious fix would have looked like one and done nothing. This
+          was the 14pt default line box: 20pt, sitting directly under two
+          44pt+ buttons it was indistinguishable from in intent. */}
+      <Link href="/(auth)/login" asChild>
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Back to sign in</Text>
+        </Pressable>
       </Link>
     </ScrollView>
   );
@@ -238,6 +251,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     marginBottom: 24,
+  },
+  // Geometry only -- the notice's own colour and 16pt gap stay on the Text,
+  // which the undismissable `info` message shares, so both paragraphs read
+  // exactly as they did and only the press area grew.
+  noticePressable: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
   },
   noticeText: {
     color: dispatchTheme.accentStrong,
@@ -302,9 +322,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  // The 24pt margin moved off the label and onto the box, and shrank to 12:
+  // the box contributes 12pt of its own above the label, so 12 + 12 keeps the
+  // deliberate break between the button pair and this link exactly where it
+  // was instead of adding half a thumb's width to it.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: dispatchTheme.accentStrong,
-    marginTop: 24,
     textAlign: 'center',
   },
 });

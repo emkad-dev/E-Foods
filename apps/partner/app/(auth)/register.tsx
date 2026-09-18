@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
@@ -125,12 +125,19 @@ export default function PartnerRegisterScreen() {
                 // was confirmed, enter the code if the resent confirmation just landed.
                 // The address rides along so the code screen — which runs signed out —
                 // does not make the partner retype it.
+                // These two sit in their own row rather than inside the
+                // sentence above, so each can be a real box. As bare <Link>s
+                // they were Text, which react-native-web lays out inline --
+                // and CSS ignores min-height on an inline box. 14pt text with
+                // no lineHeight is RN's default line box: 20pt each.
                 <View style={styles.errorActions}>
                   <Link
                     href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'}
-                    style={styles.errorActionLink}
+                    asChild
                   >
-                    Sign in
+                    <Pressable style={styles.errorActionPressable}>
+                      <Text style={styles.errorActionLink}>Sign in</Text>
+                    </Pressable>
                   </Link>
                   <Text style={styles.errorActionSeparator}>·</Text>
                   <Link
@@ -138,9 +145,11 @@ export default function PartnerRegisterScreen() {
                       pathname: '/(auth)/verify-email',
                       params: { email: email.trim(), ...(redirectTo ? { redirectTo } : null) },
                     }}
-                    style={styles.errorActionLink}
+                    asChild
                   >
-                    Enter your code
+                    <Pressable style={styles.errorActionPressable}>
+                      <Text style={styles.errorActionLink}>Enter your code</Text>
+                    </Pressable>
                   </Link>
                 </View>
               ) : null}
@@ -211,8 +220,15 @@ export default function PartnerRegisterScreen() {
             <Text style={styles.buttonText}>{loading ? 'Creating login...' : 'Create login'}</Text>
           </TouchableOpacity>
 
-          <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} style={styles.link}>
-            Already have a login? Sign in
+          {/* `asChild` so the link is a real box rather than a run of inline
+              text. A bare <Link> renders as Text, which react-native-web gives
+              `display: inline`, and CSS ignores min-height on an inline box --
+              so the obvious fix does nothing. This was the 14pt default line
+              box: 20pt. */}
+          <Link href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'} asChild>
+            <Pressable style={styles.linkPressable}>
+              <Text style={styles.link}>Already have a login? Sign in</Text>
+            </Pressable>
           </Link>
         </View>
       </ScrollView>
@@ -272,11 +288,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  // The row's own gap from the error text shrank from 8 to 4: each route is a
+  // 44pt box now, and a box that centres its label already contributes about
+  // 12pt of air above it.
   errorActions: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
+    marginTop: 4,
+  },
+  errorActionPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
   },
   errorActionLink: {
     color: partnerTheme.accentStrong,
@@ -362,9 +386,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The spacing moved off the label and onto the box that now holds it, and
+  // shrank: a 44pt box already carries its own air, so keeping the old 16pt
+  // margin on top of it would have pushed the link a thumb's width further
+  // down the screen.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: partnerTheme.accentStrong,
-    marginTop: 16,
     textAlign: 'center',
   },
 });

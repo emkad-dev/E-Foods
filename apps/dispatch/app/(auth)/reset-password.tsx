@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { resolveDispatchSuccessNotice, type DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
@@ -114,14 +115,16 @@ export default function DispatchResetPasswordScreen() {
       </Text>
 
       {notice && !error ? (
-        <Text
-          accessibilityLiveRegion="polite"
-          role="alert"
-          style={styles.noticeText}
-          onPress={() => setDismissedNotice(true)}
-        >
-          {notice}
-        </Text>
+        // Dismissing used to be an `onPress` hung on the paragraph itself: a
+        // 14pt/20pt line box, so a 20pt target when the notice fits one line
+        // and 40pt when it wraps -- under the floor either way. The press and
+        // the geometry moved to a box around it; the wording is untouched,
+        // and so is the live-region announcement, which stays on the Text.
+        <Pressable style={styles.noticePressable} onPress={() => setDismissedNotice(true)}>
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+            {notice}
+          </Text>
+        </Pressable>
       ) : null}
 
       {error ? (
@@ -182,12 +185,23 @@ export default function DispatchResetPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
       </TouchableOpacity>
 
-      <Link href="/(auth)/forgot-password" style={styles.link}>
-        Send me a new code
+      {/* `asChild` so each link is a real box instead of a run of inline
+          text. A bare <Link> renders as Text, which react-native-web gives
+          `display: inline`: CSS ignores min-height on an inline box, and
+          padding on one stretches the hit region without pushing the line
+          boxes apart -- so two links 18pt apart would have ended up with
+          overlapping targets and the wrong one taking the tap. Each was the
+          14pt default line box: 20pt. */}
+      <Link href="/(auth)/forgot-password" asChild>
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Send me a new code</Text>
+        </Pressable>
       </Link>
 
-      <Link href="/(auth)/login" style={styles.link}>
-        Back to sign in
+      <Link href="/(auth)/login" asChild>
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Back to sign in</Text>
+        </Pressable>
       </Link>
     </ScrollView>
   );
@@ -213,6 +227,12 @@ const styles = StyleSheet.create({
     color: dispatchTheme.textMuted,
     fontSize: 16,
     marginBottom: 24,
+  },
+  // Geometry only -- the notice's own colour and 16pt gap stay on the Text,
+  // so the paragraph reads exactly as it did and only the press area grew.
+  noticePressable: {
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
   },
   noticeText: {
     color: dispatchTheme.accentStrong,
@@ -260,9 +280,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The 18pt margin moved off the labels and onto the boxes, and shrank: each
+  // 44pt box already holds 12pt of air above and below its 20pt label, so
+  // keeping 18 as well would have pushed both links a thumb's width apart.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: dispatchTheme.accentStrong,
-    marginTop: 18,
     textAlign: 'center',
   },
 });

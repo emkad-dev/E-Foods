@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
@@ -116,14 +116,15 @@ export default function PartnerResetPasswordScreen() {
       </Text>
 
       {notice && !error ? (
-        <Text
-          accessibilityLiveRegion="polite"
-          role="alert"
-          style={styles.noticeText}
-          onPress={() => setDismissedNotice(true)}
-        >
-          {notice}
-        </Text>
+        // The dismiss used to hang off the <Text> itself, and Text is inline on
+        // react-native-web: on the desktop build, where this message fits on
+        // one line, the whole affordance was a 20pt strip. The Pressable
+        // carries the target; the Text keeps the live region.
+        <Pressable style={styles.noticePressable} onPress={() => setDismissedNotice(true)}>
+          <Text accessibilityLiveRegion="polite" role="alert" style={styles.noticeText}>
+            {notice}
+          </Text>
+        </Pressable>
       ) : null}
 
       {error ? (
@@ -184,20 +185,31 @@ export default function PartnerResetPasswordScreen() {
         <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Save new password'}</Text>
       </TouchableOpacity>
 
+      {/* `asChild` so each of these is a real box rather than a run of inline
+          text. A bare <Link> renders as Text, which react-native-web gives
+          `display: inline`, and CSS ignores min-height on an inline box. Both
+          were the 14pt default line box -- 20pt -- stacked 18pt apart, which
+          is the case where padding alone makes things worse: it extends each
+          hit region without pushing the line boxes apart, so the two overlap
+          and the wrong one takes the tap. */}
       <Link
         href={
           redirectTo ? { pathname: '/(auth)/forgot-password', params: { redirectTo } } : '/(auth)/forgot-password'
         }
-        style={styles.link}
+        asChild
       >
-        Send me a new code
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Send me a new code</Text>
+        </Pressable>
       </Link>
 
       <Link
         href={redirectTo ? { pathname: '/(auth)/login', params: { redirectTo } } : '/(auth)/login'}
-        style={styles.link}
+        asChild
       >
-        Back to sign in
+        <Pressable style={styles.linkPressable}>
+          <Text style={styles.link}>Back to sign in</Text>
+        </Pressable>
       </Link>
     </ScrollView>
   );
@@ -224,11 +236,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 24,
   },
+  // Bottom spacing moved onto the box and halved, because the box centres a
+  // 20pt line in 44pt and so already leaves about 12pt below the text. Only
+  // `justifyContent` here: `alignItems: 'center'` would shrink-wrap the
+  // message and centre it, and this one is a left-aligned paragraph.
+  noticePressable: {
+    justifyContent: 'center',
+    marginBottom: 8,
+    minHeight: MIN_TAP_TARGET,
+  },
   noticeText: {
     color: partnerTheme.accentStrong,
     fontSize: 14,
     lineHeight: 20,
-    marginBottom: 16,
   },
   errorText: {
     color: partnerTheme.dangerText,
@@ -270,9 +290,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The spacing moved off the labels and onto the boxes that now hold them,
+  // and shrank from 18 to 4: each box centres its label in 44pt, so it already
+  // carries about 12pt of air on either side.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: partnerTheme.accentStrong,
-    marginTop: 18,
     textAlign: 'center',
   },
 });

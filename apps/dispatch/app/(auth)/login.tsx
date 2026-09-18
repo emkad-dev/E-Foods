@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { Link, useLocalSearchParams } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateLoginForm } from '../../src/domain/authFormValidation';
 import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function DispatchLoginScreen() {
@@ -115,11 +116,21 @@ export default function DispatchLoginScreen() {
           <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter dispatch board'}</Text>
         </TouchableOpacity>
 
-        <Link href="/(auth)/register" style={styles.link}>
-          Need a dispatch account? Sign up
+        {/* `asChild` so each link is a real box instead of a run of inline
+            text. A bare <Link> renders as Text, which react-native-web gives
+            `display: inline`, and CSS ignores min-height on an inline box --
+            so the obvious fix would have looked right and changed nothing.
+            Both of these were the 14pt default line box: 20pt. Riders are on
+            budget Android hardware, where that is the hardest target to hit. */}
+        <Link href="/(auth)/register" asChild>
+          <Pressable style={styles.linkPressable}>
+            <Text style={styles.link}>Need a dispatch account? Sign up</Text>
+          </Pressable>
         </Link>
-        <Link href="./forgot-password" style={styles.linkSecondary}>
-          Forgot password?
+        <Link href="./forgot-password" asChild>
+          <Pressable style={styles.linkPressable}>
+            <Text style={styles.linkSecondary}>Forgot password?</Text>
+          </Pressable>
         </Link>
       </View>
     </ScrollView>
@@ -206,14 +217,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
+  // The spacing moved off the labels and onto the boxes that now carry them,
+  // and shrank. A 44pt box already holds 12pt of air above and below a 20pt
+  // label, so keeping the old 16/12 margins on top of that would have pushed
+  // the two links most of a thumb's width further down the screen.
+  linkPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: MIN_TAP_TARGET,
+  },
   link: {
     color: dispatchTheme.accentStrong,
-    marginTop: 16,
     textAlign: 'center',
   },
   linkSecondary: {
     color: dispatchTheme.textMuted,
-    marginTop: 12,
     textAlign: 'center',
   },
 });
