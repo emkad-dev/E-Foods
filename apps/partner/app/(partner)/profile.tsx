@@ -305,6 +305,17 @@ export default function PartnerStoreScreen() {
           <View style={styles.navRowChevron} />
         </TouchableOpacity>
 
+        {/* Read occasionally, never mid-service, so it belongs behind a row
+            here rather than in the tab bar - same call as store details and
+            account. */}
+        <TouchableOpacity accessibilityRole="button" style={styles.navRow} onPress={() => router.push('/ratings' as never)}>
+          <View style={styles.navRowText}>
+            <Text style={styles.navRowTitle}>Ratings</Text>
+            <Text style={styles.navRowCopy}>Your score and what customers said about their orders.</Text>
+          </View>
+          <View style={styles.navRowChevron} />
+        </TouchableOpacity>
+
         <TouchableOpacity accessibilityRole="button" style={styles.navRow} onPress={() => router.push('/account' as never)}>
           <View style={styles.navRowText}>
             <Text style={styles.navRowTitle}>Account</Text>

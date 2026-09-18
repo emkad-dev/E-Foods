@@ -23,7 +23,7 @@ const NAV_ITEMS = [
 // spending a fifth on a screen touched once at setup would push the mid-service
 // pause control further away), so they keep Store lit while they are open
 // instead of leaving the sidebar with nothing selected.
-const STORE_SUB_ROUTES = ['/store-details', '/account'];
+const STORE_SUB_ROUTES = ['/store-details', '/account', '/ratings'];
 
 const isNavItemActive = (path: string, pathname: string) => {
   if (path === '/') {
@@ -288,6 +288,7 @@ export default function PartnerStackLayout() {
         {/* Reached from the Store tab, never from the tab bar - see STORE_SUB_ROUTES. */}
         <Tabs.Screen name="store-details" options={{ href: null }} />
         <Tabs.Screen name="account" options={{ href: null }} />
+        <Tabs.Screen name="ratings" options={{ href: null }} />
         {/*
           Onboarding screens, and the ONLY reason they are declared here is to
           keep them out of the tab bar. Tabs registers every route in its

@@ -14,6 +14,7 @@ import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
+import { describeRatingSummary, toRatingSummary } from '../../src/domain/restaurantRatings';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
 import { SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
@@ -39,6 +40,14 @@ function KpiCard({
   note,
   noteColor,
   wide,
+  onPress,
+  accessibilityLabel,
+  // 'words' is for a tile whose value is a SENTENCE rather than a figure -- an
+  // unrated restaurant, a value that could not be loaded. At the 24pt figure
+  // size those get ellipsized to nonsense in a ~160pt tile ("Not rated ye..."),
+  // and they are not numbers, so they do not belong at the scale reserved for
+  // one. Same card, same label, smaller and quieter type.
+  valueVariant = 'figure',
 }: {
   label: string;
   value: string;
@@ -47,6 +56,9 @@ function KpiCard({
   note?: string;
   noteColor?: string;
   wide: boolean;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+  valueVariant?: 'figure' | 'words';
 }) {
   const delta =
     !note && typeof current === 'number' && typeof previous === 'number' ? formatDelta(current, previous) : null;
@@ -57,10 +69,10 @@ function KpiCard({
         ? partnerTheme.dangerText
         : partnerTheme.textSoft;
 
-  return (
-    <View style={[styles.kpiCard, wide ? styles.kpiCardWide : null]}>
+  const body = (
+    <>
       <Text style={styles.kpiLabel}>{label}</Text>
-      <Text style={styles.kpiValue} numberOfLines={1}>
+      <Text style={valueVariant === 'words' ? styles.kpiValueWords : styles.kpiValue} numberOfLines={valueVariant === 'words' ? 2 : 1}>
         {value}
       </Text>
       {note ? (
@@ -72,8 +84,27 @@ function KpiCard({
             : 'Live count'}
         </Text>
       )}
-    </View>
+    </>
   );
+
+  // A tile that leads somewhere becomes the touchable itself rather than
+  // growing a link inside it: the card is already 104pt tall, so the tap target
+  // is the whole thing and there is no small control to size.
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        style={[styles.kpiCard, wide ? styles.kpiCardWide : null]}
+        activeOpacity={0.92}
+        onPress={onPress}
+      >
+        {body}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={[styles.kpiCard, wide ? styles.kpiCardWide : null]}>{body}</View>;
 }
 
 export default function PartnerHome() {
@@ -90,6 +121,14 @@ export default function PartnerHome() {
     offsetBottom: isWide ? insets.bottom + 16 : insets.bottom + 86,
   });
   const { completedToday, error, incomingOrders, loading, orders, preparingOrders, restaurant } = usePartnerOrders();
+  // Read off the restaurant this screen already has. It briefly needed its own
+  // fetch, because buildRestaurantResponse selected ratingAverage/ratingCount
+  // and then dropped them before serialising; the builder emits them now, so
+  // the tile costs no extra RPC invocation -- which matters, since invocations
+  // are this project's actual backend cost driver, not payload size.
+  const ratingSummary = useMemo(() => toRatingSummary(restaurant), [restaurant]);
+  const ratingLoading = loading;
+  const ratingError = error;
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
 
   const rawName =
@@ -103,6 +142,44 @@ export default function PartnerHome() {
     [statusBreakdown]
   );
   const recentOrders = useMemo(() => sortOrdersByNewest(orders).slice(0, 8), [orders]);
+
+  const ratingCopy = describeRatingSummary(ratingSummary);
+  /*
+   * Four states, and three of them are words.
+   *
+   * The one thing this tile must never draw is a figure it has not earned. A
+   * restaurant nobody has rated has NO rating -- "0.0" in the slot where a
+   * score goes reads as the worst score on the scale, not as an absent one --
+   * and a request still in flight or failed has established nothing either.
+   *
+   * The note carries the denominator in every rated case. "5.0" off one
+   * delivery and "4.6" off two hundred are different claims, and a tile that
+   * prints only the first number invites the partner to make the wrong one.
+   */
+  const ratingTile = ratingLoading
+    ? { value: 'Loading...', note: 'Fetching your rating.', variant: 'words' as const, a11y: undefined }
+    : ratingError
+      ? {
+          value: 'Unavailable',
+          note: 'Could not load your rating.',
+          variant: 'words' as const,
+          a11y: 'Rating unavailable. Opens your ratings.',
+        }
+      : ratingCopy.state === 'rated'
+        ? {
+            value: ratingCopy.value,
+            note: ratingCopy.detail,
+            variant: 'figure' as const,
+            // "4.6" under the word "Rating" is clear on screen and ambiguous
+            // read aloud -- out of five, or out of ten?
+            a11y: `Rating ${ratingCopy.headline}. ${ratingCopy.detail}. Opens your ratings.`,
+          }
+        : {
+            value: ratingCopy.value,
+            note: ratingCopy.detail,
+            variant: 'words' as const,
+            a11y: `${ratingCopy.headline}. Opens your ratings.`,
+          };
 
   const handleSignOut = async () => {
     try {
@@ -211,6 +288,18 @@ export default function PartnerHome() {
               <KpiCard label="Incoming" value={String(incomingOrders.length)} wide={isWide} />
               <KpiCard label="In kitchen" value={String(preparingOrders.length)} wide={isWide} />
               <KpiCard label="Delivered today" value={String(completedToday)} wide={isWide} />
+              {/* The only tile that leads somewhere: a score with no way to
+                  read the comments behind it is a number the partner can do
+                  nothing about. */}
+              <KpiCard
+                label="Rating"
+                value={ratingTile.value}
+                note={ratingTile.note}
+                valueVariant={ratingTile.variant}
+                accessibilityLabel={ratingTile.a11y}
+                onPress={() => router.push('/(partner)/ratings' as never)}
+                wide={isWide}
+              />
             </View>
 
             <View style={[styles.splitRow, isWide ? styles.splitRowWide : null]}>
@@ -410,6 +499,16 @@ const styles = StyleSheet.create({
     color: partnerTheme.text,
     fontSize: 24,
     fontWeight: '800',
+    marginTop: 6,
+  },
+  // The sentence form of kpiValue -- see the `valueVariant` note on KpiCard.
+  // 15pt so "Not rated yet" fits a two-up tile at phone width instead of being
+  // truncated into a different word.
+  kpiValueWords: {
+    color: partnerTheme.textSoft,
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 20,
     marginTop: 6,
   },
   kpiDelta: {
