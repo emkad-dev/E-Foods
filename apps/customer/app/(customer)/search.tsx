@@ -13,7 +13,7 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import ImagePlaceholder from '../../src/components/ImagePlaceholder';
 import RemoteImage from '../../src/components/RemoteImage';
@@ -313,14 +313,20 @@ const styles = StyleSheet.create({
     color: customerTheme.text,
     flex: 1,
     fontSize: 15,
-    height: 42,
+    height: MIN_TAP_TARGET,
     marginLeft: 8,
   },
   clearButton: {
     alignItems: 'center',
-    height: 32,
+    // Same treatment as home's search submit: the 32pt glyph keeps its size so
+    // it does not crowd the field, and the BOX grows to the floor, pulled back
+    // by an equal negative margin so the shell height is unchanged. hitSlop
+    // cannot do this on web -- RNW 0.21 reads it only from the legacy Touchable
+    // mixin, so it is inert here.
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    width: 32,
+    marginVertical: -(MIN_TAP_TARGET - 32) / 2,
+    width: MIN_TAP_TARGET,
   },
   centered: {
     alignItems: 'center',
@@ -359,8 +365,13 @@ const styles = StyleSheet.create({
     borderColor: customerTheme.border,
     borderRadius: radius.pill,
     borderWidth: 1,
+    // Measured at 39pt. These are the only controls on an empty search screen
+    // -- the whole "what are you craving?" block is these chips -- so they are
+    // the last thing that should be hard to hit.
+    justifyContent: 'center',
     marginBottom: 10,
     marginRight: 10,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },

@@ -613,7 +613,10 @@ const styles = StyleSheet.create({
     borderColor: customerTheme.border,
     borderRadius: radius.pill,
     borderWidth: 1,
+    // 39pt as measured; these are how a customer moves around a long menu.
+    justifyContent: 'center',
     marginRight: 10,
+    minHeight: MIN_TAP_TARGET,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
@@ -710,18 +713,32 @@ const styles = StyleSheet.create({
   },
   addButton: {
     alignItems: 'center',
+    // `alignSelf: 'center'` USED to be contradicted by a `marginTop: 80` sitting
+    // out of order at the end of this block -- a nudge tuned to one row. Menu
+    // rows size to their content, so the two rules disagreed: measured on the
+    // running build, deleting a row's description took it from 215pt to 149pt
+    // and the gap under the button fell from 46pt to 13pt. On a row with no
+    // description at all the 80pt margin plus the button would have SET the row
+    // height. Centring alone is stable at every row height, which is what the
+    // alignSelf was asking for in the first place.
     alignSelf: 'center',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: radius.xl,
     justifyContent: 'center',
     marginRight: 10,
+    // 43pt -- one point under, on the button the whole screen exists to get
+    // pressed.
+    minHeight: MIN_TAP_TARGET,
     minWidth: 72,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    marginTop: 80,
   },
+  // Was a solid '#b9b0a0' fill, which put the white label at 2.17:1 -- the same
+  // defect as the partner order screen's disabled action. Dimming the real
+  // colour keeps the hue (this button is still pressable when the customer is
+  // out of coverage, so it must not read as dead) and keeps the label legible.
   addButtonDisabled: {
-    backgroundColor: '#b9b0a0',
+    opacity: 0.5,
   },
   addButtonText: {
     color: customerTheme.textOnBrand,
