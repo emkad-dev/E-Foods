@@ -5,6 +5,7 @@ import PartnerOnboardingReview from '../components/PartnerOnboardingReview';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { formatDateTime } from '../lib/format';
+import { resolveKycGate, type KycDocumentKey } from '../lib/kycReviewGate';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import {
   reviewDispatchApplication,
@@ -70,11 +71,54 @@ const formatVehicleLine = (application: {
  */
 const countBadgeClass = (count: number) => `badge ${count > 0 ? 'badge-warning' : 'badge-neutral'}`;
 
+/**
+ * What the operator is agreeing to when they approve a partner.
+ *
+ * Approving is the less reversible of the two decisions on this row and it was
+ * the one that asked nothing: Reject stopped to collect a reason, Approve
+ * fired on the first click. Rejecting a partner after the fact does not undo a
+ * payment their customers have already made, so the confirmation names the
+ * consequence rather than asking "are you sure".
+ *
+ * It also states the limit of the document gate below, in the same breath as
+ * the decision it is gating -- the console knows the KYC links were opened and
+ * cannot know they were read, and the one moment that distinction matters is
+ * this one.
+ */
+const partnerApprovalPrompt = (application: { contactName: string; restaurantName: string }) =>
+  [
+    `Approve ${application.restaurantName} (${application.contactName})?`,
+    'This makes the account a restaurant partner and puts the payout details it submitted on the live money path. Rejecting later does not undo payments taken in the meantime.',
+    'The console has recorded that the KYC documents were opened. It cannot record that they were read.',
+  ].join('\n\n');
+
+const dispatchApprovalPrompt = (application: { displayName: string; email: string }) =>
+  [
+    `Approve ${application.displayName} (${application.email})?`,
+    'This makes the account a dispatch rider: it can accept delivery offers and see customer addresses and phone numbers.',
+  ].join('\n\n');
+
 export default function ApprovalsPage() {
   const { data, error, refresh } = usePolledRpc(getAdminApprovalQueue);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+
+  /**
+   * Which KYC documents the reviewer has opened, per application, for the life
+   * of this mount. Session-scoped on purpose: it is a guard against approving
+   * a partner nobody looked at, not a record of who reviewed what, and writing
+   * it to a backend would turn a client-side nudge into an audit claim it
+   * cannot support. A reload clears it and asks again, which is the correct
+   * behaviour for something measuring what THIS reviewer did just now.
+   */
+  const [openedKycDocuments, setOpenedKycDocuments] = useState<Record<string, KycDocumentKey[]>>({});
+
+  const markKycDocumentOpened = (applicationId: string, document: KycDocumentKey) =>
+    setOpenedKycDocuments((previous) => {
+      const seen = previous[applicationId] ?? [];
+      return seen.includes(document) ? previous : { ...previous, [applicationId]: [...seen, document] };
+    });
 
   const restaurants = useMemo(
     () =>
@@ -148,6 +192,21 @@ export default function ApprovalsPage() {
     runReview(id, () => review(reason.trim() ? reason.trim() : undefined));
   };
 
+  // Deliberately the same kind of dialog Reject already uses -- a native
+  // window prompt, blocking, returning a value the caller has to honour. The
+  // console does own a nicer <dialog> component (ConfirmDialog, on
+  // BroadcastsPage), but introducing it for Approve alone would leave one row
+  // with two confirmations of two different shapes, which is how an operator
+  // learns to click through both. When this page moves to ConfirmDialog, both
+  // decisions move together.
+  const approveWithConfirmation = (id: string, prompt: string, review: () => Promise<ReviewResult>) => {
+    if (!window.confirm(prompt)) {
+      return;
+    }
+
+    runReview(id, review);
+  };
+
   return (
     <div className="page">
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
@@ -176,52 +235,82 @@ export default function ApprovalsPage() {
             {partnerApplications.length === 0 ? (
               <EmptyState title="No pending partner applications" body="New restaurant partner requests will land here." />
             ) : (
-              partnerApplications.map((application) => (
-                <div key={application.id} className="list-row">
-                  <div>
-                    <div className="list-row-title">{application.restaurantName}</div>
-                    {/* phoneNumber and submittedAt ride in on every row of
-                        this queue and neither was shown: the operator had no
-                        way to reach the applicant from the screen that asks
-                        them to judge the application, and no way to see that
-                        a request had been sitting here for a week. */}
-                    <div className="list-row-sub">
-                      {application.contactName} · {application.email} · {application.phoneNumber} ·{' '}
-                      {application.cuisine}
+              partnerApplications.map((application) => {
+                /**
+                 * Approve is the control that puts a stranger's bank details
+                 * on the live money path, and nothing on this screen required
+                 * the reviewer to have opened the KYC documents sitting three
+                 * lines above it. The gate is the smallest honest fix: it
+                 * knows the signed links were ACTIVATED in this session, and
+                 * it says exactly that -- see lib/kycReviewGate.ts, which also
+                 * explains why an application with no documents stays
+                 * approvable instead of becoming stuck forever.
+                 */
+                const kycGate = resolveKycGate(
+                  application.onboarding?.documents,
+                  openedKycDocuments[application.id] ?? []
+                );
+
+                return (
+                  <div key={application.id} className="list-row">
+                    <div>
+                      <div className="list-row-title">{application.restaurantName}</div>
+                      {/* phoneNumber and submittedAt ride in on every row of
+                          this queue and neither was shown: the operator had no
+                          way to reach the applicant from the screen that asks
+                          them to judge the application, and no way to see that
+                          a request had been sitting here for a week. */}
+                      <div className="list-row-sub">
+                        {application.contactName} · {application.email} · {application.phoneNumber} ·{' '}
+                        {application.cuisine}
+                      </div>
+                      <div className="list-row-sub">{application.address}</div>
+                      <div className="list-row-sub">Submitted {formatDateTime(application.submittedAt)}</div>
+                      <PartnerOnboardingReview
+                        review={application.onboarding}
+                        onDocumentOpened={(document) => markKycDocumentOpened(application.id, document)}
+                      />
+                      {/* A disabled control with no stated reason is its own
+                          defect, so the gate's reason renders here whether or
+                          not it is currently blocking -- next to the links it is
+                          talking about, rather than squeezed into the button
+                          row. `title` repeats it on the button for anyone who
+                          goes to the button first. */}
+                      <div className="list-row-sub">
+                        {kycGate.blockedReason ? `${kycGate.blockedReason} ${kycGate.note}` : kycGate.note}
+                      </div>
                     </div>
-                    <div className="list-row-sub">{application.address}</div>
-                    <div className="list-row-sub">Submitted {formatDateTime(application.submittedAt)}</div>
-                    <PartnerOnboardingReview review={application.onboarding} />
+                    <div className="row-actions">
+                      <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
+                      <button
+                        type="button"
+                        className="btn btn-success btn-sm"
+                        disabled={pendingId === application.id || kycGate.blockedReason !== undefined}
+                        title={kycGate.blockedReason}
+                        onClick={() =>
+                          approveWithConfirmation(application.id, partnerApprovalPrompt(application), () =>
+                            reviewPartnerApplication({ applicationId: application.id, decision: 'approve' })
+                          )
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        disabled={pendingId === application.id}
+                        onClick={() =>
+                          rejectWithReason(application.id, (rejectionReason) =>
+                            reviewPartnerApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
+                          )
+                        }
+                      >
+                        Reject
+                      </button>
+                    </div>
                   </div>
-                  <div className="row-actions">
-                    <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
-                    <button
-                      type="button"
-                      className="btn btn-success btn-sm"
-                      disabled={pendingId === application.id}
-                      onClick={() =>
-                        runReview(application.id, () =>
-                          reviewPartnerApplication({ applicationId: application.id, decision: 'approve' })
-                        )
-                      }
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      disabled={pendingId === application.id}
-                      onClick={() =>
-                        rejectWithReason(application.id, (rejectionReason) =>
-                          reviewPartnerApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
-                        )
-                      }
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -255,7 +344,7 @@ export default function ApprovalsPage() {
                       className="btn btn-success btn-sm"
                       disabled={pendingId === application.id}
                       onClick={() =>
-                        runReview(application.id, () =>
+                        approveWithConfirmation(application.id, dispatchApprovalPrompt(application), () =>
                           reviewDispatchApplication({ applicationId: application.id, decision: 'approve' })
                         )
                       }

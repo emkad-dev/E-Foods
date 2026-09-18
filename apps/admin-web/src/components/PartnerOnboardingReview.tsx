@@ -1,5 +1,6 @@
 import type { PartnerOnboardingReview as PartnerOnboardingReviewData } from '../../../../packages/domain/src';
 import StatusBadge from './StatusBadge';
+import type { KycDocumentKey } from '../lib/kycReviewGate';
 import type { AdminTone } from '../theme/tones';
 
 const payoutTone = (status?: string | null): AdminTone => {
@@ -21,8 +22,20 @@ const kycTone = (verifiedAt?: string | null): AdminTone => (verifiedAt ? 'succes
  * render a small note instead.
  */
 export default function PartnerOnboardingReview({
+  onDocumentOpened,
   review,
 }: {
+  /**
+   * Fired when the reviewer activates one of the signed document links, so the
+   * approvals queue can gate Approve on the documents having been opened at
+   * all (see lib/kycReviewGate.ts for what that does and does not prove).
+   *
+   * `onAuxClick` is wired as well as `onClick` because a middle-click opens
+   * the document in a background tab without firing `click` -- and a reviewer
+   * who opened both documents that way, then found Approve still disabled and
+   * insisting they open them, would rightly conclude the gate is broken.
+   */
+  onDocumentOpened?: (document: KycDocumentKey) => void;
   review?: PartnerOnboardingReviewData | null;
 }) {
   if (!review || (!review.kyc && !review.payout)) {
@@ -54,14 +67,28 @@ export default function PartnerOnboardingReview({
           ) : null}
           <span className="onboarding-review-docs">
             {documents?.frontUrl ? (
-              <a href={documents?.frontUrl} target="_blank" rel="noreferrer" className="onboarding-review-doc-link">
+              <a
+                href={documents?.frontUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="onboarding-review-doc-link"
+                onClick={() => onDocumentOpened?.('front')}
+                onAuxClick={() => onDocumentOpened?.('front')}
+              >
                 View front
               </a>
             ) : (
               <span className="list-row-sub">No front doc</span>
             )}
             {documents?.backUrl ? (
-              <a href={documents?.backUrl} target="_blank" rel="noreferrer" className="onboarding-review-doc-link">
+              <a
+                href={documents?.backUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="onboarding-review-doc-link"
+                onClick={() => onDocumentOpened?.('back')}
+                onAuxClick={() => onDocumentOpened?.('back')}
+              >
                 View back
               </a>
             ) : null}

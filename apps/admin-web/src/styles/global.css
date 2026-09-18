@@ -272,6 +272,33 @@ button {
   margin: 0;
 }
 
+/*
+ * The drill-down link in a card header ("more →"), on the overview's four
+ * cards.
+ *
+ * WCAG 2.5.8 Target Size (Minimum) asks for 24x24 CSS px; as bare inline text
+ * these measured 45x17. An inline box ignores min-height, so the height has to
+ * come from padding and the box has to stop being inline -- inline-flex keeps
+ * it beside the title while making both apply. 24 is the AA floor and the
+ * right number for a desktop console; the mobile apps hold themselves to 44.
+ *
+ * The negative margin is the point of the rule, not decoration. Padding alone
+ * would make every card header with a link 8px taller than every card header
+ * without one, so the console's vertical rhythm would depend on whether a card
+ * happens to drill down. Cancelling the padding in margin leaves the link's
+ * MARGIN box at its original 17px: the row still takes its height from the h3
+ * and nothing on the page moves. The hit area grows outward into the card's
+ * own padding, where there is nothing else to hit.
+ */
+.card-title-row .card-more-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 8px;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -941,6 +968,42 @@ button {
   gap: 14px;
   flex-wrap: wrap;
   font-size: 13px;
+}
+
+/*
+ * The broadcast audience checkboxes: two channels (Email, Push) and three
+ * roles (customer, restaurant, dispatch). Between them they decide WHO
+ * RECEIVES A MASS SEND, which makes them the highest-consequence controls in
+ * the console -- a mis-tick changes the recipient list of a message that
+ * cannot be recalled once the runner has handed it to the provider.
+ *
+ * At the browser default they rendered 13x13. The <label> wrapper made the
+ * effective hit area 54x19, which is still under WCAG 2.5.8 Target Size
+ * (Minimum) on the vertical axis. 24 is the AA floor and the right number for
+ * a desktop console; the mobile apps hold themselves to 44.
+ *
+ * The box itself is grown rather than the label padded. A padded wrapper makes
+ * the measurement pass while leaving the thing the eye aims at 13px wide, and
+ * a pointer that lands 5px outside a visible 13px square is a miss the
+ * operator will read as a hit. min-height on the label stops the 13px line box
+ * cropping the taller control.
+ *
+ * Tailwind is imported without preflight, so nothing has reset these inputs:
+ * the declarations below are the whole specification, not an override.
+ */
+.check-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.check-row input[type='checkbox'] {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
 }
 
 .broadcast-actions,

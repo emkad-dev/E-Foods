@@ -4,6 +4,7 @@ import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
 import { formatCurrency, formatDateTime } from '../lib/format';
+import { formatCtr, readPromoStats } from '../lib/promoStats';
 import { resolveViewState } from '../lib/viewState';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 import { uploadPromoAsset } from '../services/promoAssetUpload';
@@ -276,15 +277,14 @@ export default function PromosPage() {
             {promos.map((promo) => {
               const promoSchedule = scheduleLabel(promo);
               const live = isLive(promo);
-              const impressions = promo.impressions ?? 0;
-              const clicks = promo.clicks ?? 0;
-              const attributedOrders = promo.attributedOrders ?? 0;
-              const attributedRevenue = promo.attributedRevenue ?? 0;
-              // A ratio with an empty denominator has no value, and "0% CTR"
-              // is not that -- it is the reading for a promo that was seen and
-              // ignored, which is the opposite conclusion from one nobody has
-              // been shown yet.
-              const ctr = impressions > 0 ? `${Math.round((clicks / impressions) * 100)}%` : '—';
+              // `?? 0` four times over used to make a promo with no metrics
+              // read as a promo that nobody has looked at -- the same row of
+              // zeros for "seen by no one" and "the numbers never arrived",
+              // under a badge saying Live. readPromoStats returns null instead
+              // of inventing the figures, and documents precisely how far a
+              // client-side fix can go while the deployed handler is still
+              // writing its own zeros over a failed stats query.
+              const stats = readPromoStats(promo);
 
               return (
                 <li key={promo.id} className="promo-item">
@@ -297,8 +297,14 @@ export default function PromosPage() {
                     {promo.actionUrl ? <span className="promo-item-url">{promo.actionUrl}</span> : null}
                     {promoSchedule ? <span className="muted">{promoSchedule}</span> : null}
                     <span className="promo-item-stats">
-                      {impressions} impr · {clicks} clicks · {ctr} CTR · {attributedOrders} orders ·{' '}
-                      {formatCurrency(attributedRevenue)}
+                      {stats ? (
+                        <>
+                          {stats.impressions} impr · {stats.clicks} clicks · {formatCtr(stats)} CTR ·{' '}
+                          {stats.attributedOrders} orders · {formatCurrency(stats.attributedRevenue)}
+                        </>
+                      ) : (
+                        'Stats unavailable — this promo arrived without its metrics.'
+                      )}
                     </span>
                   </div>
                   <button

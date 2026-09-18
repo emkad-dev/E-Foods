@@ -145,7 +145,10 @@ export default function OverviewPage() {
               <div className="card">
                 <div className="card-title-row">
                   <h3 className="card-title">Approval pulse</h3>
-                  <Link to="/approvals" className="muted text-[13px]">
+                  {/* `card-more-link` is what carries this link over the
+                      24x24 target floor; as bare inline text it measured
+                      45x17. See global.css. */}
+                  <Link to="/approvals" className="muted text-[13px] card-more-link">
                     more →
                   </Link>
                 </div>
@@ -171,7 +174,7 @@ export default function OverviewPage() {
             <div className="card">
               <div className="card-title-row">
                 <h3 className="card-title">Orders history</h3>
-                <Link to="/orders" className="muted text-[13px]">
+                <Link to="/orders" className="muted text-[13px] card-more-link">
                   more →
                 </Link>
               </div>

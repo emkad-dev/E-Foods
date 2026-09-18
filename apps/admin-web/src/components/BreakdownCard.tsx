@@ -34,7 +34,9 @@ export default function BreakdownCard({
     <div className="card">
       <div className="card-title-row">
         <h3 className="card-title">{title}</h3>
-        <Link to={moreHref} className="muted text-[13px]">
+        {/* `card-more-link` is what carries this link over the 24x24 target
+            floor; as bare inline text it measured 45x17. See global.css. */}
+        <Link to={moreHref} className="muted text-[13px] card-more-link">
           more →
         </Link>
       </div>
