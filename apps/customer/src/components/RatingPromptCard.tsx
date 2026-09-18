@@ -13,7 +13,7 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import { useAuth } from '../contexts/AuthContext';
 import { isValidScore, selectNextPendingRating, type PendingRating } from '../domain/ratingPrompt';
@@ -33,7 +33,12 @@ const StarRow = ({
     {[1, 2, 3, 4, 5].map((star) => (
       <TouchableOpacity
         key={star}
+        style={styles.starButton}
         onPress={() => onChange(star)}
+        // Kept for native, where it widens the target past the floor. It is
+        // NOT what makes this control legal: on the web build RNW 0.21 reads
+        // hitSlop only from the legacy Touchable mixin, so it does nothing at
+        // all -- which is exactly what it was silently doing here before.
         hitSlop={6}
         accessibilityRole="button"
         accessibilityLabel={`Rate ${star} star${star === 1 ? '' : 's'}`}
@@ -251,6 +256,19 @@ const styles = StyleSheet.create({
   starRow: {
     flexDirection: 'row',
     gap: 6,
+  },
+  // The stars had no style at all, so each target was exactly its glyph: 30pt
+  // on the restaurant row and 24pt on the rider row. Five of them in a line,
+  // where a mis-tap does not miss -- it silently submits a different rating
+  // than the one intended, which is worse than nothing happening.
+  //
+  // The glyph keeps its drawn size and the BOX grows to the floor; five 44pt
+  // boxes and their gaps still sit well inside a 375pt screen.
+  starButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
+    minWidth: MIN_TAP_TARGET,
   },
   star: {
     marginRight: 4,

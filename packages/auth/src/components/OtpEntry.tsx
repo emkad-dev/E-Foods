@@ -46,7 +46,12 @@ export const OtpEntry = ({
 
   return (
     <View>
-      {/* One hidden input drives six visual cells — avoids per-cell focus juggling. */}
+      {/* One hidden input drives six visual cells — avoids per-cell focus juggling.
+
+          ui-contract: allow-small — this Pressable carries no style because it
+          does not need one: its child row is six 44x52 cells, which is the
+          target, and giving the wrapper its own minHeight would only pad
+          around a control that already clears the floor. */}
       <Pressable onPress={() => inputRef.current?.focus()} accessibilityLabel="Verification code">
         <View style={styles.cellRow}>
           {Array.from({ length: CODE_LENGTH }).map((_, index) => (

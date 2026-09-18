@@ -289,3 +289,88 @@ test(`no touchable style composes below the ${MIN_TAP_TARGET}pt floor`, () => {
       `mixin, so it does nothing.\n  ${small.join('\n  ')}`
   );
 });
+
+/** Tag names that take a press. */
+const TOUCHABLE_TAGS = [
+  'TouchableOpacity',
+  'TouchableHighlight',
+  'Pressable',
+  'TouchableWithoutFeedback',
+];
+
+/**
+ * The text of an opening JSX tag, from its `<` to its real `>`.
+ *
+ * Brace-tracked on purpose. A lazy `[\s\S]*?>` ends the tag at the first `>`
+ * it sees, and every `onPress={() => ...}` contains one inside the arrow --
+ * which reported 29 styled controls as styleless the first time I wrote this.
+ */
+function openingTag(source: string, start: number): string | null {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i]!;
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+    } else if (ch === '>' && depth === 0) {
+      return source.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+test('every touchable declares a style', () => {
+  /*
+   * The rule above can only judge a control that HAS geometry to judge. A
+   * touchable with no `style` at all declares none, so its height is exactly
+   * its content -- and it is invisible to a scanner that reads style blocks.
+   *
+   * That is not hypothetical. Partner's "Sign out", the only way out of the
+   * app on a phone, was an 18pt unstyled TouchableOpacity, and so was the
+   * "more ->" link off the dashboard. The rating stars were worse: five
+   * unstyled buttons in a row at 30pt and 24pt, where a mis-tap does not miss
+   * but silently submits the wrong rating.
+   *
+   * So: declare a style. Even an empty-looking one gets read by the rule
+   * above, which is the point.
+   */
+  const styleless: string[] = [];
+
+  for (const app of APPS) {
+    for (const file of walk(app)) {
+      const src = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+
+      for (const tag of TOUCHABLE_TAGS) {
+        for (const m of src.matchAll(new RegExp('<' + tag + '\\b', 'g'))) {
+          const open = openingTag(src, m.index!);
+          if (!open) continue;
+          if (/\bstyle\s*=/.test(open)) continue;
+
+          // Same opt-out as the size rule, and it must carry its reason. A
+          // wrapper whose sized children define the target is the legitimate
+          // case -- OtpEntry's Pressable over six 44x52 code cells.
+          const before = src.slice(Math.max(0, m.index! - 400), m.index!);
+          if (open.includes(ALLOW_SMALL) || before.includes(ALLOW_SMALL)) continue;
+
+          const line = src.slice(0, m.index!).split('\n').length;
+          styleless.push(`${file.replace(/\\/g, '/')}:${line}  <${tag}> has no style`);
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(
+    styleless,
+    [],
+    'A touchable with no style is exactly as tall as its text, and the size rule ' +
+      'cannot see it. Give it a style with a minHeight, or -- if its sized children ' +
+      `define the target -- write "${ALLOW_SMALL}" above it with the reason.\n  ` +
+      styleless.join('\n  ')
+  );
+});
