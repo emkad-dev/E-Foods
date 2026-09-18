@@ -732,8 +732,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#7c2d12',
     marginTop: 10,
   },
+  // Disabled was a mud fill painted over whatever hue the button carried:
+  // '#d7c7b7' under a white label. The defect is NOT the contrast number --
+  // WCAG 1.4.3 exempts inactive components, so neither that fill nor this
+  // replacement owes anything to 4.5:1, and an earlier version of this comment
+  // was wrong to present the new ratios as an improvement. They are not; a
+  // half-opacity button is a LOWER-contrast label than a solid one.
+  //
+  // The defect is that one fill overrode all four variants. Confirm pickup,
+  // Mark delivered, Mark failed and Escalate are green, green, amber and
+  // maroon precisely so a rider can tell them apart mid-shift, and locking the
+  // screen turned all four into the same beige slab -- so the one moment the
+  // rider most needs to know which control is which is the moment the UI stops
+  // saying. Fading preserves the hue, which is the whole point, and matches
+  // what every other disabled state in this app already does.
   actionButtonDisabled: {
-    backgroundColor: '#d7c7b7',
+    opacity: 0.5,
   },
   actionButtonText: {
     color: dispatchTheme.textOnBrand,

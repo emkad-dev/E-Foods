@@ -10,6 +10,7 @@ import { validateRegisterForm } from '../../src/domain/authFormValidation';
 import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/auth';
 import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
+import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function DispatchRegisterScreen() {
@@ -308,10 +309,18 @@ const styles = StyleSheet.create({
   phoneField: {
     marginTop: 14,
   },
+  // The one control on this screen carrying no padding of its own, so its
+  // height was only ever whatever the tallest child came out at: the 22pt
+  // checkbox while the sentence fits a line, 40pt (2 x the copy's lineHeight
+  // 20) once it wraps. Neither reaches the floor, and this is the row that
+  // gates the whole form -- nothing can be submitted until it is pressed. The
+  // floor goes on the row rather than on either child because `alignItems`
+  // already centres both, so the checkbox and the copy do not move.
   policyRow: {
     alignItems: 'center',
     flexDirection: 'row',
     marginTop: 18,
+    minHeight: MIN_TAP_TARGET,
   },
   policyRowMuted: {
     opacity: 0.94,

@@ -593,6 +593,12 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+// The back arrow's glyph box. Kept at its drawn size and grown only for the
+// touch target: BACK_ICON_INSET is the half-difference the negative margins
+// below hand straight back to the layout.
+const BACK_ICON_SIZE = 34;
+const BACK_ICON_INSET = (MIN_TAP_TARGET - BACK_ICON_SIZE) / 2;
+
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: dispatchTheme.background,
@@ -686,12 +692,22 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '900',
   },
+  // The arrow out of Weekly earnings and Shift slots was drawn as a 34x34
+  // box around a 14pt glyph -- 10pt short of the floor on both axes, and the
+  // smallest thing a rider is asked to hit anywhere in this app. The box goes
+  // to 44 and the three negative offsets give the extra 5pt back to the
+  // layout, so the header row stays 34 tall and the title beside it starts at
+  // the same x. The glyph is drawn where it always was; only the reachable
+  // area moved, outward into the card's own 18pt padding, where nothing else
+  // is.
   backIcon: {
     alignItems: 'center',
-    height: 34,
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    marginRight: 10,
-    width: 34,
+    marginLeft: -BACK_ICON_INSET,
+    marginRight: 10 - BACK_ICON_INSET,
+    marginVertical: -BACK_ICON_INSET,
+    width: MIN_TAP_TARGET,
   },
   smallAction: {
     justifyContent: 'center',

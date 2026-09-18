@@ -59,8 +59,20 @@ export default function DispatchLayout() {
           title: 'Rider',
         }}
       />
+      {/* Both of these are detail screens reached by pushing, not tabs. A
+          Tabs navigator auto-registers every route under its directory, so
+          without `href: null` each one grows a button in the bar --
+          `delivery/[id]` was already guarded and `offer/[id]`, added later,
+          was not, which would have put a fifth tab labelled after the offer
+          route next to Rider. Latent only because DISPATCH_ENABLED is false. */}
       <Tabs.Screen
         name="delivery/[id]"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="offer/[id]"
         options={{
           href: null,
         }}
