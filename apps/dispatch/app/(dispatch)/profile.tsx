@@ -25,36 +25,33 @@ import {
   accountDeletionParagraphs,
 } from '../../../../packages/domain/src/accountDeletion';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
-import DispatchLiveMap from '../../src/components/DispatchLiveMap';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { useDispatchShiftSlots } from '../../src/hooks/useDispatchShiftSlots';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { useWeeklyEarnings } from '../../src/hooks/useWeeklyEarnings';
 import {
   type DispatchRiderDraft,
   updateDispatchRider,
 } from '../../src/services/dispatchRiderActions';
-import { OpenStreetMapLocationService } from '../../src/services/osmLocation';
 import { dispatchTheme } from '../../src/theme/palette';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
 import { SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
 
-type ProfileSection =
-  | 'profile'
-  | 'availableSessions'
-  | 'mySessions'
-  | 'inbox'
-  | 'recentDeliveries'
-  | 'weeklyEarnings'
-  | 'shiftSlots'
-  | 'payments'
-  | 'activity'
-  | 'rewards'
-  | 'session';
-
-const statusOptions = ['Available', 'Delivering', 'Pickup delayed', 'Offline'];
+/**
+ * The three sections a rider can actually use.
+ *
+ * There were eleven. Six of them -- availableSessions, mySessions, inbox,
+ * recentDeliveries, payments, rewards -- were `renderPlaceholder` calls with a
+ * hard-coded sentence and no state, no fetch and no backing RPC anywhere in
+ * `DISPATCH_ACTIONS`. They rendered "No rewards yet." forever. Two more,
+ * shiftSlots and activity, showed real reads of fabricated or fleet-wide data;
+ * see the removal notes where they used to be.
+ *
+ * What is left is what is true: who the rider is and where they work, what
+ * they earned, and how to leave.
+ */
+type ProfileSection = 'profile' | 'weeklyEarnings' | 'session';
 const createDefaultDraft = (): DispatchRiderDraft => ({
   acceptanceRate: 85,
   completedTrips: 0,
@@ -67,15 +64,7 @@ const createDefaultDraft = (): DispatchRiderDraft => ({
 
 const menuItems: { icon: keyof typeof FontAwesome.glyphMap; key: ProfileSection; label: string }[] = [
   { icon: 'user-o', key: 'profile', label: 'My profile' },
-  { icon: 'calendar-check-o', key: 'availableSessions', label: 'Available sessions' },
-  { icon: 'calendar-o', key: 'mySessions', label: 'My sessions' },
-  { icon: 'bell-o', key: 'inbox', label: 'Inbox' },
-  { icon: 'history', key: 'recentDeliveries', label: 'Recent deliveries' },
   { icon: 'line-chart', key: 'weeklyEarnings', label: 'Weekly earnings' },
-  { icon: 'clock-o', key: 'shiftSlots', label: 'Shift slots' },
-  { icon: 'credit-card', key: 'payments', label: 'Payments' },
-  { icon: 'bar-chart', key: 'activity', label: 'Activity Insights' },
-  { icon: 'gift', key: 'rewards', label: 'Rewards' },
   { icon: 'sign-out', key: 'session', label: 'Session' },
 ];
 
@@ -94,25 +83,15 @@ const formatDateTime = (value?: string | null) => {
   }).format(new Date(value));
 };
 
-const formatShiftWindow = (startsAt: string, endsAt: string) =>
-  `${new Intl.DateTimeFormat('en-NG', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(startsAt))} - ${new Intl.DateTimeFormat('en-NG', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(endsAt))}`;
-
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { error, riders } = useDispatchRiders();
   const { confirm, confirmDialog } = useConfirm();
   // Saving and signing out reported failure through `Alert`, an empty function
-  // under react-native-web. Floating rather than inline: this screen is a long
-  // scrolling stack of sections (earnings, shift slots, inbox, activity) and
-  // the Save button is only one row of it, so an inline notice would often sit
-  // off-screen. The offset clears the 70px tab bar defined in ./_layout.tsx.
+  // under react-native-web. Floating rather than inline: the Save button is one
+  // row inside a scrolling section, so an inline notice can sit off-screen.
+  // The offset clears the 70px tab bar defined in ./_layout.tsx.
   const { notice, showNotice } = useNotice({
     placement: 'floating',
     offsetBottom: insets.bottom + 86,
@@ -121,7 +100,6 @@ export default function ProfileScreen() {
   // inside the profile editor; this one sits beside the delete button.
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { error: earningsError, loading: earningsLoading, refresh: refreshEarnings, refreshing, report } = useWeeklyEarnings();
-  const { error: shiftSlotsError, loading: shiftSlotsLoading, refresh: refreshShiftSlots, slots } = useDispatchShiftSlots();
   const [selectedSection, setSelectedSection] = useState<ProfileSection>('profile');
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
@@ -133,29 +111,6 @@ export default function ProfileScreen() {
     [riders, user]
   );
 
-  const mapRegion = useMemo(() => {
-    if (riders.length === 0) {
-      return {
-        latitude: 9.0765,
-        longitude: 7.3986,
-        latitudeDelta: 0.22,
-        longitudeDelta: 0.22,
-      };
-    }
-
-    const riderCoords = riders.map((rider) => ({
-      latitude: rider.latitude,
-      longitude: rider.longitude,
-    }));
-
-    return OpenStreetMapLocationService.calculateMapRegionBounds(riderCoords, 0.12) || {
-      latitude: 9.0765,
-      longitude: 7.3986,
-      latitudeDelta: 0.22,
-      longitudeDelta: 0.22,
-    };
-  }, [riders]);
-
   const populateDraftFromRider = useCallback(
     (riderId: string) => {
       const rider = riders.find((candidate) => candidate.id === riderId);
@@ -166,7 +121,11 @@ export default function ProfileScreen() {
 
       setSelectedRiderId(rider.id);
       setDraft({
-        acceptanceRate: 85,
+        // Was the literal 85, beside the rider's REAL parsed rate sitting
+        // unused on the same object. Neither value reaches the database --
+        // dispatch.ts keeps `existingRider?.acceptanceRate` on every save --
+        // but a draft seeded from a rider should carry that rider's numbers.
+        acceptanceRate: rider.acceptanceRateValue,
         completedTrips: rider.completedTripsCount,
         lga: rider.lga ?? '',
         name: rider.name,
@@ -300,10 +259,12 @@ export default function ProfileScreen() {
         <Text style={styles.nameText}>{currentRider?.name ?? user?.displayName ?? 'Feaster'}</Text>
         <Text style={styles.statusText}>{currentRider?.status ?? 'Ready to go live'}</Text>
       </View>
-      <View style={styles.pointsPill}>
-        <FontAwesome name="trophy" size={12} color={dispatchTheme.text} />
-        <Text style={styles.pointsText}>{currentRider?.completedTripsCount ?? 0}</Text>
-      </View>
+      {/* The trophy pill used to sit here showing `completedTripsCount`. That
+          column is written as 0 when a rider is approved, carried forward
+          verbatim on every save, and incremented NOWHERE -- no handler and no
+          trigger in supabase/migrations touches it. A rider on their five
+          hundredth delivery was shown a trophy reading 0. A congratulation
+          that never moves is worse than no congratulation. */}
     </View>
   );
 
@@ -367,19 +328,16 @@ export default function ProfileScreen() {
         }}
       />
 
-      <FieldLabel label="Status" />
-      <View style={styles.chipRow}>
-        {statusOptions.map((option) => (
-          <TouchableOpacity
-            key={option}
-            style={[styles.chip, draft.status === option ? styles.chipActive : null]}
-            onPress={() => updateDraft('status', option)}
-          >
-            <Text style={[styles.chipText, draft.status === option ? styles.chipTextActive : null]}>{option}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
+      {/* A status picker used to sit here -- Available / Delivering / Pickup
+          delayed / Offline. The server throws the choice away:
+          `status: existingRider?.status ?? draft.status` in
+          _shared/domains/dispatch.ts keeps the EXISTING value for any rider who
+          already has a record, which is every rider who can reach this screen.
+          `vehicleType` is discarded on the same line. The screen then showed
+          "Rider profile saved". A control that silently does nothing and
+          reports success is worse than no control: a rider marking themselves
+          Offline believed they had stopped receiving work. Status is owned by
+          the dispatch system and shown read-only in the header above. */}
       <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving || !currentRider}>
         <Text style={styles.primaryActionText}>{saving ? 'Saving...' : 'Update profile'}</Text>
       </TouchableOpacity>
@@ -428,79 +386,55 @@ export default function ProfileScreen() {
           ) : (
             <Text style={styles.emptyText}>No earnings this week.</Text>
           )}
-          <Text style={styles.sectionLabel}>Payout snapshot</Text>
-          <View style={styles.payoutCard}>
-            <Text style={styles.payoutTitle}>{report?.payout?.status ?? 'pending'}</Text>
-            <Text style={styles.payoutAmount}>{formatMoney(report?.payout?.ledgerTotal ?? report?.total ?? 0)}</Text>
-            <Text style={styles.payoutMeta}>
-              {report?.payout?.paidAt ? `Paid ${formatDateTime(report.payout.paidAt)}` : 'Awaiting payout'}
-            </Text>
-            {report?.payout?.reference ? <Text style={styles.payoutMeta}>Ref {report.payout.reference}</Text> : null}
-          </View>
+          {/* A "Payout snapshot" card used to sit here. Nothing in this
+              repository ever writes the CourierPayout table -- its only writer,
+              `upsertCourierPayout`, has exactly one reference in the codebase,
+              which is its own declaration -- so the read always fell through to
+              the fallback: ledgerTotal = the week's total, status "pending",
+              paidAt null. It printed the SAME money as the hero figure above
+              it, under a second heading, captioned as a payout ledger that does
+              not exist. Two numbers that are one number is how a rider comes to
+              believe they are owed twice. */}
         </>
       )}
     </View>
   );
 
-  const renderShiftSlots = () => (
-    <View style={styles.detailCard}>
-      <View style={styles.detailHeader}>
-        <TouchableOpacity style={styles.backIcon} onPress={() => setSelectedSection('profile')}>
-          <FontAwesome name="arrow-left" size={14} color={dispatchTheme.text} />
-        </TouchableOpacity>
-        <Text style={styles.detailTitle}>Shift slots</Text>
-      </View>
-      {shiftSlotsLoading ? <ActivityIndicator color={dispatchTheme.accent} /> : null}
-      {shiftSlotsError ? <Text style={styles.errorText}>{shiftSlotsError}</Text> : null}
-      <Text style={styles.emptyText}>
-        These slots are seeded from the operations forecast. They show when the courier network expects to be busiest.
-      </Text>
-      <TouchableOpacity style={styles.secondaryButton} onPress={refreshShiftSlots} disabled={shiftSlotsLoading}>
-        <Text style={styles.secondaryButtonText}>{shiftSlotsLoading ? 'Loading...' : 'Refresh slots'}</Text>
-      </TouchableOpacity>
-      {slots.length ? (
-        slots.map((slot) => (
-          <View key={slot.id} style={styles.shiftCard}>
-            <View style={styles.shiftHeader}>
-              <Text style={styles.shiftTitle}>
-                {formatShiftWindow(slot.startsAt, slot.endsAt)}
-              </Text>
-              <View style={styles.shiftDemandBadge}>
-                <Text style={styles.shiftDemandBadgeText}>{slot.forecastDemand} forecast</Text>
-              </View>
-            </View>
-            <Text style={styles.shiftMeta}>{slot.status}</Text>
-            {slot.notes ? <Text style={styles.shiftMeta}>{slot.notes}</Text> : null}
-          </View>
-        ))
-      ) : (
-        <Text style={styles.emptyText}>No shift slots have been published for this courier yet.</Text>
-      )}
-    </View>
-  );
+  /*
+    `renderShiftSlots` used to be here.
 
-  const renderActivity = () => (
-    <View style={styles.detailCard}>
-      <Text style={styles.detailTitle}>Activity Insights</Text>
-      <View style={styles.mapCard}>
-        <DispatchLiveMap
-          riders={riders.map((rider) => ({
-            id: rider.id,
-            latitude: rider.latitude,
-            longitude: rider.longitude,
-            name: rider.name,
-            zone: rider.zone,
-            hasPreciseLocation: rider.hasPreciseLocation,
-          }))}
-          region={mapRegion}
-        />
-      </View>
-      <View style={styles.metricRow}>
-        <Metric label="Live pins" value={String(riders.filter((rider) => rider.hasPreciseLocation).length)} />
-        <Metric label="LGA pins" value={String(riders.filter((rider) => !rider.hasPreciseLocation).length)} />
-      </View>
-    </View>
-  );
+    The CourierShiftSlot rows are a real table read, but their CONTENT is a
+    literal: admin.ts writes exactly three slots at hours 8/12/16 with
+    `forecastDemand` taken from the array [2, 3, 4], once, when a rider's
+    application is approved, and nothing ever updates them. The screen told the
+    rider these were "seeded from the operations forecast" and showed when "the
+    courier network expects to be busiest". There is no forecast.
+
+    It was also unusable: `dispatchUpsertShiftSlots` is fully implemented on the
+    server and called from no app code, so a rider could not claim or change a
+    slot. And `formatShiftWindow` printed hour:minute with no date, so a rider
+    approved months ago still read "08:00 - 12:00 - planned" as though it were
+    coming up.
+
+    The table, the RPC and the hook all remain. When slots are really published
+    and really claimable, this section comes back with a date on it.
+  */
+
+  /*
+    `renderActivity` used to be here -- a live map of the fleet plus "Live pins"
+    and "LGA pins".
+
+    It was the wrong scope: `dispatchGetRiders` returns EVERY DispatchRiderRecord
+    unfiltered, so both figures counted the whole fleet while sitting on one
+    rider's own profile. The split was degenerate too -- `hasPreciseLocation` is
+    true whenever lat/lng are non-null, and approval always writes them
+    (defaulting to a national centroid), so "LGA pins" was ~always 0 and "Live
+    pins" was just the rider count.
+
+    SEPARATELY, AND NOT FIXED BY THIS DELETION: that RPC still hands every
+    dispatch user every other rider's name and live coordinates. Removing the
+    screen removes the display, not the exposure. Raised with the owner.
+  */
 
   const renderSession = () => (
     <View style={styles.detailCard}>
@@ -519,39 +453,15 @@ export default function ProfileScreen() {
     </View>
   );
 
-  const renderPlaceholder = (title: string, copy: string) => (
-    <View style={styles.detailCard}>
-      <Text style={styles.detailTitle}>{title}</Text>
-      <Text style={styles.emptyText}>{copy}</Text>
-    </View>
-  );
-
   const renderDetail = () => {
     switch (selectedSection) {
-      case 'profile':
-        return renderProfileEditor();
       case 'weeklyEarnings':
         return renderWeeklyEarnings();
-      case 'shiftSlots':
-        return renderShiftSlots();
-      case 'activity':
-        return renderActivity();
       case 'session':
         return renderSession();
-      case 'recentDeliveries':
-        return renderPlaceholder('Recent deliveries', 'Completed deliveries appear in the deliveries tab.');
-      case 'availableSessions':
-        return renderPlaceholder('Available sessions', 'Sessions are not open yet.');
-      case 'mySessions':
-        return renderPlaceholder('My sessions', 'No active session schedule.');
-      case 'inbox':
-        return renderPlaceholder('Inbox', 'No new dispatch messages.');
-      case 'payments':
-        return renderPlaceholder('Payments', 'Payout setup comes later.');
-      case 'rewards':
-        return renderPlaceholder('Rewards', 'No rewards yet.');
+      case 'profile':
       default:
-        return null;
+        return renderProfileEditor();
     }
   };
 
@@ -575,20 +485,20 @@ function FieldLabel({ label }: { label: string }) {
   return <Text style={styles.fieldLabel}>{label}</Text>;
 }
 
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metricCard}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={styles.metricValue}>{value}</Text>
+    </View>
+  );
+}
+
 function ReadOnlyValue({ hint, value }: { hint: string; value: string | number }) {
   return (
     <View style={styles.readOnlyInput}>
       <Text style={styles.readOnlyValue}>{value}</Text>
       <Text style={styles.readOnlyHint}>{hint}</Text>
-    </View>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
     </View>
   );
 }
@@ -631,20 +541,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginTop: 4,
-  },
-  pointsPill: {
-    alignItems: 'center',
-    backgroundColor: dispatchTheme.highlight,
-    borderRadius: radius.pill,
-    flexDirection: 'row',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  pointsText: {
-    color: dispatchTheme.text,
-    fontSize: 12,
-    fontWeight: '900',
-    marginLeft: 5,
   },
   menuCard: {
     backgroundColor: dispatchTheme.surface,
@@ -750,31 +646,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  chip: {
-    justifyContent: 'center',
-    minHeight: MIN_TAP_TARGET,
-    backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: radius.pill,
-    marginBottom: 8,
-    marginRight: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  chipActive: {
-    backgroundColor: dispatchTheme.accent,
-  },
-  chipText: {
-    color: dispatchTheme.textMuted,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  chipTextActive: {
-    color: dispatchTheme.textOnBrand,
-  },
   primaryAction: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.accent,
@@ -856,31 +727,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 18,
   },
-  payoutCard: {
-    backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: radius.lg,
-    marginTop: 10,
-    padding: 14,
-  },
-  payoutTitle: {
-    color: dispatchTheme.textMuted,
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  payoutAmount: {
-    color: dispatchTheme.text,
-    fontSize: 26,
-    fontWeight: '900',
-    marginTop: 6,
-  },
-  payoutMeta: {
-    color: dispatchTheme.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 4,
-  },
   transactionRow: {
     alignItems: 'center',
     backgroundColor: dispatchTheme.surfaceMuted,
@@ -904,47 +750,6 @@ const styles = StyleSheet.create({
     color: dispatchTheme.accentStrong,
     fontSize: 14,
     fontWeight: '900',
-  },
-  shiftCard: {
-    backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: radius.lg,
-    marginTop: 12,
-    padding: 14,
-  },
-  shiftHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  shiftTitle: {
-    color: dispatchTheme.text,
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '900',
-    paddingRight: 10,
-  },
-  shiftDemandBadge: {
-    backgroundColor: dispatchTheme.accentTint,
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  shiftDemandBadgeText: {
-    color: dispatchTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  shiftMeta: {
-    color: dispatchTheme.textMuted,
-    fontSize: 12,
-    marginTop: 6,
-  },
-  mapCard: {
-    borderColor: dispatchTheme.border,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    marginTop: 12,
-    overflow: 'hidden',
   },
   emptyText: {
     color: dispatchTheme.textMuted,
