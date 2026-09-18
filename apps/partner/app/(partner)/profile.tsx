@@ -386,7 +386,13 @@ const styles = StyleSheet.create({
   },
   pausedBanner: {
     backgroundColor: partnerTheme.warningSoft,
-    borderColor: '#efcf96',
+    // Was the literal '#efcf96' -- the only two hard-coded colours on this
+    // screen, and a light-mode-only value no token controls. It also barely
+    // existed: 1.18:1 against the warningSoft fill it outlined. `warning` is
+    // the accent the design system pairs with `warningSoft`, and at 2.13:1 the
+    // border is now actually a border. Deliberately stronger than what it
+    // replaced, not a like-for-like swap.
+    borderColor: partnerTheme.warning,
     borderRadius: radius.lg,
     borderWidth: 1,
     padding: 16,
@@ -412,7 +418,7 @@ const styles = StyleSheet.create({
   },
   warningCard: {
     backgroundColor: partnerTheme.warningSoft,
-    borderColor: '#efcf96',
+    borderColor: partnerTheme.warning,
     borderRadius: radius.xl,
     borderWidth: 1,
     marginTop: 14,

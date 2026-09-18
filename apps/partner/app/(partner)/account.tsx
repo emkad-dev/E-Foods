@@ -147,8 +147,16 @@ export default function PartnerAccountScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Signed in as</Text>
           <Text style={styles.metaLine}>{user?.email ?? 'Email not available'}</Text>
+          {/* The LIVE name first. `user.restaurantName` is a denormalised copy
+              on the user document, refreshed on the client only by
+              `linkRestaurant` -- which store-details calls just when the
+              restaurant ID changes, never on a rename. So renaming the store
+              updated RestaurantRecord and the realtime-backed `restaurant.name`
+              while this line, preferring the copy, kept showing the old name
+              for the rest of the session. The copy stays as the fallback: it is
+              the only name available before the restaurant context resolves. */}
           <Text style={styles.metaLine}>
-            Controlling {user?.restaurantName ?? restaurant?.name ?? 'no restaurant yet'}
+            Controlling {restaurant?.name ?? user?.restaurantName ?? 'no restaurant yet'}
           </Text>
         </View>
 
