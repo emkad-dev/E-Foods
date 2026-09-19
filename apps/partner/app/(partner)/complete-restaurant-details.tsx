@@ -742,7 +742,29 @@ export default function CompleteRestaurantDetailsScreen() {
         </TouchableOpacity>
       ) : null}
 
-      <TouchableOpacity onPress={() => void signOut()} style={styles.secondaryButton}>
+      {/*
+        THE WAY OUT FOR SOMEBODY WHO IS NOT AN APPLICANT.
+
+        A signed-in user without the restaurant role lands here, because the
+        app cannot tell a new owner from an invited staff member and applying
+        is the common case. But an invitee has no business to verify, no KYC
+        document and no payout account -- working through this wizard would
+        have them create a SECOND restaurant in order to join the one they
+        were invited to. One tap gets them to the code screen instead.
+
+        A link rather than a change to `resolvePartnerLandingRoute`: where a
+        genuine applicant lands must not move, and the routing has nothing to
+        read that would tell it an invite is waiting.
+      */}
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={() => router.replace('/(partner)/join-restaurant' as never)}
+        style={styles.secondaryButton}
+      >
+        <Text style={styles.secondaryButtonText}>I was invited to join a restaurant</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity accessibilityRole="button" onPress={() => void signOut()} style={styles.secondaryButton}>
         <Text style={styles.secondaryButtonText}>Sign out</Text>
       </TouchableOpacity>
     </ScrollView>

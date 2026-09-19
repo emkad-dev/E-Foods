@@ -23,7 +23,25 @@ const NAV_ITEMS = [
 // spending a fifth on a screen touched once at setup would push the mid-service
 // pause control further away), so they keep Store lit while they are open
 // instead of leaving the sidebar with nothing selected.
-const STORE_SUB_ROUTES = ['/store-details', '/account', '/ratings'];
+const STORE_SUB_ROUTES = ['/store-details', '/account', '/ratings', '/staff'];
+
+/**
+ * The one route a signed-in user WITHOUT the restaurant role is allowed to
+ * stay on.
+ *
+ * An invited staff member is not an applicant: they are not setting up a
+ * business, so `complete-restaurant-details` (KYC, payout account, admin
+ * approval) is not merely the wrong screen for them, it would have them
+ * create a second restaurant to get into the one they were invited to. They
+ * need one field and a 6-digit code.
+ *
+ * Nothing about where a genuine applicant LANDS changes -- the redirect below
+ * still sends a fresh signup to the wizard, because the app cannot tell which
+ * kind of person just registered and applying is the common case. This only
+ * stops the redirect from dragging back someone who has deliberately
+ * navigated to the join screen, which the wizard now links to.
+ */
+const STAFF_JOIN_ROUTE = '/join-restaurant';
 
 const isNavItemActive = (path: string, pathname: string) => {
   if (path === '/') {
@@ -70,6 +88,13 @@ const getPartnerShellLoadingMode = (pathname: string | null | undefined): Partne
   }
 
   if (currentPath.startsWith('/application-under-review')) {
+    return 'setup';
+  }
+
+  // Same family: a single card on a hero, shown to somebody who does not have
+  // a dashboard yet. A 'dashboard' skeleton here would promise a screen of
+  // tiles that never arrives.
+  if (currentPath.startsWith(STAFF_JOIN_ROUTE)) {
     return 'setup';
   }
 
@@ -199,6 +224,14 @@ export default function PartnerStackLayout() {
   }
 
   if (user.role !== 'restaurant') {
+    // Checked BEFORE the landing route is resolved, so the join screen is
+    // reachable whatever the application status happens to say. A person who
+    // once started an application and was later invited as staff is still an
+    // invitee, and bouncing them to "under review" would strand them.
+    if (pathname === STAFF_JOIN_ROUTE) {
+      return <Slot />;
+    }
+
     const landingRoute = resolvePartnerLandingRoute({
       role: user.role,
       applicationStatus: user.partnerApplicationStatus,
@@ -289,6 +322,13 @@ export default function PartnerStackLayout() {
         <Tabs.Screen name="store-details" options={{ href: null }} />
         <Tabs.Screen name="account" options={{ href: null }} />
         <Tabs.Screen name="ratings" options={{ href: null }} />
+        <Tabs.Screen name="staff" options={{ href: null }} />
+        {/* Declared for the same reason as the two onboarding screens below:
+            Tabs registers every route in this directory unless told not to,
+            and a partner who already HAS a restaurant has no business being
+            offered "Join a restaurant" as a fifth tab. Following the URL still
+            works, and tells them why a second restaurant's code will not. */}
+        <Tabs.Screen name="join-restaurant" options={{ href: null }} />
         {/*
           Onboarding screens, and the ONLY reason they are declared here is to
           keep them out of the tab bar. Tabs registers every route in its

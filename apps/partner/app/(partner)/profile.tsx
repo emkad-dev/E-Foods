@@ -316,6 +316,20 @@ export default function PartnerStoreScreen() {
           <View style={styles.navRowChevron} />
         </TouchableOpacity>
 
+        {/* Touched a handful of times a year, so it sits behind a row like
+            the rest. The copy leads with what the owner gets out of it rather
+            than with the mechanism: "staff invites" describes the feature,
+            "their own login" describes the reason to open it. */}
+        <TouchableOpacity accessibilityRole="button" style={styles.navRow} onPress={() => router.push('/staff' as never)}>
+          <View style={styles.navRowText}>
+            <Text style={styles.navRowTitle}>Team</Text>
+            <Text style={styles.navRowCopy}>
+              Give your manager and kitchen their own login instead of sharing yours, and take it back when they leave.
+            </Text>
+          </View>
+          <View style={styles.navRowChevron} />
+        </TouchableOpacity>
+
         <TouchableOpacity accessibilityRole="button" style={styles.navRow} onPress={() => router.push('/account' as never)}>
           <View style={styles.navRowText}>
             <Text style={styles.navRowTitle}>Account</Text>
