@@ -21,6 +21,32 @@
  * the applicant screen now carries a link here, so the invitee gets out of the
  * wizard in one tap instead of having to become an applicant first.
  *
+ * WHY THIS STAYED A SEPARATE SCREEN when `(auth)/join` was built, rather than
+ * becoming a thin wrapper over it. The two are not the same screen with a flag
+ * flipped, because the caller's identity is already settled here and that
+ * changes what may be asked and what may be called:
+ *
+ *   - It must NOT ask for an email. Redemption binds the invite to the address
+ *     on the SIGNED-IN account, so a second address field would be a control
+ *     that changes nothing and a trap that explains a failure wrongly. The
+ *     address is stated, not requested.
+ *   - It must NOT call `staffInviteResolve`. There is no branch left to pick:
+ *     this person plainly has an account and is signed into it. Resolving
+ *     anyway would be a pre-auth round trip whose only possible effect is to
+ *     spend one of five attempts when the code is wrong -- paying the brute-
+ *     force budget for an answer nobody needs.
+ *
+ * Folding those two absences into `(auth)/join` would mean a mode in which
+ * step one is skipped, the email is fixed, the resolve is suppressed and two
+ * of the three branches are unreachable -- which is this file, with extra
+ * conditionals around it. What the two DO share is the part worth sharing:
+ * the code rules and copy in `src/domain/staffInvites.ts`, and
+ * `redeemStaffInvite` in `src/services/partnerStaff.ts`.
+ *
+ * It is also the landing spot for the `google` branch of `(auth)/join`: an
+ * invitee who signs in with Google still owes a redemption, and this is where
+ * they finish. See src/state/staffJoinHandoff.ts.
+ *
  * It is registered with `href: null` rather than being hidden behind the role
  * check, so an already-approved partner who follows this URL gets the screen
  * and then the server's 409 ("this account already works for another

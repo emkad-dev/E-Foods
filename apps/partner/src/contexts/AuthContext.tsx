@@ -8,10 +8,12 @@ import {
   getUserRoleClaim,
   isNetworkRequestError,
   signInWithEmail,
+  signInWithGoogle,
   signOutUser,
   sendPasswordReset,
 } from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
+import { completeGoogleWebRedirect } from '../services/googleSignIn';
 import {
   clearStoredUserProfile,
   clearStoredSessionId,
@@ -43,6 +45,14 @@ type AuthContextType = {
     }
   ) => Promise<{ verificationEmailSent: boolean; sessionPresent: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Native Google sign-in: exchanges a Google ID token for a session. */
+  signInWithGoogleIdToken: (idToken: string) => Promise<void>;
+  /**
+   * Web Google sign-in, second leg. Resolves `true` when this page load was a
+   * Google OAuth return that has now been signed in, `false` when it was an
+   * ordinary page load with nothing to consume.
+   */
+  completeGoogleWebSignIn: () => Promise<boolean>;
   resetPassword: (email: string) => Promise<void>;
   linkRestaurant: (restaurantId: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -363,25 +373,92 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  /**
+   * The tail of every explicit sign-in, whatever proved the identity.
+   *
+   * Lifted out of `signIn` rather than reimplemented for Google, so a Google
+   * partner and a password partner land in EXACTLY the same state: same
+   * profile resolution, same single-device claim, same cached profile. That
+   * matters more here than it looks — `buildNextUser` is what creates the
+   * `UserDocument` for a Google user who has never existed in this app, and
+   * `resolvePartnerAccessState` is what decides they are a `customer`. The
+   * `(partner)` layout then routes them to onboarding, or leaves them on
+   * /join-restaurant, which is precisely where an invited staff member with
+   * no restaurant and no application belongs.
+   *
+   * NOTE the absence of a role check. The customer app's Google path signs a
+   * user straight back out if their role is not `customer`; doing the mirror
+   * of that here — demanding `restaurant` — would reject the very people this
+   * feature exists for, because an invited staff member has no restaurant and
+   * no partner application at the moment they first sign in.
+   */
+  const adoptSignedInAuthUser = async (authUser: SupabaseAuthUser) => {
+    const nextUser = await buildNextUser(authUser);
+
+    if (!nextUser) {
+      // `buildNextUser` returns null only after it has signed the user out and
+      // written the reason into `error`; surface that reason, not a generic one.
+      throw new Error(error ?? MISSING_PROFILE_ERROR);
+    }
+
+    await startSingleDeviceSession(authUser.id);
+
+    setUser(nextUser);
+    await storeUserProfile(nextUser);
+  };
+
   const signIn = async (email: string, password: string) => {
     setLoading(true);
     setError(null);
 
     try {
       const authUser = await signInWithEmail(supabase, email, password);
-      const nextUser = await buildNextUser(authUser);
-
-      if (!nextUser) {
-        const message = error ?? MISSING_PROFILE_ERROR;
-        throw new Error(message);
-      }
-
-      await startSingleDeviceSession(authUser.id);
-
-      setUser(nextUser);
-      await storeUserProfile(nextUser);
+      await adoptSignedInAuthUser(authUser);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign in');
+      setError(nextMessage);
+      throw new Error(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signInWithGoogleIdToken = async (idToken: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const authUser = await signInWithGoogle(supabase, idToken);
+      await adoptSignedInAuthUser(authUser);
+    } catch (nextError: any) {
+      const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to complete Google sign-in');
+      setError(nextMessage);
+      throw new Error(nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const completeGoogleWebSignIn = async () => {
+    // Deliberately does NOT flip `loading` before it knows there is something
+    // to do: this runs on every login-screen mount, and the (auth) layout
+    // swaps the whole navigator for a skeleton while `loading` is true on the
+    // first paint. Signalling "busy" for an ordinary visit would make every
+    // partner watch a skeleton for a round-trip that never happens.
+    const authUser = await completeGoogleWebRedirect(supabase);
+
+    if (!authUser) {
+      return false;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await adoptSignedInAuthUser(authUser);
+      return true;
+    } catch (nextError: any) {
+      const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to complete Google sign-in');
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -504,6 +581,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         error,
         signUp,
         signIn,
+        signInWithGoogleIdToken,
+        completeGoogleWebSignIn,
         resetPassword,
         linkRestaurant,
         signOut,

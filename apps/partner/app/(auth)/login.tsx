@@ -4,6 +4,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableO
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
+import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateLoginForm } from '../../src/domain/authFormValidation';
 import { resolvePartnerSuccessNotice } from '../../src/utils/successNotices';
@@ -115,6 +116,15 @@ export default function PartnerLoginScreen() {
           <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Open dashboard'}</Text>
         </TouchableOpacity>
 
+        {/* Additive, never a replacement: the email/password form above is
+            untouched and remains the route every existing partner uses.
+            This is the ONLY door for an invited staff member whose email is a
+            Google account — such an account has no password in `auth.users`
+            at all, so there is nothing for them to type above and nothing for
+            "forgot password" to reset. The component renders itself away on
+            builds where Google sign-in cannot work. */}
+        <GoogleSignInButton />
+
         {/* `asChild` so each link is a real box rather than a run of inline
             text. A bare <Link> renders as Text, which react-native-web gives
             `display: inline` -- and CSS ignores min-height on an inline box,
@@ -126,6 +136,20 @@ export default function PartnerLoginScreen() {
         >
           <Pressable style={styles.linkPressable}>
             <Text style={styles.link}>Need a partner login? Create one</Text>
+          </Pressable>
+        </Link>
+        {/* THE INVITEE'S DOOR, and it is here rather than on the signup screen
+            on purpose. An invited staff member is not creating a partner
+            login: going through "Create one" lands them in the restaurant
+            application wizard -- KYC, payout account, admin approval -- which
+            was never addressed to them, and which they then have to escape
+            from via a link at the bottom. Worse, that route assumed everyone
+            has a password, so the first Google account we invited could not
+            get in at all. /join asks for the code first and lets the server
+            say which of the three ways this person gets in. */}
+        <Link href="/(auth)/join" asChild>
+          <Pressable style={styles.linkPressable}>
+            <Text style={styles.link}>Joining a restaurant? Use your invite code</Text>
           </Pressable>
         </Link>
         <Link

@@ -1,7 +1,7 @@
 /**
  * Run with: node --test --experimental-strip-types apps/partner/src/domain/staffInvites.test.ts
  *
- * Four claims are pinned here, and each one is a way this feature could
+ * Six claims are pinned here, and each one is a way this feature could
  * quietly stop being the thing it was built to be.
  *
  * FIRST, that the code never appears on the owner's side. The point of staff
@@ -24,6 +24,17 @@
  *
  * FOURTH, that removing a person names that person. The control fires from a
  * row in a list, where a correct-but-generic dialog cannot catch a mis-tap.
+ *
+ * FIFTH, that the INVITEE's branch is the server's answer and never the
+ * client's guess. The address we first tested with was a Google account with
+ * no password, and a client that defaults an unrecognised branch to
+ * `password` puts that person back in front of a field they cannot fill.
+ *
+ * SIXTH, that the two password fields on the join screen are not the same
+ * rule. One is a password being CHOSEN, where the server's eight-character
+ * floor must be stated before the round trip that claims the invite; the
+ * other is a password that already EXISTS, where imposing any floor at all
+ * locks somebody out of their own account over a rule it predates.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -32,15 +43,23 @@ import * as staffInvites from './staffInvites.ts';
 import {
   INVITE_SENT_TITLE,
   STAFF_INVITE_CODE_LENGTH,
+  STAFF_JOIN_MIN_PASSWORD_LENGTH,
+  STAFF_JOIN_UNKNOWN_BRANCH_MESSAGE,
   describeStaffInvite,
+  describeStaffJoinBranch,
   formatInviteExpiry,
   inviteSentMessage,
   normaliseStaffInviteCode,
+  normaliseStaffJoinDisplayName,
   openStaffInvites,
+  resolveStaffJoinStep,
   staffMemberName,
   staffRemovalConfirm,
   validateStaffInviteCode,
   validateStaffInviteEmail,
+  validateStaffJoinEmail,
+  validateStaffJoinNewPassword,
+  validateStaffJoinSignInPassword,
   type StaffInvite,
   type StaffMember,
 } from './staffInvites.ts';
@@ -103,6 +122,11 @@ test('no owner-facing value can carry an invite code out of a server row', () =>
       contaminatedMember,
       { email: 'chef@example.com', ownerEmail: 'owner@example.com', staff: [contaminatedMember] },
       'chef@example.com',
+      // The INVITEE's side, added with `(auth)/join`. `staffInviteResolve`
+      // returns no code today; this is the shape it would arrive in if a
+      // server change ever started sending one, and the sweep is the reason
+      // nothing on the join screen could render it by accident.
+      { branch: 'password', code, email: 'chef@example.com', restaurantName: 'Mama Put' },
     ];
 
     for (const argument of attempts) {
@@ -299,4 +323,130 @@ test('removing a person names that person', () => {
   assert.match(staffRemovalConfirm(member({ email: 'ada@example.com' })).title, /ada@example\.com/);
   assert.match(staffRemovalConfirm(member({ email: null })).title, /Remove This team member/);
   assert.equal(staffMemberName(member({ displayName: '   ', email: 'a@b.com' })), 'a@b.com');
+});
+
+/* -------------------------------------------------------------------------- *
+ * THE INVITEE'S SIDE: `(auth)/join`
+ * -------------------------------------------------------------------------- */
+
+test('the branch is the server’s answer, and an unknown one is never guessed at', () => {
+  assert.equal(resolveStaffJoinStep('password'), 'password');
+  assert.equal(resolveStaffJoinStep('google'), 'google');
+  assert.equal(resolveStaffJoinStep('create'), 'create');
+
+  /*
+   * Every plausible default is a lie told to somebody's face. `password` asks
+   * a Google account for a password it does not have -- which is the exact
+   * defect this flow was rebuilt to fix -- and `create` offers to make a
+   * second account for an address that already has one, which the server will
+   * then refuse with a 409 that reads like a dead end. So: null, and the
+   * screen says "update the app".
+   */
+  assert.equal(resolveStaffJoinStep('magic-link'), null);
+  assert.equal(resolveStaffJoinStep('PASSWORD'), null);
+  assert.equal(resolveStaffJoinStep(''), null);
+  assert.equal(resolveStaffJoinStep(undefined), null);
+  assert.equal(resolveStaffJoinStep(null), null);
+  assert.equal(resolveStaffJoinStep({ branch: 'password' }), null);
+
+  assert.equal(describeStaffJoinBranch({ branch: 'magic-link' }), null);
+  assert.match(STAFF_JOIN_UNKNOWN_BRANCH_MESSAGE, /update the app/i);
+});
+
+test('every branch names the restaurant before a password is typed', () => {
+  const password = describeStaffJoinBranch({ branch: 'password', restaurantName: 'Mama Put' });
+  const google = describeStaffJoinBranch({ branch: 'google', restaurantName: 'Mama Put' });
+  const create = describeStaffJoinBranch({ branch: 'create', restaurantName: 'Mama Put' });
+
+  for (const copy of [password, google, create]) {
+    assert.notEqual(copy, null);
+    // The last moment this person can tell they are joining the place they
+    // meant to, and on two of the three branches the next thing they do is
+    // type a password.
+    assert.match(copy!.title, /Mama Put/);
+    assert.equal(copy!.action.trim().length > 0, true);
+  }
+
+  // A Google account has no FEASTY password. Naming one in the heading is the
+  // original defect, in smaller print.
+  assert.equal(/password/i.test(google!.title), false);
+  assert.match(google!.body.join(' '), /Google/);
+  // And signing in is not joining. Saying so is the whole difference between
+  // a handoff and a dead end.
+  assert.match(google!.body.join(' '), /does not join you/i);
+
+  // Finishing a signup with no confirmation email looks like a step that
+  // failed silently unless the screen says it was skipped on purpose.
+  assert.match(create!.body.join(' '), /will not email you a confirmation code/i);
+  assert.match(create!.body.join(' '), /already proves it is yours/i);
+
+  // The password branch's unasked question is "am I making a second account?".
+  assert.match(password!.body.join(' '), /same login/i);
+
+  // No usable name: a neutral phrase, never a gap and never "undefined".
+  assert.match(describeStaffJoinBranch({ branch: 'create', restaurantName: '   ' })!.title, /this restaurant/);
+  assert.match(describeStaffJoinBranch({ branch: 'create', restaurantName: null })!.title, /this restaurant/);
+});
+
+test('branch copy is rebuilt from two named fields, not passed through', () => {
+  const code = '482913';
+  const contaminated = { branch: 'password', code, email: 'chef@example.com', restaurantName: 'Mama Put' };
+
+  // Identical to the copy built from only the two fields this function is
+  // allowed to read. That equality is the guarantee: no field a future
+  // `staffInviteResolve` might grow -- an invite code above all -- can reach
+  // the screen through here, because nothing here reads a field it does not
+  // name.
+  assert.deepEqual(
+    describeStaffJoinBranch(contaminated),
+    describeStaffJoinBranch({ branch: 'password', restaurantName: 'Mama Put' })
+  );
+  assert.equal(JSON.stringify(describeStaffJoinBranch(contaminated)).includes(code), false);
+});
+
+test('the invitee is asked for their address in words addressed to them', () => {
+  // Deliberately not `validateStaffInviteEmail`: that one also refuses the
+  // owner's own address and anyone already on staff, which are facts only the
+  // owner's screen has -- and "you already have access" is nonsense said to a
+  // stranger who is not signed in.
+  assert.match(validateStaffJoinEmail('') ?? '', /invite was sent to/i);
+  assert.match(validateStaffJoinEmail('   ') ?? '', /invite was sent to/i);
+  assert.match(validateStaffJoinEmail('chef') ?? '', /email address/i);
+  assert.match(validateStaffJoinEmail('chef@example') ?? '', /email address/i);
+  // A pasted pair. Caught here because the alternative is spending one of
+  // only five attempts on a typo.
+  assert.match(validateStaffJoinEmail('a@x.com,b@x.com') ?? '', /email address/i);
+  assert.match(validateStaffJoinEmail(`${'a'.repeat(250)}@example.com`) ?? '', /too long/i);
+
+  assert.equal(validateStaffJoinEmail('  Chef@Example.COM '), null);
+});
+
+test('the two password fields are deliberately not the same rule', () => {
+  // CHOOSING one. The server's floor is eight, and finding that out after the
+  // round trip is not free: `staffInviteCreateAccount` claims the invite
+  // before it creates the account.
+  assert.equal(STAFF_JOIN_MIN_PASSWORD_LENGTH, 8);
+  assert.match(validateStaffJoinNewPassword('') ?? '', /choose a password/i);
+  assert.match(validateStaffJoinNewPassword('short12') ?? '', /8/);
+  assert.equal(validateStaffJoinNewPassword('eightch8'), null);
+  // Spaces are characters. Trimming here would create the account with a
+  // password the person cannot reproduce in any other sign-in field.
+  assert.equal(validateStaffJoinNewPassword('  a  b  '), null);
+
+  // TYPING one they already have. No length rule at all, on purpose: the
+  // account may predate every rule we have now, and refusing a password
+  // Supabase would accept locks somebody out of their own account over
+  // nothing this screen can help them with.
+  assert.equal(validateStaffJoinSignInPassword('short'), null);
+  assert.equal(validateStaffJoinSignInPassword(' '), null);
+  assert.match(validateStaffJoinSignInPassword('') ?? '', /enter the password/i);
+});
+
+test('an optional display name is omitted rather than sent empty', () => {
+  // `''` and "absent" mean the same thing to the server's sanitizer, but
+  // sending the empty string still writes an empty display name over the
+  // fallback, which is the address.
+  assert.equal(normaliseStaffJoinDisplayName(''), undefined);
+  assert.equal(normaliseStaffJoinDisplayName('   '), undefined);
+  assert.equal(normaliseStaffJoinDisplayName('  Ada Kitchen  '), 'Ada Kitchen');
 });

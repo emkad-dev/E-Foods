@@ -344,3 +344,214 @@ export const staffRemovalConfirm = (member: Pick<StaffMember, 'displayName' | 'e
     cancelLabel: 'Keep access',
   };
 };
+
+/* ========================================================================== *
+ * THE INVITEE'S SIDE, BEFORE THEY HAVE AN ACCOUNT
+ *
+ * Everything above is the owner's screen. Everything below is the screen a
+ * person reaches from the LOGIN page, holding a code and possibly nothing
+ * else -- no partner account, sometimes no password anywhere.
+ *
+ * WHY THIS EXISTS AS A SEPARATE ENTRY POINT. The first version made an invitee
+ * register (email OTP), land in the restaurant-onboarding wizard -- KYC, payout
+ * account, admin approval, none of which applies to them -- and find a
+ * secondary link at the bottom. Two proofs of the same mailbox to join one
+ * store. Worse, it assumed everyone has a password: the first real address we
+ * invited was a Google account with no password at all, and the partner app
+ * had no Google sign-in, so that person could not get in by ANY route.
+ *
+ * So the code comes first and the SERVER decides the route. `staffInviteResolve`
+ * takes the email and the code and answers `password`, `google` or `create`.
+ * The screen cannot work the branch out for itself and must not try: without a
+ * valid, live, unexhausted invite for that exact address the endpoint returns
+ * one undifferentiated 400, which is what stops it being an account-existence
+ * oracle for an unauthenticated caller.
+ * ========================================================================== */
+
+/**
+ * The route the server picked for this address.
+ *
+ * `password` - an account with an email/password identity. Sign in, then redeem.
+ * `google`   - an account whose only identity is an OAuth provider. There is no
+ *              password to ask for, and asking is the defect this replaced.
+ * `create`   - no account at all. The code already proved the mailbox, so this
+ *              one can finish without a second email round trip.
+ */
+export type StaffJoinBranch = 'password' | 'google' | 'create';
+
+/**
+ * What the screen is currently showing. `identify` is step one for everybody;
+ * the middle three are the branches; `joined` is the one screen that names the
+ * restaurant the person now works for.
+ */
+export type StaffJoinStep = 'identify' | StaffJoinBranch | 'joined';
+
+/**
+ * Branch -> step, and `null` for anything this build does not recognise.
+ *
+ * Deliberately NOT defaulting to a branch. A server that grows a fourth route
+ * is telling an old client something it cannot act on, and every plausible
+ * default is a lie told to the person's face: guessing `password` asks a
+ * Google user for a password they do not have, and guessing `create` offers to
+ * make a second account for an address that already has one. The screen shows
+ * "update the app" instead, which is the only honest answer.
+ *
+ * Takes `unknown` on purpose -- the value is off the wire, so a type
+ * annotation here would be a claim about the server, not a fact about the value.
+ */
+export const resolveStaffJoinStep = (branch: unknown): StaffJoinBranch | null =>
+  branch === 'password' || branch === 'google' || branch === 'create' ? branch : null;
+
+export const STAFF_JOIN_UNKNOWN_BRANCH_MESSAGE =
+  'This version of the app cannot finish joining a restaurant. Update the app, or ask the restaurant to help you sign in.';
+
+/**
+ * The address the code was sent to, validated on the INVITEE's screen.
+ *
+ * Separate from `validateStaffInviteEmail` above, and not a thin wrapper over
+ * it: that one also refuses the owner's own address and anyone already on
+ * staff, which are facts only the owner's screen knows. Repeating its wording
+ * here ("you already have access") would be nonsense said to a stranger.
+ *
+ * The shape check is the same regex for the same reason: the authority is the
+ * mailbox, not this function. What it has to catch is the mistake that would
+ * otherwise burn one of five attempts -- a pasted address with a trailing
+ * comma, a missing @, a bare domain.
+ */
+export const validateStaffJoinEmail = (raw: string): string | null => {
+  const candidate = normaliseStaffEmail(raw);
+
+  if (!candidate) {
+    return 'Enter the email address your invite was sent to.';
+  }
+
+  if (candidate.length > MAX_EMAIL_LENGTH) {
+    return 'That email address is too long.';
+  }
+
+  if (!EMAIL_SHAPE.test(candidate)) {
+    return 'That does not look like an email address. Check it and try again.';
+  }
+
+  return null;
+};
+
+/**
+ * Matches the server's floor in `staffInviteCreateAccount`
+ * (`password.length < 8` is a 400).
+ *
+ * Stated here so the person finds out while their hands are still on the
+ * keyboard, rather than after a round trip that -- because the invite is
+ * claimed before the account is created -- is not a free thing to fail.
+ */
+export const STAFF_JOIN_MIN_PASSWORD_LENGTH = 8;
+
+/** The password an invitee is CHOOSING, on the `create` branch. */
+export const validateStaffJoinNewPassword = (raw: string): string | null => {
+  if (!raw) {
+    return 'Choose a password for your new account.';
+  }
+
+  // Not trimmed. A leading or trailing space is a legitimate character in a
+  // password, and silently dropping one here would create the account with a
+  // password the person cannot reproduce anywhere else.
+  if (raw.length < STAFF_JOIN_MIN_PASSWORD_LENGTH) {
+    return `Use at least ${STAFF_JOIN_MIN_PASSWORD_LENGTH} characters.`;
+  }
+
+  return null;
+};
+
+/**
+ * The password an invitee ALREADY HAS, on the `password` branch.
+ *
+ * No length rule, and that is the whole point of it being a separate function.
+ * The account predates this screen and may predate any rule we have now;
+ * rejecting a seven-character password that Supabase will happily accept locks
+ * someone out of their own account with a message they cannot act on.
+ */
+export const validateStaffJoinSignInPassword = (raw: string): string | null =>
+  raw ? null : 'Enter the password for this account.';
+
+/**
+ * Optional, and normalised to `undefined` rather than `''`.
+ *
+ * `staffInviteCreateAccount` runs it through `sanitizeOptionalText`, so an
+ * empty string and a missing field mean the same thing server-side -- but
+ * sending `''` would still write an empty display name where the fallback
+ * (the address on the account) reads better.
+ */
+export const normaliseStaffJoinDisplayName = (raw: string): string | undefined => raw.trim() || undefined;
+
+export type StaffJoinBranchCopy = {
+  /** Heading for the second step. */
+  title: string;
+  /** Sentences under it, in order. */
+  body: string[];
+  /** Label for the control that finishes the branch. */
+  action: string;
+};
+
+export type DescribeStaffJoinBranchInput = {
+  branch: unknown;
+  restaurantName?: string | null;
+};
+
+/**
+ * What the second step says, once the server has picked a branch.
+ *
+ * REBUILT FROM TWO NAMED FIELDS, never spread from the response. Same
+ * mechanical guarantee as `openStaffInvites`: `staffInviteResolve` returns no
+ * code today, and a server that started sending one back could not reach this
+ * copy even by accident, because nothing here reads a field it does not name.
+ *
+ * The restaurant is named in every branch. It is the last moment before the
+ * person types a password, and the only way they can tell they are joining the
+ * place they meant to.
+ */
+export const describeStaffJoinBranch = ({
+  branch,
+  restaurantName,
+}: DescribeStaffJoinBranchInput): StaffJoinBranchCopy | null => {
+  const place = (typeof restaurantName === 'string' && restaurantName.trim()) || 'this restaurant';
+
+  switch (resolveStaffJoinStep(branch)) {
+    case 'password':
+      return {
+        title: `Sign in to join ${place}`,
+        body: [
+          `Your code is good. This address already has a FEASTY account, so enter its password and we will add ${place} to it.`,
+          // Said because the alternative reading -- "am I about to make a
+          // second account?" -- is the one that makes people abandon here.
+          'You keep the same login. Nothing about your account changes except the restaurant you can work for.',
+        ],
+        action: 'Sign in and join',
+      };
+    case 'google':
+      return {
+        title: `Sign in with Google to join ${place}`,
+        body: [
+          'Your code is good. This address signs in with Google, so there is no FEASTY password to type.',
+          // The one instruction that has to survive the person leaving this
+          // screen: Google sign-in is on the sign-in page, and coming back
+          // signed in is not yet the same as having joined.
+          'Use the Google option on the sign-in screen. When you come back, enter this code once more to finish - signing in on its own does not join you to the store.',
+        ],
+        action: 'Go to Google sign-in',
+      };
+    case 'create':
+      return {
+        title: `Create your account for ${place}`,
+        body: [
+          `Your code is good, and there is no FEASTY account for this address yet. Choose a password and we will set one up with access to ${place}.`,
+          // NOT a missing step. Without saying so, a signup that finishes with
+          // no confirmation email looks like it forgot one, and the person
+          // sits waiting for mail that is never coming.
+          'We will not email you a confirmation code. The invite code you just entered was delivered to this mailbox, which already proves it is yours.',
+        ],
+        action: 'Create account and join',
+      };
+    default:
+      return null;
+  }
+};

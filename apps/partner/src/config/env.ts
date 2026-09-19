@@ -42,6 +42,18 @@ export const appEnv = {
     process.env.EXPO_PUBLIC_PROJECT_ID,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID
   ),
+  // NATIVE-ONLY credential for Google sign-in, and deliberately left unset in
+  // app.json. On web the browser never sees a Google client ID — the redirect
+  // goes to Supabase, which holds the client ID/secret — so leaving this blank
+  // costs the web build nothing. On native it is the `webClientId` the Google
+  // SDK signs its ID token for, and setting it here would turn the native
+  // button ON before the Android/iOS OAuth clients for `com.feasty.partner`
+  // exist in Google Cloud, which fails with a bare DEVELOPER_ERROR. See
+  // src/services/googleSignIn.ts.
+  googleWebClientId: getEnvValue(
+    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+  ),
   backendRpcUrl: getEnvValue(
     process.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_RPC_URL

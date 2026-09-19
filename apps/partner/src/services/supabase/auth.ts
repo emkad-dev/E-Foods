@@ -8,6 +8,7 @@ export {
   sendPasswordResetEmailWithFallback as sendPasswordReset,
   sendVerificationEmailWithFallback as sendVerificationEmail,
   signInWithEmail,
+  signInWithGoogle,
   signOutUser,
   useOtpCooldown,
   verifyEmailOtp,

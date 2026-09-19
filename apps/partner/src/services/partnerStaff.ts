@@ -1,4 +1,5 @@
 import type { StaffInvite, StaffMember } from '../domain/staffInvites';
+import { callAnonymousBackendRpc } from './anonymousBackendRpc';
 import { callPartnerBackendRpc } from './backendRpc';
 
 /**
@@ -91,3 +92,93 @@ export const revokeStaffAccess = (targetUid: string) =>
  */
 export const redeemStaffInvite = (code: string) =>
   callPartnerBackendRpc<RedeemStaffInviteResult>('redeemStaffInvite', { code: code.trim() });
+
+/* -------------------------------------------------------------------------- *
+ * THE TWO PRE-AUTH CALLS
+ *
+ * They live in this file, beside `redeemStaffInvite`, because they are the same
+ * feature seen from the other end -- but they go through
+ * `callAnonymousBackendRpc`, NOT `callPartnerBackendRpc`. The authenticated
+ * helper resolves a session before it sends anything and throws "your session
+ * expired" when there is none, which is the normal state of every caller here.
+ * -------------------------------------------------------------------------- */
+
+export type StaffInviteResolveResult = {
+  /**
+   * Which way this person gets in. Decided server-side off the auth user's
+   * `identities`, because a Google account having no password to type is the
+   * fact this whole flow was rebuilt around. Typed as `string` deliberately:
+   * `resolveStaffJoinStep` in the domain module is what narrows it, and a
+   * branch this build does not know must be recognisable as unknown rather
+   * than silently typed into one of the three.
+   */
+  branch: string;
+  /** The invite's address, normalised. The screen shows this, not what was typed. */
+  email: string;
+  restaurantName: string;
+};
+
+/**
+ * Which route does this email + code take? Read-only apart from the attempt
+ * counter.
+ *
+ * NOT AN ACCOUNT-EXISTENCE ORACLE, and callers must not undermine that. Every
+ * failure -- unknown address, no invite, expired, wrong code, five attempts
+ * spent -- comes back as one identical 400. Render `error.message` verbatim
+ * and do not try to work out which case it was: a screen that distinguishes
+ * them hands an unauthenticated caller a way to enumerate addresses with live
+ * invites, and separately tells anyone holding a code whether their colleague
+ * has an account.
+ *
+ * A WRONG code costs one of five attempts. A correct one costs nothing, so
+ * re-resolving the same valid code (going back a step, say) is free.
+ */
+export const resolveStaffInvite = (email: string, code: string) =>
+  callAnonymousBackendRpc<StaffInviteResolveResult>('staffInviteResolve', {
+    // Lowercased server-side too; doing it here keeps the address the screen
+    // echoes back identical to the one the server matched on.
+    email: email.trim().toLowerCase(),
+    code: code.trim(),
+  });
+
+export type StaffInviteCreateAccountResult = {
+  email: string;
+  restaurantName: string;
+};
+
+/**
+ * Creates the account for an invitee who has none, and attaches it to the
+ * restaurant that invited them. Only valid on the `create` branch.
+ *
+ * NO SESSION COMES BACK, by design -- the server mints nothing. The caller
+ * signs in afterwards with the password the person just chose, through the
+ * ordinary sign-in path, which is one fewer thing a pre-auth endpoint is
+ * trusted to do.
+ *
+ * NO EMAIL OTP EITHER. The code was delivered to that mailbox, so holding it
+ * already proves what a confirmation email would; the account is created
+ * confirmed. The screen has to SAY this, or finishing with no confirmation
+ * mail looks like a step that failed silently.
+ *
+ * 409 if the address already has an account -- refused, never updated. That
+ * missing update branch is what keeps this from being an account-takeover
+ * primitive handed to an unauthenticated caller, so a caller that "helpfully"
+ * retried as a sign-in on 409 would be defeating the point; send them back to
+ * step one and let the server pick the branch again.
+ */
+export const createStaffInviteAccount = (input: {
+  code: string;
+  displayName?: string;
+  email: string;
+  password: string;
+}) =>
+  callAnonymousBackendRpc<StaffInviteCreateAccountResult>('staffInviteCreateAccount', {
+    code: input.code.trim(),
+    // Omitted rather than sent empty when there is no name.
+    ...(input.displayName ? { displayName: input.displayName } : null),
+    email: input.email.trim().toLowerCase(),
+    // NOT trimmed. A space at either end is a legitimate password character,
+    // and trimming it here would create the account with a password that does
+    // not match what the person typed into the sign-in call two lines later.
+    password: input.password,
+  });

@@ -2,9 +2,13 @@ import { useRef } from 'react';
 import { Redirect, Stack, useLocalSearchParams, usePathname } from 'expo-router';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useStaffJoinHandoff } from '../../src/state/staffJoinHandoff';
 import { partnerTheme } from '../../src/theme/palette';
 
-const AUTH_ROUTES = new Set(['/login', '/register', '/forgot-password', '/reset-password']);
+// `/join` is in here for the same reason as the rest: `redirectTo` must never
+// point back into this group. Landing a just-signed-in person on the join
+// screen is exactly the loop the handoff below exists to steer out of.
+const AUTH_ROUTES = new Set(['/login', '/register', '/forgot-password', '/reset-password', '/join']);
 const normalizeRedirectTo = (value: unknown) => {
   if (typeof value !== 'string') {
     return null;
@@ -37,7 +41,11 @@ const getAuthLoadingMode = (pathname: string | null | undefined): PartnerLoading
     currentPath.startsWith('/reset-password') ||
     currentPath.startsWith('/verify-email') ||
     currentPath.startsWith('/terms') ||
-    currentPath.startsWith('/privacy')
+    currentPath.startsWith('/privacy') ||
+    // Same family: one card on a hero, shown to somebody who does not have a
+    // dashboard yet. The login skeleton would promise a form that is not
+    // coming.
+    currentPath.startsWith('/join')
   ) {
     return 'auth-recovery';
   }
@@ -55,6 +63,7 @@ export default function AuthLayout() {
   const params = useLocalSearchParams<{ redirectTo?: string | string[] }>();
   const pathname = usePathname();
   const { loading, user } = useAuth();
+  const staffJoin = useStaffJoinHandoff();
   const redirectTo = normalizeRedirectTo(params.redirectTo);
 
   // `loading` is true for the duration of every auth ACTION (signUp, signIn,
@@ -75,8 +84,25 @@ export default function AuthLayout() {
     return <LoadingSkeleton mode={getAuthLoadingMode(pathname)} />;
   }
 
-  // Signed-in partners never see the auth screens.
-  if (user) {
+  // Signed-in partners never see the auth screens -- with two exceptions, both
+  // of them the staff-join flow, which is the only thing in this group that
+  // signs a person in and still has work to do afterwards.
+  //
+  // HOLDING is handled by falling through to the SAME <Stack> below rather
+  // than returning a second one here: two different Stack elements at this
+  // position reconcile into a navigator remount, which would tear down the
+  // very screen this branch exists to keep alive.
+  if (user && staffJoin !== 'holding') {
+    // AWAITING-GOOGLE: they left /join to sign in with Google and still owe a
+    // redemption. `/(partner)` would send them to the applicant wizard, which
+    // is the wrong screen for an invitee and was the original defect; the
+    // authenticated join screen is the one that finishes the job. (On web the
+    // Google flow is a full-page redirect, so this flag is usually gone by
+    // now and they get the wizard's "I was invited" link instead.)
+    if (staffJoin === 'awaiting-google') {
+      return <Redirect href="/(partner)/join-restaurant" />;
+    }
+
     return <Redirect href={(redirectTo ?? '/(partner)') as never} />;
   }
 
@@ -88,6 +114,9 @@ export default function AuthLayout() {
       }}
     >
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      {/* No header, like login: this screen carries its own hero, and the
+          person arriving on it has no account to go "back" to. */}
+      <Stack.Screen name="join" options={{ headerShown: false }} />
       <Stack.Screen name="register" options={{ title: 'Create Account' }} />
       <Stack.Screen name="forgot-password" options={{ title: 'Reset Password' }} />
       <Stack.Screen name="reset-password" options={{ title: 'Choose a New Password' }} />
