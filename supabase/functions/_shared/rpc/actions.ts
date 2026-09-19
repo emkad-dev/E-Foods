@@ -110,6 +110,8 @@ export const ACCOUNT_ACTIONS = [
   'recordPolicyAcceptance',
   'provisionStaffAccount',
   'redeemStaffInvite',
+  'staffInviteCreateAccount',
+  'staffInviteResolve',
   'assignUserRole',
   'updateUserRestaurantLink',
   'revokeUserRole',
@@ -131,7 +133,16 @@ export const ACCOUNT_ACTIONS = [
 //   bootstrapFirstAdmin — resolves its own bootstrap context (see rpc/context.ts).
 // Every other action authenticates first; so does an unknown action, which is
 // why an unauthenticated request for a nonexistent action still gets a 401.
-export const ANONYMOUS_ACTIONS = ['promoTrack', 'bootstrapFirstAdmin'] as const;
+// Pre-auth surface. Every addition here is a deliberate decision, not a
+// convenience: these run with no session at all. The two staff-invite entries
+// are gated behind a valid, unexpired invite code with a five-attempt cap, and
+// neither can touch an account that already exists.
+export const ANONYMOUS_ACTIONS = [
+  'promoTrack',
+  'bootstrapFirstAdmin',
+  'staffInviteResolve',
+  'staffInviteCreateAccount',
+] as const;
 
 export const ALL_RPC_ACTIONS = [
   ...ORDER_ACTIONS,

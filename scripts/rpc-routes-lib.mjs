@@ -53,10 +53,10 @@ export const EXPECTED_DOMAIN_ACTION_COUNTS = {
   DISPATCH_ACTIONS: 14,
   PARTNER_ACTIONS: 18,
   ADMIN_ACTIONS: 29,
-  ACCOUNT_ACTIONS: 15,
+  ACCOUNT_ACTIONS: 17,
 };
 
-export const EXPECTED_TOTAL_ACTION_COUNT = 89;
+export const EXPECTED_TOTAL_ACTION_COUNT = 91;
 
 /**
  * Extracts a `export const NAME = ['a', 'b'] as const;` string-literal array

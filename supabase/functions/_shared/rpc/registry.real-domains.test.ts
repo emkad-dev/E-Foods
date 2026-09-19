@@ -50,9 +50,23 @@ const REAL_DOMAINS = [ordersDomain, dispatchDomain, partnerDomain, adminDomain, 
 // from ANONYMOUS_ACTIONS in actions.ts. The point of this file is to check
 // the real modules against a fixed expectation that a rename or an added
 // `anonymousHandlers` entry elsewhere can't quietly satisfy.
-const EXPECTED_ANONYMOUS_ACTIONS = ['bootstrapFirstAdmin', 'promoTrack'];
+const EXPECTED_ANONYMOUS_ACTIONS = [
+  'bootstrapFirstAdmin',
+  'promoTrack',
+  // Added 2026-09-19, deliberately. Both are gated behind a valid, unexpired
+  // staff invite code with a five-attempt cap, both resolve exactly one invite
+  // for exactly one address, and neither can modify an account that already
+  // exists -- staffInviteCreateAccount refuses a known address outright rather
+  // than updating it, which is what keeps it from being the takeover primitive
+  // that keeps provisionStaffAccount admin-only.
+  //
+  // If you are here because this list failed, that is the point: adding a
+  // pre-auth action should cost a decision, not a keystroke.
+  'staffInviteCreateAccount',
+  'staffInviteResolve',
+];
 
-Deno.test('the real domain modules register exactly promoTrack and bootstrapFirstAdmin as pre-auth', () => {
+Deno.test('the real domain modules register exactly the four expected pre-auth actions', () => {
   const registeredAnonymous = new Set<string>();
   for (const domain of REAL_DOMAINS) {
     for (const action of Object.keys(domain.anonymousHandlers)) {
@@ -84,11 +98,11 @@ Deno.test('the real domain modules register exactly promoTrack and bootstrapFirs
   }
 });
 
-Deno.test('the real domain modules together register all 89 handlers, none pre-auth but the two allowed', () => {
-  expectEqual(ALL_RPC_ACTIONS.length, 89, 'ALL_RPC_ACTIONS length');
+Deno.test('the real domain modules together register all 91 handlers, none pre-auth but the two allowed', () => {
+  expectEqual(ALL_RPC_ACTIONS.length, 91, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(REAL_DOMAINS);
-  expectEqual(dispatcher.actions.length, 89, 'real dispatcher action count');
+  expectEqual(dispatcher.actions.length, 91, 'real dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     const isAnonymous = EXPECTED_ANONYMOUS_ACTIONS.includes(action);

@@ -239,6 +239,227 @@ const recordPolicyAcceptanceHandler: Handler = async ({ context, data }) => {
 };
 
 /**
+ * Shared validation for the two PRE-AUTH invite actions below.
+ *
+ * These are the only unauthenticated endpoints in this codebase besides
+ * promoTrack and bootstrapFirstAdmin, so everything they do is deliberately
+ * narrow: they resolve exactly one invite, for exactly one address, and they
+ * refuse everything else.
+ *
+ * Returns the matched invite or throws the SAME rejection for every failure
+ * mode -- unknown address, no invite, expired, wrong code, attempts exhausted.
+ * An endpoint that distinguishes them tells an unauthenticated caller which
+ * addresses have live invites, which is a list worth having if you are
+ * guessing codes.
+ */
+const STAFF_INVITE_REJECTION =
+  'That code is not valid. Check it with the restaurant, or ask them to send a new one.';
+
+const resolvePendingStaffInvite = async (rawEmail: unknown, rawCode: unknown) => {
+  const email = sanitizeText(rawEmail).trim().toLowerCase();
+  const code = sanitizeText(rawCode).trim();
+
+  if (!email || !code) {
+    fail(400, 'Enter the email address the code was sent to, and the code.');
+  }
+
+  const { data: rows, error } = await serviceClient
+    .from('StaffInvite')
+    .select('id,restaurantId,codeHash,expiresAt,attempts')
+    .eq('email', email)
+    .eq('status', 'pending')
+    .order('createdAt', { ascending: false })
+    .limit(5);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const now = new Date();
+  const candidates = ((rows ?? []) as Array<{
+    attempts?: number | null;
+    codeHash: string;
+    expiresAt: string;
+    id: string;
+    restaurantId: string;
+  }>).filter((invite) => !isStaffInviteExpired(invite.expiresAt, now));
+
+  for (const invite of candidates) {
+    if ((invite.attempts ?? 0) >= STAFF_INVITE_MAX_ATTEMPTS) {
+      continue;
+    }
+
+    if (staffInviteCodeMatches(invite.codeHash, await hashStaffInviteCode(invite.id, code))) {
+      return { email, inviteId: invite.id, restaurantId: invite.restaurantId };
+    }
+
+    // Charged BEFORE the rejection returns. This counter is the entire
+    // brute-force guard on a six-digit code, and it matters more here than on
+    // the authenticated path: there is no session to rate-limit behind.
+    const nextAttempts = (invite.attempts ?? 0) + 1;
+    const { error: attemptError } = await serviceClient
+      .from('StaffInvite')
+      .update({
+        attempts: nextAttempts,
+        status: nextAttempts >= STAFF_INVITE_MAX_ATTEMPTS ? 'revoked' : 'pending',
+        updatedAt: now.toISOString(),
+      })
+      .eq('id', invite.id);
+
+    if (attemptError) {
+      throw new Error(attemptError.message);
+    }
+  }
+
+  fail(400, STAFF_INVITE_REJECTION);
+};
+
+/**
+ * PRE-AUTH. Which way does this person get in?
+ *
+ * The join screen cannot know whether to ask for a password, offer Google, or
+ * invite them to choose a password, because it does not know whether the
+ * address has an account -- and it must not be able to find out by asking.
+ * So the code is validated FIRST and the server picks the branch. Without a
+ * valid, unexpired, unexhausted invite for that exact address, this returns
+ * nothing at all: it is not an account-existence oracle.
+ *
+ * Read-only apart from the attempt counter.
+ */
+const staffInviteResolve: AnonymousRpcHandler = async ({ data }) => {
+  const invite = await resolvePendingStaffInvite(data.email, data.code);
+  const authUser = await findSupabaseAuthUserByEmail(invite.email);
+
+  // `identities` is the honest signal. A Google account has no password to
+  // type, and telling that person to "sign in" is how the account this feature
+  // was first tested against turned out to be unreachable.
+  const identities = Array.isArray((authUser as { identities?: unknown } | null)?.identities)
+    ? ((authUser as { identities: Array<Record<string, unknown>> }).identities)
+    : [];
+  const hasPasswordIdentity = identities.some((identity) => identity.provider === 'email');
+
+  const branch = !authUser ? 'create' : hasPasswordIdentity ? 'password' : 'google';
+
+  const restaurant = await loadRestaurantById(invite.restaurantId);
+
+  return json(200, {
+    data: {
+      branch,
+      email: invite.email,
+      // Named so the person can tell they are joining the right place before
+      // they type a password.
+      restaurantName: sanitizeText(restaurant.restaurant?.name, 'this restaurant'),
+    },
+  });
+};
+
+/**
+ * PRE-AUTH. Create an account for an invitee who has none, and attach it.
+ *
+ * WHY THIS IS ALLOWED TO CREATE AN ACCOUNT WITHOUT AN EMAIL OTP: the code was
+ * delivered to that mailbox, so holding it already proves what the OTP would.
+ * Asking for a second proof of the same fact is friction, not security.
+ *
+ * WHY THIS IS NOT provisionStaffAccount: the password is chosen by the person
+ * signing up, never supplied by somebody else; the role is the literal
+ * 'restaurant'; the restaurant comes from the invite; and an address that
+ * ALREADY has an account is refused outright rather than updated. That refusal
+ * is the whole difference -- an update branch here would recreate the
+ * account-takeover primitive that kept provisionStaffAccount admin-only, and
+ * hand it to an unauthenticated caller.
+ */
+const staffInviteCreateAccount: AnonymousRpcHandler = async ({ data }) => {
+  const password = sanitizeText(data.password);
+  const displayName = sanitizeOptionalText(data.displayName);
+
+  if (password.length < 8) {
+    fail(400, 'Choose a password of at least 8 characters.');
+  }
+
+  const invite = await resolvePendingStaffInvite(data.email, data.code);
+
+  // NO UPDATE BRANCH. If the address already exists this stops here; it never
+  // touches the existing account's password, role or ban state.
+  if (await findSupabaseAuthUserByEmail(invite.email)) {
+    fail(409, 'That address already has a FEASTY account. Sign in with it instead.');
+  }
+
+  const restaurant = await loadRestaurantById(invite.restaurantId);
+  if (!restaurant.restaurant) {
+    fail(404, 'The restaurant that invited you no longer exists.');
+  }
+
+  const now = new Date();
+
+  // Claim the invite BEFORE creating the account, and only from `pending`. If
+  // this loses the race it has created nothing; the other order can leave an
+  // orphaned account attached to an invite somebody else redeemed.
+  const { data: claimed, error: claimError } = await serviceClient
+    .from('StaffInvite')
+    .update({
+      acceptedAt: now.toISOString(),
+      status: 'accepted',
+      updatedAt: now.toISOString(),
+    })
+    .eq('id', invite.inviteId)
+    .eq('status', 'pending')
+    .select('id');
+
+  if (claimError) {
+    throw new Error(claimError.message);
+  }
+
+  if (!claimed || claimed.length === 0) {
+    fail(409, 'That invite has already been used.');
+  }
+
+  const authUser = await createSupabaseAuthUser({
+    displayName,
+    email: invite.email,
+    // The code already proved this mailbox. Requiring a second confirmation
+    // would lock the person out of the account they just made.
+    emailConfirmed: true,
+    password,
+    role: 'restaurant',
+  });
+
+  const targetUid = sanitizeText(
+    String((authUser as { id?: unknown; user?: { id?: unknown } }).id ?? (authUser as { user?: { id?: unknown } }).user?.id ?? '')
+  );
+
+  if (!targetUid) {
+    throw new Error('The invited account was created but returned no uid.');
+  }
+
+  await serviceClient
+    .from('StaffInvite')
+    .update({ acceptedUid: targetUid, updatedAt: nowIso() })
+    .eq('id', invite.inviteId);
+
+  await syncUserRoleState(targetUid, 'restaurant', targetUid, {
+    restaurantId: invite.restaurantId,
+    restaurantLinkedAt: now.toISOString(),
+    restaurantLinkSource: 'staff_invite',
+    restaurantName: sanitizeText(restaurant.restaurant.name, 'Restaurant'),
+  });
+
+  await createAuditEntry(targetUid, 'staff_invite_account_created', 'user', targetUid, {
+    inviteId: invite.inviteId,
+    restaurantId: invite.restaurantId,
+  });
+
+  // No session is minted here. The caller signs in with the password they just
+  // chose, through the ordinary sign-in path -- one fewer thing this pre-auth
+  // endpoint is trusted to do.
+  return json(200, {
+    data: {
+      email: invite.email,
+      restaurantName: sanitizeText(restaurant.restaurant.name, 'Restaurant'),
+    },
+  });
+};
+
+/**
  * Redeem a staff invite for the account that is already signed in.
  *
  * WHAT BINDS THE INVITE TO A PERSON is not the code. It is the email on the
@@ -1044,6 +1265,8 @@ export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
   name: 'account',
   anonymousHandlers: {
     promoTrack,
+    staffInviteCreateAccount,
+    staffInviteResolve,
   },
   handlers: {
     assignUserRole,

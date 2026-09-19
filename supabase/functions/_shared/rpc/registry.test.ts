@@ -146,6 +146,8 @@ const EXPECTED_ACCOUNT_ACTIONS = [
   'recordPolicyAcceptance',
   'provisionStaffAccount',
   'redeemStaffInvite',
+  'staffInviteCreateAccount',
+  'staffInviteResolve',
   'assignUserRole',
   'updateUserRestaurantLink',
   'revokeUserRole',
@@ -157,7 +159,15 @@ const EXPECTED_ACCOUNT_ACTIONS = [
   'deleteUserAccountOnRequest',
 ];
 
-const EXPECTED_ANONYMOUS_ACTIONS = ['promoTrack', 'bootstrapFirstAdmin'];
+const EXPECTED_ANONYMOUS_ACTIONS = [
+  'promoTrack',
+  'bootstrapFirstAdmin',
+  // See the note in registry.real-domains.test.ts. Both added 2026-09-19,
+  // gated behind a valid staff invite code, neither able to modify an
+  // existing account.
+  'staffInviteResolve',
+  'staffInviteCreateAccount',
+];
 
 Deno.test('the action contract matches a hardcoded, independently-maintained copy', () => {
   expectSameArray(ORDER_ACTIONS, EXPECTED_ORDER_ACTIONS, 'ORDER_ACTIONS');
@@ -189,7 +199,7 @@ const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['dispatch', DISPATCH_ACTIONS, 14],
   ['partner', PARTNER_ACTIONS, 18],
   ['admin', ADMIN_ACTIONS, 29],
-  ['account', ACCOUNT_ACTIONS, 15],
+  ['account', ACCOUNT_ACTIONS, 17],
 ];
 
 for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
@@ -220,7 +230,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 89-action surface', () => {
+Deno.test('the five domains together cover exactly the 91-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -229,14 +239,14 @@ Deno.test('the five domains together cover exactly the 89-action surface', () =>
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 89, 'total action count');
-  expectEqual(new Set(union).size, 89, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 89, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 91, 'total action count');
+  expectEqual(new Set(union).size, 91, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 91, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 89, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 91, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {
