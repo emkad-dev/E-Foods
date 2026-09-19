@@ -139,7 +139,7 @@ Deno.test('the attempt cap is tight enough to matter', () => {
 // was caught by a real person on a real invite. The regression is the first
 // test below.
 
-Deno.test('REGRESSION: a password account is never sent to Google', () => {
+Deno.test('REGRESSION: a password account is never sent down the no-password branch', () => {
   // What actually happened: identities came back empty because the paged admin
   // listing does not carry the field, and the branch resolved to 'google'.
   // bladeshadow554@gmail.com has an email identity and a password, and was
@@ -147,7 +147,7 @@ Deno.test('REGRESSION: a password account is never sent to Google', () => {
   assertEqual(resolveStaffJoinBranch(true, ['email']), 'password', 'email identity');
 });
 
-Deno.test('an unknown identity list fails toward password, not google', () => {
+Deno.test('an unknown identity list fails toward password, not noPassword', () => {
   // null means "could not establish". The two mistakes are not symmetrical: a
   // Google user offered a password field can still fall back to the Google
   // button, while a password user offered only Google is stuck.
@@ -158,8 +158,8 @@ Deno.test('an account with both identities gets the branch that works either way
   assertEqual(resolveStaffJoinBranch(true, ['google', 'email']), 'password', 'both');
 });
 
-Deno.test('google is claimed only when an email identity is known to be absent', () => {
-  assertEqual(resolveStaffJoinBranch(true, ['google']), 'google', 'google only');
+Deno.test('noPassword is claimed only when an email identity is known to be absent', () => {
+  assertEqual(resolveStaffJoinBranch(true, ['google']), 'noPassword', 'oauth only');
 });
 
 Deno.test('no account at all means create, whatever the identities say', () => {
@@ -170,5 +170,5 @@ Deno.test('no account at all means create, whatever the identities say', () => {
 Deno.test('an empty identity list is not the same as an unknown one', () => {
   // [] means the account genuinely has no providers, which is not a password
   // account -- so it must NOT take the null shortcut.
-  assertEqual(resolveStaffJoinBranch(true, []), 'google', 'genuinely no identities');
+  assertEqual(resolveStaffJoinBranch(true, []), 'noPassword', 'genuinely no identities');
 });

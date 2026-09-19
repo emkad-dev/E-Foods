@@ -16,7 +16,7 @@
  *
  * SO THE CODE COMES FIRST AND THE SERVER PICKS THE ROUTE. Step one asks for an
  * email and a code, and nothing else. `staffInviteResolve` answers `password`,
- * `google` or `create`, and step two is whichever of those it said.
+ * `noPassword` or `create`, and step two is whichever of those it said.
  *
  * THE SCREEN MUST NOT GUESS. Every failure -- unknown address, no invite,
  * expired, wrong code, five attempts spent -- comes back as one identical 400,
@@ -299,12 +299,14 @@ export default function StaffJoinScreen() {
   };
 
   /**
-   * `google` branch. This screen does not own a Google button and must not
-   * grow one: sign-in is the auth context's job and the login screen's
-   * surface. All this does is record that a redemption is still owed and put
-   * the person in front of it.
+   * `noPassword` branch: the account exists but has no password to type.
+   *
+   * Partner is manual sign-in only, so the way through is a password reset
+   * rather than a provider button. This screen does not own that flow either
+   * -- it records that a redemption is still owed and puts the person in
+   * front of the sign-in screen, where "Forgot password?" lives.
    */
-  const handleGoToGoogle = () => {
+  const handleGoToPasswordReset = () => {
     awaitGoogleStaffJoin();
     router.replace('/(auth)/login' as never);
   };
@@ -504,8 +506,8 @@ export default function StaffJoinScreen() {
             </Text>
           ) : null}
 
-          {step === 'google' ? (
-            <TouchableOpacity accessibilityRole="button" onPress={handleGoToGoogle} style={styles.primaryButton}>
+          {step === 'noPassword' ? (
+            <TouchableOpacity accessibilityRole="button" onPress={handleGoToPasswordReset} style={styles.primaryButton}>
               <Text style={styles.primaryButtonText}>{branchCopy?.action ?? 'Go to sign in'}</Text>
             </TouchableOpacity>
           ) : (

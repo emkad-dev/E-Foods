@@ -371,13 +371,18 @@ export const staffRemovalConfirm = (member: Pick<StaffMember, 'displayName' | 'e
 /**
  * The route the server picked for this address.
  *
- * `password` - an account with an email/password identity. Sign in, then redeem.
- * `google`   - an account whose only identity is an OAuth provider. There is no
- *              password to ask for, and asking is the defect this replaced.
- * `create`   - no account at all. The code already proved the mailbox, so this
- *              one can finish without a second email round trip.
+ * `password`   - an account with an email/password identity. Sign in, then redeem.
+ * `noPassword` - the account exists but has no password to type, because its
+ *                only identity is an OAuth provider. Partner is manual
+ *                sign-in only (owner's call, 2026-09-19), so the way through
+ *                is a password reset, not a provider button. Named for the
+ *                STATE rather than the provider: it was called `google` while
+ *                partner had a Google button, and that name pointed the copy
+ *                at a control that no longer exists.
+ * `create`     - no account at all. The code already proved the mailbox, so
+ *                this one finishes without a second email round trip.
  */
-export type StaffJoinBranch = 'password' | 'google' | 'create';
+export type StaffJoinBranch = 'password' | 'noPassword' | 'create';
 
 /**
  * What the screen is currently showing. `identify` is step one for everybody;
@@ -391,16 +396,16 @@ export type StaffJoinStep = 'identify' | StaffJoinBranch | 'joined';
  *
  * Deliberately NOT defaulting to a branch. A server that grows a fourth route
  * is telling an old client something it cannot act on, and every plausible
- * default is a lie told to the person's face: guessing `password` asks a
- * Google user for a password they do not have, and guessing `create` offers to
- * make a second account for an address that already has one. The screen shows
+ * default is a lie told to the person's face: guessing `password` asks for a
+ * password the account does not have, and guessing `create` offers to make a
+ * second account for an address that already has one. The screen shows
  * "update the app" instead, which is the only honest answer.
  *
  * Takes `unknown` on purpose -- the value is off the wire, so a type
  * annotation here would be a claim about the server, not a fact about the value.
  */
 export const resolveStaffJoinStep = (branch: unknown): StaffJoinBranch | null =>
-  branch === 'password' || branch === 'google' || branch === 'create' ? branch : null;
+  branch === 'password' || branch === 'noPassword' || branch === 'create' ? branch : null;
 
 export const STAFF_JOIN_UNKNOWN_BRANCH_MESSAGE =
   'This version of the app cannot finish joining a restaurant. Update the app, or ask the restaurant to help you sign in.';
@@ -527,17 +532,17 @@ export const describeStaffJoinBranch = ({
         ],
         action: 'Sign in and join',
       };
-    case 'google':
+    case 'noPassword':
       return {
-        title: `Sign in with Google to join ${place}`,
+        title: `Set a password to join ${place}`,
         body: [
-          'Your code is good. This address signs in with Google, so there is no FEASTY password to type.',
-          // The one instruction that has to survive the person leaving this
-          // screen: Google sign-in is on the sign-in page, and coming back
-          // signed in is not yet the same as having joined.
-          'Use the Google option on the sign-in screen. When you come back, enter this code once more to finish - signing in on its own does not join you to the store.',
+          'Your code is good, but this address has no FEASTY password yet - it was set up through a sign-in provider, and the partner app uses email and password only.',
+          // The instruction has to survive the person leaving this screen, and
+          // the second half is the part people miss: arriving back with a
+          // working password is not the same as having joined.
+          'Use "Forgot password?" on the sign-in screen to set one, then come back and enter this code again to finish.',
         ],
-        action: 'Go to Google sign-in',
+        action: 'Go to password reset',
       };
     case 'create':
       return {

@@ -4,7 +4,6 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableO
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
-import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateLoginForm } from '../../src/domain/authFormValidation';
 import { resolvePartnerSuccessNotice } from '../../src/utils/successNotices';
@@ -115,15 +114,6 @@ export default function PartnerLoginScreen() {
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>
           <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Open dashboard'}</Text>
         </TouchableOpacity>
-
-        {/* Additive, never a replacement: the email/password form above is
-            untouched and remains the route every existing partner uses.
-            This is the ONLY door for an invited staff member whose email is a
-            Google account — such an account has no password in `auth.users`
-            at all, so there is nothing for them to type above and nothing for
-            "forgot password" to reset. The component renders itself away on
-            builds where Google sign-in cannot work. */}
-        <GoogleSignInButton />
 
         {/* `asChild` so each link is a real box rather than a run of inline
             text. A bare <Link> renders as Text, which react-native-web gives

@@ -8,12 +8,10 @@ import {
   getUserRoleClaim,
   isNetworkRequestError,
   signInWithEmail,
-  signInWithGoogle,
   signOutUser,
   sendPasswordReset,
 } from '../services/supabase/auth';
 import { supabase } from '../services/supabase/config';
-import { completeGoogleWebRedirect } from '../services/googleSignIn';
 import {
   clearStoredUserProfile,
   clearStoredSessionId,
@@ -45,14 +43,6 @@ type AuthContextType = {
     }
   ) => Promise<{ verificationEmailSent: boolean; sessionPresent: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
-  /** Native Google sign-in: exchanges a Google ID token for a session. */
-  signInWithGoogleIdToken: (idToken: string) => Promise<void>;
-  /**
-   * Web Google sign-in, second leg. Resolves `true` when this page load was a
-   * Google OAuth return that has now been signed in, `false` when it was an
-   * ordinary page load with nothing to consume.
-   */
-  completeGoogleWebSignIn: () => Promise<boolean>;
   resetPassword: (email: string) => Promise<void>;
   linkRestaurant: (restaurantId: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -376,15 +366,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   /**
    * The tail of every explicit sign-in, whatever proved the identity.
    *
-   * Lifted out of `signIn` rather than reimplemented for Google, so a Google
-   * partner and a password partner land in EXACTLY the same state: same
-   * profile resolution, same single-device claim, same cached profile. That
-   * matters more here than it looks — `buildNextUser` is what creates the
-   * `UserDocument` for a Google user who has never existed in this app, and
+   * Kept separate from `signIn` so every path that establishes a session
+   * lands in EXACTLY the same state: same profile resolution, same
+   * single-device claim, same cached profile. `buildNextUser` is what creates
+   * the `UserDocument` for someone who has never existed in this app, and
    * `resolvePartnerAccessState` is what decides they are a `customer`. The
    * `(partner)` layout then routes them to onboarding, or leaves them on
    * /join-restaurant, which is precisely where an invited staff member with
    * no restaurant and no application belongs.
+   *
+   * It briefly had a second caller, a Google sign-in path, removed on the
+   * owner's call (2026-09-19): partner is manual sign-in only.
    *
    * NOTE the absence of a role check. The customer app's Google path signs a
    * user straight back out if their role is not `customer`; doing the mirror
@@ -416,49 +408,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await adoptSignedInAuthUser(authUser);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign in');
-      setError(nextMessage);
-      throw new Error(nextMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const signInWithGoogleIdToken = async (idToken: string) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const authUser = await signInWithGoogle(supabase, idToken);
-      await adoptSignedInAuthUser(authUser);
-    } catch (nextError: any) {
-      const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to complete Google sign-in');
-      setError(nextMessage);
-      throw new Error(nextMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const completeGoogleWebSignIn = async () => {
-    // Deliberately does NOT flip `loading` before it knows there is something
-    // to do: this runs on every login-screen mount, and the (auth) layout
-    // swaps the whole navigator for a skeleton while `loading` is true on the
-    // first paint. Signalling "busy" for an ordinary visit would make every
-    // partner watch a skeleton for a round-trip that never happens.
-    const authUser = await completeGoogleWebRedirect(supabase);
-
-    if (!authUser) {
-      return false;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      await adoptSignedInAuthUser(authUser);
-      return true;
-    } catch (nextError: any) {
-      const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to complete Google sign-in');
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -581,8 +530,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         error,
         signUp,
         signIn,
-        signInWithGoogleIdToken,
-        completeGoogleWebSignIn,
         resetPassword,
         linkRestaurant,
         signOut,

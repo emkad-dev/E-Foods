@@ -331,7 +331,7 @@ test('removing a person names that person', () => {
 
 test('the branch is the server’s answer, and an unknown one is never guessed at', () => {
   assert.equal(resolveStaffJoinStep('password'), 'password');
-  assert.equal(resolveStaffJoinStep('google'), 'google');
+  assert.equal(resolveStaffJoinStep('noPassword'), 'noPassword');
   assert.equal(resolveStaffJoinStep('create'), 'create');
 
   /*
@@ -355,10 +355,10 @@ test('the branch is the server’s answer, and an unknown one is never guessed a
 
 test('every branch names the restaurant before a password is typed', () => {
   const password = describeStaffJoinBranch({ branch: 'password', restaurantName: 'Mama Put' });
-  const google = describeStaffJoinBranch({ branch: 'google', restaurantName: 'Mama Put' });
+  const noPassword = describeStaffJoinBranch({ branch: 'noPassword', restaurantName: 'Mama Put' });
   const create = describeStaffJoinBranch({ branch: 'create', restaurantName: 'Mama Put' });
 
-  for (const copy of [password, google, create]) {
+  for (const copy of [password, noPassword, create]) {
     assert.notEqual(copy, null);
     // The last moment this person can tell they are joining the place they
     // meant to, and on two of the three branches the next thing they do is
@@ -367,13 +367,15 @@ test('every branch names the restaurant before a password is typed', () => {
     assert.equal(copy!.action.trim().length > 0, true);
   }
 
-  // A Google account has no FEASTY password. Naming one in the heading is the
-  // original defect, in smaller print.
-  assert.equal(/password/i.test(google!.title), false);
-  assert.match(google!.body.join(' '), /Google/);
-  // And signing in is not joining. Saying so is the whole difference between
-  // a handoff and a dead end.
-  assert.match(google!.body.join(' '), /does not join you/i);
+  // This account has no password to type, so the copy must send them to a
+  // RESET rather than ask for one they do not have -- asking was the original
+  // defect. The heading naming a password is correct here: setting one is the
+  // remedy.
+  assert.match(noPassword!.body.join(' '), /Forgot password/i);
+  assert.equal(/enter its password/i.test(noPassword!.body.join(' ')), false);
+  // And coming back with a working password is not the same as having joined.
+  // Saying so is the whole difference between a handoff and a dead end.
+  assert.match(noPassword!.body.join(' '), /enter this code again/i);
 
   // Finishing a signup with no confirmation email looks like a step that
   // failed silently unless the screen says it was skipped on purpose.

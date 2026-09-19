@@ -132,7 +132,7 @@ export const isStaffInviteExpired = (expiresAt: string | null | undefined, now: 
   return !Number.isFinite(expiry) || expiry <= now.getTime();
 };
 
-export type StaffJoinBranch = 'create' | 'google' | 'password';
+export type StaffJoinBranch = 'create' | 'noPassword' | 'password';
 
 /**
  * Which way an invitee gets in.
@@ -144,13 +144,18 @@ export type StaffJoinBranch = 'create' | 'google' | 'password';
  * with Google -- and Google was the one route that account did not have.
  *
  * THE ASYMMETRY IS THE WHOLE RULE. `identities === null` means "could not
- * establish", and it resolves to 'password' rather than 'google' because the
- * two errors do not cost the same. A Google user offered a password field
- * types one, fails once, and still has the Google button on the sign-in
- * screen. A password user offered only Google has nowhere to go at all.
+ * establish", and it resolves to 'password' rather than 'noPassword' because
+ * the two errors do not cost the same. Someone wrongly offered a password
+ * field types one and fails once; someone wrongly told they have no password
+ * is sent off to reset a password they already had.
  *
- * An account with BOTH identities is 'password' for the same reason: it is the
- * branch that works either way.
+ * An account with BOTH identities is 'password': it is the branch that works.
+ *
+ * `noPassword` was called `google` until the partner app dropped Google
+ * sign-in entirely (owner's call, 2026-09-19 -- partner is manual sign-in
+ * only). The state it describes was never really "uses Google", it was "has
+ * no password to type", and the remedy is a password reset. Naming it for the
+ * provider made the copy point at a button that no longer exists.
  *
  * @param identities providers for the account, or `null` when unknown.
  *                   Pass `[]` only when the account genuinely has none.
@@ -167,5 +172,5 @@ export const resolveStaffJoinBranch = (
     return 'password';
   }
 
-  return 'google';
+  return 'noPassword';
 };
