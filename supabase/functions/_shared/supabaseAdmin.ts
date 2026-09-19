@@ -107,6 +107,33 @@ export const findSupabaseAuthUserByEmail = async (email: string) => {
  * distinct from `[]`, so a caller can tell "no identities" from "do not
  * know" and fail in the recoverable direction.
  */
+/**
+ * One auth user by id, from the authoritative record.
+ *
+ * `UserAccount` is a MIRROR of this and can be missing entirely -- an account
+ * that signed up but never completed a flow that writes the profile row has
+ * an auth user and no UserAccount at all. Anything deciding access on email or
+ * confirmation state must read this, not the mirror.
+ */
+export const loadSupabaseAuthUserById = async (
+  uid: string
+): Promise<Record<string, unknown> | null> => {
+  const id = sanitizeText(uid);
+
+  if (!id) {
+    return null;
+  }
+
+  try {
+    return await adminAuthRequest<Record<string, unknown>>(
+      `/auth/v1/admin/users/${encodeURIComponent(id)}`,
+      { method: 'GET' }
+    );
+  } catch {
+    return null;
+  }
+};
+
 export const loadSupabaseAuthIdentities = async (uid: string): Promise<string[] | null> => {
   const id = sanitizeText(uid);
 

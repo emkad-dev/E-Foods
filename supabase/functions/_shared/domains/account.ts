@@ -53,6 +53,7 @@ import {
   deleteSupabaseAuthUser,
   findSupabaseAuthUserByEmail,
   loadSupabaseAuthIdentities,
+  loadSupabaseAuthUserById,
   updateSupabaseAuthUser,
 } from '../supabaseAdmin.ts';
 
@@ -353,6 +354,29 @@ const staffInviteResolve: AnonymousRpcHandler = async ({ data }) => {
   const identities = authUser ? await loadSupabaseAuthIdentities(authUserId) : [];
   const branch = resolveStaffJoinBranch(Boolean(authUser), identities);
 
+  // THE CODE IS THE CONFIRMATION. An account that exists but never confirmed
+  // its email could not join at all: Supabase refuses the sign-in, so the
+  // password branch dead-ends, and the create branch refuses because the
+  // account already exists. Caught on a live invite -- the person was holding
+  // a code sent to that exact mailbox and had nowhere to go.
+  //
+  // Confirming here is not a shortcut around proof, it IS the proof. The code
+  // was delivered to that address and has just been validated, which is
+  // strictly stronger evidence than clicking a confirmation link: somebody who
+  // squatted the address at signup and never confirmed it still never receives
+  // the code. Asking twice for proof of one fact is friction, not security.
+  //
+  // Only ever widens access to the mailbox's real owner, and only after a
+  // valid, unexpired, unexhausted code for that same address.
+  if (authUserId && authUser && (authUser as { email_confirmed_at?: unknown }).email_confirmed_at == null) {
+    await updateSupabaseAuthUser(authUserId, { email_confirm: true }).catch((error: unknown) => {
+      // Not fatal. The branch is still correct and the person may already be
+      // confirmed by the time they act; failing the whole resolve here would
+      // replace a recoverable sign-in error with a dead screen.
+      console.warn('Could not confirm an invited staff email on resolve:', error);
+    });
+  }
+
   const restaurant = await loadRestaurantById(invite.restaurantId);
 
   return json(200, {
@@ -494,21 +518,31 @@ const redeemStaffInvite: Handler = async ({ context, data }) => {
     fail(400, 'Enter the invite code you were sent.');
   }
 
-  const account = await loadUserAccount(context.uid);
-  if (!account) {
+  // THE AUTH RECORD, NOT THE MIRROR. `UserAccount` is a copy of this and can
+  // be absent entirely -- an account that signed up but never finished a flow
+  // that writes the profile row has an auth user and no UserAccount at all.
+  // Reading email and confirmation off the mirror made such a person
+  // unredeemable, behind a 404 that explained nothing. That is how this was
+  // found: a real invitee, holding a valid code, with no way through.
+  const authUser = await loadSupabaseAuthUserById(context.uid);
+  if (!authUser) {
     fail(404, 'Your account could not be loaded.');
   }
 
-  const email = sanitizeText(account.email).toLowerCase();
+  const account = await loadUserAccount(context.uid);
+  const email = sanitizeText(authUser.email).toLowerCase();
   if (!email) {
     fail(412, 'Add an email address to your account before redeeming an invite.');
   }
 
-  // A VERIFIED address, not merely a claimed one. Without this, signing up with
-  // somebody else's address and never confirming it would be enough to take
-  // the invite meant for them -- the code is emailed to the mailbox, so the
-  // mailbox has to be proven to belong to this account.
-  if (account.emailVerified !== true) {
+  // A VERIFIED address, not merely a claimed one: signing up with somebody
+  // else's address and never confirming it must not be enough to take the
+  // invite meant for them.
+  //
+  // In practice staffInviteResolve has already confirmed this address, because
+  // validating a code delivered to that mailbox IS what confirmation attests
+  // to. This remains the backstop for any path reaching redeem without it.
+  if (authUser.email_confirmed_at == null) {
     fail(412, 'Confirm your email address before redeeming an invite.');
   }
 
@@ -519,7 +553,7 @@ const redeemStaffInvite: Handler = async ({ context, data }) => {
     fail(400, 'Administrator accounts cannot be added as restaurant staff.');
   }
 
-  const existingRestaurantId = sanitizeText(account.restaurantId);
+  const existingRestaurantId = sanitizeText(account?.restaurantId);
 
   const { data: inviteRows, error: lookupError } = await serviceClient
     .from('StaffInvite')
@@ -618,6 +652,22 @@ const redeemStaffInvite: Handler = async ({ context, data }) => {
 
   if (!claimed || claimed.length === 0) {
     fail(409, 'That invite has already been used.');
+  }
+
+  // syncUserRoleState only UPDATEs UserAccount, so a person whose mirror row
+  // was never written would have their role change land nowhere at all --
+  // silently, since an UPDATE matching no rows is not an error. Seed it first
+  // from the authoritative record.
+  if (!account) {
+    await upsertUserAccount({
+      uid: context.uid,
+      email,
+      displayName: sanitizeOptionalText(
+        (authUser.user_metadata as { full_name?: unknown } | null)?.full_name
+      ),
+      emailVerified: true,
+      createdAt: nowIso(),
+    });
   }
 
   await syncUserRoleState(context.uid, 'restaurant', context.uid, {
