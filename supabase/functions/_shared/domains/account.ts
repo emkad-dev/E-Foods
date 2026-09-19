@@ -39,6 +39,7 @@ import {
   STAFF_INVITE_MAX_ATTEMPTS,
   hashStaffInviteCode,
   isStaffInviteExpired,
+  resolveStaffJoinBranch,
   staffInviteCodeMatches,
 } from '../staffInviteCodes.ts';
 import { ACCOUNT_ACTIONS } from '../rpc/actions.ts';
@@ -51,6 +52,7 @@ import {
   createSupabaseAuthUser,
   deleteSupabaseAuthUser,
   findSupabaseAuthUserByEmail,
+  loadSupabaseAuthIdentities,
   updateSupabaseAuthUser,
 } from '../supabaseAdmin.ts';
 
@@ -330,15 +332,26 @@ const staffInviteResolve: AnonymousRpcHandler = async ({ data }) => {
   const invite = await resolvePendingStaffInvite(data.email, data.code);
   const authUser = await findSupabaseAuthUserByEmail(invite.email);
 
-  // `identities` is the honest signal. A Google account has no password to
-  // type, and telling that person to "sign in" is how the account this feature
-  // was first tested against turned out to be unreachable.
-  const identities = Array.isArray((authUser as { identities?: unknown } | null)?.identities)
-    ? ((authUser as { identities: Array<Record<string, unknown>> }).identities)
-    : [];
-  const hasPasswordIdentity = identities.some((identity) => identity.provider === 'email');
-
-  const branch = !authUser ? 'create' : hasPasswordIdentity ? 'password' : 'google';
+  // WHICH WAY IN, AND WHICH WAY TO BE WRONG.
+  //
+  // The first version read `identities` straight off the object the paged
+  // admin listing returns. That listing does not reliably carry the field, so
+  // the array was empty, "no password identity" looked true, and a real
+  // password account was told on screen that it signs in with Google. It was
+  // caught in production on the first live invite.
+  //
+  // Two changes. The identities come from the single-user admin endpoint,
+  // which does carry them. And the UNKNOWN case now resolves to 'password'
+  // rather than 'google', because the two mistakes are not symmetrical: a
+  // Google user offered a password field types one, fails once, and can still
+  // use Google from the sign-in screen, whereas a password user offered only
+  // Google has nowhere to go. An account carrying BOTH identities also
+  // resolves to 'password' -- it is the branch that works either way.
+  const authUserId = sanitizeText(
+    String((authUser as { id?: unknown } | null)?.id ?? '')
+  );
+  const identities = authUser ? await loadSupabaseAuthIdentities(authUserId) : [];
+  const branch = resolveStaffJoinBranch(Boolean(authUser), identities);
 
   const restaurant = await loadRestaurantById(invite.restaurantId);
 

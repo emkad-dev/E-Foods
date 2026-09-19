@@ -131,3 +131,41 @@ export const isStaffInviteExpired = (expiresAt: string | null | undefined, now: 
   const expiry = new Date(expiresAt).getTime();
   return !Number.isFinite(expiry) || expiry <= now.getTime();
 };
+
+export type StaffJoinBranch = 'create' | 'google' | 'password';
+
+/**
+ * Which way an invitee gets in.
+ *
+ * EXTRACTED BECAUSE IT WAS WRONG IN PRODUCTION. The first version lived inline
+ * in the handler and read `identities` off the paged admin listing, which does
+ * not reliably carry that field. The empty array read as "no password
+ * identity", so a real password account was told on screen that it signs in
+ * with Google -- and Google was the one route that account did not have.
+ *
+ * THE ASYMMETRY IS THE WHOLE RULE. `identities === null` means "could not
+ * establish", and it resolves to 'password' rather than 'google' because the
+ * two errors do not cost the same. A Google user offered a password field
+ * types one, fails once, and still has the Google button on the sign-in
+ * screen. A password user offered only Google has nowhere to go at all.
+ *
+ * An account with BOTH identities is 'password' for the same reason: it is the
+ * branch that works either way.
+ *
+ * @param identities providers for the account, or `null` when unknown.
+ *                   Pass `[]` only when the account genuinely has none.
+ */
+export const resolveStaffJoinBranch = (
+  hasAccount: boolean,
+  identities: readonly string[] | null
+): StaffJoinBranch => {
+  if (!hasAccount) {
+    return 'create';
+  }
+
+  if (identities === null || identities.includes('email')) {
+    return 'password';
+  }
+
+  return 'google';
+};

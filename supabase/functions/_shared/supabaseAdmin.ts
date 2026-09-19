@@ -94,6 +94,44 @@ export const findSupabaseAuthUserByEmail = async (email: string) => {
   );
 };
 
+/**
+ * The auth providers linked to one account, straight from the admin API.
+ *
+ * WHY NOT READ `identities` OFF THE LIST RESPONSE: the paged
+ * `/admin/users` listing does not reliably carry it, and a caller that
+ * treats the missing array as "no password identity" concludes the exact
+ * opposite of the truth. That happened in production: a password account was
+ * told it signs in with Google, which left it with no way forward at all.
+ *
+ * Returns `null` when the answer cannot be established -- deliberately
+ * distinct from `[]`, so a caller can tell "no identities" from "do not
+ * know" and fail in the recoverable direction.
+ */
+export const loadSupabaseAuthIdentities = async (uid: string): Promise<string[] | null> => {
+  const id = sanitizeText(uid);
+
+  if (!id) {
+    return null;
+  }
+
+  try {
+    const payload = await adminAuthRequest<{ identities?: Array<{ provider?: unknown }> }>(
+      `/auth/v1/admin/users/${encodeURIComponent(id)}`,
+      { method: 'GET' }
+    );
+
+    if (!Array.isArray(payload.identities)) {
+      return null;
+    }
+
+    return payload.identities
+      .map((identity) => sanitizeText(identity?.provider))
+      .filter((provider) => provider.length > 0);
+  } catch {
+    return null;
+  }
+};
+
 export const createSupabaseAuthUser = async (input: {
   displayName?: string | null;
   email: string;

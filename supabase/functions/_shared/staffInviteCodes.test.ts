@@ -10,6 +10,7 @@ import {
   generateStaffInviteCode,
   hashStaffInviteCode,
   isStaffInviteExpired,
+  resolveStaffJoinBranch,
   staffInviteCodeMatches,
 } from './staffInviteCodes.ts';
 
@@ -131,4 +132,43 @@ Deno.test('the attempt cap is tight enough to matter', () => {
     `an attempt cap of ${STAFF_INVITE_MAX_ATTEMPTS} is too loose to protect a 6-digit code`
   );
   assert(STAFF_INVITE_MAX_ATTEMPTS >= 3, 'a person reading a code off a screen deserves a retry');
+});
+
+// --- resolveStaffJoinBranch -------------------------------------------------
+// These exist because the inline version of this decision shipped wrong and
+// was caught by a real person on a real invite. The regression is the first
+// test below.
+
+Deno.test('REGRESSION: a password account is never sent to Google', () => {
+  // What actually happened: identities came back empty because the paged admin
+  // listing does not carry the field, and the branch resolved to 'google'.
+  // bladeshadow554@gmail.com has an email identity and a password, and was
+  // shown "this address signs in with Google" -- the one route it did not have.
+  assertEqual(resolveStaffJoinBranch(true, ['email']), 'password', 'email identity');
+});
+
+Deno.test('an unknown identity list fails toward password, not google', () => {
+  // null means "could not establish". The two mistakes are not symmetrical: a
+  // Google user offered a password field can still fall back to the Google
+  // button, while a password user offered only Google is stuck.
+  assertEqual(resolveStaffJoinBranch(true, null), 'password', 'unknown identities');
+});
+
+Deno.test('an account with both identities gets the branch that works either way', () => {
+  assertEqual(resolveStaffJoinBranch(true, ['google', 'email']), 'password', 'both');
+});
+
+Deno.test('google is claimed only when an email identity is known to be absent', () => {
+  assertEqual(resolveStaffJoinBranch(true, ['google']), 'google', 'google only');
+});
+
+Deno.test('no account at all means create, whatever the identities say', () => {
+  assertEqual(resolveStaffJoinBranch(false, null), 'create', 'no account, unknown');
+  assertEqual(resolveStaffJoinBranch(false, []), 'create', 'no account, empty');
+});
+
+Deno.test('an empty identity list is not the same as an unknown one', () => {
+  // [] means the account genuinely has no providers, which is not a password
+  // account -- so it must NOT take the null shortcut.
+  assertEqual(resolveStaffJoinBranch(true, []), 'google', 'genuinely no identities');
 });
