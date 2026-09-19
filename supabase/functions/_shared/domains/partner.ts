@@ -1,12 +1,19 @@
 // Partner domain: a restaurant's own workspace — profile, menu, kitchen queue,
 // order transitions, and the onboarding application that gets it there.
 
-import { loadUserAccount, loadUserPhoneNumber, loadUserPhoneNumbers, updateUserAccount, upsertUserAccount, upsertUserRoleLink } from '../accounts.ts';
+import { loadUserAccount, loadUserPhoneNumber, loadUserPhoneNumbers, syncUserRoleState, updateUserAccount, upsertUserAccount, upsertUserRoleLink } from '../accounts.ts';
 import {
   PARTNER_APPLICATION_STATUS,
   loadPartnerApplication,
 } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
+import { buildTransactionalEmailHtml, sendTransactionalEmail } from '../email.ts';
+import {
+  STAFF_INVITE_TTL_HOURS,
+  generateStaffInviteCode,
+  hashStaffInviteCode,
+  isStaffInviteExpired,
+} from '../staffInviteCodes.ts';
 import { serviceClient } from '../client.ts';
 import { releaseDispatchAssignmentLoad, runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
 import { buildNotificationData, notifyAdmins, notifyUsers } from '../notifications.ts';
@@ -568,6 +575,258 @@ const partnerGetRestaurantRatings: Handler = async ({ context, data }) => {
       hasMore: ratings.length === limit,
     },
   });
+};
+
+/**
+ * Invite a staff member to this restaurant.
+ *
+ * Everything that decides authority comes from the CALLER, never the request:
+ * the restaurant from loadManagedRestaurantForUser, the role as the literal
+ * 'restaurant'. The body supplies an email address and nothing else that
+ * matters. That is the whole difference between this and
+ * provisionStaffAccount, which reads both from the body and must stay
+ * admin-only.
+ *
+ * The invite creates no account and grants nothing by itself. It is a pointer
+ * an already-signed-in user can redeem for themselves.
+ */
+const partnerInviteStaff: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['restaurant']);
+  const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role);
+
+  if (!managedRestaurant.restaurant) {
+    fail(412, 'Finish setting up your store before inviting staff.');
+  }
+
+  const email = sanitizeText(data.email).trim().toLowerCase();
+
+  if (!email || !email.includes('@') || email.length > 254) {
+    fail(400, 'Enter the email address of the person you are inviting.');
+  }
+
+  // Inviting yourself is a no-op that would read as a broken feature when the
+  // code never unlocks anything.
+  const ownerAccount = await loadUserAccount(context.uid);
+  if (sanitizeText(ownerAccount?.email).toLowerCase() === email) {
+    fail(400, 'That is your own address - you already have access.');
+  }
+
+  const restaurantId = managedRestaurant.restaurant.id;
+  const now = new Date();
+  const inviteId = crypto.randomUUID();
+  const code = generateStaffInviteCode();
+  const codeHash = await hashStaffInviteCode(inviteId, code);
+  const expiresAt = new Date(now.getTime() + STAFF_INVITE_TTL_HOURS * 60 * 60 * 1000).toISOString();
+
+  // Supersede any live invite for this address first. The partial unique index
+  // allows exactly one pending row per (restaurant, email), and re-inviting
+  // somebody -- after a typo, or because the first code expired -- has to work.
+  const { error: supersedeError } = await serviceClient
+    .from('StaffInvite')
+    .update({ status: 'revoked', updatedAt: now.toISOString() })
+    .eq('restaurantId', restaurantId)
+    .eq('email', email)
+    .eq('status', 'pending');
+
+  if (supersedeError) {
+    throw new Error(supersedeError.message);
+  }
+
+  const { error: insertError } = await serviceClient.from('StaffInvite').insert({
+    id: inviteId,
+    restaurantId,
+    email,
+    codeHash,
+    role: 'restaurant',
+    invitedByUid: context.uid,
+    status: 'pending',
+    expiresAt,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  });
+
+  if (insertError) {
+    throw new Error(insertError.message);
+  }
+
+  const restaurantName = sanitizeText(managedRestaurant.restaurant.name, 'a FEASTY restaurant');
+
+  // Sent AFTER the row exists. The other order loses the code entirely if the
+  // insert fails, leaving somebody holding a number nothing will accept.
+  await sendTransactionalEmail({
+    to: email,
+    subject: 'Your code to join ' + restaurantName + ' on FEASTY',
+    html: buildTransactionalEmailHtml({
+      heading: 'Join ' + restaurantName + ' on FEASTY',
+      lines: [
+        restaurantName + ' has invited you to help manage their store on FEASTY.',
+        'Your invite code is ' + code + '. It expires in ' + STAFF_INVITE_TTL_HOURS + ' hours.',
+        'Create your own FEASTY partner account with this email address, then enter the code to get access. You choose your own password, and nobody at the restaurant can see it.',
+        'If you were not expecting this, ignore this email. The code grants nothing until someone signs in with this address and enters it.',
+      ],
+    }),
+  });
+
+  await createAuditEntry(context.uid, 'staff_invited', 'restaurant', restaurantId, {
+    // The address is the subject of the record. The CODE is never logged.
+    email,
+    inviteId,
+  });
+
+  return json(200, { data: { email, expiresAt, inviteId } });
+};
+
+/** Who can act for this restaurant, and who has been asked to. */
+const partnerListStaff: Handler = async ({ context }) => {
+  ensureRole(context.role, ['restaurant']);
+  const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role);
+
+  if (!managedRestaurant.restaurant) {
+    return json(200, { data: { invites: [], staff: [] } });
+  }
+
+  const restaurantId = managedRestaurant.restaurant.id;
+
+  const [{ data: inviteRows, error: inviteError }, { data: staffRows, error: staffError }] = await Promise.all([
+    serviceClient
+      .from('StaffInvite')
+      .select('id,email,status,expiresAt,createdAt,acceptedAt')
+      .eq('restaurantId', restaurantId)
+      .order('createdAt', { ascending: false })
+      .limit(50),
+    serviceClient
+      .from('UserAccount')
+      .select('uid,email,displayName,accountDisabled')
+      .eq('restaurantId', restaurantId),
+  ]);
+
+  if (inviteError) {
+    throw new Error(inviteError.message);
+  }
+  if (staffError) {
+    throw new Error(staffError.message);
+  }
+
+  const now = new Date();
+
+  return json(200, {
+    data: {
+      invites: ((inviteRows ?? []) as Array<Record<string, string | null>>).map((invite) => ({
+        acceptedAt: invite.acceptedAt ?? null,
+        createdAt: invite.createdAt,
+        email: invite.email,
+        expiresAt: invite.expiresAt,
+        id: invite.id,
+        // Derived, not stored. A pending row whose window has closed is
+        // expired whatever the column says, and no sweep runs on this table --
+        // so without this a dead invite would keep looking live forever.
+        status:
+          invite.status === 'pending' && isStaffInviteExpired(invite.expiresAt, now)
+            ? 'expired'
+            : invite.status,
+      })),
+      staff: ((staffRows ?? []) as Array<Record<string, unknown>>)
+        .filter((account) => sanitizeText(String(account.uid)) !== context.uid)
+        .map((account) => ({
+          disabled: account.accountDisabled === true,
+          displayName: sanitizeOptionalText(account.displayName),
+          email: sanitizeOptionalText(account.email),
+          uid: sanitizeText(String(account.uid)),
+        })),
+    },
+  });
+};
+
+/** Cancel an invite that has not been redeemed. */
+const partnerRevokeStaffInvite: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['restaurant']);
+  const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role);
+
+  if (!managedRestaurant.restaurant) {
+    fail(404, 'No restaurant is linked to this account.');
+  }
+
+  const inviteId = sanitizeText(data.inviteId);
+  if (!inviteId) {
+    fail(400, 'An invite id is required.');
+  }
+
+  // Scoped by restaurantId inside the WHERE clause rather than checked after
+  // the read: a partner must not be able to revoke another restaurant's invite
+  // by guessing an id, and the query is the place to guarantee that.
+  const { data: updated, error } = await serviceClient
+    .from('StaffInvite')
+    .update({ status: 'revoked', updatedAt: nowIso() })
+    .eq('id', inviteId)
+    .eq('restaurantId', managedRestaurant.restaurant.id)
+    .eq('status', 'pending')
+    .select('id');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!updated || updated.length === 0) {
+    fail(404, 'That invite is no longer pending.');
+  }
+
+  await createAuditEntry(context.uid, 'staff_invite_revoked', 'restaurant', managedRestaurant.restaurant.id, {
+    inviteId,
+  });
+
+  return json(200, { data: { inviteId, status: 'revoked' } });
+};
+
+/**
+ * Remove a staff member's access to this restaurant.
+ *
+ * The counterpart to inviting, and the reason the feature is worth having: an
+ * owner who can add staff but never remove them is worse off than one shared
+ * password, because the set of people who can act for the restaurant only ever
+ * grows.
+ *
+ * This unlinks and drops the role. It deliberately does NOT delete the account
+ * or touch the password -- their FEASTY login is theirs, and the restaurant's
+ * authority over it stops at its own door.
+ */
+const partnerRevokeStaffAccess: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['restaurant']);
+  const managedRestaurant = await loadManagedRestaurantForUser(context.uid, context.role);
+
+  if (!managedRestaurant.restaurant) {
+    fail(404, 'No restaurant is linked to this account.');
+  }
+
+  const targetUid = sanitizeText(data.targetUid);
+  if (!targetUid) {
+    fail(400, 'A staff member is required.');
+  }
+
+  if (targetUid === context.uid) {
+    // Removing yourself would strand the restaurant with nobody able to reach
+    // its own console.
+    fail(400, 'You cannot remove your own access.');
+  }
+
+  const account = await loadUserAccount(targetUid);
+  if (!account || sanitizeText(account.restaurantId) !== managedRestaurant.restaurant.id) {
+    // One message for "no such user" and "not your staff". Splitting them
+    // turns this endpoint into an oracle for which uids exist.
+    fail(404, 'That person does not have access to this restaurant.');
+  }
+
+  await syncUserRoleState(targetUid, 'customer', context.uid, {
+    restaurantId: null,
+    restaurantLinkedAt: null,
+    restaurantLinkSource: null,
+    restaurantName: null,
+  });
+
+  await createAuditEntry(context.uid, 'staff_access_revoked', 'user', targetUid, {
+    restaurantId: managedRestaurant.restaurant.id,
+  });
+
+  return json(200, { data: { targetUid } });
 };
 
 const partnerGetRestaurantOrder: Handler = async ({ context, data }) => {
@@ -1608,6 +1867,10 @@ export const partnerDomain = defineRpcDomain<AuthenticatedRequestContext>({
     partnerGetRestaurantOrder,
     partnerGetRestaurantOrders,
     partnerGetRestaurantRatings,
+    partnerInviteStaff,
+    partnerListStaff,
+    partnerRevokeStaffAccess,
+    partnerRevokeStaffInvite,
     partnerSetMenuItemAvailability,
     partnerSetStorePause,
     partnerUpdateOrderStatus,

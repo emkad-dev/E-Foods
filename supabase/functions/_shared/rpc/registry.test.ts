@@ -90,6 +90,10 @@ const EXPECTED_PARTNER_ACTIONS = [
   'partnerGetRestaurantContext',
   'partnerGetRestaurantOrders',
   'partnerGetRestaurantRatings',
+  'partnerInviteStaff',
+  'partnerListStaff',
+  'partnerRevokeStaffAccess',
+  'partnerRevokeStaffInvite',
   'partnerGetRestaurantOrder',
   'upsertPartnerRestaurantProfile',
   'claimPartnerRestaurantLink',
@@ -141,6 +145,7 @@ const EXPECTED_ACCOUNT_ACTIONS = [
   'getPolicyAcceptance',
   'recordPolicyAcceptance',
   'provisionStaffAccount',
+  'redeemStaffInvite',
   'assignUserRole',
   'updateUserRestaurantLink',
   'revokeUserRole',
@@ -182,9 +187,9 @@ const stubDomain = (name: string, actions: readonly string[]): RpcDomain<TestCon
 const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['orders', ORDER_ACTIONS, 13],
   ['dispatch', DISPATCH_ACTIONS, 14],
-  ['partner', PARTNER_ACTIONS, 14],
+  ['partner', PARTNER_ACTIONS, 18],
   ['admin', ADMIN_ACTIONS, 29],
-  ['account', ACCOUNT_ACTIONS, 14],
+  ['account', ACCOUNT_ACTIONS, 15],
 ];
 
 for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
@@ -215,7 +220,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 84-action surface', () => {
+Deno.test('the five domains together cover exactly the 89-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -224,14 +229,14 @@ Deno.test('the five domains together cover exactly the 84-action surface', () =>
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 84, 'total action count');
-  expectEqual(new Set(union).size, 84, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 84, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 89, 'total action count');
+  expectEqual(new Set(union).size, 89, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 89, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 84, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 89, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {

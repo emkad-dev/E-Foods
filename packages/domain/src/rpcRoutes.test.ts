@@ -52,11 +52,11 @@ const GENERATOR_PATH = path.join(REPO_ROOT, 'scripts', 'generate-rpc-routes.mjs'
 const EXPECTED_DOMAIN_ACTION_COUNTS = {
   ORDER_ACTIONS: 13,
   DISPATCH_ACTIONS: 14,
-  PARTNER_ACTIONS: 14,
+  PARTNER_ACTIONS: 18,
   ADMIN_ACTIONS: 29,
-  ACCOUNT_ACTIONS: 14,
+  ACCOUNT_ACTIONS: 15,
 };
-const EXPECTED_TOTAL_ACTIONS = 84;
+const EXPECTED_TOTAL_ACTIONS = 89;
 
 const actionsSource = fs.readFileSync(ACTIONS_SOURCE_PATH, 'utf8');
 
@@ -79,7 +79,7 @@ test('actions.ts has exactly the expected per-domain action counts', () => {
   }
 });
 
-test('actions.ts has exactly 84 total actions across all five domains', () => {
+test('actions.ts has exactly 89 total actions across all five domains', () => {
   const total = Object.keys(EXPECTED_DOMAIN_ACTION_COUNTS).reduce(
     (sum, constName) => sum + extractActionArrayIndependently(actionsSource, constName).length,
     0
@@ -87,7 +87,7 @@ test('actions.ts has exactly 84 total actions across all five domains', () => {
   assert.equal(total, EXPECTED_TOTAL_ACTIONS);
 });
 
-test('RPC_ROUTES covers exactly the 84 actions', () => {
+test('RPC_ROUTES covers exactly the 89 actions', () => {
   assert.equal(Object.keys(RPC_ROUTES).length, EXPECTED_TOTAL_ACTIONS);
 });
 

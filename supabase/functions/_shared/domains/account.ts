@@ -35,6 +35,12 @@ import { validatePromoTrack } from '../promoTrack.ts';
 import { loadFeatureFlagMap } from '../featureFlags.ts';
 import { broadcastRidersChanged } from '../realtime.ts';
 import { loadManagedRestaurantForUser, loadRestaurantById } from '../restaurants.ts';
+import {
+  STAFF_INVITE_MAX_ATTEMPTS,
+  hashStaffInviteCode,
+  isStaffInviteExpired,
+  staffInviteCodeMatches,
+} from '../staffInviteCodes.ts';
 import { ACCOUNT_ACTIONS } from '../rpc/actions.ts';
 import type { JsonObject } from '../rpc/coercion.ts';
 import { nowIso, parseInteger, sanitizeOptionalText, sanitizeText } from '../rpc/coercion.ts';
@@ -228,6 +234,174 @@ const recordPolicyAcceptanceHandler: Handler = async ({ context, data }) => {
       acceptedAt,
       privacyVersion: CURRENT_PRIVACY_VERSION,
       termsVersion: CURRENT_TERMS_VERSION,
+    },
+  });
+};
+
+/**
+ * Redeem a staff invite for the account that is already signed in.
+ *
+ * WHAT BINDS THE INVITE TO A PERSON is not the code. It is the email on the
+ * signed-in account: the lookup is by `account.email`, so holding a code for
+ * someone else's address achieves nothing. The code only proves the holder of
+ * that mailbox meant to accept.
+ *
+ * Deliberately an AUTHENTICATED action, which is what keeps this feature small.
+ * The invitee signs up through the ordinary partner signup -- their own
+ * password, the existing email OTP -- and arrives here with an account already.
+ * So nothing in this path creates an auth user, sets a password or lifts a ban,
+ * ANONYMOUS_ACTIONS stays at two, and the pre-auth surface does not grow to
+ * carry a feature that does not need it.
+ */
+const redeemStaffInvite: Handler = async ({ context, data }) => {
+  const code = sanitizeText(data.code).trim();
+
+  if (!code) {
+    fail(400, 'Enter the invite code you were sent.');
+  }
+
+  const account = await loadUserAccount(context.uid);
+  if (!account) {
+    fail(404, 'Your account could not be loaded.');
+  }
+
+  const email = sanitizeText(account.email).toLowerCase();
+  if (!email) {
+    fail(412, 'Add an email address to your account before redeeming an invite.');
+  }
+
+  // A VERIFIED address, not merely a claimed one. Without this, signing up with
+  // somebody else's address and never confirming it would be enough to take
+  // the invite meant for them -- the code is emailed to the mailbox, so the
+  // mailbox has to be proven to belong to this account.
+  if (account.emailVerified !== true) {
+    fail(412, 'Confirm your email address before redeeming an invite.');
+  }
+
+  // An admin redeeming a staff invite would silently demote themselves out of
+  // the console. A person who already works for another restaurant has to be
+  // released by that restaurant first, rather than being moved by a code.
+  if (context.role === 'admin') {
+    fail(400, 'Administrator accounts cannot be added as restaurant staff.');
+  }
+
+  const existingRestaurantId = sanitizeText(account.restaurantId);
+
+  const { data: inviteRows, error: lookupError } = await serviceClient
+    .from('StaffInvite')
+    .select('id,restaurantId,codeHash,status,expiresAt,attempts')
+    .eq('email', email)
+    .eq('status', 'pending')
+    .order('createdAt', { ascending: false })
+    .limit(5);
+
+  if (lookupError) {
+    throw new Error(lookupError.message);
+  }
+
+  const now = new Date();
+  const candidates = ((inviteRows ?? []) as Array<{
+    attempts?: number | null;
+    codeHash: string;
+    expiresAt: string;
+    id: string;
+    restaurantId: string;
+  }>).filter((invite) => !isStaffInviteExpired(invite.expiresAt, now));
+
+  // One message for "no invite", "expired", "wrong code" and "out of attempts".
+  // Distinguishing them tells an attacker which addresses have live invites.
+  const REJECTION = 'That code is not valid. Check it with the restaurant, or ask them to send a new one.';
+
+  if (candidates.length === 0) {
+    fail(400, REJECTION);
+  }
+
+  let matched: { id: string; restaurantId: string } | null = null;
+
+  for (const invite of candidates) {
+    if ((invite.attempts ?? 0) >= STAFF_INVITE_MAX_ATTEMPTS) {
+      continue;
+    }
+
+    const candidateHash = await hashStaffInviteCode(invite.id, code);
+
+    if (staffInviteCodeMatches(invite.codeHash, candidateHash)) {
+      matched = { id: invite.id, restaurantId: invite.restaurantId };
+      break;
+    }
+
+    // Count the miss BEFORE returning. Six digits is a million combinations,
+    // and this counter is the only thing standing between that number and a
+    // script; a failed attempt that costs nothing is not a guard.
+    const nextAttempts = (invite.attempts ?? 0) + 1;
+    const { error: attemptError } = await serviceClient
+      .from('StaffInvite')
+      .update({
+        attempts: nextAttempts,
+        // Burn the invite outright once the budget is gone, rather than
+        // leaving a row that quietly accepts nothing.
+        status: nextAttempts >= STAFF_INVITE_MAX_ATTEMPTS ? 'revoked' : 'pending',
+        updatedAt: now.toISOString(),
+      })
+      .eq('id', invite.id);
+
+    if (attemptError) {
+      throw new Error(attemptError.message);
+    }
+  }
+
+  if (!matched) {
+    fail(400, REJECTION);
+  }
+
+  if (existingRestaurantId && existingRestaurantId !== matched.restaurantId) {
+    fail(409, 'This account already works for another restaurant. Ask them to remove your access first.');
+  }
+
+  const restaurant = await loadRestaurantById(matched.restaurantId);
+  if (!restaurant.restaurant) {
+    fail(404, 'The restaurant that invited you no longer exists.');
+  }
+
+  // Claim the row FIRST, and only from `pending`. Two tabs redeeming the same
+  // code race here; the status predicate means exactly one of them gets a row
+  // back and therefore exactly one grants access.
+  const { data: claimed, error: claimError } = await serviceClient
+    .from('StaffInvite')
+    .update({
+      acceptedAt: now.toISOString(),
+      acceptedUid: context.uid,
+      status: 'accepted',
+      updatedAt: now.toISOString(),
+    })
+    .eq('id', matched.id)
+    .eq('status', 'pending')
+    .select('id');
+
+  if (claimError) {
+    throw new Error(claimError.message);
+  }
+
+  if (!claimed || claimed.length === 0) {
+    fail(409, 'That invite has already been used.');
+  }
+
+  await syncUserRoleState(context.uid, 'restaurant', context.uid, {
+    restaurantId: matched.restaurantId,
+    restaurantLinkedAt: now.toISOString(),
+    restaurantLinkSource: 'staff_invite',
+    restaurantName: sanitizeText(restaurant.restaurant.name, 'Restaurant'),
+  });
+
+  await createAuditEntry(context.uid, 'staff_invite_redeemed', 'user', context.uid, {
+    inviteId: matched.id,
+    restaurantId: matched.restaurantId,
+  });
+
+  return json(200, {
+    data: {
+      restaurantId: matched.restaurantId,
+      restaurantName: sanitizeText(restaurant.restaurant.name, 'Restaurant'),
     },
   });
 };
@@ -881,6 +1055,7 @@ export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
     getFeatureFlags,
     getPolicyAcceptance,
     provisionStaffAccount,
+    redeemStaffInvite,
     recordPolicyAcceptance: recordPolicyAcceptanceHandler,
     revokeUserRole,
     syncUserClaims,
