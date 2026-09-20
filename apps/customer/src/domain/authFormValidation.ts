@@ -140,6 +140,16 @@ export function validateRegisterForm({
     return emailDomainError;
   }
 
+  // Checked here, in field order, because the number is now KEPT: sign-up
+  // writes it to the profile instead of asking for it again a screen later, so
+  // `abc` in this box would become the number support and riders dial. The
+  // profile editor has always run this check; registration only ever checked
+  // that the box was not empty.
+  const phoneError = validatePhoneNumber({ value: phoneNumber });
+  if (phoneError) {
+    return phoneError;
+  }
+
   if (password !== confirmPassword) {
     return PASSWORD_MISMATCH;
   }
@@ -292,4 +302,31 @@ export function normalizeProfilePhoneNumber(value: string): string | null {
   const result = normalizePhone(value);
 
   return result.ok ? result.e164 : null;
+}
+
+/**
+ * The phone number a sign-up left in the auth user's metadata, ready to store.
+ *
+ * Sign-up collects a number and every customer used to be asked for it AGAIN
+ * on /complete-profile, because the value reached `auth.users.user_metadata`
+ * and stopped there — the profile row was created without it, and the route
+ * guard keys on the profile row. This is what carries it the last step.
+ *
+ * `unknown` in, because metadata is untyped JSON that anything could have
+ * written. Anything unreadable, or any number that is not a supported mobile,
+ * returns `null` rather than a guess: `null` means the profile row is created
+ * without a phone, the guard sends the customer to /complete-profile, and they
+ * are asked once — which is the old behaviour, kept as the fallback. Storing a
+ * malformed number instead would satisfy the guard with something nobody can
+ * dial.
+ *
+ * NOT a verification claim. It is a well-formed number the account holder
+ * typed, which is exactly what `phoneVerifiedAt` staying null records.
+ */
+export function resolveSignupPhoneNumber(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  return normalizeProfilePhoneNumber(value);
 }

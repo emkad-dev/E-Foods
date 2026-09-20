@@ -7,6 +7,7 @@ import {
   validateEmailCode,
   validateForgotPasswordForm,
   normalizeProfilePhoneNumber,
+  resolveSignupPhoneNumber,
   validateLoginForm,
   validatePhoneNumber,
   validateRegisterForm,
@@ -58,6 +59,31 @@ describe('validateRegisterForm', () => {
     assert.match(
       validateRegisterForm({ ...validRegistration, nickname: '   ' }) ?? '',
       /complete all fields/
+    );
+  });
+
+  it('rejects a phone number nobody can dial', () => {
+    // The number is KEPT now -- sign-up writes it to the profile instead of
+    // asking again on /complete-profile -- so this form is the last place that
+    // can stop `abc` becoming the number a rider calls. It only ever checked
+    // that the box was non-empty.
+    assert.match(
+      validateRegisterForm({ ...validRegistration, phoneNumber: 'abc' }) ?? '',
+      /digits only/
+    );
+  });
+
+  it('checks the phone before the passwords, in field order', () => {
+    // The phone box sits above both password boxes, so a form wrong in both
+    // places must point at the field the eye reaches first.
+    assert.match(
+      validateRegisterForm({
+        ...validRegistration,
+        phoneNumber: 'abc',
+        password: 'x',
+        confirmPassword: 'y',
+      }) ?? '',
+      /digits only/
     );
   });
 
@@ -206,6 +232,29 @@ describe('the signup domain allowlist is NOT applied anywhere else', () => {
       }),
       null
     );
+  });
+});
+
+describe('resolveSignupPhoneNumber', () => {
+  it('normalises whatever spacing the customer typed at sign-up', () => {
+    assert.equal(resolveSignupPhoneNumber('0803 123 4567'), '+2348031234567');
+    assert.equal(resolveSignupPhoneNumber('+234 803 123 4567'), '+2348031234567');
+  });
+
+  it('returns null for metadata that is absent, blank, or not a string', () => {
+    // Metadata is untyped JSON, so anything could be in there. `null` means
+    // the profile row is created without a phone and the route guard asks for
+    // one -- the old behaviour, kept as the fallback.
+    for (const absent of [undefined, null, '', '   ', 42, {}, ['+2348031234567']]) {
+      assert.equal(resolveSignupPhoneNumber(absent), null, `expected null for ${JSON.stringify(absent)}`);
+    }
+  });
+
+  it('returns null rather than storing a number nobody can dial', () => {
+    // Satisfying the guard with garbage is worse than asking again: the guard
+    // opens, and support is left dialling 'abc'.
+    assert.equal(resolveSignupPhoneNumber('abc'), null);
+    assert.equal(resolveSignupPhoneNumber('12'), null);
   });
 });
 

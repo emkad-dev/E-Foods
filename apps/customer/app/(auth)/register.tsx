@@ -10,7 +10,7 @@ import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShe
 import AuthTextField from '../../src/components/AuthTextField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import SuccessBanner from '../../src/components/SuccessBanner';
-import { validateRegisterForm } from '../../src/domain/authFormValidation';
+import { normalizeProfilePhoneNumber, validateRegisterForm } from '../../src/domain/authFormValidation';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/auth';
 import { customerTheme } from '../../src/theme/palette';
@@ -88,11 +88,17 @@ export default function RegisterScreen() {
 
     setValidationError(null);
     const trimmedEmail = email.trim();
+    // The dialable form, never the typed spacing -- the same rule the profile
+    // editor follows, so "0803 123 4567" and "+234 803 123 4567" do not become
+    // two different numbers for the same person. `validateRegisterForm` above
+    // has already rejected anything that will not normalise; the fallback only
+    // keeps this from silently sending an empty string if that ever changes.
+    const phoneE164 = normalizeProfilePhoneNumber(phoneNumber) ?? phoneNumber.trim();
 
     try {
       const { verificationEmailSent } = await signUp(trimmedEmail, password, {
         displayName: nickname.trim(),
-        phoneNumber: phoneNumber.trim(),
+        phoneNumber: phoneE164,
         policyAcceptance: buildCustomerPolicyAcceptance('customer_signup'),
       });
 

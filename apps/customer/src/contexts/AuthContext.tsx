@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { router } from 'expo-router';
+import { resolveSignupPhoneNumber } from '../domain/authFormValidation';
 import type { UserDocument } from '../domain/entities';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
 import {
@@ -163,6 +164,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             (authUser.user_metadata?.display_name as string | undefined) ??
             (authUser.user_metadata?.full_name as string | undefined) ??
             undefined,
+          // The number the customer typed at sign-up. Without this the profile
+          // row was created empty-handed and the route guard -- which keys on
+          // the profile row, not on the metadata -- sent every newly confirmed
+          // customer to /complete-profile to type the same number again.
+          // `null` when there is nothing usable there (a Google sign-in, or a
+          // number that will not normalise), which leaves that guard exactly as
+          // it was.
+          phoneNumber: resolveSignupPhoneNumber(authUser.user_metadata?.phone) ?? undefined,
           photoURL: (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
         });
       }
