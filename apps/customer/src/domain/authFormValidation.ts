@@ -12,7 +12,11 @@
  * surface per screen rather than a second competing one.
  */
 
-import { normalizePhone, phoneRejectionMessage } from '../../../../packages/domain/src/phone.ts';
+import {
+  formatLocalPhone,
+  normalizePhone,
+  phoneRejectionMessage,
+} from '../../../../packages/domain/src/phone.ts';
 
 /** Matches the minimum Supabase Auth is configured to accept. */
 export const MIN_PASSWORD_LENGTH = 6;
@@ -302,6 +306,40 @@ export function normalizeProfilePhoneNumber(value: string): string | null {
   const result = normalizePhone(value);
 
   return result.ok ? result.e164 : null;
+}
+
+export type PhoneConfirmation = {
+  /** The number as its owner reads it aloud: `0803 123 4567`. */
+  readable: string;
+  /** The form that is actually stored and dialled: `+2348031234567`. */
+  e164: string;
+};
+
+/**
+ * The two ways to show a number back to the person who just typed it, for the
+ * "is this right?" step.
+ *
+ * There is no SMS round-trip on this number — Termii sender approval is
+ * pending, so nothing proves the line belongs to them — which makes reading it
+ * back the only check there is. A transposed digit otherwise surfaces when a
+ * rider cannot reach them with the food already cooked.
+ *
+ * Both forms are shown deliberately. `readable` is the one people recognise as
+ * their own number and can check at a glance; `e164` is what the record
+ * actually holds, and seeing `+234` appear where a leading `0` was typed is
+ * reassurance rather than a surprise later.
+ *
+ * `null` for anything that will not normalise, so a caller cannot render a
+ * confirmation for a number it is not about to store.
+ */
+export function describePhoneForConfirmation(value: string): PhoneConfirmation | null {
+  const result = normalizePhone(value);
+
+  if (!result.ok) {
+    return null;
+  }
+
+  return { readable: formatLocalPhone(result.local, result.country), e164: result.e164 };
 }
 
 /**

@@ -10,7 +10,11 @@ import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShe
 import AuthTextField from '../../src/components/AuthTextField';
 import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import SuccessBanner from '../../src/components/SuccessBanner';
-import { normalizeProfilePhoneNumber, validateRegisterForm } from '../../src/domain/authFormValidation';
+import {
+  describePhoneForConfirmation,
+  normalizeProfilePhoneNumber,
+  validateRegisterForm,
+} from '../../src/domain/authFormValidation';
 import { buildCustomerPolicyAcceptance } from '../../src/services/policyAcceptance';
 import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/auth';
 import { customerTheme } from '../../src/theme/palette';
@@ -40,6 +44,10 @@ export default function RegisterScreen() {
   // it. `validationError` is client-side only and never carries this text, so
   // only the context's `error` can light this up.
   const showAlreadyRegisteredRoutes = formError === ACCOUNT_ALREADY_REGISTERED_MESSAGE;
+  // `null` until the number is one we can actually store, which is what keeps
+  // the readback below from quoting a half-typed number back at someone
+  // mid-keystroke.
+  const phoneConfirmation = describePhoneForConfirmation(phoneNumber);
 
   const handleNicknameChange = (value: string) => {
     if (error) clearError();
@@ -197,7 +205,17 @@ export default function RegisterScreen() {
         keyboardType="phone-pad"
         editable={!loading}
       />
-      <Text style={styles.helperText}>We use this for order updates and rider contact.</Text>
+      {/* Reads the number back in the form it will be stored and dialled in.
+          There is no SMS code on this number, so this line is the only chance
+          the customer gets to catch a transposed digit -- and it doubles as
+          the explanation for why a leading 0 turns into +234. */}
+      {phoneConfirmation ? (
+        <Text style={styles.helperText}>
+          {`We'll use ${phoneConfirmation.readable} (${phoneConfirmation.e164}) for order updates and rider contact. Check it before you continue.`}
+        </Text>
+      ) : (
+        <Text style={styles.helperText}>We use this for order updates and rider contact.</Text>
+      )}
 
       <View style={styles.fieldGap}>
         <AuthPasswordField

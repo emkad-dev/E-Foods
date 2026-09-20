@@ -6,6 +6,7 @@ import {
   MIN_PASSWORD_LENGTH,
   validateEmailCode,
   validateForgotPasswordForm,
+  describePhoneForConfirmation,
   normalizeProfilePhoneNumber,
   resolveSignupPhoneNumber,
   validateLoginForm,
@@ -232,6 +233,45 @@ describe('the signup domain allowlist is NOT applied anywhere else', () => {
       }),
       null
     );
+  });
+});
+
+describe('describePhoneForConfirmation', () => {
+  // This is the whole of the check on a phone number now: no SMS code is sent,
+  // so reading it back is the only thing between a transposed digit and a
+  // rider who cannot reach anybody.
+  it('shows a Nigerian number the way its owner reads it, and the way it is stored', () => {
+    assert.deepEqual(describePhoneForConfirmation('08031234567'), {
+      readable: '0803 123 4567',
+      e164: '+2348031234567',
+    });
+  });
+
+  it('reads back the same pair however the number was typed', () => {
+    // The point of showing both: someone who typed a leading 0 sees where the
+    // +234 came from instead of meeting it for the first time in a receipt.
+    for (const typed of ['0803 123 4567', '+2348031234567', '+234 803 123 4567', '2348031234567']) {
+      assert.deepEqual(
+        describePhoneForConfirmation(typed),
+        { readable: '0803 123 4567', e164: '+2348031234567' },
+        `typed as ${typed}`
+      );
+    }
+  });
+
+  it('groups a UK number by UK rules', () => {
+    assert.deepEqual(describePhoneForConfirmation('+447123456789'), {
+      readable: '07123 456789',
+      e164: '+447123456789',
+    });
+  });
+
+  it('returns null rather than a confirmation for a number that will not store', () => {
+    // A confirmation screen for a number the app is not about to save would be
+    // a lie, so there is nothing to render.
+    for (const bad of ['', '   ', 'abc', '12', '+1 555 0100']) {
+      assert.equal(describePhoneForConfirmation(bad), null, `expected null for "${bad}"`);
+    }
   });
 });
 
