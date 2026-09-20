@@ -6,7 +6,10 @@
 export const SUCCESS_NOTICES = {
   'account-created': {
     title: 'Check your email',
-    message: 'We sent a 6-digit confirmation code. Enter it to confirm your email, then sign in to start ordering.',
+    // Shown on /verify-email, where the code field is, rather than on /login:
+    // sign-up leaves no session, so telling someone to "sign in" at this point
+    // sends them to a screen that cannot let them in until the code is used.
+    message: 'We sent a 6-digit confirmation code. Enter it below to finish setting up your account.',
   },
   'email-verified': {
     title: 'Email confirmed',

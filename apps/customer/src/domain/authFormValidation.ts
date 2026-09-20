@@ -168,6 +168,31 @@ export function validateEmailCode({ value }: ProfileFieldInput): string | null {
   return null;
 }
 
+export type VerifyEmailFormInput = {
+  /**
+   * The address the confirmation code was sent to. Carried from register as a
+   * route param, or typed on the screen when the customer landed there
+   * directly. Empty when a session supplies it instead, which is why the
+   * caller passes the resolved address rather than the field.
+   */
+  email: string;
+  /** The 6-digit confirmation code from the email. */
+  code: string;
+};
+
+/**
+ * Email confirmation is OTP-only and `verifyOtp` is keyed on (email, token), so
+ * a code with no address identifies nobody. The address is checked first
+ * because it is the field above.
+ */
+export function validateVerifyEmailForm({ email, code }: VerifyEmailFormInput): string | null {
+  if (!email.trim()) {
+    return 'Enter the email address you signed up with.';
+  }
+
+  return validateEmailCode({ value: code });
+}
+
 export type ResetPasswordFormInput = {
   /**
    * The address the recovery code was sent to. Carried from forgot-password as

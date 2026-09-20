@@ -75,8 +75,15 @@ interface AuthContextType {
   updateDisplayName: (displayName: string) => Promise<void>;
   updatePhoneNumber: (phoneNumber: string) => Promise<void>;
   reloadUser: () => Promise<boolean>;
-  sendVerificationEmail: () => Promise<void>;
-  verifyEmailCode: (code: string) => Promise<boolean>;
+  /**
+   * `email` is for the SIGNED-OUT caller. Sign-up returns no session while
+   * confirmation is pending, so the code screen reached straight from
+   * /register has no session address to read and passes the one it was routed
+   * with. When a session exists its address wins, so a signed-in customer
+   * cannot aim a resend at somebody else's inbox.
+   */
+  sendVerificationEmail: (email?: string) => Promise<void>;
+  verifyEmailCode: (code: string, email?: string) => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -826,20 +833,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const sendVerificationEmail = async (): Promise<void> => {
+  /**
+   * The address a confirmation code belongs to.
+   *
+   * Both callers below used to demand a session and fail with "No user is
+   * currently signed in" without one. That made the whole confirmation screen
+   * unusable in the state it exists for: sign-up with confirmation pending
+   * returns NO session, so the customer who had just registered could not
+   * confirm the code that had just been emailed to them. The session address
+   * still wins when there is one -- a signed-in customer must not be able to
+   * point a resend at an address that is not theirs -- and the caller-supplied
+   * address is only consulted when there is nobody signed in.
+   */
+  const resolveVerificationEmail = async (fallbackEmail?: string): Promise<string> => {
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();
 
-    if (!authUser?.email) {
-      const message = 'No user is currently signed in';
+    const address = authUser?.email ?? fallbackEmail?.trim();
+
+    if (!address) {
+      const message = 'Enter the email address you signed up with.';
       setError(message);
       throw new Error(message);
     }
 
+    return address;
+  };
+
+  const sendVerificationEmail = async (email?: string): Promise<void> => {
+    const address = await resolveVerificationEmail(email);
+
     try {
       // No redirect: the resent email is the same OTP email.
-      await sendVerificationEmailWithFallback(supabase, authUser.email);
+      await sendVerificationEmailWithFallback(supabase, address);
       trackAnalyticsEvent('customer_verification_email_requested');
     } catch (err: any) {
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to send verification email');
@@ -848,19 +875,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const verifyEmailCode = async (code: string): Promise<boolean> => {
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
-
-    if (!authUser?.email) {
-      const message = 'No user is currently signed in';
-      setError(message);
-      throw new Error(message);
-    }
+  const verifyEmailCode = async (code: string, email?: string): Promise<boolean> => {
+    const address = await resolveVerificationEmail(email);
 
     try {
-      await verifyEmailOtp(supabase, authUser.email, code);
+      // A redeemed signup OTP leaves a real session behind, so the signed-out
+      // caller is signed in by this line. `onAuthStateChange` above picks that
+      // up and the route guards carry them on into the app; `reloadUser` is
+      // what settles the verified flag for the already-signed-in caller.
+      await verifyEmailOtp(supabase, address, code);
       const emailVerified = await reloadUser();
       return emailVerified;
     } catch (err: any) {

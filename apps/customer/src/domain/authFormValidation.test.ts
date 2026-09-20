@@ -13,6 +13,7 @@ import {
   validateResetPasswordForm,
   validateSignupEmailDomain,
   validateUsername,
+  validateVerifyEmailForm,
 } from './authFormValidation.ts';
 
 const validRegistration = {
@@ -205,6 +206,27 @@ describe('the signup domain allowlist is NOT applied anywhere else', () => {
       }),
       null
     );
+  });
+});
+
+describe('validateVerifyEmailForm', () => {
+  // This screen is reached straight from sign-up, where there is no session
+  // yet, so the address is a value the screen carries rather than one it can
+  // read off `AuthContext`. `verifyOtp` is keyed on (email, token): a code with
+  // no address redeems against nobody.
+  it('accepts an address and a full code', () => {
+    assert.equal(validateVerifyEmailForm({ email: 'ada@gmail.com', code: '123456' }), null);
+  });
+
+  it('asks for the address before the code', () => {
+    assert.match(
+      validateVerifyEmailForm({ email: '   ', code: '123456' }) ?? '',
+      /email address you signed up with/
+    );
+  });
+
+  it('requires all six digits once there is an address', () => {
+    assert.match(validateVerifyEmailForm({ email: 'ada@gmail.com', code: '1234' }) ?? '', /6 digits/);
   });
 });
 

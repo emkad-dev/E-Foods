@@ -87,18 +87,30 @@ export default function RegisterScreen() {
     }
 
     setValidationError(null);
+    const trimmedEmail = email.trim();
 
     try {
-      const { verificationEmailSent } = await signUp(email.trim(), password, {
+      const { verificationEmailSent } = await signUp(trimmedEmail, password, {
         displayName: nickname.trim(),
         phoneNumber: phoneNumber.trim(),
         policyAcceptance: buildCustomerPolicyAcceptance('customer_signup'),
       });
 
       if (verificationEmailSent) {
+        // Straight to the code screen, not to /login. Confirmation is OTP-only,
+        // so the next thing that happens is typing the 6-digit code -- and it
+        // happens in the app. Sending the new customer to sign-in instead put
+        // them in front of a form that CANNOT let them in while the address is
+        // unconfirmed, with the code screen reachable only by typing its URL.
+        // The address rides along as its own param so it is not retyped and so
+        // the resend button there has something to send to.
         router.replace({
-          pathname: '/login',
-          params: { notice: 'account-created', ...(redirectTo ? { redirectTo } : null) },
+          pathname: '/(auth)/verify-email',
+          params: {
+            notice: 'account-created',
+            email: trimmedEmail,
+            ...(redirectTo ? { redirectTo } : null),
+          },
         } as never);
         return;
       }
@@ -141,7 +153,10 @@ export default function RegisterScreen() {
                 Sign in
               </Link>
               <Text style={styles.errorActionSeparator}>·</Text>
-              <Link href="/verify-email" style={styles.errorActionLink}>
+              <Link
+                href={{ pathname: '/(auth)/verify-email', params: { email: email.trim() } }}
+                style={styles.errorActionLink}
+              >
                 Enter your code
               </Link>
             </View>
