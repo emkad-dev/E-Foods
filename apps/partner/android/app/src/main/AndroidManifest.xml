@@ -1,8 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <!--
+    RECORD_AUDIO is removed, not merely absent. expo-audio declares it
+    because the module can record; this app only ever PLAYS - the kitchen
+    alarm, via useAudioPlayer in KitchenAlarmContext. Nothing here opens a
+    microphone, so the permission is declined rather than justified.
+  -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+  <!--
+    SYSTEM_ALERT_WINDOW ("draw over other apps") belongs to the debug
+    variant, which declares it separately in src/debug/AndroidManifest.xml
+    for the React Native dev overlay. Its presence HERE put it in release
+    builds too. Play treats it as sensitive and expects a justification this
+    app cannot give, so release drops it and debug keeps it.
+  -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
   <queries>
