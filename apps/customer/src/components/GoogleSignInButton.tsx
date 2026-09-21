@@ -10,7 +10,14 @@ import {
   signInWithGoogleOAuth,
 } from '../services/googleSignIn';
 
-export default function GoogleSignInButton() {
+/**
+ * `redirectTo` is where the visitor was headed before they were asked to sign
+ * in. On web it rides through the OAuth round trip as a query param on our
+ * own callback URL and is re-validated on return; without it a customer sent
+ * to sign in from their cart came back to the home feed and had to find their
+ * way again.
+ */
+export default function GoogleSignInButton({ redirectTo }: { redirectTo?: string }) {
   const { signInWithGoogle, loading } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
   const unavailableMessage = getGoogleSignInUnavailableMessage();
@@ -30,7 +37,7 @@ export default function GoogleSignInButton() {
 
     try {
       if (Platform.OS === 'web') {
-        await signInWithGoogleOAuth(supabase);
+        await signInWithGoogleOAuth(supabase, redirectTo);
         return;
       }
 

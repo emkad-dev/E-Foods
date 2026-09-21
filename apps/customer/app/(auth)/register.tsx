@@ -266,7 +266,7 @@ export default function RegisterScreen() {
 
       <AuthDivider label="or" />
 
-      <GoogleSignInButton />
+      <GoogleSignInButton redirectTo={redirectTo} />
 
       <View style={styles.switchRow}>
         <Text style={styles.switchText}>Already have an account? </Text>

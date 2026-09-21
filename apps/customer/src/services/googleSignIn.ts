@@ -107,14 +107,29 @@ export const configureGoogleSignIn = (): { ok: true } | { ok: false; message: st
   return { ok: true };
 };
 
-export const signInWithGoogleOAuth = async (supabase: SupabaseClient) => {
+/**
+ * Starts the browser OAuth flow (web only -- native takes the ID-token path
+ * below).
+ *
+ * `destination` is where the customer was headed before they were asked to
+ * sign in; it rides along as a query param on our own callback URL and is
+ * re-validated on the way back by `resolveOAuthDestination`, because anything
+ * in a URL is attacker-composable.
+ */
+export const signInWithGoogleOAuth = async (supabase: SupabaseClient, destination?: string) => {
   const webClientId = getConfiguredWebClientId();
 
   if (!webClientId) {
     throw new Error('Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID and enable Google in Supabase Auth before using customer Google sign-in.');
   }
 
-  const redirectTo = Linking.createURL('/verify-email');
+  // /auth/callback, not /verify-email. This flow is PKCE: Supabase returns a
+  // `code` that has to be exchanged for a session, and /auth/callback is the
+  // one route that does it. The old target did nothing with what it was sent,
+  // and asked an already-Google-verified address to confirm its email.
+  const redirectTo = Linking.createURL('/auth/callback', {
+    queryParams: destination ? { redirectTo: destination } : undefined,
+  });
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {

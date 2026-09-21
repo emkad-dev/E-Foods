@@ -100,7 +100,7 @@ export default function LoginScreen() {
 
       <AuthDivider label="or" />
 
-      <GoogleSignInButton />
+      <GoogleSignInButton redirectTo={redirectTo} />
 
       <View style={styles.switchRow}>
         <Text style={styles.switchText}>Don&apos;t have an account? </Text>
