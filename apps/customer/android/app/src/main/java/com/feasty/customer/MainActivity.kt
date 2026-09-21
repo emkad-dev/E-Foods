@@ -1,4 +1,4 @@
-package com.ebuy.customer
+package com.feasty.customer
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

@@ -10,7 +10,7 @@
     "owner": "ghosty_xx",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ebuy.customer",
+      "bundleIdentifier": "com.feasty.customer",
       "associatedDomains": [
         "applinks:app.feasty.com.ng"
       ]
@@ -22,7 +22,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.ebuy.customer",
+      "package": "com.feasty.customer",
       "intentFilters": [
         {
           "action": "VIEW",
