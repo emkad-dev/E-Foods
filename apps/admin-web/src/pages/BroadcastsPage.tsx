@@ -353,7 +353,12 @@ export default function BroadcastsPage() {
             branch was still the table, so a failed load simply said "no
             broadcasts" in header rows instead of in words. */}
         {listState === 'loading' ? <SkeletonRows count={5} /> : null}
-        {listState === 'empty' ? <EmptyState title="No broadcasts yet" body="Compose one on the left." /> : null}
+        {listState === 'empty' ? (
+          <EmptyState
+            title="No broadcasts yet"
+            body="Nothing has been sent or scheduled, so no customer has received one. Compose on the left; a broadcast appears here with its status as soon as it is queued."
+          />
+        ) : null}
         {listState === 'ready' ? (
           <div className="table-wrap">
             <table className="data-table">

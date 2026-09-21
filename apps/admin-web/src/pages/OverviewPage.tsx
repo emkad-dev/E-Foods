@@ -17,7 +17,16 @@ import {
   getOrderDate,
   type RangeDays,
 } from '../lib/analytics';
-import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
+import { formatCurrency, formatDateTime, formatNumber, parseTimestamp } from '../lib/format';
+import {
+  buildPeriodWindows,
+  coversPreviousWindow,
+  earlierOf,
+  earliestDateIn,
+  filterWithin,
+  kpiComparison,
+  windowTotalCaption,
+} from '../lib/periodComparison';
 import { resolveViewState } from '../lib/viewState';
 import { getApprovalTone, getOrderTone, getPaymentChartColor, getStatusChartColor } from '../theme/tones';
 
@@ -41,15 +50,50 @@ export default function OverviewPage() {
 
   const statusBreakdown = useMemo(() => buildStatusBreakdown(snapshot.orders).slice(0, 8), [snapshot.orders]);
 
-  const windowedOrders = useMemo(() => {
-    const start = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
-    return snapshot.orders.filter((order) => {
-      const created = getOrderDate(order);
-      return created !== null && created >= start;
-    });
-  }, [snapshot.orders, rangeDays]);
+  /**
+   * The window's problem counts, plus whether the window BEFORE it is one this
+   * snapshot can speak for at all.
+   *
+   * `previousWindowCovered` is the honesty gate on every delta this page
+   * renders. `computeDashboardKpis` happily reports a previous period of zero
+   * whether the platform was quiet or did not yet exist, and `formatDeltaPercent`
+   * turns a zero previous into "▲ New activity" -- so on a platform younger
+   * than the selected range, all three cards below were asserting a trend
+   * inferred from the absence of data. The horizon is the oldest record in
+   * hand (users predate orders on a real platform); before it, a count of zero
+   * means "we cannot see", not "it did not happen".
+   *
+   * The window is also now half-open and equal-length on both sides, matching
+   * `computeDashboardKpis` exactly, rather than the unbounded `created >= start`
+   * filter this replaces -- which let a future-dated row inflate the count.
+   */
+  const windowComparison = useMemo(() => {
+    const windows = buildPeriodWindows(rangeDays);
+    const dataHorizon = earlierOf(
+      earliestDateIn(snapshot.orders, getOrderDate),
+      earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
+    );
 
-  const problemCounts = useMemo(() => computeProblemCounts(windowedOrders), [windowedOrders]);
+    return {
+      previousWindowCovered: coversPreviousWindow(dataHorizon, windows),
+      problems: computeProblemCounts(
+        filterWithin(snapshot.orders, getOrderDate, windows.currentStart, windows.currentEnd)
+      ),
+    };
+  }, [snapshot.orders, snapshot.users, rangeDays]);
+
+  const problemCounts = windowComparison.problems;
+
+  // The three windowed cards ask the same question of the same two windows, so
+  // it is asked once here.
+  const compare = (current: number, previous: number) =>
+    kpiComparison({
+      current,
+      previous,
+      previousWindowCovered: windowComparison.previousWindowCovered,
+      fallbackCaption: windowTotalCaption(rangeDays),
+    });
+
   const paymentBreakdown = useMemo(() => buildPaymentBreakdown(snapshot.orders).slice(0, 8), [snapshot.orders]);
 
   const approvalPulse = useMemo(
@@ -84,42 +128,61 @@ export default function OverviewPage() {
             <KpiCard
               label={`Orders (${rangeDays}d)`}
               value={formatNumber(kpis.orders.current)}
-              current={kpis.orders.current}
-              previous={kpis.orders.previous}
+              {...compare(kpis.orders.current, kpis.orders.previous)}
             />
             <KpiCard
               label={`Revenue (${rangeDays}d)`}
               value={formatCurrency(kpis.revenue.current, kpis.currency)}
-              current={kpis.revenue.current}
-              previous={kpis.revenue.previous}
+              {...compare(kpis.revenue.current, kpis.revenue.previous)}
             />
             <KpiCard
               label={`New users (${rangeDays}d)`}
               value={formatNumber(kpis.newUsers.current)}
-              current={kpis.newUsers.current}
-              previous={kpis.newUsers.previous}
+              {...compare(kpis.newUsers.current, kpis.newUsers.previous)}
             />
             <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} />
             <KpiCard label="Dispatch online" value={formatNumber(kpis.dispatchOnline)} />
             <KpiCard label="Pending approvals" value={formatNumber(kpis.pendingApprovals)} />
-            {/* These three are windowed and have no prior period, so they must
-                not inherit KpiCard's "Live count" default -- it contradicted
-                the (30d) in their own labels. The three above them ARE live
-                counts and keep it. */}
+            {/* The three below are windowed, so they must not inherit
+                KpiCard's "Live count" default -- it contradicted the (30d) in
+                their own labels. The three above them ARE live counts and keep
+                it.
+
+                Two of them cannot be measured from this feed AT ALL, and a
+                prior-period delta was never the defect worth fixing here. The
+                snapshot RPC runs every order through
+                `isOrderCleanForReporting` (supabase/functions/_shared/orders.ts),
+                which drops cancelled/rejected/failed-delivery orders outright
+                and drops prepaid orders that are not paid. Every path that
+                writes `payment.status = 'failed'` is a Paystack one and also
+                cancels the order, so it is excluded twice over. The two counts
+                below were therefore not low -- they were structurally,
+                permanently zero, and a confident "0 cancelled orders" on an
+                operations dashboard is a worse lie than a missing delta. They
+                render an em dash until the feed carries the rows. */}
             <KpiCard
               label={`Failed payments (${rangeDays}d)`}
-              value={formatNumber(problemCounts.failedPayments)}
-              caption="Window total"
+              value="—"
+              caption="Not carried by this feed"
             />
+            {/* Survives the filter only when the payment is cash: a cash order
+                is 'pending' until a rider or the restaurant collects on
+                delivery, at which point both handoff paths mark it paid. So
+                this is uncollected cash, not the stuck card checkouts the
+                label brings to mind -- those are filtered out above. Left
+                un-compared deliberately: the tail of the current window is
+                full of orders that are merely still in flight, while the
+                previous window's are ones that never resolved, so a delta
+                between the two would be measuring two different things. */}
             <KpiCard
               label={`Pending payments (${rangeDays}d)`}
               value={formatNumber(problemCounts.pendingPayments)}
-              caption="Window total"
+              caption="Uncollected cash in window"
             />
             <KpiCard
               label={`Cancelled orders (${rangeDays}d)`}
-              value={formatNumber(problemCounts.cancelledOrders)}
-              caption="Window total"
+              value="—"
+              caption="Not carried by this feed"
             />
           </div>
 

@@ -29,7 +29,16 @@ import {
   getOrderDate,
   type RangeDays,
 } from '../lib/analytics';
-import { formatCurrency, formatNumber, humanizeStatus } from '../lib/format';
+import { formatCurrency, formatNumber, humanizeStatus, parseTimestamp } from '../lib/format';
+import {
+  buildPeriodWindows,
+  comparisonText,
+  coversPreviousWindow,
+  earlierOf,
+  earliestDateIn,
+  filterWithin,
+  noPriorWindowNote,
+} from '../lib/periodComparison';
 import { resolveViewState } from '../lib/viewState';
 import { getPaymentChartColor, getStatusChartColor } from '../theme/tones';
 
@@ -55,13 +64,40 @@ export default function StatisticsPage() {
   const { snapshot, error, hasData, refresh } = useSnapshot();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
 
-  const windowedOrders = useMemo(() => {
-    const start = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
-    return snapshot.orders.filter((order) => {
-      const created = getOrderDate(order);
-      return created !== null && created >= start;
-    });
-  }, [snapshot.orders, rangeDays]);
+  /**
+   * The window's orders, the equal-length window before it, and whether that
+   * earlier window is one the snapshot can speak for.
+   *
+   * The count in the page header was the page's one bare figure -- "1,204
+   * orders in window" says nothing about whether that is a good week. The
+   * comparison needs no new backend read: `adminGetDashboardSnapshot` returns
+   * the whole history, so the previous window is the same filter run one
+   * window earlier, and it is the same pair of windows the Overview KPIs use.
+   *
+   * `previousWindowCovered` is what keeps that honest. If the platform is
+   * younger than the selected range, the previous window holds no records and
+   * "0 orders then" is an absence of measurement, not a measurement of zero.
+   *
+   * The current window is also now half-open [start, now) rather than the
+   * unbounded `created >= start` it replaces, so a future-dated row can no
+   * longer be counted in the header while being absent from every chart below
+   * it -- `buildDailySeries` only buckets days up to today.
+   */
+  const orderWindows = useMemo(() => {
+    const windows = buildPeriodWindows(rangeDays);
+    const dataHorizon = earlierOf(
+      earliestDateIn(snapshot.orders, getOrderDate),
+      earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
+    );
+
+    return {
+      current: filterWithin(snapshot.orders, getOrderDate, windows.currentStart, windows.currentEnd),
+      previousCount: filterWithin(snapshot.orders, getOrderDate, windows.previousStart, windows.previousEnd).length,
+      previousWindowCovered: coversPreviousWindow(dataHorizon, windows),
+    };
+  }, [snapshot.orders, snapshot.users, rangeDays]);
+
+  const windowedOrders = orderWindows.current;
 
   const dailySeries = useMemo(() => buildDailySeries(windowedOrders, rangeDays), [windowedOrders, rangeDays]);
   const statusBreakdown = useMemo(() => buildStatusBreakdown(windowedOrders), [windowedOrders]);
@@ -104,7 +140,15 @@ export default function StatisticsPage() {
           <RangePicker value={rangeDays} onChange={setRangeDays} />
         </div>
         {dataState === 'ready' ? (
-          <div className="muted">{formatNumber(windowedOrders.length)} orders in window</div>
+          <div className="muted">
+            {formatNumber(windowedOrders.length)} orders in window ·{' '}
+            {comparisonText({
+              current: windowedOrders.length,
+              previous: orderWindows.previousCount,
+              previousWindowCovered: orderWindows.previousWindowCovered,
+              fallback: noPriorWindowNote(rangeDays),
+            })}
+          </div>
         ) : null}
       </div>
 
@@ -136,6 +180,11 @@ export default function StatisticsPage() {
             <div className="card">
               <div className="card-title-row">
                 <h3 className="card-title">Orders by status</h3>
+                {/* `buildStatusBreakdown` even pins a display slot for
+                    'cancelled', but the feed can never deliver one. Saying so
+                    is the difference between "no cancellations" and "no
+                    cancellations visible here". */}
+                <span className="muted">Cancelled not in this feed</span>
               </div>
               {statusBreakdown.length === 0 ? (
                 <EmptyState title="No orders" body="Status breakdown appears once orders exist in this window." />
@@ -177,6 +226,11 @@ export default function StatisticsPage() {
             <div className="card">
               <div className="card-title-row">
                 <h3 className="card-title">Payments by status</h3>
+                {/* Same exclusion: a failed payment is always a prepaid,
+                    cancelled order, so this breakdown can only ever show paid
+                    and (cash) pending. Without the note, an operator reads a
+                    failure-free pie as a failure-free platform. */}
+                <span className="muted">Failed not in this feed</span>
               </div>
               {paymentBreakdown.length === 0 ? (
                 <EmptyState title="No payments" body="Payment breakdown appears once orders exist in this window." />
@@ -218,9 +272,20 @@ export default function StatisticsPage() {
             <div className="card">
               <div className="card-title-row">
                 <h3 className="card-title">Problem transactions per day</h3>
+                {/* Two of this chart's three series can never plot a bar. The
+                    snapshot RPC filters every order through
+                    `isOrderCleanForReporting`, which drops cancelled orders and
+                    unpaid prepaid ones, and every `payment.status = 'failed'`
+                    write path is a Paystack one that also cancels the order. An
+                    empty chart titled "problem transactions" reads as "no
+                    problems", so it has to say which problems it cannot see. */}
+                <span className="muted">Failed and cancelled are not in this feed</span>
               </div>
               {!hasOrders ? (
-                <EmptyState title="No orders" body="Failed, pending and cancelled activity appears once orders exist." />
+                <EmptyState
+                  title="No orders"
+                  body="Pending-payment activity appears once orders exist in this window."
+                />
               ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={problemSeries}>

@@ -319,13 +319,18 @@ export default function AuditLogPage() {
       {viewState === 'empty' ? (
         <div className="card">
           <EmptyState
-            title={filtered ? 'No entries match these filters' : offset > 0 ? 'No entries on this page' : 'No audit entries yet'}
+            title={filtered ? 'No entries match these filters' : offset > 0 ? 'No entries on this page' : 'Nothing recorded yet'}
             body={
               filtered
                 ? 'Widen or clear the filters to see more of the history.'
                 : offset > 0
                   ? 'You have paged past the end of the log. Go back to newer entries.'
-                  : 'Privileged actions are recorded here as they happen — approvals, role changes, publishing and access changes.'
+                  : // An empty audit log is the one empty state an operator is
+                    // right to distrust: "nobody has done anything privileged"
+                    // and "the recording is broken" look identical from here.
+                    // The console cannot prove which, so it states what the log
+                    // covers and leaves the reader able to test it themselves.
+                    'Approvals, role changes, publishing and access changes are written here as they happen, so an empty log means none have been taken yet — take one and it will appear.'
             }
           />
         </div>

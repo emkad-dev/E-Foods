@@ -90,6 +90,30 @@ export default function OrdersPage() {
     isEmpty: filteredOrders.length === 0,
   });
 
+  /**
+   * An empty table has two completely different causes here, and the one
+   * sentence on screen covered neither: "Try a wider date range or a different
+   * status filter" is advice, offered identically whether or not a filter is
+   * even set. Three controls narrow this view and the operator can see all
+   * three, but not which of them emptied it -- so this names the ones that are
+   * actually filtering, and says nothing about filters when none are.
+   */
+  const activeFilters = [
+    statusFilter !== 'all' ? `a ${humanizeStatus(statusFilter)} status` : null,
+    paymentFilter !== 'all' ? `a ${humanizeStatus(paymentFilter)} payment` : null,
+  ].filter((label): label is string => label !== null);
+
+  const emptyOrdersCopy =
+    activeFilters.length > 0
+      ? {
+          title: 'No orders match these filters',
+          body: `Nothing in the last ${rangeDays} days has ${activeFilters.join(' and ')}. Orders may exist outside this window or under another status, so clear the filters or widen the range.`,
+        }
+      : {
+          title: `No orders in the last ${rangeDays} days`,
+          body: 'No status or payment filter is applied, so this is every order in the window. Widen the range to look further back.',
+        };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -142,9 +166,7 @@ export default function OrdersPage() {
             empty table at the same time: two loading metaphors, one of which
             reads as an answer. */}
         {ordersState === 'loading' ? <SkeletonRows count={8} /> : null}
-        {ordersState === 'empty' ? (
-          <EmptyState title="No orders in this window" body="Try a wider date range or a different status filter." />
-        ) : null}
+        {ordersState === 'empty' ? <EmptyState {...emptyOrdersCopy} /> : null}
         {ordersState === 'ready' ? (
           <div className="table-wrap">
             <table className="data-table">

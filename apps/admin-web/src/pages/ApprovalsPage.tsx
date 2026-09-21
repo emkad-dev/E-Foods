@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import PartnerOnboardingReview from '../components/PartnerOnboardingReview';
@@ -7,6 +7,7 @@ import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { formatDateTime } from '../lib/format';
 import { resolveKycGate, type KycDocumentKey } from '../lib/kycReviewGate';
+import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import {
   reviewDispatchApplication,
@@ -64,6 +65,26 @@ const formatVehicleLine = (application: {
 };
 
 /**
+ * The marker for a row that was not here last time.
+ *
+ * The word "New" is the affordance, not the colour. A badge that signalled
+ * only in teal would be invisible to a screen reader and ambiguous to a
+ * colourblind operator -- and this console already draws neutral, warning and
+ * info badges on the same rows, so hue alone was never going to carry it. The
+ * hidden half of the label supplies the context the visible word leaves out:
+ * "New" on its own could plausibly mean a status.
+ *
+ * Deliberately static. An animation here would pull the eye on a screen whose
+ * whole job is to be read carefully, and would replay on every poll.
+ */
+const NewSinceMarker = ({ label }: { label: string }) => (
+  <span className="badge badge-info">
+    {label}
+    <span className="sr-only"> since your last visit</span>
+  </span>
+);
+
+/**
  * Warning tone only when the number means work.
  *
  * Amber is the console saying "look at this". A queue at zero is the opposite
@@ -101,6 +122,32 @@ const dispatchApprovalPrompt = (application: { displayName: string; email: strin
 
 export default function ApprovalsPage() {
   const { data, error, refresh } = usePolledRpc(getAdminApprovalQueue);
+
+  /**
+   * The instant this admin last LEFT this page, read once on mount. Rows that
+   * arrived after it get a marker, so the visit can start with "these three
+   * are the ones I have not seen" instead of re-reading the whole queue. Null
+   * on a first visit and on any browser where storage is unavailable, and in
+   * both cases nothing is marked -- see lib/lastVisit.ts for why that is the
+   * deliberate answer rather than a fallback.
+   */
+  const previousVisit = useLastVisit('approvals');
+
+  /**
+   * When the queue below last actually arrived. `usePolledRpc` hands back a
+   * fresh object on every SUCCESSFUL read and leaves the previous one in place
+   * when a read fails, so a change of reference is the one honest signal that
+   * the data on screen is current. An empty queue is a claim, and this is the
+   * timestamp that makes it checkable rather than merely reassuring.
+   */
+  const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (data !== null) {
+      setLastLoadedAt(Date.now());
+    }
+  }, [data]);
+
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
@@ -150,6 +197,29 @@ export default function ApprovalsPage() {
     () => (data?.dispatchApplications ?? []).filter((application) => application.status === 'pending'),
     [data?.dispatchApplications]
   );
+
+  const newPartnerCount = useMemo(
+    () => countNewSince(previousVisit, partnerApplications.map((application) => application.submittedAt)),
+    [previousVisit, partnerApplications]
+  );
+
+  const newDispatchCount = useMemo(
+    () => countNewSince(previousVisit, dispatchApplications.map((application) => application.submittedAt)),
+    [previousVisit, dispatchApplications]
+  );
+
+  /**
+   * Stated as a fact with a time on it rather than an adjective. "Nothing to
+   * review" is only worth reading if the reader can tell it is not a stale
+   * screen, and the two things they need for that are when it last arrived and
+   * whether it will arrive again on its own. The interval itself is
+   * deliberately not quoted here -- it lives in usePolledRpc and would drift
+   * out of step with this sentence the first time it is tuned.
+   */
+  const queueFreshness =
+    lastLoadedAt === null
+      ? undefined
+      : `Last checked ${formatDateTime(lastLoadedAt)}. This page rechecks itself while the tab is open.`;
 
   const runAction = async (id: string, action: () => Promise<unknown>) => {
     setPendingId(id);
@@ -231,10 +301,20 @@ export default function ApprovalsPage() {
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Partner applications</h3>
-              <span className={countBadgeClass(partnerApplications.length)}>{partnerApplications.length} pending</span>
+              {/* Wrapped, because `.card-title-row` is space-between: a third
+                  child would push the two counts to opposite ends of the
+                  header rather than keeping them together. */}
+              <span className="flex items-center gap-2">
+                {newPartnerCount > 0 ? <NewSinceMarker label={`${newPartnerCount} new`} /> : null}
+                <span className={countBadgeClass(partnerApplications.length)}>{partnerApplications.length} pending</span>
+              </span>
             </div>
             {partnerApplications.length === 0 ? (
-              <EmptyState title="No pending partner applications" body="New restaurant partner requests will land here." />
+              <EmptyState
+                title="You're caught up on partner applications"
+                body="Every application that has reached the console has been reviewed. New restaurant sign-ups arrive here as they are submitted."
+                note={queueFreshness}
+              />
             ) : (
               partnerApplications.map((application) => {
                 /**
@@ -252,10 +332,20 @@ export default function ApprovalsPage() {
                   openedKycDocuments[application.id] ?? []
                 );
 
+                const isNew = isNewSince(previousVisit, application.submittedAt);
+
                 return (
                   <div key={application.id} className="list-row">
                     <div>
-                      <div className="list-row-title">{application.restaurantName}</div>
+                      <div className="list-row-title">
+                        {application.restaurantName}
+                        {isNew ? (
+                          <>
+                            {' '}
+                            <NewSinceMarker label="New" />
+                          </>
+                        ) : null}
+                      </div>
                       {/* phoneNumber and submittedAt ride in on every row of
                           this queue and neither was shown: the operator had no
                           way to reach the applicant from the screen that asks
@@ -318,15 +408,30 @@ export default function ApprovalsPage() {
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Dispatch applications</h3>
-              <span className={countBadgeClass(dispatchApplications.length)}>{dispatchApplications.length} pending</span>
+              <span className="flex items-center gap-2">
+                {newDispatchCount > 0 ? <NewSinceMarker label={`${newDispatchCount} new`} /> : null}
+                <span className={countBadgeClass(dispatchApplications.length)}>{dispatchApplications.length} pending</span>
+              </span>
             </div>
             {dispatchApplications.length === 0 ? (
-              <EmptyState title="No pending dispatch applications" body="New rider applications will land here." />
+              <EmptyState
+                title="You're caught up on dispatch applications"
+                body="Every rider application that has reached the console has been reviewed. New ones arrive here as riders sign up."
+                note={queueFreshness}
+              />
             ) : (
               dispatchApplications.map((application) => (
                 <div key={application.id} className="list-row">
                   <div>
-                    <div className="list-row-title">{application.displayName}</div>
+                    <div className="list-row-title">
+                      {application.displayName}
+                      {isNewSince(previousVisit, application.submittedAt) ? (
+                        <>
+                          {' '}
+                          <NewSinceMarker label="New" />
+                        </>
+                      ) : null}
+                    </div>
                     <div className="list-row-sub">
                       {application.email} · {application.phoneNumber} · {application.vehicleType} ·{' '}
                       {application.region} / {application.lga}
@@ -378,7 +483,11 @@ export default function ApprovalsPage() {
               </span>
             </div>
             {restaurants.length === 0 ? (
-              <EmptyState title="No restaurants yet" body="Partner restaurants will appear here once created." />
+              <EmptyState
+                title="No restaurants yet"
+                body="A restaurant is created when its partner application is approved, so this stays empty until the first approval goes through."
+                note={queueFreshness}
+              />
             ) : (
               restaurants.map((restaurant) => (
                 <div key={restaurant.id} className="list-row">

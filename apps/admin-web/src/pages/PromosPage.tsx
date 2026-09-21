@@ -271,7 +271,10 @@ export default function PromosPage() {
         {listState === 'loading' ? (
           <LoadingBlock label="Loading promos…" />
         ) : listState === 'empty' ? (
-          <EmptyState title="No promos yet" body="Create one to broadcast a banner to customers on the app." />
+          <EmptyState
+            title="No promos yet"
+            body="No banner is running or scheduled, so customers currently see none in the app. Create one on the left to put a banner in front of them."
+          />
         ) : listState !== 'ready' ? null : (
           <ul className="promo-items">
             {promos.map((promo) => {

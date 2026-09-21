@@ -4,6 +4,10 @@ import AppLayout from './components/AppLayout';
 import LoadingBlock from './components/LoadingBlock';
 import RequireRole from './components/RequireRole';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+// Mounted with SnapshotProvider, not inside it: the sidebar's waiting-work
+// counts are two separate reads on their own slow, visibility-gated poll,
+// and SnapshotContext's header is explicit about what its aggregate covers.
+import { NavCountsProvider } from './contexts/NavCountsContext';
 import { SnapshotProvider } from './contexts/SnapshotContext';
 import LoginPage from './pages/LoginPage';
 
@@ -46,7 +50,9 @@ export default function App() {
           element={
             <RequireAdmin>
               <SnapshotProvider>
-                <AppLayout />
+                <NavCountsProvider>
+                  <AppLayout />
+                </NavCountsProvider>
               </SnapshotProvider>
             </RequireAdmin>
           }
@@ -150,7 +156,9 @@ export default function App() {
           element={
             <RequireRole roles={['admin', 'support']}>
               <SnapshotProvider>
-                <AppLayout />
+                <NavCountsProvider>
+                  <AppLayout />
+                </NavCountsProvider>
               </SnapshotProvider>
             </RequireRole>
           }

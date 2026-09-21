@@ -3,6 +3,8 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import { formatDateTime } from '../lib/format';
+import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
 import { useSupportRealtime } from '../lib/useSupportRealtime';
 import { resolveViewState } from '../lib/viewState';
 import {
@@ -18,6 +20,51 @@ import {
 } from '../services/supportInbox';
 
 const STATUS_FILTERS: Array<SupportStatus | 'all'> = ['open', 'pending', 'closed', 'all'];
+
+/**
+ * "Updated", not "New": `lastMessageAt` moves whenever anyone writes, so a
+ * marked row may be a week-old conversation that a customer just replied to
+ * -- which is exactly the row an agent most needs to find, and exactly the
+ * one "New" would have mislabelled.
+ *
+ * The word carries the signal; the colour only reinforces it, and the hidden
+ * tail says what the word is relative to. No animation: this list re-renders
+ * on every realtime event, so anything that moved would keep moving.
+ */
+const UpdatedSinceMarker = () => (
+  <span className="badge badge-info ml-2">
+    Updated
+    <span className="sr-only"> since your last visit</span>
+  </span>
+);
+
+/**
+ * What an empty list MEANS depends entirely on the filter above it, and the
+ * one sentence it used to show ("No conversations") was wrong under three of
+ * the four. An agent looking at a filtered list and reading an unqualified
+ * "no conversations" concludes the inbox is empty; it may be full of closed
+ * ones.
+ */
+const emptyInboxCopy = (statusFilter: SupportStatus | 'all'): { title: string; body: string } => {
+  if (statusFilter === 'open') {
+    return {
+      title: "You're caught up",
+      body: 'Nothing is open. A new customer message opens a conversation here automatically, so this is the cleared state rather than a filtered-out one.',
+    };
+  }
+
+  if (statusFilter === 'all') {
+    return {
+      title: 'No conversations yet',
+      body: 'No customer has written in. This view has no filter applied, so nothing is being hidden.',
+    };
+  }
+
+  return {
+    title: `Nothing is ${statusFilter}`,
+    body: `No conversation currently has the ${statusFilter} status. Other conversations may exist under a different one — switch the filter above to see them.`,
+  };
+};
 
 export default function InboxPage() {
   const [statusFilter, setStatusFilter] = useState<SupportStatus | 'all'>('open');
@@ -39,6 +86,21 @@ export default function InboxPage() {
   const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
 
+  /**
+   * The instant this agent last LEFT the inbox, read once on mount, so the
+   * rows that have moved since can be marked instead of re-read. Null on a
+   * first visit and wherever storage is unavailable; both mark nothing, on
+   * purpose — see lib/lastVisit.ts.
+   */
+  const previousVisit = useLastVisit('inbox');
+
+  /**
+   * When the list below last actually arrived. Set only on the success path,
+   * next to `setLoaded`, so a failed refresh cannot advance it and make a
+   * stale list look current.
+   */
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+
   const loadInbox = useCallback(async () => {
     try {
       const res = await getInbox({
@@ -48,6 +110,7 @@ export default function InboxPage() {
       setConversations(res.conversations);
       setError(null);
       setLoaded(true);
+      setLoadedAt(Date.now());
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Unable to load the inbox.');
     }
@@ -105,6 +168,22 @@ export default function InboxPage() {
     error,
     isEmpty: conversations.length === 0,
   });
+
+  const updatedSinceVisit = useMemo(
+    () => countNewSince(previousVisit, conversations.map((conversation) => conversation.lastMessageAt)),
+    [previousVisit, conversations]
+  );
+
+  /**
+   * A time, not an adjective. This list is driven by a realtime subscription
+   * rather than a poll, so the useful pair is "it was right at HH:MM" and "it
+   * does not need a refresh" — an agent staring at an empty inbox is usually
+   * wondering which of the two is failing.
+   */
+  const inboxFreshness =
+    loadedAt === null
+      ? undefined
+      : `Last checked ${formatDateTime(loadedAt)}. New messages appear here without a refresh.`;
 
   const onSend = async () => {
     if (!selectedId || !reply.trim()) {
@@ -182,7 +261,17 @@ export default function InboxPage() {
             render nothing and let the banner speak for itself. */}
         {listState === 'loading' ? <SkeletonRows count={6} /> : null}
         {listState === 'empty' ? (
-          <EmptyState title="No conversations" body="Customer messages will show up here." />
+          <EmptyState {...emptyInboxCopy(statusFilter)} note={inboxFreshness} />
+        ) : null}
+        {/* A count, in words, above the list. The per-row markers answer
+            "which ones", but on a list long enough to scroll the operator
+            still has to scan the whole thing to learn whether the answer is
+            "none" — which is the question they opened the page with. */}
+        {listState === 'ready' && updatedSinceVisit > 0 ? (
+          <div className="muted">
+            {updatedSinceVisit} {updatedSinceVisit === 1 ? 'conversation has' : 'conversations have'} new activity since
+            your last visit
+          </div>
         ) : null}
         {listState === 'ready' ? (
           <div className="inbox-items">
@@ -200,7 +289,10 @@ export default function InboxPage() {
                   <span className="inbox-item-name">{conversation.customerName}</span>
                   <StatusBadge label={conversation.status} tone={getSupportTone(conversation.status)} />
                 </div>
-                <div className="muted">{new Date(conversation.lastMessageAt).toLocaleString()}</div>
+                <div className="muted">
+                  {new Date(conversation.lastMessageAt).toLocaleString()}
+                  {isNewSince(previousVisit, conversation.lastMessageAt) ? <UpdatedSinceMarker /> : null}
+                </div>
               </button>
             ))}
           </div>
@@ -209,7 +301,18 @@ export default function InboxPage() {
 
       <div className="inbox-thread card">
         {!selected ? (
-          <EmptyState title="Select a conversation" body="Pick a conversation on the left to reply." />
+          /* "Pick a conversation on the left" is an instruction, and an
+             instruction pointing at a list that is empty, still loading or
+             failed is a second wrong answer stacked on the first. Gated on
+             `ready` for the same reason ObservabilityPage gates its own
+             "Select an alert" — the list's own state is already saying the
+             true thing a few pixels to the left. */
+          listState === 'ready' ? (
+            <EmptyState
+              title="Select a conversation"
+              body="Pick one on the left to read the thread and reply. Nothing is sent to the customer until you press Send."
+            />
+          ) : null
         ) : (
           <>
             <header className="inbox-thread-head">

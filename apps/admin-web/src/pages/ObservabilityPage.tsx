@@ -204,8 +204,8 @@ export default function ObservabilityPage() {
 
           {alertsState === 'empty' ? (
             <EmptyState
-              title="No alerts yet"
-              body="Alerts will appear here when dispatch, payment, or acceptance flows cross their threshold."
+              title="No alerts queued"
+              body="Nothing has crossed a dispatch, payment or acceptance threshold. Alerts are raised automatically, so an empty queue is the healthy state rather than a switched-off one."
             />
           ) : alertsState !== 'ready' ? null : (
             <div className="risk-signals-list">
@@ -244,11 +244,12 @@ export default function ObservabilityPage() {
         </div>
 
         <div className="card observability-detail-card">
-          {!loaded ? null : !selectedAlert ? (
-            // Gated on `loaded` because "choose an alert from the queue" is an
-            // instruction, and instructing an operator to pick from a queue we
-            // failed to fetch points them at a list that is empty for reasons
-            // this panel is not admitting to.
+          {alertsState !== 'ready' ? null : !selectedAlert ? (
+            // Gated on the queue being READY, not merely on `loaded`. The
+            // original reasoning stands -- do not instruct an operator to pick
+            // from a queue we failed to fetch -- but `loaded` was true for an
+            // empty queue too, so a cleared alert list still drew "choose an
+            // alert from the queue" next to a panel saying there were none.
             <EmptyState
               title="Select an alert"
               body="Choose an alert from the queue to inspect its metadata and trace the triggering subject."
@@ -301,7 +302,10 @@ export default function ObservabilityPage() {
         </div>
 
         {flagsState === 'empty' ? (
-          <EmptyState title="No feature flags yet" body="Add a flag to dark-launch risky work behind a server-controlled switch." />
+          <EmptyState
+            title="No feature flags yet"
+            body="Nothing is gated behind a switch, so every feature is running as it was built. Add a flag to dark-launch risky work without a redeploy."
+          />
         ) : flagsState !== 'ready' ? null : (
           <div className="feature-flag-list">
             {sortedFlags.map((flag) => (

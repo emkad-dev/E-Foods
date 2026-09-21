@@ -226,7 +226,16 @@ export default function AccessPage() {
             loading to false whether the read succeeded or threw, so !loading
             could not tell an empty platform from an unreachable one. */}
         {usersState === 'loading' ? <SkeletonRows count={6} /> : null}
-        {usersState === 'empty' ? <EmptyState title="No users" body="Platform accounts will appear here." /> : null}
+        {/* "No users" was never a state this list can honestly be in: the
+            admin reading it is a platform account, so they are inside the
+            result set they are being told is empty. Which of the two things
+            just happened is the whole value of the sentence. */}
+        {usersState === 'empty' ? (
+          <EmptyState
+            title="No accounts came back"
+            body="This list includes your own admin account, so an empty result almost certainly means the read returned nothing rather than that the platform has no users. Retry, and check the access RPC if it stays empty."
+          />
+        ) : null}
         {usersState === 'ready' ? (
           <div className="table-wrap">
             <table className="data-table">
