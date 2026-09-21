@@ -7,7 +7,6 @@ import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import LoadingSkeleton from '../src/components/LoadingSkeleton';
 import { isPublicContentRoute } from '../src/domain/authRouteAccess';
-import { configureGoogleSignIn, hasGoogleSignInConfig } from '../src/services/googleSignIn';
 import { normalizeCustomerPaymentCallbackPath } from '../src/services/paymentRouting';
 import { initializeAnalytics, trackAnalyticsEvent } from '../../../packages/observability/src/analytics';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
@@ -281,21 +280,6 @@ export default function RootLayout() {
     trackAnalyticsEvent('app_opened', {
       surface: 'customer',
     });
-  }, []);
-
-  useEffect(() => {
-    if (!hasGoogleSignInConfig()) {
-      return;
-    }
-
-    const result = configureGoogleSignIn();
-
-    if (!result.ok) {
-      console.warn(result.message);
-      return;
-    }
-
-    console.log('Google Sign-In configured successfully');
   }, []);
 
   return (

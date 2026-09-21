@@ -1,14 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useHeaderHeight } from '@react-navigation/elements';
+import { FontAwesome } from '@expo/vector-icons';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import AuthPrimaryButton from '../../src/components/AuthPrimaryButton';
-import AuthScreenShell, { AuthDivider } from '../../src/components/AuthScreenShell';
+import AuthScreenShell, { AuthScreenShellHandle } from '../../src/components/AuthScreenShell';
 import AuthTextField from '../../src/components/AuthTextField';
-import GoogleSignInButton from '../../src/components/GoogleSignInButton';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import {
   describePhoneForConfirmation,
@@ -48,6 +48,11 @@ export default function RegisterScreen() {
   // the readback below from quoting a half-typed number back at someone
   // mid-keystroke.
   const phoneConfirmation = describePhoneForConfirmation(phoneNumber);
+  // The error surface is at the top of the card and "Create account" is below
+  // six inputs and a consent row. Measured at 375x812, a failed submit put the
+  // message 141px above the viewport: correct, announced, and invisible.
+  // Called at the two points where this screen puts a message into that slot.
+  const shellRef = useRef<AuthScreenShellHandle>(null);
 
   const handleNicknameChange = (value: string) => {
     if (error) clearError();
@@ -91,6 +96,7 @@ export default function RegisterScreen() {
 
     if (invalid) {
       setValidationError(invalid);
+      shellRef.current?.scrollToTop();
       return;
     }
 
@@ -134,12 +140,17 @@ export default function RegisterScreen() {
       );
     } catch {
       // `signUp` has already pushed the formatted message into `AuthContext`'s
-      // `error`, which the slot above renders.
+      // `error`, which the slot above renders. Scrolled to for the same reason
+      // the validation branch above is -- and this branch matters most of the
+      // two, because the already-registered message carries the only two links
+      // out of the dead end it describes.
+      shellRef.current?.scrollToTop();
     }
   };
 
   return (
     <AuthScreenShell
+      ref={shellRef}
       title="Create your account"
       subtitle="Confirm your email, then start ordering from nearby restaurants."
       topInset={headerHeight}
@@ -150,6 +161,10 @@ export default function RegisterScreen() {
         onDismiss={() => setPendingNotice(null)}
       />
 
+      {/* The one error surface on this screen. Styled as the red sibling of
+          `SuccessBanner` so a failure is as legible as a success, and left
+          aligned: several of these messages run to two or three lines, which a
+          centred paragraph makes measurably harder to read. */}
       {formError ? (
         <View style={styles.errorBlock}>
           <Text accessibilityLiveRegion="assertive" role="alert" style={styles.errorText}>
@@ -178,62 +193,82 @@ export default function RegisterScreen() {
         </View>
       ) : null}
 
-      <AuthTextField
-        placeholder="Nickname or username"
-        value={nickname}
-        onChangeText={handleNicknameChange}
-        editable={!loading}
-      />
-      <Text style={styles.helperText}>This is how we will greet you in the customer app.</Text>
+      {/* Six inputs and a consent row is a wall on a phone. It is still one
+          screen and one submit -- nothing is hidden behind a step -- but the
+          boxes are gathered into the two things they are actually about, so the
+          eye gets two short lists rather than one long one. */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>About you</Text>
+        <View style={styles.sectionFields}>
+          <AuthTextField
+            label="Nickname"
+            hint="This is how we'll greet you in the app."
+            placeholder="What should we call you?"
+            value={nickname}
+            onChangeText={handleNicknameChange}
+            editable={!loading}
+          />
 
-      <AuthTextField
-        style={styles.fieldGap}
-        placeholder="name@email.com"
-        value={email}
-        onChangeText={handleEmailChange}
-        autoCapitalize="none"
-        autoComplete="email"
-        keyboardType="email-address"
-        editable={!loading}
-      />
+          <AuthTextField
+            label="Email address"
+            hint="Use a Gmail, Yahoo or iCloud address."
+            placeholder="name@email.com"
+            value={email}
+            onChangeText={handleEmailChange}
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            editable={!loading}
+          />
 
-      <AuthTextField
-        style={styles.fieldGap}
-        placeholder="Phone number"
-        value={phoneNumber}
-        onChangeText={handlePhoneNumberChange}
-        keyboardType="phone-pad"
-        editable={!loading}
-      />
-      {/* Reads the number back in the form it will be stored and dialled in.
-          There is no SMS code on this number, so this line is the only chance
-          the customer gets to catch a transposed digit -- and it doubles as
-          the explanation for why a leading 0 turns into +234. */}
-      {phoneConfirmation ? (
-        <Text style={styles.helperText}>
-          {`We'll use ${phoneConfirmation.readable} (${phoneConfirmation.e164}) for order updates and rider contact. Check it before you continue.`}
-        </Text>
-      ) : (
-        <Text style={styles.helperText}>We use this for order updates and rider contact.</Text>
-      )}
-
-      <View style={styles.fieldGap}>
-        <AuthPasswordField
-          placeholder="Password"
-          value={password}
-          onChangeText={handlePasswordChange}
-          editable={!loading}
-          showHint
-        />
+          {/* The hint reads the number back in the form it will be stored and
+              dialled in. There is no SMS code on this number, so this line is
+              the only chance the customer gets to catch a transposed digit --
+              and it doubles as the explanation for why a leading 0 turns into
+              +234. It only appears once the number normalises; until then the
+              field keeps the plain statement of what the number is for. */}
+          <AuthTextField
+            label="Phone number"
+            hint={
+              phoneConfirmation
+                ? `We'll use ${phoneConfirmation.readable} (${phoneConfirmation.e164}) for order updates and rider contact. Check it before you continue.`
+                : 'We use this for order updates and rider contact.'
+            }
+            placeholder="0803 123 4567"
+            value={phoneNumber}
+            onChangeText={handlePhoneNumberChange}
+            keyboardType="phone-pad"
+            editable={!loading}
+          />
+        </View>
       </View>
-      <AuthPasswordField
-        placeholder="Confirm password"
-        value={confirmPassword}
-        onChangeText={handleConfirmPasswordChange}
-        editable={!loading}
-      />
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Your password</Text>
+        <View style={styles.sectionFields}>
+          <AuthPasswordField
+            label="Password"
+            placeholder="Create a password"
+            autoComplete="new-password"
+            value={password}
+            onChangeText={handlePasswordChange}
+            editable={!loading}
+            showHint
+          />
+          <AuthPasswordField
+            label="Confirm password"
+            placeholder="Type it once more"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChangeText={handleConfirmPasswordChange}
+            editable={!loading}
+          />
+        </View>
+      </View>
 
       <TouchableOpacity
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: acceptedPolicies, disabled: loading }}
         style={styles.policyRow}
         onPress={() => {
           setValidationError(null);
@@ -243,7 +278,9 @@ export default function RegisterScreen() {
         disabled={loading}
       >
         <View style={[styles.checkbox, acceptedPolicies ? styles.checkboxActive : null]}>
-          {acceptedPolicies ? <View style={styles.checkboxDot} /> : null}
+          {acceptedPolicies ? (
+            <FontAwesome name="check" size={13} color={customerTheme.textOnBrand} />
+          ) : null}
         </View>
         <Text style={styles.policyText}>
           I agree to the{' '}
@@ -258,23 +295,24 @@ export default function RegisterScreen() {
         </Text>
       </TouchableOpacity>
 
+      {/* Pressable even with the box unticked. Disabling it made the last
+          branch of `validateRegisterForm` -- "Accept the Terms and Privacy
+          Policy before creating an account." -- unreachable, and left a greyed
+          control that said nothing about why. Pressing it now routes that
+          message into the error surface above like every other check. */}
       <AuthPrimaryButton
-        label={loading ? 'Creating account...' : 'Sign Up with Email'}
+        label={loading ? 'Creating account...' : 'Create account'}
         onPress={handleRegister}
-        disabled={loading || !acceptedPolicies}
+        disabled={loading}
       />
 
-      <AuthDivider label="or" />
-
-      <GoogleSignInButton redirectTo={redirectTo} />
-
       <View style={styles.switchRow}>
-        <Text style={styles.switchText}>Already have an account? </Text>
+        <Text style={styles.switchText}>Already have an account?</Text>
         <Link
           href={redirectTo ? { pathname: '/login', params: { redirectTo } } : '/login'}
           style={styles.switchLink}
         >
-          Sign In
+          Sign in
         </Link>
       </View>
     </AuthScreenShell>
@@ -283,44 +321,62 @@ export default function RegisterScreen() {
 
 const styles = StyleSheet.create({
   errorBlock: {
-    marginBottom: 14,
+    backgroundColor: customerTheme.dangerSoft,
+    borderColor: customerTheme.danger,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 14,
   },
   errorText: {
     color: customerTheme.dangerText,
     fontSize: 14,
     lineHeight: 20,
-    textAlign: 'center',
   },
   errorActions: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
-    justifyContent: 'center',
-    marginTop: 8,
+    marginTop: 4,
   },
+  // Same reason as every other link on these two screens: `Text` is
+  // `display: inline` under react-native-web, so padding is the only thing
+  // that grows the target. 2*12 + 20 clears the 44pt floor.
   errorActionLink: {
     color: customerTheme.accentText,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
+    lineHeight: 20,
+    paddingVertical: 12,
   },
   errorActionSeparator: {
     color: customerTheme.textMuted,
     fontSize: 14,
+    lineHeight: 20,
   },
-  fieldGap: {
-    marginTop: 10,
+  section: {
+    marginBottom: 20,
   },
-  helperText: {
+  sectionTitle: {
     color: customerTheme.textMuted,
     fontSize: 12,
-    lineHeight: 17,
-    marginTop: 8,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginBottom: 12,
+    textTransform: 'uppercase',
   },
+  sectionFields: {
+    gap: 16,
+  },
+  // 2pt in `textMuted` rather than 1pt in `border`: an empty box is the only
+  // thing telling you the consent is outstanding, and at #c2d0ca on the card it
+  // sat at 1.55:1 -- under the 3:1 WCAG 1.4.11 asks of a graphical control.
+  // #54626f is 6.09:1, and the ticked state is the accent fill at 4.99:1.
   checkbox: {
     alignItems: 'center',
-    borderColor: customerTheme.border,
+    borderColor: customerTheme.textMuted,
     borderRadius: radius.sm,
-    borderWidth: 1,
+    borderWidth: 2,
     height: 24,
     justifyContent: 'center',
     width: 24,
@@ -329,15 +385,9 @@ const styles = StyleSheet.create({
     backgroundColor: customerTheme.accent,
     borderColor: customerTheme.accent,
   },
-  checkboxDot: {
-    backgroundColor: customerTheme.textOnBrand,
-    borderRadius: radius.pill,
-    height: 10,
-    width: 10,
-  },
   policyLink: {
     color: customerTheme.link,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   // The same 20pt consent row partner and dispatch had. I fixed those two by
   // hand and never looked at customer's, which is the exact asymmetry this
@@ -346,12 +396,11 @@ const styles = StyleSheet.create({
   policyRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
+    gap: 12,
     minHeight: MIN_TAP_TARGET,
   },
   policyText: {
-    color: customerTheme.textMuted,
+    color: customerTheme.text,
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
@@ -360,15 +409,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 14,
+    marginTop: 4,
   },
   switchText: {
     color: customerTheme.textMuted,
     fontSize: 14,
+    lineHeight: 20,
   },
   switchLink: {
-    color: customerTheme.accentText,
+    color: customerTheme.link,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
+    lineHeight: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
   },
 });

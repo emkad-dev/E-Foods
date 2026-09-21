@@ -45,10 +45,6 @@ export const appEnv = {
     process.env.EXPO_PUBLIC_PROJECT_ID,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID
   ),
-  googleWebClientId: getEnvValue(
-    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
-  ),
   backendRpcUrl: getEnvValue(
     process.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_RPC_URL

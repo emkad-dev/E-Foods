@@ -16,7 +16,6 @@ import {
   SESSION_EXPIRED_ERROR_MESSAGE,
   signInWithEmail,
   signOutUser,
-  signInWithGoogle,
   verifyEmailOtp,
 } from '../services/supabase/auth';
 import {
@@ -69,7 +68,6 @@ interface AuthContextType {
   ) => Promise<SignUpResult>;
   acceptCurrentPolicies: (source?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: (idToken: string) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
@@ -168,9 +166,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // row was created empty-handed and the route guard -- which keys on
           // the profile row, not on the metadata -- sent every newly confirmed
           // customer to /complete-profile to type the same number again.
-          // `null` when there is nothing usable there (a Google sign-in, or a
-          // number that will not normalise), which leaves that guard exactly as
-          // it was.
+          // `null` when there is nothing usable there (an account whose
+          // metadata carries no number, or a number that will not normalise),
+          // which leaves that guard exactly as it was.
           phoneNumber: resolveSignupPhoneNumber(authUser.user_metadata?.phone) ?? undefined,
           photoURL: (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
         });
@@ -559,56 +557,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const signInWithGoogleAuth = async (idToken: string): Promise<void> => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const authUser = await signInWithGoogle(supabase, idToken);
-      const claimRole = await getUserRoleClaim(authUser);
-      if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
-        await clearLocalUserState();
-        await signOutUser(supabase);
-        setUser(null);
-        setError(CUSTOMER_ACCESS_ERROR);
-        throw new Error(CUSTOMER_ACCESS_ERROR);
-      }
-
-      const nextUser = await buildNextUser(authUser);
-      if (!nextUser) {
-        throw new Error(CUSTOMER_ACCESS_ERROR);
-      }
-
-      const userData = await getUserDocument(authUser.id);
-      if (userData) {
-        await updateUserDocument(authUser.id, {
-          displayName: (authUser.user_metadata?.full_name as string | undefined) ?? undefined,
-          photoURL: (authUser.user_metadata?.avatar_url as string | undefined) ?? undefined,
-        });
-      }
-
-      // Explicit sign-in deliberately claims this device as the active session.
-      // Takeover detection lives in the passive onAuthStateChange path; re-checking
-      // here against the pre-claim snapshot would always false-positive on re-login.
-      await startSingleDeviceSession(authUser.id);
-
-      identifyAnalyticsUser(authUser.id);
-      trackAnalyticsEvent('customer_sign_in_completed', {
-        auth_method: 'google',
-      });
-      setUser(nextUser);
-      await storeUserProfile(nextUser);
-      await flushPendingCustomerPolicyAcceptance();
-      await refreshPolicyAcceptance();
-    } catch (err: any) {
-      const formattedError = getCustomerAuthErrorMessage(err, 'Unable to complete Google sign-in');
-      setError(formattedError);
-      throw new Error(formattedError);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const signOut = async (): Promise<void> => {
     setLoading(true);
     setError(null);
@@ -917,7 +865,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         signUp,
         acceptCurrentPolicies,
         signIn,
-        signInWithGoogle: signInWithGoogleAuth,
         signOut,
         resetPassword,
         deleteAccount,

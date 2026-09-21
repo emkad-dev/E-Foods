@@ -2,6 +2,16 @@ import { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { partnerTheme } from '../theme/palette';
+import { MIN_PASSWORD_LENGTH } from '../domain/authFormValidation';
+
+/**
+ * Interpolated from the rule the form actually enforces, so the sentence
+ * cannot drift from it again. The string this replaces claimed a
+ * composition rule ("alphanumeric characters") that nothing checks, quoted
+ * two example passwords with literal backticks around them, and rendered
+ * permanently rather than when it could help.
+ */
+const LENGTH_HINT = `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
 
 type AuthPasswordFieldProps = {
   editable?: boolean;
@@ -38,7 +48,7 @@ export default function AuthPasswordField({
       </View>
       {showHint ? (
         <Text style={styles.hint}>
-          Password must contain alphanumeric characters. Example:`Rider24`,`Dispatch9`...
+          {LENGTH_HINT}
         </Text>
       ) : null}
     </View>

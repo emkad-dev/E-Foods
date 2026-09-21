@@ -15,8 +15,9 @@ import { customerTheme } from '../../src/theme/palette';
  * The last thing standing between a new customer and the app: the number
  * riders and support dial. Email sign-ups now arrive with one already (it is
  * carried from the sign-up form into the profile row), so in practice this
- * screen is what a GOOGLE sign-up meets -- Google hands over an email and a
- * name, never a phone number.
+ * screen is the catch-all for an account whose profile row has no usable
+ * number -- one created before that carry-through existed, or one whose
+ * stored number would not normalise.
  *
  * FORMAT-CHECKED AND READ BACK, NOT SMS-VERIFIED, and deliberately so.
  *
@@ -24,8 +25,8 @@ import { customerTheme } from '../../src/theme/palette';
  * auth-gateway -> Termii. That path is complete and still wired up on the
  * server, but Termii sender approval is pending, so it has never worked: at
  * the time of writing `phone_otps` has ZERO rows in production and no account
- * has a `phoneVerifiedAt`. Putting Google sign-ups in front of it would have
- * meant the only way into the app for them was a code that cannot be sent.
+ * has a `phoneVerifiedAt`. Putting anyone in front of it would have meant the
+ * only way into the app for them was a code that cannot be sent.
  *
  * So this matches what the rest of the codebase already does: partner and
  * dispatch registration both collect a phone with this same `PhoneInput`, and
