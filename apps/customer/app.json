@@ -76,6 +76,14 @@
           "icon": "./assets/images/android-icon-monochrome.png",
           "color": "#f5b342"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "FEASTY uses your photo library so you can choose a profile picture.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
       ]
     ],
     "experiments": {

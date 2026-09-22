@@ -1,5 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.INTERNET"/>
+  <!--
+    CAMERA is removed, not merely absent. It arrives through manifest merging
+    from expo-image-picker, which reads the photo LIBRARY in this app and
+    never opens a camera (no launchCameraAsync call exists). Verified present
+    in the first production AAB before this entry was added.
+
+    This has to live here rather than in app.json's plugin config: android/ is
+    a committed prebuild, so EAS Build ignores app.json's android block
+    entirely, as the build log states. The plugin config governs iOS,
+    where there is no committed native project; this manifest governs Android.
+  -->
+  <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <!--
     RECORD_AUDIO is removed, not merely absent. expo-audio declares it
