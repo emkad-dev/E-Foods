@@ -29,7 +29,6 @@ env:
   EXPO_PUBLIC_CATALOG_URL: https://api.feasty.com.ng
   EXPO_PUBLIC_APP_DOMAIN: app.feasty.com.ng
   EXPO_PUBLIC_FUNCTIONS_REGION: us-central1
-  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: 671364074557-5v9jvuvctnoh97mt4o1451hgn47qee6d.apps.googleusercontent.com
   EXPO_PUBLIC_SENTRY_DSN: https://4a5c3f8b1f0482ab71bec0788114e027@o4511625693102080.ingest.de.sentry.io/4511625718464592
 
 jobs:

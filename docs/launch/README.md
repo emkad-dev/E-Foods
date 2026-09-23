@@ -12,7 +12,6 @@ This folder holds the launch-facing planning docs for FEASTY.
 ## Supporting Docs
 
 - [Analytics and monitoring guide](../ANALYTICS_AND_MONITORING_GUIDE.md)
-- [Google sign-in setup](../GOOGLE_SIGNIN_SETUP.md)
 - [OSM and MapLibre testing](../OSM_MAPLIBRE_TESTING.md)
 
 ## Notes
