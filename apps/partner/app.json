@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.feasty.partner"
+      "bundleIdentifier": "com.feasty.partner",
+      "icon": "./assets/images/ios-icon.png"
     },
     "android": {
       "adaptiveIcon": {

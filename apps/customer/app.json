@@ -13,7 +13,8 @@
       "bundleIdentifier": "com.feasty.customer",
       "associatedDomains": [
         "applinks:app.feasty.com.ng"
-      ]
+      ],
+      "icon": "./assets/images/ios-icon.png"
     },
     "android": {
       "adaptiveIcon": {
