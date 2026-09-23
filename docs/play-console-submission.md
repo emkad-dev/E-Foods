@@ -134,12 +134,24 @@ Play rejects apps a reviewer cannot get into.
 reviewer a test account under *App access → All functionality requires special
 access*, with the email and password, and say that browsing works signed out.
 
-**Partner is the risk.** Sign-in alone is not enough: a restaurant only reaches
-the dashboard after an administrator approves its application
-(`application-under-review.tsx` is where an unapproved account sits). A reviewer
-handed a fresh login sees a waiting screen and rejects the app as
-non-functional. Create a **pre-approved demo restaurant** with a real menu and
-at least one order in history, and hand over those credentials.
+**Partner needs a demo account that is already through the gate.** The shell
+redirects on `user.role !== 'restaurant'`
+(`apps/partner/app/(partner)/_layout.tsx:226`), sending anyone without the role
+to `complete-restaurant-details` or `application-under-review`. A reviewer given
+a fresh signup sees a waiting screen and rejects the app as non-functional.
+
+Measured 2026-09-23: **two live accounts already pass that gate** — both have
+`roleDisplay = 'restaurant'`, a linked restaurant, a password and a confirmed
+email, so both land on the dashboard.
+
+| account | restaurant | menu items | orders |
+|---|---|---|---|
+| `emkad567123@gmail.com` | Gojo mojo | 2 | 109 |
+| `eniolajames36@gmail.com` | Neeta's Food Haven | 1 | 0 |
+
+The first is the repo owner's own account — do not hand its password to Google.
+Either make a third account and give it the role, or use the second. Whichever
+you pick needs a menu worth looking at first; one item is not a demo.
 
 ---
 
