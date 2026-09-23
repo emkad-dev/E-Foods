@@ -239,11 +239,18 @@ Install a build on a device and capture — **customer:** home feed, a restauran
 page, the cart, live order tracking. **partner:** incoming order, menu editor,
 orders list, ratings.
 
-The customer preview APK is at
-https://expo.dev/artifacts/eas/TRuGqWYIAfKckxLznsSA2rm7qkXEI7lzJIZUfvbINXo.apk
-(versionCode 1, commit `c408f80` — fine for screenshots, not for release).
-Partner has no APK yet; its production profile builds an AAB, so a
-`--profile preview` build is needed to get an installable partner APK.
+Installable APKs for capturing them:
+
+- customer — https://expo.dev/artifacts/eas/TRuGqWYIAfKckxLznsSA2rm7qkXEI7lzJIZUfvbINXo.apk
+  (versionCode 1, commit `c408f80`)
+- partner — https://expo.dev/artifacts/eas/rqA7gFsh7WLzMLAetYzN2-1u5gYNu3KA8YJRgzDGcvU.apk
+  (build `552f46c5`, versionCode 5, commit `5d85d3b`)
+
+Both are for screenshots only — upload the AABs from §1, not these.
+
+If an `eas build` hangs after "Resolved … environment" and never prints a
+build id, it is stuck computing the project fingerprint. Re-run it with
+`EAS_SKIP_AUTO_FINGERPRINT=1` set.
 
 ---
 
