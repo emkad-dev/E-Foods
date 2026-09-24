@@ -10,6 +10,24 @@
 
 ## Global Constraints
 
+> **Correction, 2026-09-23 — do not follow this document's env-file path.**
+> Every reference below to `supabase\functions\.env` as "the file the deploy
+> script syncs" is wrong today, and following it silently yields placeholders.
+>
+> - The **real** credentials are in `functions\.env` at the **repo root**:
+>   `SERVICE_ROLE_KEY` with `ref=rgfbheorvtolixdcpjhy`, and `sk_live_…`.
+> - `supabase\functions\.env` holds the **public `supabase-demo` key**
+>   (`iss: supabase-demo`, no project ref — it authenticates nothing) and
+>   `PAYSTACK_SECRET_KEY=sk_test_dumm…`. It is the Supabase CLI's default
+>   env file for local `functions serve`, which is all it is for.
+> - All four deploy scripts resolve `Join-Path $repoRoot 'functions\.env'`;
+>   none of them reads the `supabase\` copy. The sync is also opt-in behind
+>   `-SyncSecrets` now, not automatic, so the "syncs on every run" framing
+>   below no longer holds either.
+>
+> Steps 3 and the `wrangler secret put` snippet would therefore write a dummy
+> Paystack key. Read the root file instead.
+
 - All repo work happens in the `main` worktree: `C:\Users\emkad\EBuy\pricing-v2-wt`. Do NOT touch `C:\Users\emkad\EBuy\E-Foods` (stale branch checkout) except to READ the untracked `supabase\functions\.env` and to APPEND the new env var there (it is the file the local deploy script syncs to Supabase secrets).
 - Do not commit or print secrets. `PAYSTACK_SECRET_KEY` is read from `C:\Users\emkad\EBuy\E-Foods\supabase\functions\.env` and piped straight into `wrangler secret put` / HMAC computation.
 - Never stage with `git add -A` or commit with `-am`: the worktree carries the user's own uncommitted `apps/partner/app/(auth)/login.tsx` change. Stage exact paths only.
