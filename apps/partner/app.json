@@ -4,7 +4,7 @@
     "slug": "feasty-partner",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "../customer/assets/images/icon.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "feasty-partner",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -14,10 +14,10 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "../customer/assets/images/android-icon-foreground.png",
-        "backgroundImage": "../customer/assets/images/android-icon-background.png",
-        "monochromeImage": "../customer/assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#21252E",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "package": "com.feasty.partner",
       "permissions": [
@@ -32,7 +32,7 @@
       [
         "expo-notifications",
         {
-          "icon": "../customer/assets/images/android-icon-monochrome.png",
+          "icon": "./assets/images/android-icon-monochrome.png",
           "color": "#F57C00"
         }
       ],
