@@ -9,12 +9,15 @@
     "userInterfaceStyle": "automatic",
     "owner": "ghosty_xx",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.feasty.customer",
       "associatedDomains": [
         "applinks:app.feasty.com.ng"
       ],
-      "icon": "./assets/images/ios-icon.png"
+      "icon": "./assets/images/ios-icon.png",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

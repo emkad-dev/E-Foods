@@ -8,9 +8,12 @@
     "scheme": "feasty-partner",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.feasty.partner",
-      "icon": "./assets/images/ios-icon.png"
+      "icon": "./assets/images/ios-icon.png",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
