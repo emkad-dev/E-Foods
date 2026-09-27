@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import {
@@ -377,6 +378,16 @@ export default function PartnerMenuScreen() {
       setTogglingItemId(null);
     }
   };
+
+  // Raised once on mount and never again (usePartnerRestaurant only ever lowers
+  // it), so this cannot flash over a realtime refresh. Without it the screen
+  // rendered from a null restaurant during the first load: the summary read
+  // 0 categories, 0 meals, 0 live now, and the editor told a partner with a
+  // full menu to "set up or link a restaurant". Account, profile and
+  // store-details already had this guard; this screen was the one without it.
+  if (loading) {
+    return <LoadingSkeleton mode="menu" />;
+  }
 
   return (
     // Wrapped rather than used as the root because the floating notice
