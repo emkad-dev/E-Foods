@@ -87,7 +87,40 @@ export const getKitchenLane = (status: string | null | undefined): KitchenLane |
 export const isUnrenderableLiveStatus = (status: string | null | undefined) =>
   !isTerminalOrderStatus(status) && getKitchenLane(status) === null;
 
-export const formatPartnerMoney = (amount: number) => `₦${amount.toFixed(2)}`;
+/**
+ * Naira for display: `₦83,700`, `₦4,441.20`, `₦0`.
+ *
+ * This was `₦${amount.toFixed(2)}`, which printed `₦83700.00` -- no separator,
+ * so a restaurant read its own takings digit by digit -- and always appended
+ * `.00`, which is noise when menu prices are whole naira. On the dashboard it
+ * was worse than untidy: the KPI tiles are one line (`numberOfLines={1}`) at
+ * roughly 47% of the screen, so `₦10000.00` and anything above it was cut off
+ * with an ellipsis. Thirty days' earnings for any restaurant actually trading
+ * is well past that, so the tile that exists to show a partner their money
+ * could not show it.
+ *
+ * Kobo still appear when there are kobo. Order totals carry the platform markup
+ * (base x 1.2 + 100), which lands on a fraction whenever the base price is not
+ * a multiple of 5, and quietly rounding what a customer paid would make the
+ * order screen disagree with the payout. `whole` is for the KPI tiles, which
+ * are summaries and have to fit.
+ *
+ * Grouped by hand rather than with Intl.NumberFormat: the output has to be the
+ * same on every phone, and under Hermes that depends on the locale data a given
+ * device ships. It also keeps this module testable in plain Node.
+ */
+export const formatPartnerMoney = (amount: number, options: { whole?: boolean } = {}): string => {
+  // Callers pass computed values (price x quantity, sums over orders); a NaN
+  // from a missing field renders as zero rather than as "₦NaN".
+  const value = Number.isFinite(amount) ? amount : 0;
+  const rounded = options.whole ? Math.round(value) : Math.round(value * 100) / 100;
+  const magnitude = Math.abs(rounded);
+  const naira = Math.floor(magnitude);
+  const kobo = Math.round((magnitude - naira) * 100);
+  const grouped = String(naira).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+  return `${rounded < 0 ? '-' : ''}₦${grouped}${kobo ? `.${String(kobo).padStart(2, '0')}` : ''}`;
+};
 
 const toTimestamp = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {

@@ -273,14 +273,14 @@ export default function PartnerHome() {
               />
               <KpiCard
                 label={`Earnings (${rangeDays}d)`}
-                value={formatPartnerMoney(kpis.earnings.current)}
+                value={formatPartnerMoney(kpis.earnings.current, { whole: true })}
                 current={kpis.earnings.current}
                 previous={kpis.earnings.previous}
                 wide={isWide}
               />
               <KpiCard
                 label="Avg order value"
-                value={formatPartnerMoney(kpis.avgOrder.current)}
+                value={formatPartnerMoney(kpis.avgOrder.current, { whole: true })}
                 current={kpis.avgOrder.current}
                 previous={kpis.avgOrder.previous}
                 wide={isWide}

@@ -33,6 +33,7 @@ import {
   type KitchenLane,
   countModifiedOrderItems,
   formatOrderItemOptions,
+  formatPartnerMoney,
   getKitchenLane,
   getKitchenSignal,
   getKitchenSignalColors,
@@ -282,5 +283,56 @@ describe('order item options', () => {
 
     assert.equal(countModifiedOrderItems(order), 2);
     assert.equal(countModifiedOrderItems({} as OrderDocument), 0);
+  });
+});
+
+/**
+ * `formatPartnerMoney` used to be `₦${amount.toFixed(2)}`: no thousands
+ * separator, and always a trailing `.00`. On the dashboard's one-line KPI tiles
+ * that pushed any figure from ₦10,000 upward past the tile's width, so it
+ * rendered truncated -- the earnings tile could not show a trading restaurant
+ * its own earnings.
+ */
+describe('partner money formatting', () => {
+  it('groups thousands with commas', () => {
+    assert.equal(formatPartnerMoney(83700), '₦83,700');
+    assert.equal(formatPartnerMoney(1234567), '₦1,234,567');
+    assert.equal(formatPartnerMoney(999), '₦999');
+    assert.equal(formatPartnerMoney(1000), '₦1,000');
+  });
+
+  it('drops a trailing .00 but keeps kobo that are really there', () => {
+    assert.equal(formatPartnerMoney(15000), '₦15,000');
+    // markup lands on a fraction when the base price is not a multiple of 5
+    assert.equal(formatPartnerMoney(4441.2), '₦4,441.20');
+    assert.equal(formatPartnerMoney(0.05), '₦0.05');
+  });
+
+  it('survives floating-point residue instead of printing it', () => {
+    assert.equal(formatPartnerMoney(0.1 + 0.2), '₦0.30');
+    assert.equal(formatPartnerMoney(4441.2 - 0.0000001), '₦4,441.20');
+  });
+
+  it('whole rounds to the naira, for the KPI tiles that have to fit', () => {
+    assert.equal(formatPartnerMoney(4466.67, { whole: true }), '₦4,467');
+    assert.equal(formatPartnerMoney(83700.4, { whole: true }), '₦83,700');
+  });
+
+  it('keeps a six-figure month short enough for a one-line tile', () => {
+    // '₦83700.00' is what used to overflow; the replacement is 2 characters
+    // shorter even with its comma, and 7-figure months stay under 11.
+    assert.ok(formatPartnerMoney(83700, { whole: true }).length < '₦83700.00'.length);
+    assert.ok(formatPartnerMoney(1234567, { whole: true }).length <= 10);
+  });
+
+  it('renders a missing or broken amount as zero, never as ₦NaN', () => {
+    assert.equal(formatPartnerMoney(Number.NaN), '₦0');
+    assert.equal(formatPartnerMoney(Number.POSITIVE_INFINITY), '₦0');
+    assert.equal(formatPartnerMoney(0), '₦0');
+  });
+
+  it('puts the sign before the currency symbol', () => {
+    assert.equal(formatPartnerMoney(-2500), '-₦2,500');
+    assert.equal(formatPartnerMoney(-0.4, { whole: true }), '₦0');
   });
 });
