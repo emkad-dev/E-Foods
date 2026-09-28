@@ -33,10 +33,10 @@ type RestaurantDiscoveryRowProps = {
   /**
    * The restaurant's raw rating fields, not a formatted string.
    *
-   * REQUIRED, deliberately: an optional rating is an optional line, and a line
-   * that is present on some rows and absent on others is what gives one feed
-   * two card heights. Making the compiler ask for it on every shelf is also the
-   * only thing that keeps the two shelves showing the same facts.
+   * REQUIRED, deliberately: making the compiler ask for it on every shelf is
+   * the only thing that keeps the two shelves showing the same facts -- a
+   * rating that renders on one row and not another is a fact shown
+   * selectively.
    */
   rating: RatedRestaurant;
   tone: RestaurantDiscoveryRowTone;
@@ -53,11 +53,11 @@ type RestaurantDiscoveryRowProps = {
  * The restaurant row both home shelves are built from.
  *
  * WHY IT EXISTS: the nearby shelf and the "outside your delivery zone" shelf
- * stated the same geometry twice -- 112x132 thumbnail, 132pt minimum row, 14pt
- * info padding, a flex-1 name against a trailing control -- and the two copies
- * had already drifted (the name's trailing gap was 8 on one and 10 on the
- * other, and only one of them dimmed on press). Stated once, they cannot drift
- * again.
+ * stated the same geometry twice -- a 116pt-wide image stretched to the row's
+ * full height, a 92pt minimum row, 12pt info padding, a flex-1 name against a
+ * trailing control -- and the two copies had already drifted (the name's
+ * trailing gap was 8 on one and 10 on the other, and only one of them dimmed
+ * on press). Stated once, they cannot drift again.
  *
  * WHY FAVORITES AND SEARCH ARE NOT HERE: favorites is a full-bleed feed card
  * (image on top, logo badge straddling the seam, a rating row) -- a different
@@ -100,30 +100,41 @@ export default function RestaurantDiscoveryRow({
       <View style={styles.info}>
         <View style={styles.header}>
           {/* One line on both shelves. The out-of-zone copy let a long name wrap
-              and push its own status badge around; a card header that changes
-              height with the data is what the fixed 132pt thumbnail cannot
-              follow. */}
+              and push its own status badge around; a header that changes
+              height with the data would still fight the trailing control's
+              own row, even now that the image stretches to match whatever
+              height the card ends up. */}
           <Text style={styles.name} numberOfLines={1}>
             {name}
           </Text>
           {trailing}
         </View>
-        <Text style={[styles.cuisine, isMuted ? styles.cuisineMuted : null]} numberOfLines={1}>
-          {cuisine}
-        </Text>
-        {/* Always rendered, in both states, and at a fixed height -- see
-            RestaurantRating. The available row's content box comes to ~116pt
-            with this line in it, still inside the 132pt the thumbnail fixes, so
-            the orderable shelf's card height does not move at all. */}
-        <RestaurantRating restaurant={rating} />
+        {/* The rating sits on the cuisine line itself, not its own row -- see
+            RestaurantRating's 'inline' variant, which drops the fixed-height
+            row chrome the 'card' variant needs when it stands alone. Always
+            rendered, in both states, so the two shelves show the same fact.
+            The cuisine text is the only thing here allowed to shrink: if
+            space runs out it truncates first, so the rating is never the
+            thing that gets cut. */}
+        <View style={styles.cuisineRow}>
+          <Text
+            style={[styles.cuisine, isMuted ? styles.cuisineMuted : null]}
+            numberOfLines={1}
+          >
+            {cuisine}
+          </Text>
+          <Text style={[styles.separator, isMuted ? styles.cuisineMuted : null]}>{' · '}</Text>
+          <RestaurantRating restaurant={rating} variant="inline" />
+        </View>
         <Text
           style={[styles.meta, isMuted ? styles.metaMuted : null]}
           // The orderable row's meta is a fixed-shape chip line (distance, ETA)
           // that must never grow the card. The muted rows' meta is a full
           // sentence explaining WHY the kitchen cannot serve this address, and
           // clamping that to one line would truncate away the only reason the
-          // section exists -- so it wraps, a step smaller, to stay inside the
-          // 132pt the thumbnail fixes.
+          // section exists -- so it wraps, a step smaller, and the image,
+          // which stretches to the card's full height, simply grows to
+          // follow it.
           numberOfLines={isMuted ? undefined : 1}
         >
           {meta}
@@ -140,7 +151,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 12,
-    minHeight: 132,
+    minHeight: 92,
     overflow: 'hidden',
     width: '100%',
   },
@@ -158,11 +169,16 @@ const styles = StyleSheet.create({
   },
   cuisine: {
     color: customerTheme.textMuted,
+    flexShrink: 1,
     fontSize: 12,
-    marginTop: 6,
   },
   cuisineMuted: {
     color: customerTheme.textSoft,
+  },
+  cuisineRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginTop: 4,
   },
   footnote: {
     color: customerTheme.warningText,
@@ -176,17 +192,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   image: {
-    height: 132,
-    width: 112,
+    // No fixed height: the image stretches to match whatever height the row
+    // ends up (92pt minimum, taller when a muted row's meta wraps), so it
+    // never clips or letterboxes against the text column beside it.
+    alignSelf: 'stretch',
+    width: 116,
   },
   info: {
     flex: 1,
-    padding: 14,
+    padding: 12,
   },
   meta: {
     color: customerTheme.textMuted,
     fontSize: 12,
-    marginTop: 6,
+    marginTop: 4,
   },
   metaMuted: {
     color: customerTheme.dangerText,
@@ -199,5 +218,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     marginRight: 10,
+  },
+  separator: {
+    // Same colour as the cuisine text for the row's tone -- it is part of
+    // that text, not a divider with its own voice. flexShrink pinned to 0
+    // explicitly: native Text already defaults to it, but react-native-web
+    // renders Text with CSS flex-shrink 1, and the whole point is that the
+    // cuisine text gives up space before this does.
+    color: customerTheme.textMuted,
+    flexShrink: 0,
+    fontSize: 12,
   },
 });

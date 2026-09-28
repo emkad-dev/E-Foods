@@ -22,14 +22,16 @@ import { getRestaurantRatingSummary, RATING_STAR, type RatedRestaurant } from '.
  * and makes it jump as rated and unrated kitchens interleave. Both states are
  * one line of the same fixed height, so the rating can never move the layout.
  */
-export type RestaurantRatingVariant = 'card' | 'pill';
+export type RestaurantRatingVariant = 'card' | 'pill' | 'inline';
 
 type RestaurantRatingProps = {
   restaurant: RatedRestaurant;
   style?: StyleProp<ViewStyle>;
   /**
    * 'card' on a feed row; 'pill' inside the restaurant page's facts row, where
-   * it has to match the surrounding fact pills' geometry exactly.
+   * it has to match the surrounding fact pills' geometry exactly; 'inline'
+   * when the rating sits inside another line of text (the discovery card's
+   * cuisine line) and must carry no row chrome of its own.
    */
   variant?: RestaurantRatingVariant;
 };
@@ -40,10 +42,12 @@ export default function RestaurantRating({
   variant = 'card',
 }: RestaurantRatingProps) {
   const summary = getRestaurantRatingSummary(restaurant);
+  const rowVariantStyle =
+    variant === 'pill' ? styles.rowPill : variant === 'inline' ? styles.rowInline : styles.rowCard;
 
   return (
     <View
-      style={[styles.row, variant === 'pill' ? styles.rowPill : styles.rowCard, style]}
+      style={[styles.row, rowVariantStyle, style]}
       // Grouped and relabelled: read child by child, a screen reader announces
       // the star glyph as "black star" and "(12)" as a stray parenthetical.
       accessible
@@ -103,6 +107,12 @@ const styles = StyleSheet.create({
     // unrated one -- the exact feed jitter this component exists to avoid.
     height: LABEL_LINE_HEIGHT + 2,
     marginTop: 6,
+  },
+  rowInline: {
+    // Deliberately empty. `card` and `pill` fix a height and add margin
+    // because they stand alone as their own row; inline sits inside a line
+    // another component already owns (the discovery card's cuisine line), so
+    // it must add no height, margin, background or padding of its own.
   },
   rowPill: {
     backgroundColor: customerTheme.surfaceMuted,
