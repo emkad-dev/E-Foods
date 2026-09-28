@@ -56,14 +56,20 @@ const formatOrderDate = (value: unknown): string => {
   return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString() : '';
 };
 
-type OrderFilter = 'all' | 'ongoing' | 'placed' | 'cancelled';
+// 'delivered', not 'placed'. This tab was labelled "Placed" while filtering to
+// delivered-and-paid orders -- and `placed` is a real order status here, the
+// one an order has right after checkout. So a customer tapping "Placed" to
+// find the order they had just submitted got their finished ones instead, and
+// the tab's own empty state already said "No paid orders yet". The value is
+// local screen state only (no route param, nothing persisted), so it is renamed
+// along with the label rather than left to collide with the status name.
+type OrderFilter = 'all' | 'ongoing' | 'delivered' | 'cancelled';
 
 const ORDER_FILTERS: { label: string; value: OrderFilter }[] = [
   { label: 'All', value: 'all' },
   { label: 'Ongoing', value: 'ongoing' },
-  { label: 'Placed', value: 'placed' },
+  { label: 'Delivered', value: 'delivered' },
   { label: 'Cancelled', value: 'cancelled' },
-  
 ];
 
 const matchesOrderFilter = (order: Order, filter: OrderFilter) => {
@@ -72,7 +78,7 @@ const matchesOrderFilter = (order: Order, filter: OrderFilter) => {
   switch (filter) {
     case 'ongoing':
       return !isTerminalOrderStatus(status);
-    case 'placed':
+    case 'delivered':
       return status === 'delivered' && (order.payment?.status ?? '') === 'paid';
     case 'cancelled':
       return ['cancelled', 'rejected', 'failed_delivery'].includes(status);
@@ -85,8 +91,8 @@ const getEmptyStateCopy = (filter: OrderFilter) => {
   switch (filter) {
     case 'ongoing':
       return 'No ongoing orders yet.';
-    case 'placed':
-      return 'No paid orders yet.';
+    case 'delivered':
+      return 'Orders appear here once they have been delivered and paid for.';
     case 'cancelled':
       return 'No cancelled orders yet.';
     default:
@@ -98,8 +104,8 @@ const getEmptyStateTitle = (filter: OrderFilter) => {
   switch (filter) {
     case 'ongoing':
       return 'No ongoing orders yet';
-    case 'placed':
-      return 'No placed orders yet';
+    case 'delivered':
+      return 'No delivered orders yet';
     case 'cancelled':
       return 'No cancelled orders yet';
     default:
