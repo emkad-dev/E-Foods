@@ -58,6 +58,18 @@ export const NIGERIA_BANKS: readonly NigeriaBank[] = [
 ];
 
 /**
+ * Banks whose name (case-insensitive, anywhere) or exact code matches what the
+ * partner typed into the picker's search box. A blank query returns them all.
+ */
+export const filterNigeriaBanks = (query: string): NigeriaBank[] => {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return [...NIGERIA_BANKS];
+  }
+  return NIGERIA_BANKS.filter((bank) => bank.name.toLowerCase().includes(needle) || bank.code === needle);
+};
+
+/**
  * NUBAN account numbers are exactly 10 digits. Checked before spending a
  * /bank/resolve round trip on input that cannot possibly resolve.
  */

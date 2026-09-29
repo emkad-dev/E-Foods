@@ -34,7 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { NIGERIA_BANKS, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
+import { filterNigeriaBanks, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
 import {
   PARTNER_ONBOARDING_STEPS,
   canSubmitPartnerOnboarding,
@@ -104,6 +104,8 @@ export default function CompleteRestaurantDetailsScreen() {
   const [verifyingBank, setVerifyingBank] = useState(false);
   const [uploadingKind, setUploadingKind] = useState<'front' | 'back' | null>(null);
   const [bankPickerOpen, setBankPickerOpen] = useState(false);
+  const [bankQuery, setBankQuery] = useState('');
+  const filteredBanks = useMemo(() => filterNigeriaBanks(bankQuery), [bankQuery]);
   // The (code, number) pair the resolved name actually belongs to.
   const [verifiedPair, setVerifiedPair] = useState<{ accountNumber: string; bankCode: string } | null>(null);
 
@@ -570,25 +572,53 @@ export default function CompleteRestaurantDetailsScreen() {
         {stepId === 'payout' ? (
           <>
             <Text style={styles.sectionLabel}>Bank</Text>
-            <TouchableOpacity onPress={() => setBankPickerOpen((open) => !open)} style={styles.input}>
+            <TouchableOpacity
+              onPress={() => {
+                setBankQuery('');
+                setBankPickerOpen((open) => !open);
+              }}
+              style={styles.input}
+            >
               <Text style={form.bankName ? styles.pickerValue : styles.pickerPlaceholder}>
                 {form.bankName || 'Select your bank'}
               </Text>
             </TouchableOpacity>
             {bankPickerOpen ? (
               <View style={styles.bankList}>
-                {NIGERIA_BANKS.map((bank) => (
-                  <TouchableOpacity
-                    key={bank.code}
-                    onPress={() => {
-                      setForm((current) => ({ ...current, bankCode: bank.code, bankName: bank.name }));
-                      setBankPickerOpen(false);
-                    }}
-                    style={styles.bankRow}
-                  >
-                    <Text style={styles.bankRowText}>{bank.name}</Text>
-                  </TouchableOpacity>
-                ))}
+                {/* The list used to be a plain View clipped at ~5 rows, so every
+                    bank after First City Monument Bank was unreachable, and the
+                    field above looked typeable but was a button. A search box
+                    plus a scrolling list fixes both. nestedScrollEnabled lets
+                    the list scroll inside the page's own ScrollView on
+                    Android. */}
+                <TextInput
+                  autoCorrect={false}
+                  autoFocus
+                  onChangeText={setBankQuery}
+                  placeholder="Search your bank"
+                  placeholderTextColor={partnerTheme.textSoft}
+                  style={styles.bankSearch}
+                  value={bankQuery}
+                />
+                <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.bankScroll}>
+                  {filteredBanks.length === 0 ? (
+                    <Text style={styles.bankEmpty}>No bank matches “{bankQuery.trim()}”.</Text>
+                  ) : (
+                    filteredBanks.map((bank) => (
+                      <TouchableOpacity
+                        key={bank.code}
+                        onPress={() => {
+                          setForm((current) => ({ ...current, bankCode: bank.code, bankName: bank.name }));
+                          setBankPickerOpen(false);
+                          setBankQuery('');
+                        }}
+                        style={styles.bankRow}
+                      >
+                        <Text style={styles.bankRowText}>{bank.name}</Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </ScrollView>
               </View>
             ) : null}
 
@@ -900,8 +930,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     marginTop: 8,
-    maxHeight: 260,
     overflow: 'hidden',
+  },
+  bankSearch: {
+    borderBottomColor: partnerTheme.border,
+    borderBottomWidth: 1,
+    color: partnerTheme.text,
+    fontSize: 15,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bankScroll: {
+    // About five rows visible; the rest scroll.
+    maxHeight: 240,
+  },
+  bankEmpty: {
+    color: partnerTheme.textSoft,
+    fontSize: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
   },
   bankRow: {
     borderBottomColor: partnerTheme.border,
