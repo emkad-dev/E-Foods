@@ -17,17 +17,57 @@ guessing.
 |---|---|---|
 | Package | `com.feasty.customer` | `com.feasty.partner` |
 | Version | 1.0.0 | 1.0.0 |
-| versionCode | **4** | **5** |
-| Build | `23b36282` | `6c26bf0e` |
-| Commit | `ff06abd` | `65807eb` |
+| versionCode | **8** | **8** |
+| Build | `78a495b7` | `7ea1fcb5` |
+| Commit | `7611d9b` | `1379550` |
 | Keystore | `IMF2w24Tw6` | `DM-aqpCGKm` |
+
+These are the **first closed-testing** binaries, submitted 2026-09-29. There is
+no customer vc7: a hung build attempt bumped the counter without producing one.
 
 AABs:
 
-- customer — https://expo.dev/artifacts/eas/CM9WwllQavlP_-grQWeF-iNmv15-5m5WCmRib9jgb7s.aab
-- partner — https://expo.dev/artifacts/eas/d9h7tPOzEAtEsQdh85F7O6hMD0nmvoCDacd8jjSVM58.aab
+- customer — https://expo.dev/artifacts/eas/pMDQx2M7Y3wl2tTduI9NoP5q-ue8IH6duDs4Ylt-HeY.aab
+  **Do not upload vc6 or earlier**: the store screenshots show the "Delivered"
+  order tab, which only exists from `c1c12fa`.
+- partner — https://expo.dev/artifacts/eas/pOgp8MqA1bYW15Dtt0Daw1y-hGkAXQorAPKvTV1txg8.aab
+  **Do not upload vc7 or earlier**: the dashboard screenshot shows `₦83,700`, and
+  before `1379550` the app rendered `₦83700.00` and truncated it.
 
-Both manifests were read out of the shipped bundles, not inferred from config.
+Customer vc8 was verified 2026-09-29 by reading the shipped AAB:
+- package `com.feasty.customer`;
+- permissions identical to vc6;
+- signing certificate SHA256 `88:E1:4E:29…0C:9E`, the same as vc6;
+- the Hermes bundle contains the "Delivered" tab and dish-search strings.
+
+### Not in these binaries yet: next upload, 2026-10-01
+
+The Expo Free plan's Android build quota ran out on 2026-09-29 and resets on
+2026-10-01. Everything committed after the two build commits is live on the web
+apps now and reaches mobile with the next pair. Upload that pair into the
+**same closed-testing track**:
+- customer next versionCode 9
+- partner next versionCode 10 (a quota-refused attempt used 9)
+
+What that pair adds:
+- pull-to-refresh (`77341f0`)
+- dish cards matching the home card (`0f9d121`)
+- customer prices read `₦4,300` (`1fc53cd`)
+- friendly error messages, raw errors to Sentry (`47dfa19`, `6ba3504`,
+  `e08448c`, `aa8d657`)
+- **the partner bank picker scrolls and searches (`657a999`)**. In partner
+  vc8, 26 of 31 banks cannot be selected on the payout step. Until the next
+  build, closed-testing partners must finish onboarding on
+  partner.feasty.com.ng.
+
+After that upload, refresh the customer screenshots: vc8 shows `₦4300.00` and
+the old "Add" pill.
+
+Partner vc8 verified 2026-09-28 by reading the shipped bundle, not the repo:
+package `com.feasty.partner`; permissions identical to vc6; launcher icons are
+partner's own (not customer's); signing certificate `16:11:FA:BF…8D:A3` matches
+the backed-up keystore; the money-grouping code is present in the Hermes bundle
+(absent from vc6), and the menu-loading fix is an ancestor of the build commit.
 
 Customer requests: `INTERNET`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`,
 `POST_NOTIFICATIONS`, `VIBRATE`, `WAKE_LOCK`, `ACCESS_NETWORK_STATE`,
