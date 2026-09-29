@@ -13,6 +13,7 @@ import {
   type NominatimReverseResponse,
   type ResolvedAddress,
 } from './locationResolution';
+import { reportError } from '../../../../packages/observability/src/sentry';
 
 export type { Coordinates, CoordinatesResult, LocationErrorReason, ResolvedAddress };
 
@@ -101,6 +102,7 @@ const getNativeCoordinates = async (): Promise<CoordinatesResult> => {
     };
   } catch (error) {
     console.error('Failed to read the current position:', error);
+    reportError('customer.getCurrentCoordinates', error);
     return locationFailure('unavailable');
   }
 };
@@ -163,6 +165,7 @@ export const watchCoordinates = async (
     };
   } catch (error) {
     console.error('Failed to watch the current position:', error);
+    reportError('customer.watchCoordinates', error);
     onError?.('unavailable');
     return null;
   }
@@ -196,6 +199,7 @@ const reverseGeocodeWithOpenStreetMap = async (
     return buildNominatimAddress((await response.json()) as NominatimReverseResponse);
   } catch (error) {
     console.error('Reverse geocoding failed:', error);
+    reportError('customer.reverseGeocode', error);
     return null;
   } finally {
     clearTimeout(timeoutHandle);

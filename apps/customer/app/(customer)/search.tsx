@@ -24,6 +24,7 @@ import RestaurantRating from '../../src/components/RestaurantRating';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import { getPublishedRestaurants } from '../../src/services/publicRestaurantReadModel';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import {
   type DiscoveryRestaurant,
   isRestaurantVisibleToCustomers,
@@ -100,9 +101,7 @@ export default function SearchScreen() {
       setRestaurants(catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)));
       setCatalogError(null);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'The restaurant service is unavailable right now. Please try again.';
-      setCatalogError(message);
+      setCatalogError(toUserMessage(error, 'The restaurant service is unavailable right now. Please try again.'));
     } finally {
       if (mode === 'initial') {
         setLoading(false);

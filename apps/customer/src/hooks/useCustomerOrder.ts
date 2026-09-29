@@ -6,6 +6,7 @@ import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreak
 import type { FulfillmentType } from '../domain/orders';
 import { getCustomerOrderDetail } from '../services/customerReadModel';
 import { supabase } from '../services/supabase/config';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 
 // RLS self-read policies on CustomerOrder and DeliveryAssignment are applied
 // in production, so `postgres_changes` works for this screen specifically --
@@ -51,13 +52,13 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
 
       setOrder(nextData.order as Order);
       setError(null);
-    } catch (err: any) {
+    } catch (err) {
       if (!activeRef.current) {
         return;
       }
 
       setOrder(null);
-      setError(err.message ?? 'Order not found');
+      setError(toUserMessage(err, 'Order not found'));
     } finally {
       if (activeRef.current) {
         setLoading(false);

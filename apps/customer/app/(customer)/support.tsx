@@ -16,6 +16,7 @@ import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useSupportThreadRealtime } from '../../src/hooks/useSupportThreadRealtime';
 import { getSupportThread, sendSupportMessage, type SupportMessage } from '../../src/services/customerSupport';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { customerTheme } from '../../src/theme/palette';
 
 export default function SupportScreen() {
@@ -35,7 +36,7 @@ export default function SupportScreen() {
       setMessages(res.messages);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to load your messages.');
+      setError(toUserMessage(nextError, 'Unable to load your messages.'));
     } finally {
       setLoading(false);
     }
@@ -62,7 +63,7 @@ export default function SupportScreen() {
       await load();
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to send your message.');
+      setError(toUserMessage(nextError, 'Unable to send your message.'));
     } finally {
       setSending(false);
     }

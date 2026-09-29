@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { customerTheme } from '../theme/palette';
 import { resolveAuthRedirectTo } from '../utils/authPrompt';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 
 type RestaurantFavoriteButtonProps = {
   restaurantId: string;
@@ -66,7 +67,7 @@ export default function RestaurantFavoriteButton({
     } catch (nextError) {
       // Inline, never Alert — Alert is a no-op on the web build, which is what
       // made this failure silent in the first place.
-      setError(nextError instanceof Error ? nextError.message : 'Unable to update favorites right now.');
+      setError(toUserMessage(nextError, 'Unable to update favorites right now.'));
     } finally {
       setSaving(false);
     }

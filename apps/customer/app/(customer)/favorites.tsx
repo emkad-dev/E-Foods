@@ -13,6 +13,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import { useCart } from '../../src/contexts/CartContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getRestaurantList } from '../../src/services/publicRestaurantReadModel';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { customerTheme } from '../../src/theme/palette';
 import { formatDeliveryEta } from '../../src/utils/formatting';
 import {
@@ -112,8 +113,7 @@ export default function CustomerFavoritesScreen() {
       if (catalogRequestRef.current !== requestId) {
         return;
       }
-      const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
-      setError(message);
+      setError(toUserMessage(nextError, 'Unable to load favorites.'));
     } finally {
       if (catalogRequestRef.current === requestId) {
         setLoadingCatalog(false);
@@ -143,8 +143,7 @@ export default function CustomerFavoritesScreen() {
       setError(null);
       await loadCatalogForIds(ids);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
-      setError(message);
+      setError(toUserMessage(nextError, 'Unable to load favorites.'));
     }
   }, [refreshFavorites, loadCatalogForIds]);
 

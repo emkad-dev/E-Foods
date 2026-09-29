@@ -8,7 +8,6 @@ import {
   ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
-  formatAuthError,
   createUserWithEmail,
   isNetworkRequestError,
   getUserRoleClaim,
@@ -43,6 +42,8 @@ import {
   identifyAnalyticsUser,
   trackAnalyticsEvent,
 } from '../../../../packages/observability/src/analytics';
+import { reportError } from '../../../../packages/observability/src/sentry';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import type { PolicyAcceptancePayload } from '../../../../packages/domain/src';
 
 export type User = UserDocument | null;
@@ -105,20 +106,49 @@ const isOfflineError = (error: unknown) => {
 
 const isTransientNetworkError = (error: unknown) => isOfflineError(error) || isNetworkRequestError(error);
 
+// This app's own friendly, deliberately-thrown outcomes (an existing account,
+// a session takeover, session expiry, no customer access) - not faults, so
+// reportAuthFailure below does not send them to Sentry.
+const EXPECTED_AUTH_OUTCOMES = new Set<string>([
+  CUSTOMER_ACCESS_ERROR,
+  SESSION_CONFLICT_ERROR,
+  ACCOUNT_ALREADY_REGISTERED_MESSAGE,
+  SESSION_EXPIRED_ERROR_MESSAGE,
+]);
+
+// None of the calls in this file go through packages/auth/src/backendRpc.ts
+// (direct supabase.auth.*/supabase.from(...) calls instead), so nothing else
+// reports their failures - see task-3b-common.md. `reloadUser` is called both
+// on its own and from inside `verifyEmailCode`'s own try/catch; the WeakSet
+// stops the same re-thrown error object from being sent to Sentry twice when
+// it is caught at both layers.
+const reportedAuthErrors = new WeakSet<object>();
+const reportAuthFailure = (source: string, error: unknown) => {
+  if (error instanceof Error && EXPECTED_AUTH_OUTCOMES.has(error.message)) {
+    return;
+  }
+
+  if (error && typeof error === 'object') {
+    if (reportedAuthErrors.has(error)) {
+      return;
+    }
+    reportedAuthErrors.add(error);
+  }
+
+  reportError(source, error);
+};
+
+// formatAuthError (packages/auth/src/supabaseAuth.ts) falls back to the raw
+// Supabase message for any code it does not recognise, which is exactly the
+// leak toUserMessage exists to close - so it is no longer called here.
+// toUserMessage's own Supabase-code rules already cover the common cases
+// (invalid_credentials, email_not_confirmed, user_already_exists, ...).
 const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
   if (isTransientNetworkError(error)) {
     return NO_INTERNET_ERROR;
   }
 
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    return formatAuthError(error);
-  }
-
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String((error as any).message ?? fallbackMessage);
-  }
-
-  return fallbackMessage;
+  return toUserMessage(error, fallbackMessage);
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -392,6 +422,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           return;
         }
 
+        // Offline is expected (tab refocus, a brief drop) and this listener
+        // re-fires on every one, so only unexpected failures reach Sentry.
+        if (!isOfflineError(err)) {
+          reportAuthFailure('customer.authStateChange', err);
+        }
+
         if (authUser && isOfflineError(err)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
@@ -507,6 +543,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
       return { verificationEmailSent: true };
     } catch (err: any) {
+      reportAuthFailure('customer.signUp', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to create account');
       setError(formattedError);
       throw new Error(formattedError);
@@ -549,6 +586,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await storeUserProfile(nextUser);
       await refreshPolicyAcceptance();
     } catch (err: any) {
+      reportAuthFailure('customer.signIn', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to sign in');
       setError(formattedError);
       throw new Error(formattedError);
@@ -574,6 +612,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       clearAnalyticsUser();
       router.replace('/login');
     } catch (err: any) {
+      reportAuthFailure('customer.signOut', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to sign out');
       setError(formattedError);
       throw new Error(formattedError);
@@ -651,6 +690,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return nextUser;
       });
     } catch (err: any) {
+      reportAuthFailure('customer.updateDisplayName', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to update username');
       setError(formattedError);
       throw new Error(formattedError);
@@ -697,6 +737,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return nextUser;
       });
     } catch (err: any) {
+      reportAuthFailure('customer.updatePhoneNumber', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to update phone number');
       setError(formattedError);
       throw new Error(formattedError);
@@ -736,6 +777,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         email_domain: email.includes('@') ? email.split('@').pop() ?? null : null,
       });
     } catch (err: any) {
+      reportAuthFailure('customer.resetPassword', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to send reset email');
       setError(formattedError);
       throw new Error(formattedError);
@@ -784,6 +826,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         throw new Error(SESSION_EXPIRED_ERROR_MESSAGE);
       }
 
+      reportAuthFailure('customer.reloadUser', err);
       console.error('Error reloading user:', err);
       setError(getCustomerAuthErrorMessage(err, 'Failed to reload user data'));
       throw err;
@@ -826,6 +869,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await sendVerificationEmailWithFallback(supabase, address);
       trackAnalyticsEvent('customer_verification_email_requested');
     } catch (err: any) {
+      reportAuthFailure('customer.sendVerificationEmail', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to send verification email');
       setError(formattedError);
       throw new Error(formattedError);
@@ -844,6 +888,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const emailVerified = await reloadUser();
       return emailVerified;
     } catch (err: any) {
+      reportAuthFailure('customer.verifyEmailCode', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to verify email code');
       setError(formattedError);
       throw new Error(formattedError);

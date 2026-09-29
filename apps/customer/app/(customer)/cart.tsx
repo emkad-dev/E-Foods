@@ -24,6 +24,7 @@ import {
   type PromoCodePreview,
 } from '../../src/services/customerOrderActions';
 import { trackAnalyticsEvent } from '../../../../packages/observability/src/analytics';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { WAT_OFFSET_MS, buildScheduleSlots, type ScheduleSlotDay } from '../../src/domain/scheduleSlots';
 import { getRestaurantDetail } from '../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../src/services/supabase/config';
@@ -43,79 +44,10 @@ const DEFAULT_TIP_AMOUNT = tipOptions[0];
 // mislabelled every rejection (paused restaurant, minimum order, out of range)
 // as a money problem the customer could not act on.
 const CHECKOUT_FAILURE_TITLE = 'Order not placed';
-// Reserved for a genuine transport failure. It used to be shown for EVERY
-// rejection, which is why "this item is unavailable" and "we do not deliver to
-// your location" both read as a network glitch.
-const CHECKOUT_NETWORK_FAILURE_MESSAGE = 'We could not reach FEASTY. Check your connection and try again.';
 // An amount the screen does not know yet. Never a formatted zero: a real-looking
 // price that is not a price is worse than an obvious placeholder.
 const PENDING_AMOUNT_LABEL = 'Calculating...';
 const paymentOptions: CheckoutPaymentMethod[] = ['card', 'bank_transfer'];
-
-/**
- * Strings the RPC transport itself invents when it never got an answer from the
- * server. Everything else reaching handlePlaceOrder's catch came out of the edge
- * function's error envelope, where a rejection is a sentence written for a human
- * (RpcError / ClientSafeError - see supabase/functions/_shared/observability.ts).
- */
-const TRANSPORT_FAILURE_PATTERNS = [
-  /^backend rpc /i,
-  /failed to fetch/i,
-  /network ?request failed/i,
-  /^load failed\.?$/i,
-  /networkerror/i,
-  /^timeout/i,
-];
-
-/**
- * packages/auth/src/backendRpc.ts only unwraps a STRING `error` field, but the
- * edge functions answer with an `{ error: { message } }` envelope - so the Error
- * it throws usually carries that whole envelope as raw JSON text. Unwrap it
- * rather than showing the customer JSON.
- */
-const unwrapRpcErrorMessage = (raw: string): string => {
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('{')) {
-    return trimmed;
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown } | string; message?: unknown };
-    const candidate =
-      typeof parsed.error === 'object' && parsed.error !== null
-        ? parsed.error.message
-        : typeof parsed.error === 'string'
-          ? parsed.error
-          : parsed.message;
-
-    return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : trimmed;
-  } catch {
-    return trimmed;
-  }
-};
-
-/**
- * The reason to print under CHECKOUT_FAILURE_TITLE, or null when nothing
- * trustworthy survived (the caller then falls back to the network copy).
- *
- * The length/newline guard is deliberate: the RPC envelope serializes
- * `error.message` even for 5xx, so an unexpected server fault could otherwise
- * leak its internals onto this screen. A rejection the customer can act on is
- * one short sentence; anything longer is not one.
- */
-const resolveCheckoutFailureReason = (error: unknown): string | null => {
-  if (!(error instanceof Error) || !error.message) {
-    return null;
-  }
-
-  const message = unwrapRpcErrorMessage(error.message);
-
-  if (!message || message.length > 180 || message.includes('\n')) {
-    return null;
-  }
-
-  return TRANSPORT_FAILURE_PATTERNS.some((pattern) => pattern.test(message)) ? null : message;
-};
 
 type RestaurantCheckoutSummary = {
   // null while the restaurant detail is still loading: the fee is UNKNOWN, not
@@ -640,18 +572,16 @@ export default function CartScreen() {
         },
       } as never);
     } catch (error) {
-      // This used to discard the server's message and blame the network for
-      // everything, so "This restaurant is paused right now.", "This restaurant
-      // does not deliver to your selected location yet." and a real connection
-      // drop were indistinguishable and none named the thing to fix. The
-      // server's rejections are already written to be client-safe; only a
-      // genuine transport failure gets the fallback copy.
-      const failureReason = resolveCheckoutFailureReason(error);
+      // toUserMessage keeps the server's own client-safe rejection text (a
+      // paused restaurant, an out-of-range address) and only falls back to
+      // generic copy for a 5xx or a genuine transport failure - so a server
+      // crash is no longer misreported as a network problem. The RPC layer
+      // already reported this to Sentry; nothing here reports it again.
       trackAnalyticsEvent('customer_checkout_failed', {
         reason: 'payment_flow_error',
       });
       if (isCheckoutScreenFocusedRef.current) {
-        setCheckoutError(failureReason ?? CHECKOUT_NETWORK_FAILURE_MESSAGE);
+        setCheckoutError(toUserMessage(error));
       }
     } finally {
       if (isMountedRef.current) {

@@ -3,12 +3,14 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { radius } from '@feasty/design-system';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
-import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
+import { clearOtpCooldown, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import SuccessBanner from '../../src/components/SuccessBanner';
 import { resolveSuccessNotice } from '../../src/utils/successNotices';
 import { customerTheme } from '../../src/theme/palette';
+import { reportError } from '../../../../packages/observability/src/sentry';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 
 const firstParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -93,10 +95,17 @@ export default function ResetPasswordScreen() {
         pathname: '/login',
         params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },
       } as never);
-    } catch (err: any) {
+    } catch (err) {
+      // This screen redeems the code directly against supabase.auth (it runs
+      // before AuthContext has a session to hang a request off), so nothing
+      // else reports this failure - see task-3b-common.md.
+      reportError('customer.resetPasswordConfirm', err);
       // `setError` alone: the slot above renders it. The `Alert` that used to
-      // follow was a duplicate on native and silence on web.
-      setError(formatAuthError(err));
+      // follow was a duplicate on native and silence on web. formatAuthError
+      // (packages/auth/src/supabaseAuth.ts) falls back to the raw Supabase
+      // message for a code it does not recognise; toUserMessage is what keeps
+      // that off this screen.
+      setError(toUserMessage(err, 'Unable to reset your password.'));
     } finally {
       setSubmitting(false);
     }

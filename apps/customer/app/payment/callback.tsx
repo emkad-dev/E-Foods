@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { customerTheme } from '../../src/theme/palette';
 import { pageTitleTextStyle } from '../../src/theme/screenChrome';
 
@@ -74,9 +75,9 @@ export default function PaymentCallbackScreen() {
         if (result.paymentStatus === 'failed') {
           setRefreshError('The payment was not completed successfully.');
         }
-      } catch (nextError: any) {
+      } catch (nextError) {
         if (active) {
-          setRefreshError(nextError.message ?? 'We could not verify this payment right now.');
+          setRefreshError(toUserMessage(nextError, 'We could not verify this payment right now.'));
         }
       } finally {
         if (active) {
@@ -114,8 +115,8 @@ export default function PaymentCallbackScreen() {
       if (result.paymentStatus === 'failed') {
         setRefreshError('The payment was not completed successfully.');
       }
-    } catch (nextError: any) {
-      setRefreshError(nextError.message ?? 'We could not verify this payment right now.');
+    } catch (nextError) {
+      setRefreshError(toUserMessage(nextError, 'We could not verify this payment right now.'));
     } finally {
       setRefreshing(false);
     }

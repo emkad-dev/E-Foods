@@ -23,6 +23,7 @@ import {
   rememberDismissedRatingOrderId,
 } from '../services/ratingPromptDismissals';
 import { customerTheme } from '../theme/palette';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 
 const StarRow = ({
   value,
@@ -184,11 +185,7 @@ export default function RatingPromptCard() {
       // server-side; whatever arrives here is safe to show, and a generic line
       // covers the case where it is not readable.
       if (activeRef.current) {
-        setSubmitError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : 'That did not go through. Check your connection and try again.'
-        );
+        setSubmitError(toUserMessage(error, 'That did not go through. Check your connection and try again.'));
       }
     } finally {
       if (activeRef.current) {

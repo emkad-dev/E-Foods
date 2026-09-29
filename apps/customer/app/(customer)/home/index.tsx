@@ -30,6 +30,7 @@ import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/
 import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../src/services/supabase/config';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
+import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import {
   type DiscoveryRestaurant,
   getDiscoveryEmptyState,
@@ -115,12 +116,14 @@ export default function HomeScreen() {
         });
         return true;
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'The restaurant service is unavailable right now. Please try again.';
-        setCatalogError(message);
+        setCatalogError(toUserMessage(error, 'The restaurant service is unavailable right now. Please try again.'));
+        // No exported classifier or copy constants on userMessage.ts to
+        // compare against (see task-3b-customer.md) and this file must not
+        // add any - 'other' is the only category that stays raw-free without
+        // reaching into toUserMessage's unexported internals.
         trackAnalyticsEvent('customer_catalog_load_failed', {
           mode,
-          error_message: message.slice(0, 120),
+          error_category: 'other',
         });
         return false;
       } finally {

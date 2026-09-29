@@ -36,6 +36,7 @@ import {
   type OrderTrackingSummaryItem,
 } from '../../../src/utils/orderTrackingSummary';
 import { formatMoney } from '../../../src/utils/formatting';
+import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 
 /**
  * The lines the customer actually ordered.
@@ -285,8 +286,8 @@ export default function OrderTracking() {
           }
         },
       });
-    } catch (nextError: any) {
-      setCancelError(nextError?.message ?? 'We could not cancel this order right now.');
+    } catch (nextError) {
+      setCancelError(toUserMessage(nextError, 'We could not cancel this order right now.'));
     }
   };
 
@@ -307,8 +308,8 @@ export default function OrderTracking() {
           order.payment?.method
         )}.`
       );
-    } catch (nextError: any) {
-      setPaymentError(nextError?.message ?? 'We could not verify this payment right now.');
+    } catch (nextError) {
+      setPaymentError(toUserMessage(nextError, 'We could not verify this payment right now.'));
     } finally {
       setRefreshingPayment(false);
     }
