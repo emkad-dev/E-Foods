@@ -406,8 +406,10 @@ export default function RestaurantDetail() {
                       <Text style={styles.matchTagText}>Your search match</Text>
                     </View>
                   ) : null}
-                  <Text style={styles.itemName}>{menuItem.name}</Text>
-                  {menuItem.description ? <Text style={styles.itemDesc}>{menuItem.description}</Text> : null}
+                  <Text style={styles.itemName} numberOfLines={1}>{menuItem.name}</Text>
+                  {menuItem.description ? (
+                    <Text style={styles.itemDesc} numberOfLines={2}>{menuItem.description}</Text>
+                  ) : null}
                   <Text style={styles.itemPrice}>{formatMoney(menuItem.price)}</Text>
                 </View>
                 <TouchableOpacity
@@ -423,8 +425,10 @@ export default function RestaurantDetail() {
                   // feedback. The disabled STYLE reflects both conditions; `disabled` itself
                   // stays keyed only on isOpen.
                   disabled={restaurant.isOpen === false}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${menuItem.name} to cart`}
                 >
-                  <Text style={styles.addButtonText}>Add</Text>
+                  <FontAwesome name="plus" size={16} color={customerTheme.textOnBrand} />
                 </TouchableOpacity>
               </View>
             ))}
@@ -650,9 +654,12 @@ const styles = StyleSheet.create({
   menuItemCard: {
     alignItems: 'stretch',
     backgroundColor: customerTheme.surface,
-    borderRadius: radius.xl,
+    borderColor: customerTheme.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 10,
+    minHeight: 92,
     overflow: 'hidden',
   },
   menuItemCardHighlighted: {
@@ -679,51 +686,42 @@ const styles = StyleSheet.create({
   menuItemImage: {
     alignSelf: 'stretch',
     backgroundColor: customerTheme.surfaceMuted,
-    width: 104,
+    width: 116,
   },
   menuItemInfo: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    padding: 12,
   },
   itemName: {
     color: customerTheme.text,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
   },
   itemDesc: {
     color: customerTheme.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 4,
   },
   itemPrice: {
     color: customerTheme.accentStrong,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '800',
-    marginTop: 10,
+    marginTop: 4,
   },
   addButton: {
     alignItems: 'center',
-    // `alignSelf: 'center'` USED to be contradicted by a `marginTop: 80` sitting
-    // out of order at the end of this block -- a nudge tuned to one row. Menu
-    // rows size to their content, so the two rules disagreed: measured on the
-    // running build, deleting a row's description took it from 215pt to 149pt
-    // and the gap under the button fell from 46pt to 13pt. On a row with no
-    // description at all the 80pt margin plus the button would have SET the row
-    // height. Centring alone is stable at every row height, which is what the
-    // alignSelf was asking for in the first place.
+    // `alignSelf: 'center'` centres the button on rows that size to their own
+    // content (a description can push a row well past the 92pt minimum), so
+    // this stays stable at every row height instead of chasing one measured
+    // case with a margin tuned to it.
     alignSelf: 'center',
     backgroundColor: customerTheme.accentStrong,
-    borderRadius: radius.xl,
+    borderRadius: MIN_TAP_TARGET / 2,
+    height: MIN_TAP_TARGET,
     justifyContent: 'center',
-    marginRight: 10,
-    // 43pt -- one point under, on the button the whole screen exists to get
-    // pressed.
-    minHeight: MIN_TAP_TARGET,
-    minWidth: 72,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    marginRight: 12,
+    width: MIN_TAP_TARGET,
   },
   // Was a solid '#b9b0a0' fill, which put the white label at 2.17:1 -- the same
   // defect as the partner order screen's disabled action. Dimming the real
@@ -731,11 +729,6 @@ const styles = StyleSheet.create({
   // out of coverage, so it must not read as dead) and keeps the label legible.
   addButtonDisabled: {
     opacity: 0.5,
-  },
-  addButtonText: {
-    color: customerTheme.textOnBrand,
-    fontSize: 14,
-    fontWeight: '800',
   },
   emptyState: {
     alignItems: 'center',

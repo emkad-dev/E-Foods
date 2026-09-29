@@ -216,7 +216,7 @@ export default function SearchScreen() {
             </Text>
           </View>
         </View>
-        <FontAwesome name="angle-right" size={20} color={customerTheme.textMuted} />
+        <FontAwesome name="angle-right" size={20} color={customerTheme.textMuted} style={styles.resultChevron} />
       </TouchableOpacity>
     );
   };
@@ -453,30 +453,38 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   resultCard: {
-    // ui-contract: allow-small -- a container, not a control: the 78pt
-    // thumbnail sets its height, so a line-box estimate is meaningless here.
-    alignItems: 'center',
+    // ui-contract: allow-small -- a container, not a control: the card sets a
+    // 92pt minimum and the image stretches to match it, so a line-box
+    // estimate is meaningless here. `stretch` is what lets the image fill the
+    // card; the chevron opts back out with its own alignSelf (resultChevron).
+    alignItems: 'stretch',
     backgroundColor: customerTheme.surface,
     borderColor: customerTheme.border,
     borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     marginBottom: 10,
+    minHeight: 92,
     overflow: 'hidden',
     paddingRight: 12,
   },
+  resultChevron: {
+    // The card stretches its children so the image fills it; the chevron
+    // would otherwise sit at the top of any row taller than 92pt.
+    alignSelf: 'center',
+  },
   resultImage: {
-    height: 78,
-    width: 78,
+    alignSelf: 'stretch',
+    width: 116,
   },
   resultInfo: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    justifyContent: 'center',
+    padding: 12,
   },
   resultName: {
     color: customerTheme.text,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
   resultRating: {
