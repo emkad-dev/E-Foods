@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { getDispatchShiftSlots, type DispatchShiftSlot } from '../services/dispatchReadModel';
 
@@ -39,7 +40,7 @@ export const useDispatchShiftSlots = () => {
 
         console.error('Error loading dispatch shift slots:', nextError);
         setSlots([]);
-        setError(nextError.message ?? 'Unable to load shift slots right now.');
+        setError(toUserMessage(nextError, 'Unable to load shift slots right now.'));
       } finally {
         if (active) {
           setLoading(false);
@@ -65,7 +66,7 @@ export const useDispatchShiftSlots = () => {
         setSlots(nextData.slots ?? []);
         setError(null);
       } catch (nextError: any) {
-        setError(nextError.message ?? 'Unable to load shift slots right now.');
+        setError(toUserMessage(nextError, 'Unable to load shift slots right now.'));
       }
     },
     slots,

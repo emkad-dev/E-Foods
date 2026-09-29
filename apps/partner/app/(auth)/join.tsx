@@ -46,6 +46,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
 import {
@@ -180,7 +181,7 @@ export default function StaffJoinScreen() {
       showNotice({
         tone: 'error',
         title: 'That did not work',
-        message: error?.message ?? 'Unable to check that code right now.',
+        message: toUserMessage(error, 'Unable to check that code right now.'),
       });
     } finally {
       setBusy(false);
@@ -215,7 +216,7 @@ export default function StaffJoinScreen() {
       showNotice({
         tone: 'error',
         title: 'We could not sign you in',
-        message: error?.message ?? 'Check the password and try again.',
+        message: toUserMessage(error, 'Check the password and try again.'),
       });
       return;
     }
@@ -234,7 +235,7 @@ export default function StaffJoinScreen() {
       // person is going to get.
       setStalled({
         kind: 'signed-in-not-joined',
-        message: error?.message ?? 'Unable to use that code right now.',
+        message: toUserMessage(error, 'Unable to use that code right now.'),
       });
     } finally {
       setBusy(false);
@@ -273,7 +274,7 @@ export default function StaffJoinScreen() {
       showNotice({
         tone: 'error',
         title: 'We could not create your account',
-        message: error?.message ?? 'Unable to create your account right now.',
+        message: toUserMessage(error, 'Unable to create your account right now.'),
       });
       return;
     }
@@ -291,7 +292,7 @@ export default function StaffJoinScreen() {
       releaseStaffJoin();
       setStalled({
         kind: 'account-created-not-signed-in',
-        message: error?.message ?? 'Unable to sign in right now.',
+        message: toUserMessage(error, 'Unable to sign in right now.'),
       });
     } finally {
       setBusy(false);

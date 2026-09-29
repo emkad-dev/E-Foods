@@ -3,6 +3,7 @@ import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../p
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import type { OrderDocument } from '../domain/entities';
 import { isTerminalOrderStatus, normalizeOrderStatus } from '../domain/orders';
 import { getDispatchDeliveryQueue, type DispatchDeliveryOffer } from '../services/dispatchReadModel';
@@ -46,7 +47,7 @@ export const useDispatchOrders = () => {
         }
 
         console.error('Error loading dispatch orders:', nextError);
-        setError(nextError.message ?? 'Unable to load dispatch orders right now.');
+        setError(toUserMessage(nextError, 'Unable to load dispatch orders right now.'));
       } finally {
         if (mode === 'refresh') {
           setRefreshing(false);

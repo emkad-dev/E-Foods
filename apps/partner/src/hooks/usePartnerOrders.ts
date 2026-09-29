@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ORDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
@@ -48,7 +49,7 @@ export const usePartnerOrders = () => {
         // kitchen watched every live ticket disappear because one poll timed
         // out. The last good snapshot is stale, not wrong — it stays on screen
         // and the error card says the queue could not be refreshed.
-        setError(nextError.message ?? 'Unable to load restaurant orders right now.');
+        setError(toUserMessage(nextError, 'Unable to load restaurant orders right now.'));
       } finally {
         if (mode === 'refresh') {
           setRefreshing(false);

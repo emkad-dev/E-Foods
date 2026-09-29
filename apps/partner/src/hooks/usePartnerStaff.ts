@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { openStaffInvites, type StaffInvite, type StaffMember } from '../domain/staffInvites';
 import { getPartnerStaff } from '../services/partnerStaff';
 
@@ -57,7 +58,7 @@ export const usePartnerStaff = () => {
 
       // Rows already on screen are kept. A refresh that failed after a
       // successful revoke must not blank the list the owner is working in.
-      setError(nextError?.message ?? 'Unable to load your team right now.');
+      setError(toUserMessage(nextError, 'Unable to load your team right now.'));
     } finally {
       inFlightRef.current = false;
 

@@ -26,6 +26,8 @@ import {
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { shouldShowSignInLoading } from '../../../../packages/auth/src';
+import { reportError } from '../../../../packages/observability/src/sentry';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { MISSING_PROFILE_ERROR, resolveDispatchAccessState } from './dispatchAuthFlow';
 
 type DispatchSignUpInput = {
@@ -79,11 +81,10 @@ const getDispatchAuthErrorMessage = (error: unknown, fallbackMessage: string) =>
     return formatAuthError(error);
   }
 
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String((error as any).message ?? fallbackMessage);
-  }
-
-  return fallbackMessage;
+  // Anything else (including a plain `message`) goes through `toUserMessage`
+  // rather than being shown verbatim -- it may be a raw Supabase/Postgres
+  // string, not friendly copy.
+  return toUserMessage(error, fallbackMessage);
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -325,6 +326,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         const nextMessage = getDispatchAuthErrorMessage(nextError, 'Failed to load dispatch account');
         console.error('Error syncing dispatch auth state:', nextError);
+        // `buildNextUser`/`syncSingleDeviceSession` read and write user
+        // profiles via direct `supabase.from(...)` calls (packages/auth's
+        // profileApi.ts), not routed through `callBackendRpc`, so nothing
+        // else reports this failure.
+        reportError('dispatch.auth_state_sync', nextError);
         setUser(null);
         setError(nextMessage);
         await clearStoredUserProfile();
@@ -370,6 +376,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return { verificationEmailSent: false, sessionPresent: true };
     } catch (nextError: any) {
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign up');
+
+      // `createUserWithEmail` is a direct `supabase.auth.signUp` call, not
+      // routed through `callBackendRpc`, so nothing else reports this. Skip
+      // the expected "already registered" outcome thrown above -- it is not
+      // a fault.
+      if (!(nextError instanceof Error && nextError.message === ACCOUNT_ALREADY_REGISTERED_MESSAGE)) {
+        reportError('dispatch.auth.sign_up', nextError);
+      }
+
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -395,6 +410,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign in');
+      // `signInWithEmail` and `buildNextUser`'s direct-Supabase reads
+      // (getUserDocument/createUserDocument) are not routed through
+      // `callBackendRpc`, so nothing else reports these.
+      reportError('dispatch.auth.sign_in', nextError);
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -412,6 +431,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to send password reset email');
+      // `sendPasswordReset` is a direct `supabase.auth.resetPasswordForEmail`
+      // call, not routed through `callBackendRpc`.
+      reportError('dispatch.auth.reset_password', nextError);
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -433,6 +455,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(null);
     } catch (nextError: any) {
       const nextMessage = getDispatchAuthErrorMessage(nextError, 'Unable to sign out');
+      // `signOutUser`/`supabase.auth.getUser` are direct Supabase calls, not
+      // routed through `callBackendRpc`.
+      reportError('dispatch.auth.sign_out', nextError);
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {

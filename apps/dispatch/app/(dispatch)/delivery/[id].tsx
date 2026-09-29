@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // it needs. Customer and partner, which already load the fonts, import it by
 // package name. See the same note in ../profile.tsx.
 import { useNotice } from '../../../../../packages/design-system/src/primitives/Notice';
+import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import {
   formatOrderStatusLabel,
@@ -162,7 +163,7 @@ export default function DispatchDeliveryDetailScreen() {
     try {
       await assignDispatchCourier(order.id, courier, order.assignment ?? null);
     } catch (nextError: any) {
-      reportFailure('Assignment failed', nextError.message ?? 'Could not assign this rider.');
+      reportFailure('Assignment failed', toUserMessage(nextError, 'Could not assign this rider.'));
     }
   };
 
@@ -174,7 +175,7 @@ export default function DispatchDeliveryDetailScreen() {
     try {
       await markDispatchOrderPickedUp(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      reportFailure('Update failed', nextError.message ?? 'Could not confirm pickup.');
+      reportFailure('Update failed', toUserMessage(nextError, 'Could not confirm pickup.'));
     }
   };
 
@@ -186,7 +187,7 @@ export default function DispatchDeliveryDetailScreen() {
     try {
       await markDispatchOrderDelivered(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      reportFailure('Update failed', nextError.message ?? 'Could not mark this order delivered.');
+      reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this order delivered.'));
     }
   };
 
@@ -198,7 +199,7 @@ export default function DispatchDeliveryDetailScreen() {
     try {
       await markDispatchOrderOnTheWay(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      reportFailure('Update failed', nextError.message ?? 'Could not mark this order on the way.');
+      reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this order on the way.'));
     }
   };
 
@@ -210,7 +211,7 @@ export default function DispatchDeliveryDetailScreen() {
     try {
       await markDispatchOrderFailed(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      reportFailure('Update failed', nextError.message ?? 'Could not mark this delivery as failed.');
+      reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this delivery as failed.'));
     }
   };
 
@@ -222,7 +223,7 @@ export default function DispatchDeliveryDetailScreen() {
     try {
       await escalateDispatchOrder(order.id, order.timeline ?? null);
     } catch (nextError: any) {
-      reportFailure('Escalation failed', nextError.message ?? 'Could not escalate this delivery.');
+      reportFailure('Escalation failed', toUserMessage(nextError, 'Could not escalate this delivery.'));
     }
   };
 

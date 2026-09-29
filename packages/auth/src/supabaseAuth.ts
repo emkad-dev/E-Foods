@@ -1,6 +1,11 @@
 import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
 import { getSupabaseUserRole } from './claims.js';
 import type { AuthRole } from './types';
+// Explicit `.ts` specifier for the same reason backendRpc.ts uses one for its
+// own relative imports: `node --test --experimental-strip-types` refuses
+// extensionless relative ESM specifiers, and every consuming tsconfig sets
+// `allowImportingTsExtensions`.
+import { toUserMessage } from '../../observability/src/userMessage.ts';
 
 const NETWORK_ERROR_PATTERNS = [
   'failed to fetch',
@@ -246,7 +251,6 @@ export const signInWithGoogle = async (supabase: SupabaseClient, idToken: string
 
 export const formatAuthError = (error: any): string => {
   const errorCode = error?.code || 'unknown-error';
-  const errorMessage = error?.message || 'An unknown error occurred';
 
   const errorMap: Record<string, string> = {
     email_not_confirmed: 'Verify your email address before continuing',
@@ -260,8 +264,15 @@ export const formatAuthError = (error: any): string => {
     email_exists: ACCOUNT_ALREADY_REGISTERED_MESSAGE,
     weak_password: 'Password must be at least 6 characters',
     validation_failed: 'Please enter a valid email address',
-    unexpected_failure: 'Network error. Check your internet connection and try again',
+    // `unexpected_failure` is Supabase's generic SERVER failure code, not a
+    // network one -- deliberately absent from this map (it used to say
+    // "Network error..." here, which was simply wrong) so it falls through
+    // to `toUserMessage` below, which gives it the server-fault line.
   };
 
-  return errorMap[errorCode] || errorMessage;
+  // Any code this map does not recognise -- including `unexpected_failure` --
+  // falls through to `toUserMessage` rather than returning `error.message`
+  // verbatim, which used to hand back whatever raw string Supabase (or a
+  // proxy in front of it) sent.
+  return errorMap[errorCode] || toUserMessage(error);
 };

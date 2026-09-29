@@ -23,6 +23,7 @@ import {
   accountDeletionErrorMessage,
   accountDeletionParagraphs,
 } from '../../../../packages/domain/src/accountDeletion';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -209,7 +210,7 @@ export default function ProfileScreen() {
       showNotice({
         tone: 'error',
         title: 'Save failed',
-        message: nextError.message ?? 'Could not save this rider profile.',
+        message: toUserMessage(nextError, 'Could not save this rider profile.'),
       });
     } finally {
       setSaving(false);
@@ -225,7 +226,7 @@ export default function ProfileScreen() {
       showNotice({
         tone: 'error',
         title: 'Sign out failed',
-        message: nextError.message ?? 'Could not sign out right now.',
+        message: toUserMessage(nextError, 'Could not sign out right now.'),
       });
     }
   };

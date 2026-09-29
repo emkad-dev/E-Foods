@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import {
   appendRatingsPage,
   toRatingSummary,
@@ -93,7 +94,7 @@ export const usePartnerRatings = () => {
 
       // Rows already on screen are kept. A failed "Load more" that emptied the
       // list would take away feedback the partner was reading.
-      setError(nextError?.message ?? 'Unable to load your ratings right now.');
+      setError(toUserMessage(nextError, 'Unable to load your ratings right now.'));
     } finally {
       inFlightRef.current = false;
 

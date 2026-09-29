@@ -32,6 +32,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { NIGERIA_BANKS, isPlausibleNubanAccountNumber } from '../../src/domain/nigeriaBanks';
 import {
@@ -284,7 +285,7 @@ export default function CompleteRestaurantDetailsScreen() {
       showNotice({
         tone: 'error',
         title: 'Could not verify',
-        message: error?.message ?? 'Check the account number and bank, then try again.',
+        message: toUserMessage(error, 'Check the account number and bank, then try again.'),
       });
     } finally {
       setVerifyingBank(false);
@@ -301,7 +302,7 @@ export default function CompleteRestaurantDetailsScreen() {
         showNotice({
           tone: 'error',
           title: 'Upload failed',
-          message: error?.message ?? 'Please try again.',
+          message: toUserMessage(error, 'Please try again.'),
         });
       } finally {
         setUploadingKind(null);
@@ -354,7 +355,7 @@ export default function CompleteRestaurantDetailsScreen() {
       showNotice({
         tone: 'error',
         title: 'Unable to submit',
-        message: error?.message ?? 'Please try again.',
+        message: toUserMessage(error, 'Please try again.'),
       });
     } finally {
       setSubmitting(false);

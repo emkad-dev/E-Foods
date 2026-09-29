@@ -1,6 +1,8 @@
 import { backendRpcErrorFromResponse } from '../../../../packages/auth/src';
 import { KNOWN_RPC_TARGETS, resolveRpcMode, resolveRpcTarget } from '../../../../packages/domain/src/rpcRoutes';
 import { deriveRpcFunctionUrl } from '../../../../packages/domain/src/rpcUrl';
+import { reportError } from '../../../../packages/observability/src/sentry';
+import { shouldReportRpcFailure } from '../../../../packages/observability/src/userMessage';
 import { appEnv, supabaseEnv } from '../config/env';
 import { supabase } from './supabase/config';
 
@@ -30,7 +32,28 @@ import { supabase } from './supabase/config';
  * exhausted, and any attempt to be more specific turns this endpoint into an
  * oracle for which addresses have live invites.
  */
+/**
+ * `callBackendRpc` (packages/auth/src/backendRpc.ts) reports its own failures
+ * to Sentry as the sole choke point for that transport. This is a SECOND,
+ * deliberately separate transport (see the module doc above) that does not
+ * go through it, so nothing reports these failures automatically -- this
+ * wrapper is that choke point for this path, reusing `shouldReportRpcFailure`
+ * so an expected 4xx rejection (e.g. a wrong staff-invite code) is not
+ * reported as a fault, same as the authenticated path.
+ */
 export const callAnonymousBackendRpc = async <T>(action: string, data: Record<string, unknown>): Promise<T> => {
+  try {
+    return await callAnonymousBackendRpcInternal<T>(action, data);
+  } catch (error) {
+    if (shouldReportRpcFailure(error)) {
+      reportError('partner.anonymous_rpc', error, { action });
+    }
+
+    throw error;
+  }
+};
+
+const callAnonymousBackendRpcInternal = async <T>(action: string, data: Record<string, unknown>): Promise<T> => {
   // Resolved the same way `callBackendRpc` does, so this deliberately separate
   // transport follows the split/legacy kill switch instead of drifting from it.
   const targetFunction = resolveRpcTarget(action, resolveRpcMode(appEnv.rpcMode));

@@ -1,4 +1,5 @@
 import { callPartnerBackendRpc } from './backendRpc';
+import { reportError } from '../../../../packages/observability/src/sentry';
 import type { PolicyAcceptancePayload } from '../../../../packages/domain/src';
 
 export type PartnerApplicationInput = {
@@ -98,9 +99,13 @@ export const uploadPartnerVerificationDocument = async ({
 }): Promise<string> => {
   const target = await requestPartnerVerificationUploadUrl({ contentType, extension, kind });
 
+  // Both fetches below are direct network calls, not routed through
+  // `callBackendRpc`, so nothing else reports a failure here.
   const file = await fetch(fileUri);
   if (!file.ok) {
-    throw new Error('We could not read that image. Pick it again.');
+    const error = new Error('We could not read that image. Pick it again.');
+    reportError('partner.verification_document_upload', error, { status: file.status });
+    throw error;
   }
   const body = await file.arrayBuffer();
 
@@ -110,7 +115,9 @@ export const uploadPartnerVerificationDocument = async ({
     method: 'PUT',
   });
   if (!uploaded.ok) {
-    throw new Error('We could not upload that document. Check your connection and try again.');
+    const error = new Error('We could not upload that document. Check your connection and try again.');
+    reportError('partner.verification_document_upload', error, { status: uploaded.status });
+    throw error;
   }
 
   return target.path;

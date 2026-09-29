@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { reportError } from '../../../../packages/observability/src/sentry';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
 import {
   formatAuthError,
@@ -91,6 +92,9 @@ export default function DispatchVerifyEmailScreen() {
       const noticeKey: DispatchSuccessNoticeKey = 'email-confirmed';
       router.replace({ pathname: '/(auth)/login', params: { notice: noticeKey } } as never);
     } catch (nextError: any) {
+      // `verifyEmailOtp` is a direct Supabase call, not routed through
+      // `callBackendRpc`, so nothing else reports this.
+      reportError('dispatch.auth.verify_email', nextError);
       // `setError` alone: the slot below renders it.
       setError(formatAuthError(nextError));
     } finally {
@@ -115,6 +119,9 @@ export default function DispatchVerifyEmailScreen() {
       await resendCooldown.markSent();
       setInfo('A new 6-digit code is on its way. Check your inbox.');
     } catch (nextError: any) {
+      // `sendVerificationEmail` is a direct Supabase call, not routed through
+      // `callBackendRpc`, so nothing else reports this.
+      reportError('dispatch.auth.resend_verification_email', nextError);
       setError(formatAuthError(nextError));
     } finally {
       setResending(false);

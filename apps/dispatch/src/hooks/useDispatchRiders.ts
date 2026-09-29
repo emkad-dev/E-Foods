@@ -3,6 +3,7 @@ import { RIDERS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../p
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { getDispatchRiders as getDispatchRidersReadModel } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
@@ -177,7 +178,7 @@ export const useDispatchRiders = () => {
 
       console.error('Error loading dispatch riders:', nextError);
       setRiders([]);
-      setError(nextError.message ?? 'Unable to load dispatch riders right now.');
+      setError(toUserMessage(nextError, 'Unable to load dispatch riders right now.'));
     } finally {
       if (activeRef.current) {
         setLoading(false);

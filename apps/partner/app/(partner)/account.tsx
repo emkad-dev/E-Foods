@@ -23,6 +23,7 @@ import {
   accountDeletionErrorMessage,
   accountDeletionParagraphs,
 } from '../../../../packages/domain/src/accountDeletion';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { VERIFIED_LINK_MESSAGE } from '../../src/domain/restaurantLinkCopy';
@@ -81,7 +82,7 @@ export default function PartnerAccountScreen() {
       showNotice({
         tone: 'error',
         title: 'Link failed',
-        message: nextError?.message ?? 'Unable to link this restaurant right now.',
+        message: toUserMessage(nextError, 'Unable to link this restaurant right now.'),
       });
     } finally {
       setLinkPending(null);
@@ -95,7 +96,7 @@ export default function PartnerAccountScreen() {
       showNotice({
         tone: 'error',
         title: 'Sign out failed',
-        message: nextError?.message ?? 'Unable to sign out right now.',
+        message: toUserMessage(nextError, 'Unable to sign out right now.'),
       });
     }
   };

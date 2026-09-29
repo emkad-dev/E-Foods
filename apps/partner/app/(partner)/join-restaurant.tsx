@@ -66,6 +66,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../../src/contexts/AuthContext';
 import {
   STAFF_INVITE_CODE_LENGTH,
@@ -137,7 +138,7 @@ export default function JoinRestaurantScreen() {
       showNotice({
         tone: 'error',
         title: 'That did not work',
-        message: nextError?.message ?? 'Unable to check that code right now.',
+        message: toUserMessage(nextError, 'Unable to check that code right now.'),
       });
     } finally {
       setRedeeming(false);

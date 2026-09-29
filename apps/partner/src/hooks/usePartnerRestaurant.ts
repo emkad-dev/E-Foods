@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
@@ -69,7 +70,7 @@ export const usePartnerRestaurant = () => {
           setRestaurant(null);
           setRequiresVerifiedLink(false);
         }
-        setError(nextError.message ?? 'Unable to load restaurant context right now.');
+        setError(toUserMessage(nextError, 'Unable to load restaurant context right now.'));
       } finally {
         if (activeRef.current) {
           setLoading(false);

@@ -1,5 +1,6 @@
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
+import { reportError } from '../../../../packages/observability/src/sentry';
 import {
   MAX_UPLOAD_BYTES,
   QUALITY_STEPS,
@@ -139,6 +140,9 @@ export const uploadRestaurantAsset = async ({ kind, ownerId, uri }: UploadRestau
     });
 
   if (error) {
+    // Direct Supabase Storage call -- not routed through callBackendRpc, so
+    // it is not auto-reported there. Report here at the point it throws.
+    reportError('partner.restaurant_asset_upload', error);
     throw new Error(error.message);
   }
 

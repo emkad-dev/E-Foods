@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../contexts/AuthContext';
 import {
   getDispatchWeeklyEarnings,
@@ -23,7 +24,7 @@ export const useWeeklyEarnings = () => {
       setError(null);
     } catch (nextError: any) {
       console.error('Error loading weekly earnings:', nextError);
-      setError(nextError.message ?? 'Unable to load weekly earnings.');
+      setError(toUserMessage(nextError, 'Unable to load weekly earnings.'));
     } finally {
       if (mode === 'refresh') {
         setRefreshing(false);

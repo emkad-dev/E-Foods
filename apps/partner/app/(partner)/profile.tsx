@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { VERIFIED_LINK_MESSAGE } from '../../src/domain/restaurantLinkCopy';
 import { storeSetupGaps, storeTradingState } from '../../src/domain/storeSetupForm';
@@ -102,7 +103,7 @@ export default function PartnerStoreScreen() {
       showNotice({
         tone: 'error',
         title: 'Pause failed',
-        message: nextError?.message ?? 'Unable to pause the store right now.',
+        message: toUserMessage(nextError, 'Unable to pause the store right now.'),
       });
     } finally {
       setPauseActionPending(false);
@@ -122,7 +123,7 @@ export default function PartnerStoreScreen() {
       showNotice({
         tone: 'error',
         title: 'Resume failed',
-        message: nextError?.message ?? 'Unable to resume the store right now.',
+        message: toUserMessage(nextError, 'Unable to resume the store right now.'),
       });
     } finally {
       setPauseActionPending(false);

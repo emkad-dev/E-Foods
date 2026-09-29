@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { FeatureFlagMap } from '../../../../packages/domain/src/featureFlags';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { getFeatureFlags } from '../services/featureFlags';
 import { useAuth } from './AuthContext';
 
@@ -42,7 +43,7 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      setError(nextError instanceof Error ? nextError.message : 'Unable to load feature flags.');
+      setError(toUserMessage(nextError, 'Unable to load feature flags.'));
     } finally {
       if (activeRef.current) {
         setLoading(false);

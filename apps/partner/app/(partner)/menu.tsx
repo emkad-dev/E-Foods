@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
@@ -258,7 +259,7 @@ export default function PartnerMenuScreen() {
       showNotice({
         tone: 'error',
         title: 'Save failed',
-        message: nextError?.message ?? 'Unable to save this menu item right now.',
+        message: toUserMessage(nextError, 'Unable to save this menu item right now.'),
       });
     } finally {
       setSaving(false);
@@ -344,7 +345,7 @@ export default function PartnerMenuScreen() {
       showNotice({
         tone: 'error',
         title: 'Remove failed',
-        message: nextError?.message ?? 'Unable to remove this meal right now.',
+        message: toUserMessage(nextError, 'Unable to remove this meal right now.'),
       });
     } finally {
       setSaving(false);
@@ -381,9 +382,10 @@ export default function PartnerMenuScreen() {
       showNotice({
         tone: 'error',
         title: 'Update failed',
-        message:
-          nextError?.message ??
-          `Unable to mark "${item.name}" ${nextIsAvailable ? 'available' : 'unavailable'} right now.`,
+        message: toUserMessage(
+          nextError,
+          `Unable to mark "${item.name}" ${nextIsAvailable ? 'available' : 'unavailable'} right now.`
+        ),
       });
     } finally {
       setTogglingItemId(null);

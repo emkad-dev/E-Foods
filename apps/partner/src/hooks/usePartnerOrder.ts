@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
@@ -55,7 +56,7 @@ export const usePartnerOrder = (orderId: string | null | undefined) => {
 
       console.error('Error loading partner order:', nextError);
       setOrder(null);
-      setError(nextError.message ?? 'Order not found');
+      setError(toUserMessage(nextError, 'Order not found'));
     } finally {
       if (activeRef.current) {
         setLoading(false);

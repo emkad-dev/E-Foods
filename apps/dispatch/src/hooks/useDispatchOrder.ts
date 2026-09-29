@@ -3,6 +3,7 @@ import { orderRealtimeTopic, subscribeToRealtimeChanges } from '../../../../pack
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { getDispatchOrderDetail } from '../services/dispatchReadModel';
 import { supabase } from '../services/supabase/config';
@@ -113,7 +114,7 @@ export const useDispatchOrder = (orderId: string) => {
 
       console.error('Error loading dispatch order:', nextError);
       setOrder(null);
-      setError(nextError.message ?? 'Order not found');
+      setError(toUserMessage(nextError, 'Order not found'));
     } finally {
       if (activeRef.current) {
         setLoading(false);

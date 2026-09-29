@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // system and does not declare those dependencies, so it takes the one primitive
 // it needs. See the same note in ./profile.tsx.
 import { useNotice } from '../../../../packages/design-system/src/primitives/Notice';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../../src/contexts/AuthContext';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
@@ -248,7 +249,7 @@ export default function CompleteRiderDetailsScreen() {
       showNotice({
         tone: 'error',
         title: 'Unable to submit',
-        message: nextError.message ?? 'Please try again.',
+        message: toUserMessage(nextError, 'Please try again.'),
       });
     }
   };
@@ -260,7 +261,7 @@ export default function CompleteRiderDetailsScreen() {
       showNotice({
         tone: 'error',
         title: 'Sign out failed',
-        message: nextError.message ?? 'Unable to sign out right now.',
+        message: toUserMessage(nextError, 'Unable to sign out right now.'),
       });
     }
   };

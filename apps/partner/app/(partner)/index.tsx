@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel } from '../../src/domain/orders';
@@ -205,7 +206,7 @@ export default function PartnerHome() {
       showNotice({
         tone: 'error',
         title: 'Sign out failed',
-        message: nextError?.message ?? 'Unable to sign out right now.',
+        message: toUserMessage(nextError, 'Unable to sign out right now.'),
       });
     }
   };

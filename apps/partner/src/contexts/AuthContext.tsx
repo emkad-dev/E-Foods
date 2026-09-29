@@ -25,6 +25,9 @@ import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import { shouldHydrateCachedUserProfile, shouldShowSignInLoading } from '../../../../packages/auth/src';
+import { isStaleSupabaseSessionError } from '../../../../packages/auth/src/session';
+import { reportError } from '../../../../packages/observability/src/sentry';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import {
   resolvePartnerAccessState,
   type PartnerUserDocumentState,
@@ -81,11 +84,10 @@ const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => 
     return formatAuthError(error);
   }
 
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String((error as any).message ?? fallbackMessage);
-  }
-
-  return fallbackMessage;
+  // Anything else (including a plain `message`) goes through `toUserMessage`
+  // rather than being shown verbatim -- it may be a raw Supabase/Postgres
+  // string, not friendly copy.
+  return toUserMessage(error, fallbackMessage);
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -308,6 +310,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         const nextMessage = getPartnerAuthErrorMessage(nextError, 'Failed to load partner account');
         console.error('Error syncing partner auth state:', nextError);
+        // `buildNextUser`/`syncSingleDeviceSession` read and write user
+        // profiles via direct `supabase.from(...)` calls (packages/auth's
+        // profileApi.ts), not routed through `callBackendRpc`, so nothing
+        // else reports this failure. An expired refresh token is routine, not a
+        // fault, and this listener re-fires until the partner signs in again --
+        // reporting it would send one Sentry event per re-fire.
+        if (!isStaleSupabaseSessionError(nextError)) {
+          reportError('partner.auth_state_sync', nextError);
+        }
         setUser(null);
         setError(nextMessage);
         await clearStoredUserProfile();
@@ -355,6 +366,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return { verificationEmailSent: true, sessionPresent: Boolean(session) };
     } catch (nextError: any) {
       const resolvedMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign up');
+
+      // `createUserWithEmail` is a direct `supabase.auth.signUp` call, not
+      // routed through `callBackendRpc`, so nothing else reports this. Skip
+      // the expected "already registered" outcome thrown above -- it is not
+      // a fault.
+      if (!(nextError instanceof Error && nextError.message === ACCOUNT_ALREADY_REGISTERED_MESSAGE)) {
+        reportError('partner.auth.sign_up', nextError);
+      }
 
       setError(resolvedMessage);
       throw new Error(resolvedMessage);
@@ -408,6 +427,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await adoptSignedInAuthUser(authUser);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign in');
+      // `signInWithEmail` and `adoptSignedInAuthUser`'s direct-Supabase reads
+      // (getUserDocument/createUserDocument) are not routed through
+      // `callBackendRpc`, so nothing else reports these.
+      reportError('partner.auth.sign_in', nextError);
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -425,6 +448,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await sendPasswordReset(supabase, email);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to send password reset email');
+      // `sendPasswordReset` is a direct `supabase.auth.resetPasswordForEmail`
+      // call, not routed through `callBackendRpc`.
+      reportError('partner.auth.reset_password', nextError);
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
@@ -483,6 +509,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(null);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign out');
+      // `signOutUser`/`supabase.auth.getUser` are direct Supabase calls, not
+      // routed through `callBackendRpc`.
+      reportError('partner.auth.sign_out', nextError);
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {

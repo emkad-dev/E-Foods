@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import {
   draftFromStore,
@@ -198,7 +199,7 @@ export default function StoreDetailsScreen() {
       showNotice({
         tone: 'error',
         title: 'Upload failed',
-        message: nextError?.message ?? 'Unable to upload this image right now.',
+        message: toUserMessage(nextError, 'Unable to upload this image right now.'),
       });
     }
   };
@@ -287,7 +288,7 @@ export default function StoreDetailsScreen() {
       showNotice({
         tone: 'error',
         title: 'Save failed',
-        message: nextError?.message ?? 'Unable to save store details right now.',
+        message: toUserMessage(nextError, 'Unable to save store details right now.'),
       });
     } finally {
       setSavingProfile(false);

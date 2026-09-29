@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
+import { reportError } from '../../../../packages/observability/src/sentry';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { OpenStreetMapLocationService } from '../services/osmLocation';
 
 export interface LiveLocation {
@@ -91,8 +93,11 @@ export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
         }
       } catch (err) {
         console.error('Real-time location tracking error:', err);
+        // A device/location API failure, not routed through callBackendRpc,
+        // so nothing else reports it.
+        reportError('dispatch.real_time_location', err);
         if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to start tracking');
+          setError(toUserMessage(err, 'Failed to start tracking'));
           setIsTracking(false);
         }
       }

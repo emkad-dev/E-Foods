@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { reportError } from '../../../../packages/observability/src/sentry';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
@@ -96,6 +97,10 @@ export default function PartnerResetPasswordScreen() {
         params: { notice: noticeKey, ...(redirectTo ? { redirectTo } : null) },
       } as never);
     } catch (nextError: any) {
+      // `verifyPasswordResetOtp`/`supabase.auth.updateUser` are direct
+      // Supabase calls, not routed through `callBackendRpc`, so nothing else
+      // reports this.
+      reportError('partner.auth.reset_password_confirm', nextError);
       // `setError` alone: it renders in the inline slot above.
       setError(formatAuthError(nextError));
     } finally {

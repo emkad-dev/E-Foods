@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
@@ -85,7 +86,7 @@ export default function PartnerOrderDetailScreen() {
     try {
       await run(target);
     } catch (nextError: any) {
-      reportFailure(nextError?.message ?? fallbackMessage);
+      reportFailure(toUserMessage(nextError, fallbackMessage));
     } finally {
       busyRef.current = null;
       setBusy(null);

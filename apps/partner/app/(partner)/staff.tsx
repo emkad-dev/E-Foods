@@ -33,6 +33,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius, useConfirm, useNotice } from '@feasty/design-system';
+import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import {
@@ -133,7 +134,7 @@ export default function PartnerStaffScreen() {
       showNotice({
         tone: 'error',
         title: 'Invite not sent',
-        message: nextError?.message ?? 'Unable to send that invite right now.',
+        message: toUserMessage(nextError, 'Unable to send that invite right now.'),
       });
     } finally {
       setInviting(false);
@@ -149,7 +150,7 @@ export default function PartnerStaffScreen() {
       showNotice({
         tone: 'error',
         title: 'Invite not sent',
-        message: nextError?.message ?? 'Unable to send a new code right now.',
+        message: toUserMessage(nextError, 'Unable to send a new code right now.'),
       });
     } finally {
       setPendingId(null);
@@ -180,7 +181,7 @@ export default function PartnerStaffScreen() {
         title: 'Could not cancel that invite',
         // The 404 ("That invite is no longer pending") is the interesting
         // case: it means the person redeemed it while this screen was open.
-        message: nextError?.message ?? 'Unable to cancel that invite right now.',
+        message: toUserMessage(nextError, 'Unable to cancel that invite right now.'),
       });
       // Whatever happened, this screen's copy of the row is now suspect.
       await refresh();
@@ -220,7 +221,7 @@ export default function PartnerStaffScreen() {
       showNotice({
         tone: 'error',
         title: 'Could not remove access',
-        message: nextError?.message ?? 'Unable to remove that person right now.',
+        message: toUserMessage(nextError, 'Unable to remove that person right now.'),
       });
       await refresh();
     } finally {

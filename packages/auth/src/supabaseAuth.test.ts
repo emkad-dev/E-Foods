@@ -12,6 +12,7 @@ import {
   sendVerificationEmailWithFallback,
   verifyPasswordResetOtp,
 } from './supabaseAuth.ts';
+import { toUserMessage } from '../../observability/src/userMessage.ts';
 
 const signUpStub = (user: unknown, session: unknown = null) =>
   ({
@@ -121,6 +122,43 @@ test('an outright already-exists error code lands on the same message', () => {
   // register screens key their two follow-up links off this exact string.
   assert.equal(formatAuthError({ code: 'user_already_exists' }), ACCOUNT_ALREADY_REGISTERED_MESSAGE);
   assert.equal(formatAuthError({ code: 'email_exists' }), ACCOUNT_ALREADY_REGISTERED_MESSAGE);
+});
+
+test('a mapped code keeps its exact product copy', () => {
+  // The map's own values are existing product copy and must not drift, even
+  // though the fallback path now routes through `toUserMessage`.
+  assert.equal(formatAuthError({ code: 'invalid_credentials' }), 'Incorrect email or password');
+  assert.equal(
+    formatAuthError({ code: 'over_request_rate_limit' }),
+    'Too many login attempts. Please try again later'
+  );
+});
+
+test('an unmapped code does not leak the raw Supabase message', () => {
+  // Task 3b: this used to be `errorMap[errorCode] || errorMessage`, so any
+  // code this map does not know handed back Supabase's (or a proxy's) raw
+  // string verbatim. It must now go through `toUserMessage` instead.
+  const rawMessage = 'relation "auth.users" does not exist: constraint violation at line 42';
+  const error = { code: 'some_code_this_map_does_not_know', message: rawMessage };
+
+  const result = formatAuthError(error);
+
+  assert.notEqual(result, rawMessage);
+  assert.equal(result, toUserMessage(error));
+});
+
+test('unexpected_failure (Supabase\'s generic SERVER failure code) no longer claims it is a network problem', () => {
+  // This code used to map to "Network error. Check your internet connection
+  // and try again" here, which was simply wrong -- `unexpected_failure` is
+  // Supabase's catch-all for a failure on ITS side, not the caller's network.
+  // The entry is gone; this now falls through to `toUserMessage` like any
+  // other unmapped code.
+  const error = { code: 'unexpected_failure', message: 'Unexpected failure, please check server logs' };
+
+  const result = formatAuthError(error);
+
+  assert.equal(result, toUserMessage(error));
+  assert.doesNotMatch(result, /network|internet connection/i);
 });
 
 /**
