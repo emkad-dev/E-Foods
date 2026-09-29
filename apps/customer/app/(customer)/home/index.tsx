@@ -3,6 +3,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -267,6 +268,18 @@ export default function HomeScreen() {
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, screenColumn.feed, { paddingTop: Math.max(insets.top, 12) + 6 }]}
+      refreshControl={
+        // refreshingCatalog is only ever set by loadRestaurants('manual') -- the
+        // 'initial' and 'background' modes never touch it -- so this spinner can
+        // only appear from a user pull, never from the realtime/background
+        // refresh loop above.
+        <RefreshControl
+          refreshing={refreshingCatalog}
+          onRefresh={handleRetryCatalog}
+          tintColor={customerTheme.brandGreen}
+          colors={[customerTheme.brandGreen]}
+        />
+      }
     >
       <Animated.View entering={FadeInDown.delay(120).duration(500)} style={styles.homeHeader}>
         <View style={styles.headerTopRow}>

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { KitchenBoard } from '../../src/components/KitchenBoard';
@@ -47,6 +47,18 @@ export default function PartnerOrdersScreen() {
   const [selectedView, setSelectedView] = useState<'live' | 'history'>('live');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'delivered' | 'cancelled' | 'failed'>('all');
   const { state: alarmState, syncNewOrders } = useKitchenAlarm();
+  // Local, not the hook's own `refreshing` -- that flag also drives this
+  // screen's "Retry queue" button text (below), so the pull spinner needs its
+  // own state rather than reusing it.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await reload();
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [reload]);
 
   // The alarm keys off the "New" lane only, exactly as the board's columns do --
   // `getKitchenLane` rather than a `status === 'placed'` test, so a scheduled order
@@ -145,7 +157,18 @@ export default function PartnerOrdersScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={pullRefreshing}
+          onRefresh={handlePullRefresh}
+          tintColor={partnerTheme.brandGreen}
+          colors={[partnerTheme.brandGreen]}
+        />
+      }
+    >
       <Text style={styles.title}>{restaurant?.name ?? 'Orders'}</Text>
       <Text style={styles.copy}>
         Kitchen work is now split into live queue and history so new tickets, cooking orders, and handoff pressure stay visible.

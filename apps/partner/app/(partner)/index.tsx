@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -120,7 +121,20 @@ export default function PartnerHome() {
     placement: 'floating',
     offsetBottom: isWide ? insets.bottom + 16 : insets.bottom + 86,
   });
-  const { completedToday, error, incomingOrders, loading, orders, preparingOrders, restaurant } = usePartnerOrders();
+  const { completedToday, error, incomingOrders, loading, orders, preparingOrders, reload, restaurant } =
+    usePartnerOrders();
+  // Local, not the hook's own `refreshing` -- that flag also drives the Orders
+  // screen's "Retry queue" button text, so this dashboard's pull spinner needs
+  // its own state rather than reusing it.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await reload();
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [reload]);
   // Read off the restaurant this screen already has. It briefly needed its own
   // fetch, because buildRestaurantResponse selected ratingAverage/ratingCount
   // and then dropped them before serialising; the builder emits them now, so
@@ -217,6 +231,14 @@ export default function PartnerHome() {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingTop: (isWide ? 8 : insets.top) + SCREEN_TOP_INSET }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={pullRefreshing}
+            onRefresh={handlePullRefresh}
+            tintColor={partnerTheme.brandGreen}
+            colors={[partnerTheme.brandGreen]}
+          />
+        }
       >
         <View style={styles.headerRow}>
           <View style={styles.greetingBlock}>

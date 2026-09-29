@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
@@ -37,6 +37,14 @@ export default function CustomerFavoritesScreen() {
   const [restaurants, setRestaurants] = useState<FavoriteRestaurant[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // refreshFavorites() flips FavoritesContext's own `loading` true for the
+  // duration of the fetch, and a changed favoriteRestaurantIds reference also
+  // re-arms the catalog effect below (loadingCatalog true) -- both would
+  // normally re-trigger the full-screen skeleton a few lines down. pullRefreshing
+  // suppresses that ONE render path during a user pull so the existing list
+  // stays on screen with just the native spinner, without touching what
+  // loadFavorites/refreshFavorites themselves do.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
 
   // Tracks whether a catalog fetch has been attempted-and-settled (success
   // OR failure) for the CURRENT favoriteRestaurantIds -- see catalogPending
@@ -52,28 +60,27 @@ export default function CustomerFavoritesScreen() {
     setCatalogSettled(false);
   }
 
-  // refreshFavorites() only updates FavoritesContext's own state and resolves to void --
-  // it does not hand back the refreshed ids. Reading the context's favoriteRestaurantIds
-  // here (instead of trusting a return value that doesn't exist) also avoids shadowing
-  // the context value of the same name, which previously crashed with a TypeError on
-  // every load. The catalog fetch itself is driven by the effect below, which reacts to
-  // favoriteRestaurantIds once the context has re-rendered with the fresh list.
-  const loadFavorites = useCallback(async () => {
-    try {
-      await refreshFavorites();
-      setError(null);
-    } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
-      setError(message);
-    }
-  }, [refreshFavorites]);
+  // Shared stale-write guard for loadCatalogForIds below: whichever call is
+  // the most recent (by requestId) is the only one allowed to write its
+  // result. Reused by BOTH the ids-changed effect and the pull path (via
+  // loadFavorites) so a slower, earlier request from one caller can never
+  // clobber a faster, later result from the other.
+  const catalogRequestRef = useRef(0);
 
-  useEffect(() => {
-    void loadFavorites();
-  }, [loadFavorites]);
+  // Unmount supersedes every in-flight request the same way a newer call
+  // does, so a catalog fetch resolving after this screen is gone writes
+  // nothing -- the guard the old effect's `cancelled` flag used to provide.
+  useEffect(
+    () => () => {
+      catalogRequestRef.current += 1;
+    },
+    []
+  );
 
-  useEffect(() => {
-    if (favoriteRestaurantIds.length === 0) {
+  const loadCatalogForIds = useCallback(async (ids: string[]) => {
+    const requestId = ++catalogRequestRef.current;
+
+    if (ids.length === 0) {
       setRestaurants([]);
       setError(null);
       setLoadingCatalog(false);
@@ -81,7 +88,6 @@ export default function CustomerFavoritesScreen() {
       return;
     }
 
-    let cancelled = false;
     setLoadingCatalog(true);
 
     // Cards only — this screen renders image/logoImage/name/cuisine/deliveryTime
@@ -89,42 +95,80 @@ export default function CustomerFavoritesScreen() {
     // all of which are on the card; it never needed the full menu. What a card
     // does NOT carry is the operating window, which is why the status label
     // below has to be allowed to say nothing.
-    getRestaurantList()
-      .then(({ restaurants: catalog }) => {
-        if (!cancelled) {
-          // The same visibility gate home and search apply. Without it a
-          // favorite that the partner later unpublished stayed on this list
-          // and tapped through to "Restaurant not found" -- the favorite id
-          // outlives the listing, so the catalogue is what decides.
-          setRestaurants(
-            catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as FavoriteRestaurant[]
-          );
-          setError(null);
-        }
-      })
-      .catch((nextError) => {
-        if (!cancelled) {
-          const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
-          setError(message);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingCatalog(false);
-          // Marks this fetch attempt as settled (success OR failure) for
-          // the ids it was resolved for. catalogPending below reads this
-          // instead of restaurants.length === 0, otherwise a catalog that
-          // legitimately resolves empty (nothing published) would look
-          // indistinguishable from "still loading" and hang on the
-          // skeleton forever.
-          setCatalogSettled(true);
-        }
-      });
+    try {
+      const { restaurants: catalog } = await getRestaurantList();
+      if (catalogRequestRef.current !== requestId) {
+        return;
+      }
+      // The same visibility gate home and search apply. Without it a
+      // favorite that the partner later unpublished stayed on this list
+      // and tapped through to "Restaurant not found" -- the favorite id
+      // outlives the listing, so the catalogue is what decides.
+      setRestaurants(
+        catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)) as FavoriteRestaurant[]
+      );
+      setError(null);
+    } catch (nextError) {
+      if (catalogRequestRef.current !== requestId) {
+        return;
+      }
+      const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
+      setError(message);
+    } finally {
+      if (catalogRequestRef.current === requestId) {
+        setLoadingCatalog(false);
+        // Marks this fetch attempt as settled (success OR failure) for
+        // the ids it was resolved for. catalogPending below reads this
+        // instead of restaurants.length === 0, otherwise a catalog that
+        // legitimately resolves empty (nothing published) would look
+        // indistinguishable from "still loading" and hang on the
+        // skeleton forever.
+        setCatalogSettled(true);
+      }
+    }
+  }, []);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [favoriteRestaurantIds]);
+  // refreshFavorites() resolves with the freshly-fetched ids (see
+  // FavoritesContext) -- awaiting the catalog fetch for THOSE ids here, not
+  // just the ids leg, is what lets handlePullRefresh keep pullRefreshing true
+  // for the whole round trip. Without this, a pull only waited on the ids
+  // fetch; the catalog re-fetch that the ids-changed effect below kicks off
+  // ran un-awaited, so the pull spinner closed early and the full-screen
+  // skeleton could still flash in afterward once that fetch set
+  // loadingCatalog. loadCatalogForIds's requestId guard keeps this call and
+  // the effect below from writing over each other if both ever race.
+  const loadFavorites = useCallback(async () => {
+    try {
+      const ids = await refreshFavorites();
+      setError(null);
+      await loadCatalogForIds(ids);
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : 'Unable to load favorites.';
+      setError(message);
+    }
+  }, [refreshFavorites, loadCatalogForIds]);
+
+  useEffect(() => {
+    void loadFavorites();
+  }, [loadFavorites]);
+
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await loadFavorites();
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [loadFavorites]);
+
+  // Covers ids that change from elsewhere (e.g. a favorite toggled on the
+  // restaurant page updates FavoritesContext directly, without this screen's
+  // own loadFavorites running). loadFavorites above already awaits this same
+  // function directly for its own trigger (mount/pull); this effect is what
+  // catches every OTHER path that changes favoriteRestaurantIds.
+  useEffect(() => {
+    void loadCatalogForIds(favoriteRestaurantIds);
+  }, [favoriteRestaurantIds, loadCatalogForIds]);
 
   const favoriteIdSet = useMemo(() => new Set(favoriteRestaurantIds), [favoriteRestaurantIds]);
   const favoriteRestaurants = useMemo(
@@ -167,7 +211,10 @@ export default function CustomerFavoritesScreen() {
     );
   }
 
-  if (loadingCatalog || favoritesLoading || catalogPending) {
+  // pullRefreshing wins over the loading flags during a pull -- see the state
+  // declaration above -- so the list already on screen is kept instead of
+  // being replaced by the skeleton.
+  if ((loadingCatalog || favoritesLoading || catalogPending) && !pullRefreshing) {
     return (
       <SkeletonScreen>
         <SkeletonCard />
@@ -177,7 +224,18 @@ export default function CustomerFavoritesScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, screenColumn.feed]}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, screenColumn.feed]}
+      refreshControl={
+        <RefreshControl
+          refreshing={pullRefreshing}
+          onRefresh={handlePullRefresh}
+          tintColor={customerTheme.brandGreen}
+          colors={[customerTheme.brandGreen]}
+        />
+      }
+    >
       {error ? (
         <View style={styles.stateCard}>
           <Text style={styles.stateTitle}>Favorites unavailable</Text>

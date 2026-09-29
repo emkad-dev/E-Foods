@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   FlatList,
   Keyboard,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -75,6 +76,7 @@ export default function SearchScreen() {
   const [restaurants, setRestaurants] = useState<DiscoveryRestaurant[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const submittedRef = useRef(false);
   const router = useRouter();
@@ -83,8 +85,16 @@ export default function SearchScreen() {
   const { q } = useLocalSearchParams<{ q?: string }>();
   const handoffQuery = typeof q === 'string' ? q.trim() : '';
 
-  const loadRestaurants = useCallback(async () => {
-    setLoading(true);
+  // 'manual' is a pull-to-refresh: `loading` drives the full-screen
+  // ActivityIndicator that replaces the results list below, so a pull must not
+  // set it -- the RefreshControl's own spinner does that job instead. Every
+  // existing caller (mount effect, Retry button) calls this with no argument
+  // and keeps today's behaviour.
+  const loadRestaurants = useCallback(async (mode: 'initial' | 'manual' = 'initial') => {
+    if (mode === 'initial') {
+      setLoading(true);
+    }
+
     try {
       const { restaurants: catalog } = await getPublishedRestaurants();
       setRestaurants(catalog.filter((restaurant) => isRestaurantVisibleToCustomers(restaurant)));
@@ -94,12 +104,23 @@ export default function SearchScreen() {
         error instanceof Error ? error.message : 'The restaurant service is unavailable right now. Please try again.';
       setCatalogError(message);
     } finally {
-      setLoading(false);
+      if (mode === 'initial') {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadRestaurants();
+  }, [loadRestaurants]);
+
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await loadRestaurants('manual');
+    } finally {
+      setPullRefreshing(false);
+    }
   }, [loadRestaurants]);
 
   // Home hands its search term over when its own filter finds nothing: home
@@ -233,7 +254,10 @@ export default function SearchScreen() {
         <View style={[styles.centered, screenColumn.feed]}>
           <ActivityIndicator size="large" color={customerTheme.accentStrong} />
         </View>
-      ) : catalogError ? (
+      ) : catalogError && restaurants.length === 0 ? (
+        // Nothing to show underneath the error yet (first load failed, or a
+        // pull failed before anything had ever loaded), so the full-page
+        // error view is the only thing that CAN render here.
         <View style={[styles.centered, screenColumn.feed]}>
           <Text style={styles.emptyTitle}>Search is unavailable</Text>
           <Text style={styles.emptyCopy}>{catalogError}</Text>
@@ -261,28 +285,50 @@ export default function SearchScreen() {
           ) : null}
         </View>
       ) : (
-        <FlatList
-          data={results}
-          keyExtractor={(item) => item.key}
-          renderItem={renderResult}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[styles.listContent, screenColumn.feed]}
-          ListHeaderComponent={
-            results.length > 0 ? (
-              <Text style={styles.resultCountLabel}>
-                {results.length} {results.length === 1 ? 'meal' : 'meals'} found
-              </Text>
-            ) : null
-          }
-          ListEmptyComponent={
-            <View style={styles.centered}>
-              <Text style={styles.emptyTitle}>No meals found</Text>
-              <Text style={styles.emptyCopy}>
-                We couldn&apos;t find &quot;{trimmedQuery}&quot; on any menu yet. Try another dish or category.
-              </Text>
+        <>
+          {/* A failed pull must not hide results already on screen -- restaurants
+              is non-empty here (the branch above already caught the empty case),
+              so the list stays and the error surfaces as a banner above it
+              instead of replacing the whole results area. */}
+          {catalogError ? (
+            <View style={[styles.inlineErrorBar, screenColumn.feed]}>
+              <Text style={styles.emptyCopy}>{catalogError}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => void loadRestaurants()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
             </View>
-          }
-        />
+          ) : null}
+          <FlatList
+            data={results}
+            keyExtractor={(item) => item.key}
+            renderItem={renderResult}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[styles.listContent, screenColumn.feed]}
+            refreshControl={
+              <RefreshControl
+                refreshing={pullRefreshing}
+                onRefresh={handlePullRefresh}
+                tintColor={customerTheme.brandGreen}
+                colors={[customerTheme.brandGreen]}
+              />
+            }
+            ListHeaderComponent={
+              results.length > 0 ? (
+                <Text style={styles.resultCountLabel}>
+                  {results.length} {results.length === 1 ? 'meal' : 'meals'} found
+                </Text>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={styles.centered}>
+                <Text style={styles.emptyTitle}>No meals found</Text>
+                <Text style={styles.emptyCopy}>
+                  We couldn&apos;t find &quot;{trimmedQuery}&quot; on any menu yet. Try another dish or category.
+                </Text>
+              </View>
+            }
+          />
+        </>
       )}
     </View>
   );
@@ -389,6 +435,15 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: 150,
     paddingTop: 12,
+  },
+  // Banner above the FlatList for a failed pull when results are already on
+  // screen -- keeps the list visible instead of swapping it for the full-page
+  // error view, which is reserved for "nothing to show" (see the render
+  // ternary above).
+  inlineErrorBar: {
+    alignItems: 'center',
+    paddingBottom: 4,
+    paddingTop: 8,
   },
   resultCountLabel: {
     color: customerTheme.textMuted,

@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -109,7 +110,17 @@ export default function PartnerMenuScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { user } = useAuth();
-  const { error, loading, restaurant } = usePartnerRestaurant();
+  const { error, loading, reload, restaurant } = usePartnerRestaurant();
+  // Local: usePartnerRestaurant has no "refreshing" flag of its own to reuse.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await reload();
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [reload]);
   // Every outcome on this screen used to go to `Alert`, which is
   // `class Alert { static alert() {} }` in react-native-web - nothing at all on
   // partner.feasty.com.ng. The `error` above belongs to usePartnerRestaurant and
@@ -394,7 +405,18 @@ export default function PartnerMenuScreen() {
     // positions itself absolutely: inside a ScrollView that would anchor it to
     // the bottom of the CONTENT and let it scroll away.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={pullRefreshing}
+            onRefresh={handlePullRefresh}
+            tintColor={partnerTheme.brandGreen}
+            colors={[partnerTheme.brandGreen]}
+          />
+        }
+      >
         <Text style={styles.title}>Menu builder</Text>
         <Text style={styles.subtitle}>
           Shape the dishes customers will see first. Keep names clean, pricing accurate, and descriptions short enough to scan fast.

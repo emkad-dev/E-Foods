@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { elevation, radius } from '@feasty/design-system';
 import { useRouter } from 'expo-router';
@@ -122,6 +122,7 @@ export default function OrdersList() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<OrderFilter>('all');
   const router = useRouter();
   const isVisible = useAppStateVisibility();
@@ -129,32 +130,53 @@ export default function OrdersList() {
   // in-flight guard has to outlive any single effect run.
   const activeRef = useRef(false);
 
-  const loadOrders = useCallback(async () => {
-    if (!user) {
-      return;
-    }
+  // 'manual' is a pull-to-refresh: it must never empty an already-visible list
+  // just because one fetch failed, so only 'initial' (nothing on screen to lose
+  // yet) clears down to []. Every existing caller (mount, realtime, fallback
+  // poll) calls this with no argument, so its behaviour is unchanged.
+  const loadOrders = useCallback(
+    async (mode: 'initial' | 'manual' = 'initial') => {
+      if (!user) {
+        return;
+      }
 
+      try {
+        const nextData = await getCustomerOrders();
+
+        if (!activeRef.current) {
+          return;
+        }
+
+        setOrders(nextData.orders as Order[]);
+      } catch (nextError) {
+        if (!activeRef.current) {
+          return;
+        }
+
+        console.error('Error fetching orders:', nextError);
+        if (mode === 'initial') {
+          setOrders([]);
+        }
+      } finally {
+        if (activeRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [user]
+  );
+
+  // loading only ever flips true once (its initial value) and this screen
+  // never sets it true again, so a pull never triggers the skeleton branch
+  // below -- pullRefreshing only drives the pull spinner itself.
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
     try {
-      const nextData = await getCustomerOrders();
-
-      if (!activeRef.current) {
-        return;
-      }
-
-      setOrders(nextData.orders as Order[]);
-    } catch (nextError) {
-      if (!activeRef.current) {
-        return;
-      }
-
-      console.error('Error fetching orders:', nextError);
-      setOrders([]);
+      await loadOrders('manual');
     } finally {
-      if (activeRef.current) {
-        setLoading(false);
-      }
+      setPullRefreshing(false);
     }
-  }, [user]);
+  }, [loadOrders]);
 
   useEffect(() => {
     if (!user) {
@@ -297,6 +319,14 @@ export default function OrdersList() {
         </Animated.View>
       )}
       contentContainerStyle={[styles.list, screenColumn.reading]}
+      refreshControl={
+        <RefreshControl
+          refreshing={pullRefreshing}
+          onRefresh={handlePullRefresh}
+          tintColor={customerTheme.brandGreen}
+          colors={[customerTheme.brandGreen]}
+        />
+      }
     />
   );
 }

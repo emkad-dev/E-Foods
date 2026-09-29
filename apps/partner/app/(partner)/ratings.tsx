@@ -12,8 +12,9 @@
  * backend withheld, on a screen where the restaurant can read the customer's
  * delivery address one tap away.
  */
+import { useCallback, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
@@ -56,8 +57,19 @@ function StarRow({ filled, large = false }: { filled: number; large?: boolean })
 export default function PartnerRatingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { error, hasMore, loaded, loading, loadingMore, loadMore, ratings, retry, summary } =
+  const { error, hasMore, loaded, loading, loadingMore, loadMore, ratings, reload, retry, summary } =
     usePartnerRatings();
+  // Local: reload() deliberately never raises the hook's own `loading`, so
+  // there is no existing flag this pull spinner could reuse.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await reload();
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [reload]);
 
   const handleBack = () => {
     // Deep-linked or reloaded on the web build there is no history to pop, and
@@ -95,6 +107,14 @@ export default function PartnerRatingsScreen() {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={pullRefreshing}
+            onRefresh={handlePullRefresh}
+            tintColor={partnerTheme.brandGreen}
+            colors={[partnerTheme.brandGreen]}
+          />
+        }
       >
         {/* Labelled because the visible text leads with a bare `&lsaquo;`,
             which a screen reader either reads out as punctuation or drops. */}
