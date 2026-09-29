@@ -11,6 +11,12 @@ import {
 // `allowImportingTsExtensions`, and Metro/Vite both resolve the exact path.
 import { KNOWN_RPC_TARGETS, resolveRpcMode, resolveRpcTarget } from '../../domain/src/rpcRoutes.ts';
 import { deriveRpcFunctionUrl } from '../../domain/src/rpcUrl.ts';
+// packages/observability has no dependency back on packages/auth (verified:
+// neither sentry.ts nor userMessage.ts imports anything from this package
+// except userMessage.ts's own read of session.ts's exported constant below),
+// so this is a plain DAG edge, not a circular import.
+import { reportError } from '../../observability/src/sentry.ts';
+import { shouldReportRpcFailure } from '../../observability/src/userMessage.ts';
 import { clearSupabaseSession, isStaleSupabaseSessionError, SESSION_EXPIRED_ERROR_MESSAGE } from './session.ts';
 
 export interface BackendRpcEnv {
@@ -156,6 +162,17 @@ export const parseBackendRpcErrorBody = (body: unknown): ParsedRpcErrorBody => {
   return { message: null };
 };
 
+/**
+ * Tags a transport-level throw with a name `toUserMessage`/
+ * `shouldReportRpcFailure` can switch on directly, instead of guessing from
+ * message text. The message itself stays raw (it is reported, never shown).
+ */
+const networkError = (message: string): Error => {
+  const error = new Error(message);
+  error.name = 'NetworkError';
+  return error;
+};
+
 const parseRetryAfterSeconds = (header: string | null) => {
   const seconds = Number(header?.trim());
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
@@ -209,7 +226,7 @@ export const backendRpcErrorFromResponse = async (
   return new BackendRpcError(`Backend RPC ${action} failed with HTTP ${status}.`, base);
 };
 
-export const callBackendRpc = async <T>(
+const callBackendRpcInternal = async <T>(
   supabase: SupabaseClient,
   env: BackendRpcEnv,
   action: string,
@@ -283,7 +300,7 @@ export const callBackendRpc = async <T>(
       headers,
       method: 'POST',
     }).catch((error) => {
-      throw new Error(error instanceof Error ? error.message : `Backend RPC ${action} failed to send request.`);
+      throw networkError(error instanceof Error ? error.message : `Backend RPC ${action} failed to send request.`);
     });
 
     if (!response.ok) {
@@ -338,10 +355,10 @@ export const callBackendRpc = async <T>(
     }
 
     if (error instanceof FunctionsRelayError || error instanceof FunctionsFetchError) {
-      throw new Error(`Backend RPC ${action} failed: ${error.message}`);
+      throw networkError(`Backend RPC ${action} failed: ${error.message}`);
     }
 
-    throw new Error(
+    throw networkError(
       error instanceof Error ? error.message : 'Backend RPC request failed. Check Supabase function availability.'
     );
   }
@@ -351,4 +368,36 @@ export const callBackendRpc = async <T>(
   }
 
   return responseData as T;
+};
+
+/**
+ * The choke point every app's server calls go through. Reports to Sentry
+ * exactly once per failed call, right here where the error leaves this
+ * function — not inside `callBackendRpcInternal`, which has several throw
+ * sites across two transports (direct URL, relay) and would otherwise need
+ * the same report-and-rethrow duplicated at each one.
+ *
+ * `shouldReportRpcFailure` (packages/observability/src/userMessage.ts) is
+ * the single source of truth for which failures are expected rejections
+ * (a safe-text 4xx `BackendRpcError`) versus real faults, so this does not
+ * carry its own copy of that rule.
+ */
+export const callBackendRpc = async <T>(
+  supabase: SupabaseClient,
+  env: BackendRpcEnv,
+  action: string,
+  data?: Record<string, unknown>
+): Promise<T> => {
+  try {
+    return await callBackendRpcInternal<T>(supabase, env, action, data);
+  } catch (error) {
+    if (shouldReportRpcFailure(error)) {
+      reportError('backend_rpc', error, {
+        action,
+        status: isBackendRpcError(error) ? error.status : undefined,
+      });
+    }
+
+    throw error;
+  }
 };

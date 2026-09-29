@@ -5,6 +5,7 @@ import {
   createSentryInitializer,
   installGlobalErrorHandlers,
   isWebRuntime,
+  reportError,
   resetSentryStateForTest,
 } from './sentry.ts';
 
@@ -193,6 +194,85 @@ test('installGlobalErrorHandlers uses ErrorUtils on React Native, where window e
       cleanup();
     }
   );
+
+  resetSentryStateForTest();
+});
+
+test('reportError is a safe no-op before initialization', () => {
+  // `isDevelopment` is captured once at module load from `globalThis.__DEV__`
+  // (see the top of sentry.ts), so it cannot be toggled per test from here --
+  // this only asserts the no-op itself: nothing thrown, nothing forwarded.
+  resetSentryStateForTest();
+
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+
+  try {
+    // Must not throw, and must not need a try/catch at the call site.
+    reportError('checkout', new Error('boom'), { orderId: 'o-1' });
+    // Whatever warnings.length is, it must be at most one -- a no-op never
+    // does more than warn once, and only in dev.
+    assert.ok(warnings.length <= 1);
+  } finally {
+    console.warn = originalWarn;
+    resetSentryStateForTest();
+  }
+});
+
+test('reportError forwards to the loaded SDK once Sentry has initialized', async () => {
+  resetSentryStateForTest();
+
+  const captured: Array<{ message: string; context: { extra?: Record<string, unknown>; tags?: Record<string, unknown> } }> = [];
+
+  const initializer = createSentryInitializer({
+    getDsn: () => 'https://example.invalid/1',
+    getEnvironment: () => 'test',
+    getPlatform: () => 'web',
+    installHandlers: () => () => undefined,
+    loadWebSdk: async () => ({
+      captureException: (error, context) => {
+        captured.push({ message: error.message, context });
+      },
+      init: () => undefined,
+      setTag: () => undefined,
+    }),
+  });
+
+  await initializer('customer');
+
+  reportError('checkout', new Error('payment failed'), { orderId: 'o-1' });
+
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].message, 'payment failed');
+  assert.deepEqual(captured[0].context.extra, { orderId: 'o-1', source: 'checkout' });
+  assert.deepEqual(captured[0].context.tags, { app: 'customer', source: 'checkout' });
+
+  resetSentryStateForTest();
+});
+
+test('reportError never throws, even if the SDK it forwards to does', async () => {
+  resetSentryStateForTest();
+
+  const initializer = createSentryInitializer({
+    getDsn: () => 'https://example.invalid/1',
+    getEnvironment: () => 'test',
+    getPlatform: () => 'web',
+    installHandlers: () => () => undefined,
+    loadWebSdk: async () => ({
+      captureException: () => {
+        throw new Error('Sentry SDK is down');
+      },
+      init: () => undefined,
+      setTag: () => undefined,
+    }),
+  });
+
+  await initializer('customer');
+
+  assert.doesNotThrow(() => reportError('checkout', new Error('payment failed')));
 
   resetSentryStateForTest();
 });

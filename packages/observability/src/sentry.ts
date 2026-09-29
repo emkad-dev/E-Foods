@@ -27,6 +27,10 @@ type SentryInitializerDeps = {
 let isInitialized = false;
 let initializationPromise: Promise<boolean> | null = null;
 let cleanupGlobalHandlers: (() => void) | null = null;
+// Set once init succeeds; reportError below needs both to tag and route a
+// capture, and there is nothing safe to do with either alone.
+let activeSdk: SentrySdk | null = null;
+let activeAppName: string | null = null;
 
 const DEFAULT_SENTRY_DSN =
   'https://4a5c3f8b1f0482ab71bec0788114e027@o4511625693102080.ingest.de.sentry.io/4511625718464592';
@@ -249,6 +253,8 @@ export const createSentryInitializer = (deps: Partial<SentryInitializerDeps> = {
         Sentry.setTag('app', appName);
         installHandlers((error, context) => Sentry.captureException(error, context as never), appName);
         isInitialized = true;
+        activeSdk = Sentry;
+        activeAppName = appName;
         return true;
       } catch (error) {
         console.warn(`Failed to initialize Sentry for ${appName}:`, error);
@@ -269,6 +275,39 @@ export const resetSentryStateForTest = () => {
   cleanupGlobalHandlers = null;
   isInitialized = false;
   initializationPromise = null;
+  activeSdk = null;
+  activeAppName = null;
+};
+
+/**
+ * Report a caught error to Sentry from anywhere in the app (not just the
+ * global crash handler). Before this, only `installGlobalErrorHandlers`
+ * ever called `captureException`, so a `catch` block that handled an error
+ * gracefully for the user left the server-side team with nothing.
+ *
+ * Deliberately forgiving: this runs on error paths, so a reporting failure
+ * (SDK not loaded yet, DSN missing in dev, `captureException` itself
+ * throwing) must never become the reason the caller's error handling
+ * fails. It is a no-op — with a `__DEV__`-only warning so a real miss isn't
+ * silent in local testing — whenever `initializeSentry` hasn't completed
+ * successfully, including in tests and in any environment with no DSN.
+ */
+export const reportError = (source: string, error: unknown, extra: Record<string, unknown> = {}): void => {
+  if (!activeSdk || !activeAppName) {
+    if (isDevelopment) {
+      console.warn(`[reportError] Sentry is not initialized; dropping report from "${source}":`, error);
+    }
+    return;
+  }
+
+  try {
+    const payload = captureAppErrorPayload(activeAppName, source, error, extra);
+    activeSdk.captureException(payload.error, { extra: payload.extra, tags: payload.tags });
+  } catch (reportingFailure) {
+    if (isDevelopment) {
+      console.warn(`[reportError] failed to report error from "${source}":`, reportingFailure);
+    }
+  }
 };
 
 export const wrapWithSentry = <T>(component: T) => component;
