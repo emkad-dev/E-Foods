@@ -5,18 +5,42 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { formatDeliveryEta, formatDistanceAway, formatMoney } from './formatting.ts';
 
-test('formatMoney renders two decimals with the naira sign', () => {
-  assert.equal(formatMoney(4300), '₦4300.00');
-  assert.equal(formatMoney(0), '₦0.00');
-  assert.equal(formatMoney(1234.5), '₦1234.50');
+/**
+ * `formatMoney` used to be `₦${amount.toFixed(2)}`: no thousands separator and
+ * always two kobo digits, so every price in the app (and the store
+ * screenshots) printed `₦4300.00` instead of `₦4,300`.
+ */
+test('formatMoney hand-groups thousands and drops kobo when there are none', () => {
+  assert.equal(formatMoney(4300), '₦4,300');
+  assert.equal(formatMoney(4540), '₦4,540');
+  assert.equal(formatMoney(1234567), '₦1,234,567');
+});
+
+test('formatMoney shows kobo, as two digits, only when they are non-zero', () => {
+  assert.equal(formatMoney(4300.5), '₦4,300.50');
+  assert.equal(formatMoney(99.99), '₦99.99');
 });
 
 test('formatMoney survives the missing pricing fields that used to throw', () => {
   // Five of the six inline copies called `amount.toFixed(2)` on a value typed
   // `number` that an RPC payload can legitimately omit (serviceFee, tip,
   // refundAmount), which crashed the whole screen instead of the one line.
-  assert.equal(formatMoney(undefined), '₦0.00');
-  assert.equal(formatMoney(null), '₦0.00');
+  assert.equal(formatMoney(0), '₦0');
+  assert.equal(formatMoney(undefined), '₦0');
+  assert.equal(formatMoney(null), '₦0');
+});
+
+test('formatMoney renders a non-finite amount as zero rather than "₦NaN"', () => {
+  assert.equal(formatMoney(Number.NaN), '₦0');
+  assert.equal(formatMoney(Number.POSITIVE_INFINITY), '₦0');
+});
+
+test('formatMoney signs a negative amount with a leading minus before the naira sign', () => {
+  assert.equal(formatMoney(-2500), '-₦2,500');
+});
+
+test('formatMoney rounds to kobo before formatting, so a sub-kobo value collapses to zero', () => {
+  assert.equal(formatMoney(0.004), '₦0');
 });
 
 test('formatDistanceAway keeps one decimal place', () => {
