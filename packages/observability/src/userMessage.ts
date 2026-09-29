@@ -4,11 +4,20 @@
 // tsconfig sets `allowImportingTsExtensions`.
 //
 // This is the one place observability reaches into another package. It reads
-// ONLY the session-expired string constant (no behavior, no class), and
-// session.ts itself imports nothing local, so the graph stays a DAG:
-// backendRpc.ts -> userMessage.ts -> session.ts, never back around. Importing
-// the real constant keeps this file and packages/auth/src/session.ts from
-// drifting apart, which a hand-copied literal could not guarantee.
+// ONLY the session-expired string constant (no behavior, no class) from
+// packages/auth/src/session.ts, which itself imports nothing local, so the
+// graph stays a DAG: backendRpc.ts -> userMessage.ts -> session.ts, never
+// back around. Importing the real constant keeps this file and
+// packages/auth/src/session.ts from drifting apart, which a hand-copied
+// literal could not guarantee.
+//
+// packages/auth/src/supabaseAuth.ts is NOT imported from here, even though it
+// exports its own ACCOUNT_ALREADY_REGISTERED_MESSAGE constant this file wants
+// in FRIENDLY_PASSTHROUGH: that lane's supabaseAuth.ts has started importing
+// toUserMessage FROM this file (concurrent work, see task-3b-common.md), so
+// importing it back would close a real cycle - node hit exactly that as
+// "Cannot access 'ACCOUNT_ALREADY_REGISTERED_MESSAGE' before initialization"
+// when this file tried it. The value is copied as a literal below instead.
 import { SESSION_EXPIRED_ERROR_MESSAGE } from '../../auth/src/session.ts';
 
 const RATE_LIMITED_MESSAGE_TEXT = 'Too many attempts. Please wait a moment and try again.';
@@ -20,8 +29,39 @@ const DEFAULT_FALLBACK_MESSAGE_TEXT = 'Something went wrong. Please try again.';
  * App-thrown constants that are already written for a human and should pass
  * through `toUserMessage` unchanged. Task 3b adds its own friendly constants
  * here as the app screens are switched over.
+ *
+ * Every entry below other than the session-expiry import is a literal, not an
+ * import: some are owned by apps/customer (a package importing an app would
+ * invert the dependency direction the note above relies on), and
+ * ACCOUNT_ALREADY_REGISTERED_MESSAGE is owned by packages/auth/src/supabaseAuth.ts
+ * but cannot be imported without a cycle (see the note above). Each one names
+ * the file it must be kept in sync with by hand.
  */
-export const FRIENDLY_PASSTHROUGH = new Set<string>([SESSION_EXPIRED_ERROR_MESSAGE]);
+export const FRIENDLY_PASSTHROUGH = new Set<string>([
+  SESSION_EXPIRED_ERROR_MESSAGE,
+  // packages/auth/src/supabaseAuth.ts: ACCOUNT_ALREADY_REGISTERED_MESSAGE.
+  'This email is already registered. Sign in instead — or if you never confirmed it, check your inbox for a new code.',
+  // apps/customer/src/contexts/AuthContext.tsx: signUp's own guard, and the
+  // "no customer access" outcome after a real Supabase sign-in.
+  'Accept the Terms and Privacy Policy before creating an account.',
+  'This account does not have customer access.',
+  // apps/customer/src/services/customerOrderActions.ts: PREPAID_CHECKOUT_DISABLED_MESSAGE.
+  'Use card or bank transfer for checkout.',
+  // apps/customer/src/services/publicRestaurantReadModel.ts: UNREACHABLE_MESSAGE
+  // and GENERIC_FAILURE_MESSAGE, shown on the home feed and meal search catalog
+  // errors via toUserMessage.
+  'We could not reach our restaurants right now. Check your connection and try again.',
+  'Something went wrong loading restaurants. Please try again.',
+  // apps/partner and apps/dispatch (their own lane, task 3b): app-owned
+  // friendly constants added here on request once that lane's own switch to
+  // toUserMessage was done, since packages/observability importing an app
+  // would invert the dependency direction the note above relies on.
+  'No partner profile was found for this account.',
+  'No dispatch profile was found for this account.',
+  'We could not read that image. Pick it again.',
+  'We could not upload that document. Check your connection and try again.',
+  'Sign in again to link a restaurant.',
+]);
 
 /**
  * Disqualifies a server-written message from being shown to a user verbatim.
