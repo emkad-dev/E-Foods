@@ -87,3 +87,24 @@ Target audience 18+.
 
 Both apps' content is submitted/ready; only the partner release upload + send
 remains, then both wait on Google review (~7 days) + the 12-tester/14-day rule.
+
+## UPDATE 2026-10-01 — PARTNER SUBMITTED ✅ (BOTH APPS NOW IN REVIEW)
+FEASTY Partner closed-test release + all content changes SENT FOR REVIEW.
+- Track: "Closed testing - Alpha" (track ID 4698963807583231077), Nigeria targeted,
+  "FEASTY testers" email list attached.
+- Release "8 (1.0.0)", 22.3 MB new-install size, en-GB release notes added.
+  Only warning = no deobfuscation file (benign, same as customer).
+- The re-upload of the vc8 AAB was rejected ("Version code 8 has already been
+  used") because vc8 was already in the app's bundle library from the earlier
+  session; attached it via "Add from library" instead of re-uploading.
+- Publishing overview: 13 changes → "Send changes for review" → header now reads
+  "Changes in review". Google quick-checks were still running (send completes once
+  they pass). Review ~7 days.
+
+NEXT for BOTH apps after approval:
+- Testers tab shows the opt-in link; send to the "FEASTY testers" list.
+- Grow the list to 12+ real testers, keep opted in 14 days, then Apply for production.
+- vc9 (customer) / vc10 (partner) rebuilds carry pull-to-refresh, dish cards,
+  ₦4,300 formatting, friendly errors, and the partner bank-picker fix; build after
+  the Expo quota reset (2026-10-01). Until vc10, partners onboard on
+  partner.feasty.com.ng (vc8 bank picker only allows 5 of 31 banks).
