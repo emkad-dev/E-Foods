@@ -60,3 +60,11 @@ Track: **Closed testing - Alpha** (track ID 4700094111304792866).
   send it to testers; each opts in signed in as the exact email listed.
 
 Everything else for the CUSTOMER app is done. Partner app not started.
+
+## UPDATE 2026-09-30 — CUSTOMER SUBMITTED ✅
+Customer vc8 closed-test release + all 14 app-content/store changes SENT FOR
+REVIEW (Publishing overview → "Changes in review"). Google review ~7 days.
+Release: 8 (1.0.0), 32.5 MB install; only warning = no deobfuscation file (benign).
+NEXT for customer after approval:
+- Testers tab shows the opt-in link; send to the "FEASTY testers" list.
+- Grow list to 12+ real testers, keep opted in 14 days, then Apply for production.
