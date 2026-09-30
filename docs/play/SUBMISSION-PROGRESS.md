@@ -68,3 +68,22 @@ Release: 8 (1.0.0), 32.5 MB install; only warning = no deobfuscation file (benig
 NEXT for customer after approval:
 - Testers tab shows the opt-in link; send to the "FEASTY testers" list.
 - Grow list to 12+ real testers, keep opted in 14 days, then Apply for production.
+
+## UPDATE 2026-09-30 — PARTNER app content + listing DONE ✅
+FEASTY Partner (app ID 4974464232968568207): all 9 App content declarations,
+content rating (Everyone/PEGI 3), data safety (imported data-safety-partner.csv,
+after fixing orphaned usage rows), category Business, contact, and the full
+store listing (icon + feature graphic + 4 screenshots) all SAVED.
+Sign-in details = Gojo mojo (emkad567123@gmail.com) per owner's choice.
+Target audience 18+.
+
+⬜ PARTNER remaining (same as customer, owner uploads AAB):
+- Test and release → Closed testing → the "FEASTY testers" list is account-wide
+  (reuse it), target Nigeria, Create new release → upload partner vc8 AAB
+  (https://expo.dev/artifacts/eas/pOgp8MqA1bYW15Dtt0Daw1y-hGkAXQorAPKvTV1txg8.aab),
+  release notes, Save → Publishing overview → Send changes for review.
+- KNOWN: partner vc8 bank picker only allows 5 of 31 banks; testers finish
+  onboarding on partner.feasty.com.ng until a vc10 build ships.
+
+Both apps' content is submitted/ready; only the partner release upload + send
+remains, then both wait on Google review (~7 days) + the 12-tester/14-day rule.
