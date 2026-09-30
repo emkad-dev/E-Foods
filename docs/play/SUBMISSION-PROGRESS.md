@@ -43,3 +43,20 @@ Partner vc8 AAB: https://expo.dev/artifacts/eas/pOgp8MqA1bYW15Dtt0Daw1y-hGkAXQor
 apps/{customer,partner}/store/screenshots/*.png (copied from ~/FEASTY-screenshots,
 which is outside this session's readable area).
 docs/play/data-safety-customer.csv — the filled data safety import.
+
+## UPDATE 2026-09-30 (later) — customer closed-test track configured
+Track: **Closed testing - Alpha** (track ID 4700094111304792866).
+- ✅ Countries/regions: Nigeria (Targeted).
+- ✅ Testers: email list "FEASTY testers" (ghostyxx326@gmail.com,
+  emekacletusanoruo@gmail.com) attached; feedback = feastyfooders@gmail.com.
+  Add the remaining 10+ testers to this same list later (Testers tab →
+  FEASTY testers → arrow → add emails). Need 12 opted-in for 14 days.
+- ⬜ RELEASE (owner): Test and release → Closed testing → Create new release →
+  upload customer vc8 AAB
+  (https://expo.dev/artifacts/eas/pMDQx2M7Y3wl2tTduI9NoP5q-ue8IH6duDs4Ylt-HeY.aab
+  — ~80 MB, over the browser-upload limit, so owner uploads from Downloads),
+  add release notes, then Review + Start roll-out.
+- After a release exists, the opt-in web link appears on the Testers tab —
+  send it to testers; each opts in signed in as the exact email listed.
+
+Everything else for the CUSTOMER app is done. Partner app not started.
