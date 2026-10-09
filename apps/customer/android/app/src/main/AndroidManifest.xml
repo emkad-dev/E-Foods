@@ -14,6 +14,15 @@
     where there is no committed native project; this manifest governs Android.
   -->
   <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+  <!--
+    RECEIVE_BOOT_COMPLETED is removed, not merely absent. expo-notifications
+    declares it so it can re-arm LOCALLY SCHEDULED notifications after a
+    reboot. This app schedules none (remote push only, see
+    usePushNotifications), so the permission buys nothing and, paired with
+    the receiver filter narrowed below, clears Play's "restricted foreground
+    service types started from BOOT_COMPLETED" warning.
+  -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <!--
     RECORD_AUDIO is removed, not merely absent. This app has no audio code at
@@ -49,6 +58,19 @@
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
+    <!--
+      Narrowed copy of expo-notifications' receiver. The library version also
+      listens for BOOT_COMPLETED / REBOOT / QUICKBOOT_POWERON /
+      MY_PACKAGE_REPLACED to re-arm locally scheduled notifications, which
+      this app never uses. NOTIFICATION_EVENT must stay: it is how all push
+      receive/response/dismiss events are dispatched, so the receiver itself
+      cannot be removed.
+    -->
+    <receiver android:name="expo.modules.notifications.service.NotificationsService" android:enabled="true" android:exported="false" tools:node="replace">
+      <intent-filter android:priority="-1">
+        <action android:name="expo.modules.notifications.NOTIFICATION_EVENT"/>
+      </intent-filter>
+    </receiver>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
