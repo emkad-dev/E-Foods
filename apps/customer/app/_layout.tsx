@@ -68,34 +68,46 @@ const getCustomerLoadingMode = (pathname: string | null | undefined): CustomerLo
   return 'home';
 };
 
+// The pizza mark continues the native splash (same image, same colour, true
+// screen centre, 138x124 = 48% of the 288dp splash canvas). It therefore has to
+// be opaque and in place from the very first frame: any fade-in or shift leaves
+// an empty grey blink or a visible jump at the hand-over. Only the wordmark and
+// tagline fade in, in a block anchored under the mark so the mark never moves;
+// the whole content then fades out together.
+const LAUNCH_MARK_WIDTH = 138;
+const LAUNCH_MARK_HEIGHT = 124;
+
 function FEASTYLaunchScreen() {
-  const opacity = useRef(new Animated.Value(0)).current;
+  const textOpacity = useRef(new Animated.Value(0)).current;
+  const exitOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.sequence([
-      Animated.timing(opacity, {
+      Animated.timing(textOpacity, {
         duration: 320,
         toValue: 1,
         useNativeDriver: true,
       }),
       Animated.delay(4320),
-      Animated.timing(opacity, {
+      Animated.timing(exitOpacity, {
         duration: 360,
         toValue: 0,
         useNativeDriver: true,
       }),
     ]).start();
-  }, [opacity]);
+  }, [exitOpacity, textOpacity]);
 
   return (
     <View style={styles.launchScreen}>
-      <Animated.View style={[styles.launchBrand, { opacity }]}>
+      <Animated.View style={[styles.launchContent, { opacity: exitOpacity }]}>
         <Image source={require('../assets/images/feasty-pizza.png')} style={styles.launchMark} resizeMode="contain" />
-        <Text style={styles.launchWordmark}>
-          <Text style={styles.launchWordmarkGreen}>FEAST</Text>
-          <Text style={styles.launchWordmarkOrange}>Y</Text>
-        </Text>
-        <Text style={styles.launchSubtitle}>Feast You deserve.</Text>
+        <Animated.View style={[styles.launchText, { opacity: textOpacity }]}>
+          <Text style={styles.launchWordmark}>
+            <Text style={styles.launchWordmarkGreen}>FEAST</Text>
+            <Text style={styles.launchWordmarkOrange}>Y</Text>
+          </Text>
+          <Text style={styles.launchSubtitle}>Feast You deserve.</Text>
+        </Animated.View>
       </Animated.View>
     </View>
   );
@@ -301,17 +313,26 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   launchScreen: {
-    alignItems: 'center',
     backgroundColor: customerTheme.launchBackground,
     flex: 1,
+  },
+  launchContent: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  launchBrand: {
-    alignItems: 'center',
-  },
   launchMark: {
-    height: 108,
-    width: 120,
+    height: LAUNCH_MARK_HEIGHT,
+    width: LAUNCH_MARK_WIDTH,
+  },
+  // Absolutely positioned from the vertical centre so it never shifts the mark.
+  launchText: {
+    alignItems: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: '50%',
+    paddingTop: LAUNCH_MARK_HEIGHT / 2,
   },
   launchWordmark: {
     fontSize: 54,
