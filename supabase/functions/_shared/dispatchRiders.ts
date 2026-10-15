@@ -63,6 +63,29 @@ export const buildDispatchRiderResponse = (rider: DispatchRiderRow) => ({
   zone: sanitizeText(rider.zone),
 });
 
+const coarsen = (v: number | null | undefined): number | null =>
+  v === null || v === undefined || !Number.isFinite(v) ? null : Math.round(v * 1000) / 1000;
+
+/**
+ * Minimal rider projection for operational fleet views. Deliberately omits
+ * every PII/credential field (licence, plate, verifier, phone, address) and
+ * coarsens live location to ~110m. Admin live-map precision is a later
+ * sub-project; SP-1 ships coarse.
+ */
+export const buildFleetRiderResponse = (rider: DispatchRiderRow) => ({
+  id: rider.id,
+  displayName: sanitizeText(rider.displayName, 'Dispatch rider'),
+  status: sanitizeText(rider.status, DEFAULT_DISPATCH_STATUS),
+  zone: sanitizeText(rider.zone),
+  vehicleType: sanitizeText(rider.vehicleType, DEFAULT_DISPATCH_VEHICLE),
+  activeLoad: rider.activeLoad ?? 0,
+  latitude: coarsen(rider.latitude),
+  longitude: coarsen(rider.longitude),
+  ratingAverage: (rider as { ratingAverage?: number | null }).ratingAverage ?? null,
+});
+
+export type FleetRiderResponse = ReturnType<typeof buildFleetRiderResponse>;
+
 export const loadDispatchRiderPhoneNumber = async (riderId: string | null | undefined) => {
   const safeRiderId = sanitizeText(riderId);
   if (!safeRiderId) {

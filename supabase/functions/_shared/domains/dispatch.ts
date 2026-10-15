@@ -29,6 +29,7 @@ import {
   DEFAULT_DISPATCH_VEHICLE,
   DISPATCH_RIDER_COLUMNS,
   buildDispatchRiderResponse,
+  buildFleetRiderResponse,
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
@@ -556,10 +557,15 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
 
 const dispatchGetRiders: Handler = async ({ context }) => {
   ensureRole(context.role, ['dispatch', 'admin']);
-  const { data: riders, error } = await serviceClient
+  // A dispatch-role caller only ever sees their own record: this table holds
+  // every rider's licence, plate and GPS. Admin keeps the fleet-wide read but
+  // gets the PII-free, coarsened projection (see buildFleetRiderResponse).
+  const baseQuery = serviceClient
     .from('DispatchRiderRecord')
     .select(DISPATCH_RIDER_COLUMNS)
     .order('updatedAt', { ascending: false });
+  const { data: riders, error } =
+    context.role === 'admin' ? await baseQuery : await baseQuery.eq('id', context.uid);
 
   if (error) {
     throw new Error(error.message);
@@ -585,9 +591,12 @@ const dispatchGetRiders: Handler = async ({ context }) => {
 
   return json(200, {
     data: {
-      riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) =>
-        buildDispatchRiderResponse(mergeRiderLiveLocation(rider, liveById.get(rider.id), nowMs))
-      ),
+      riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) => {
+        const merged = mergeRiderLiveLocation(rider, liveById.get(rider.id), nowMs);
+        return context.role === 'admin'
+          ? buildFleetRiderResponse(merged)
+          : buildDispatchRiderResponse(merged); // caller's own full record
+      }),
     },
   });
 };
@@ -920,7 +929,9 @@ const syncDispatchRiderLocation: Handler = async ({ context, data }) => {
 };
 
 const dispatchGetNearestRiders: Handler = async ({ context, data }) => {
-  ensureRole(context.role, ['dispatch', 'admin']);
+  // Admin-only: a nearest-riders lookup is a way to enumerate other riders'
+  // positions, and no dispatch-role client calls it.
+  ensureRole(context.role, ['admin']);
   const latitude = parseNumber(data.latitude, Number.NaN);
   const longitude = parseNumber(data.longitude, Number.NaN);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -952,7 +963,7 @@ const dispatchGetNearestRiders: Handler = async ({ context, data }) => {
   // joinRankedRiders preserves the geo ordering and drops ranked ids with no
   // profile row — see _shared/riderLocation.ts for why both matter.
   const ordered = joinRankedRiders(nearest, ridersById).map(({ rider, metres }) => ({
-    ...buildDispatchRiderResponse(rider),
+    ...buildFleetRiderResponse(rider),
     metres,
   }));
 
