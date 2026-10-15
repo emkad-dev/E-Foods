@@ -1,5 +1,12 @@
 import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { buildFleetRiderResponse } from './dispatchRiders.ts';
+
+// dispatchRiders.ts statically imports client.ts, which throws at module scope
+// without these set, so they must be set BEFORE the (dynamic) import below.
+Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
+Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
+Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
+
+const { buildFleetRiderResponse } = await import('./dispatchRiders.ts');
 
 Deno.test('fleet projection omits PII and coarsens location', () => {
   const r = buildFleetRiderResponse({
