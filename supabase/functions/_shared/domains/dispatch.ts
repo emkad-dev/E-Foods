@@ -1788,6 +1788,23 @@ const dispatchDeclineOffer: Handler = async ({ context, data }) => {
   });
 };
 
+// Rider online/offline toggle. A dispatch caller can only ever flip their OWN
+// row (any courierId they pass is ignored); an admin may target another rider.
+// 'Offline' is already excluded from offer matching, so this adds no selection
+// code - it just writes the status the matcher reads.
+const dispatchSetAvailability: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch', 'admin']);
+  const requested = sanitizeText(data.courierId);
+  const courierId = context.role === 'admin' && requested ? requested : context.uid;
+  const status = data.available === true ? 'Available' : 'Offline';
+  const { error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .update({ status, updatedAt: nowIso() })
+    .eq('id', courierId);
+  if (error) throw new Error(error.message);
+  return json(200, { data: { courierId, status } });
+};
+
 export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: DISPATCH_ACTIONS,
   name: 'dispatch',
@@ -1798,6 +1815,7 @@ export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
     dispatchGetDeliveryQueue,
     dispatchGetNearestRiders,
     dispatchGetOrderDetail,
+    dispatchSetAvailability,
     dispatchGetRiders,
     dispatchGetWeeklyEarnings,
     dispatchGetShiftSlots,
