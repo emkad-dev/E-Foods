@@ -199,23 +199,19 @@ const BASE_INPUT: Row = { fulfillmentType: 'pickup', paymentMethod: 'cash', rest
 // A valid slot: 2 days ahead, all-open hours.
 const validSlotIso = () => new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
 
+// SP-4: placeCustomerOrder is now a stub returning 410. Tests below are
+// retained as 410 assertions; original assertions on scheduling and DB
+// writes are removed (handler exits before any DB access).
 Deno.test('placeCustomerOrder: a valid slot lands the order in scheduled with scheduledFor and no placedAt', async () => {
   const mocks = installPlacementMocks(buildRestaurant(), buildHoursRows());
   try {
-    const slot = validSlotIso();
-    const response = await place({ ...BASE_INPUT, items: [{ id: 'item-1', quantity: 1 }], scheduledFor: slot });
-    const body = await response.json();
-    expectEqual(body.data.status, 'scheduled', 'response status is scheduled');
-    expectEqual(body.data.scheduledFor, slot, 'response echoes the slot');
-
-    expectEqual(mocks.state.orderInserts.length, 1, 'exactly one order insert');
-    const inserted = mocks.state.orderInserts[0];
-    expectEqual(inserted.status, 'scheduled', 'stored status is scheduled');
-    expectEqual(inserted.scheduledFor, slot, 'stored scheduledFor');
-    const timeline = inserted.timeline as Row;
-    expectEqual(timeline.scheduledFor, slot, 'timeline carries scheduledFor');
-    expectEqual(typeof timeline.scheduledAt, 'string', 'timeline carries scheduledAt');
-    expectEqual('placedAt' in timeline, false, 'timeline has NO placedAt (clock starts at release)');
+    let thrown: unknown = null;
+    try {
+      await place({ ...BASE_INPUT, items: [{ id: 'item-1', quantity: 1 }], scheduledFor: validSlotIso() });
+    } catch (error) {
+      thrown = error;
+    }
+    expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
   } finally {
     mocks.restore();
   }
@@ -232,8 +228,7 @@ Deno.test('placeCustomerOrder: a slot on a closed day is rejected 412 and writes
     } catch (error) {
       thrown = error;
     }
-    expectEqual((thrown as { status?: number })?.status, 412, 'closed-day slot is a 412');
-    expectEqual(mocks.state.orderInserts.length, 0, 'no order was written');
+    expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
   } finally {
     mocks.restore();
   }
@@ -242,17 +237,13 @@ Deno.test('placeCustomerOrder: a slot on a closed day is rejected 412 and writes
 Deno.test('placeCustomerOrder: an immediate order (no scheduledFor) is unregressed — placed with placedAt', async () => {
   const mocks = installPlacementMocks(buildRestaurant(), buildHoursRows());
   try {
-    const response = await place({ ...BASE_INPUT, items: [{ id: 'item-1', quantity: 1 }] });
-    const body = await response.json();
-    expectEqual(body.data.status, 'placed', 'immediate order lands placed');
-    expectEqual(body.data.scheduledFor, null, 'no scheduledFor on the response');
-
-    const inserted = mocks.state.orderInserts[0];
-    expectEqual(inserted.status, 'placed', 'stored status is placed');
-    expectEqual(inserted.scheduledFor, null, 'stored scheduledFor is null');
-    const timeline = inserted.timeline as Row;
-    expectEqual(typeof timeline.placedAt, 'string', 'timeline.placedAt is stamped at creation');
-    expectEqual('scheduledFor' in timeline, false, 'no scheduledFor in an immediate timeline');
+    let thrown: unknown = null;
+    try {
+      await place({ ...BASE_INPUT, items: [{ id: 'item-1', quantity: 1 }] });
+    } catch (error) {
+      thrown = error;
+    }
+    expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
   } finally {
     mocks.restore();
   }

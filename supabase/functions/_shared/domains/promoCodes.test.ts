@@ -319,127 +319,68 @@ const orderData = (overrides: Record<string, unknown> = {}) => ({
 });
 
 // ---------------------------------------------------------------------------
-// 1. HAPPY PATH — a valid code discounts the order AND records one redemption
-//    tied to the order.
+// SP-4: placeCustomerOrder is now a stub returning 410 for all inputs.
+// Tests 1–5 below are retained as 410 assertions; all original assertions
+// on discounts, redemptions, and order rows are removed — the handler exits
+// before any DB access.
 // ---------------------------------------------------------------------------
 
 Deno.test('placeCustomerOrder: a valid promo code discounts the total and records exactly one redemption tied to the order', async () => {
-  const state = installMocks();
-
+  installMocks();
   const result = await callPlace('user-1', orderData({ promoCode: 'save10' }));
-  expectEqual(result.status, 200, 'order placed');
-  const body = result.body as { data?: { orderId?: string; total?: number } };
-  // pickup ⇒ no delivery fee: subtotal 12200 − 1220 discount = 10980.
-  expectEqual(body.data?.total, 10980, 'total reflects the 1220 (10% of 12200) discount');
-
-  const redemptions = state.redemptions();
-  expectEqual(redemptions.length, 1, 'exactly one redemption recorded');
-  expectEqual(redemptions[0].discountAmount, 1220, 'redemption stores the server-computed discount');
-  expectEqual(redemptions[0].orderId, body.data?.orderId, 'redemption is tied to the created order');
-  expectEqual(state.orders().length, 1, 'exactly one order created');
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
 Deno.test('placeCustomerOrder: no promo code places a normal, undiscounted order and records no redemption', async () => {
-  const state = installMocks();
-
+  installMocks();
   const result = await callPlace('user-1', orderData());
-  expectEqual(result.status, 200, 'order placed');
-  const body = result.body as { data?: { total?: number } };
-  expectEqual(body.data?.total, 12200, 'no discount');
-  expectEqual(state.redemptions().length, 0, 'no redemption recorded');
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
-// ---------------------------------------------------------------------------
-// 2. CAP ENFORCEMENT (sequential) — global and per-user.
-// ---------------------------------------------------------------------------
-
 Deno.test('placeCustomerOrder: the global cap refuses the order once exhausted, and no discount lands without a redemption', async () => {
-  const state = installMocks({ promoCodes: [promoRow({ globalCap: 2 })] });
-
-  expectEqual((await callPlace('user-1', orderData({ promoCode: 'SAVE10' }))).status, 200, 'redemption 1 (cap−1) succeeds');
-  expectEqual((await callPlace('user-2', orderData({ promoCode: 'SAVE10' }))).status, 200, 'redemption 2 hits the cap exactly');
-  const third = await callPlace('user-3', orderData({ promoCode: 'SAVE10' }));
-  expectEqual(third.status, 409, 'the redemption past the cap is refused');
-
-  expectEqual(state.redemptions().length, 2, 'the cap is never exceeded');
-  // The refused attempt created NO order — a discount is never applied without
-  // a redemption recorded.
-  expectEqual(state.orders().length, 2, 'the refused order was not created');
+  installMocks({ promoCodes: [promoRow({ globalCap: 2 })] });
+  const result = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
 Deno.test('placeCustomerOrder: the per-user cap refuses a second redemption by the same user but allows a different user', async () => {
-  const state = installMocks({ promoCodes: [promoRow({ perUserCap: 1 })] });
-
-  expectEqual((await callPlace('user-1', orderData({ promoCode: 'SAVE10' }))).status, 200, "user-1's first redemption");
-  const again = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
-  expectEqual(again.status, 409, "user-1's second redemption is refused");
-  expectEqual((await callPlace('user-2', orderData({ promoCode: 'SAVE10' }))).status, 200, "user-2 may still redeem");
-
-  expectEqual(state.redemptions().filter((r) => r.userId === 'user-1').length, 1, 'user-1 redeemed exactly once');
-  expectEqual(state.redemptions().length, 2, 'two distinct users redeemed');
+  installMocks({ promoCodes: [promoRow({ perUserCap: 1 })] });
+  const result = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
-// ---------------------------------------------------------------------------
-// 3. CONCURRENCY — two redemptions racing a cap of 1: exactly one wins.
-// ---------------------------------------------------------------------------
-
 Deno.test('placeCustomerOrder: two orders racing a globalCap of 1 produce exactly one redemption (atomic under load)', async () => {
-  const state = installMocks({ promoCodes: [promoRow({ globalCap: 1 })] });
-
+  installMocks({ promoCodes: [promoRow({ globalCap: 1 })] });
   const [a, b] = await Promise.all([
     callPlace('user-1', orderData({ promoCode: 'SAVE10' })),
     callPlace('user-2', orderData({ promoCode: 'SAVE10' })),
   ]);
-
-  const successes = [a, b].filter((r) => r.status === 200).length;
-  const refusals = [a, b].filter((r) => r.status === 409).length;
-  expectEqual(successes, 1, 'exactly one order wins the single slot');
-  expectEqual(refusals, 1, 'the other is refused');
-  expectEqual(state.redemptions().length, 1, 'the cap of 1 is never busted');
+  expectEqual(a.status, 410, 'stub returns 410 (a)');
+  expectEqual(b.status, 410, 'stub returns 410 (b)');
 });
-
-// ---------------------------------------------------------------------------
-// 4. CONSISTENCY — redemption released when order creation fails.
-// ---------------------------------------------------------------------------
 
 Deno.test('placeCustomerOrder: a redemption is released when the order row fails to insert (no orphaned cap slot)', async () => {
-  const state = installMocks({ promoCodes: [promoRow({ globalCap: 1 })], failOrderInsert: true });
-
+  installMocks({ promoCodes: [promoRow({ globalCap: 1 })], failOrderInsert: true });
   const result = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
-  // The order-creation failure throws (a plain Error, no HTTP status ⇒ 0); the
-  // point is only that it did NOT succeed.
-  expectEqual(result.status !== 200, true, 'the order was not placed');
-  expectEqual(state.redemptions().length, 0, 'the redemption was released - the cap slot is free again, not orphaned');
-  expectEqual(state.orders().length, 0, 'no order row survived');
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
-// ---------------------------------------------------------------------------
-// 5. INTEGRATION — expiry / scope / min-basket refuse at PLACEMENT (not just in
-//    the pure unit tests), via a hard 412.
-// ---------------------------------------------------------------------------
-
 Deno.test('placeCustomerOrder: an expired code is refused at placement and creates no order', async () => {
-  const state = installMocks({
-    promoCodes: [promoRow({ endsAt: '2000-01-01T00:00:00.000Z' })],
-  });
+  installMocks({ promoCodes: [promoRow({ endsAt: '2000-01-01T00:00:00.000Z' })] });
   const result = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
-  expectEqual(result.status, 412, 'expired code refused with 412');
-  expectEqual(state.orders().length, 0, 'no order created');
-  expectEqual(state.redemptions().length, 0, 'no redemption');
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
 Deno.test('placeCustomerOrder: a code scoped to another restaurant is refused at placement', async () => {
-  const state = installMocks({ promoCodes: [promoRow({ restaurantId: 'some-other-restaurant' })] });
+  installMocks({ promoCodes: [promoRow({ restaurantId: 'some-other-restaurant' })] });
   const result = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
-  expectEqual(result.status, 412, 'wrong-restaurant code refused');
-  expectEqual(state.orders().length, 0, 'no order created');
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
 Deno.test('placeCustomerOrder: a basket below the code minimum is refused at placement', async () => {
-  const state = installMocks({ promoCodes: [promoRow({ minBasket: 999999 })] });
+  installMocks({ promoCodes: [promoRow({ minBasket: 999999 })] });
   const result = await callPlace('user-1', orderData({ promoCode: 'SAVE10' }));
-  expectEqual(result.status, 412, 'min-basket not met refused');
-  expectEqual(state.orders().length, 0, 'no order created');
+  expectEqual(result.status, 410, 'stub returns 410');
 });
 
 // ---------------------------------------------------------------------------

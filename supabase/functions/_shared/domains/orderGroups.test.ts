@@ -207,42 +207,34 @@ const place = async (data: Row) =>
   // deno-lint-ignore no-explicit-any
   await (placeHandler as any)({ context: CUSTOMER_CONTEXT, data, request: fakeRequest() });
 
+// SP-4: placeCustomerOrder is now a stub returning 410. The multi-restaurant
+// group-order test is retained as a 410 assertion; the original assertions
+// on group/order writes are removed (handler exits before any DB access).
 Deno.test('placeCustomerOrder creates one group and one order per restaurant', async () => {
   const mocks = installMocks();
   try {
-    const response = await place({
-      fulfillmentType: 'delivery',
-      idempotencyKey: 'group-test',
-      items: [
-        { id: 'item-1', quantity: 1, restaurantId: 'restaurant-1', restaurantName: 'Kitchen One' },
-        { id: 'item-2', quantity: 2, restaurantId: 'restaurant-2', restaurantName: 'Kitchen Two' },
-      ],
-      paymentMethod: 'cash',
-      restaurantId: 'restaurant-1',
-      tipAmount: 0,
-      deliveryLocation: {
-        address: 'Test address',
-        latitude: 6.52,
-        longitude: 3.38,
-      },
-    });
-
-    const body = await response.json();
-    expectEqual(body.data.status, 'placed', 'group order lands immediately');
-    expectEqual(body.data.total, 4620, 'group total sums both restaurant orders');
-    expectEqual(mocks.state.groupInserts.length, 1, 'one order group is written');
-    expectEqual(mocks.state.orderInserts.length, 2, 'two restaurant orders are written');
-
-    const groupInsert = mocks.state.groupInserts[0];
-    expectEqual(groupInsert.restaurantCount, 2, 'group tracks both restaurants');
-    expectEqual(groupInsert.primaryOrderId, body.data.orderId, 'primary order id anchors the group');
-
-    const firstOrder = mocks.state.orderInserts[0];
-    const secondOrder = mocks.state.orderInserts[1];
-    expectEqual(firstOrder.orderGroupId, body.data.orderId, 'first order is in the group');
-    expectEqual(secondOrder.orderGroupId, body.data.orderId, 'second order is in the group');
-    expectEqual(firstOrder.restaurantId, 'restaurant-1', 'first order keeps its restaurant');
-    expectEqual(secondOrder.restaurantId, 'restaurant-2', 'second order keeps its restaurant');
+    let thrown: unknown = null;
+    try {
+      await place({
+        fulfillmentType: 'delivery',
+        idempotencyKey: 'group-test',
+        items: [
+          { id: 'item-1', quantity: 1, restaurantId: 'restaurant-1', restaurantName: 'Kitchen One' },
+          { id: 'item-2', quantity: 2, restaurantId: 'restaurant-2', restaurantName: 'Kitchen Two' },
+        ],
+        paymentMethod: 'cash',
+        restaurantId: 'restaurant-1',
+        tipAmount: 0,
+        deliveryLocation: {
+          address: 'Test address',
+          latitude: 6.52,
+          longitude: 3.38,
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
   } finally {
     mocks.restore();
   }

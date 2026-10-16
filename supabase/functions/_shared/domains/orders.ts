@@ -693,13 +693,13 @@ const prepareCustomerOrderDraft = async (
     fail(400, 'Unsupported fulfillment type.');
   }
 
-  if (!['cash', 'card', 'bank_transfer', 'wallet'].includes(paymentMethod)) {
+  if (!['card', 'bank_transfer', 'wallet'].includes(paymentMethod)) {
     fail(400, 'Unsupported payment method.');
   }
 
   if (!allowedPaymentMethods.includes(paymentMethod)) {
     if (paymentMethod === 'wallet') {
-      fail(412, 'Wallet payments are still coming soon. Use card, bank transfer, or cash for now.');
+      fail(412, 'Wallet payments are still coming soon. Use card or bank transfer.');
     }
 
     fail(412, 'This checkout flow does not support the selected payment method.');
@@ -1650,174 +1650,13 @@ const customerToggleFavoriteRestaurant: Handler = async ({ context, data }) => {
   });
 };
 
-const placeCustomerOrder: Handler = async ({ context, data }) => {
-  ensureRole(context.role, ['customer']);
-  const orderDraft = await prepareCustomerOrderDraft(data, ['cash']);
-  const idempotencyKey = orderDraft.idempotencyKey
-    ? `${context.uid}:place_customer_order:${orderDraft.idempotencyKey}`
-    : null;
-
-  if (idempotencyKey) {
-    const existing = await getIdempotencyRecord(idempotencyKey);
-    if (existing?.response) {
-      return json(200, { data: existing.response });
-    }
-  }
-
-  const groupedOrders = Array.isArray((orderDraft as { orders?: unknown }).orders)
-    ? (orderDraft as { orders: PreparedRestaurantOrderDraft[] }).orders
-    : null;
-  const orderId = groupedOrders?.[0]?.orderId ?? crypto.randomUUID();
-  // Redeem BEFORE the order row lands: a cap-busted code fails here (409) and
-  // no order is created; and if order creation then throws, the redemption is
-  // released so a failed placement never consumes a cap slot.
-  await redeemResolvedPromoOrFail(orderDraft.resolvedPromo, context.uid, orderId, orderDraft.pricing.discount);
-  const payment = buildInitialPaymentSummary({
-    paymentMethod: orderDraft.paymentMethod,
-    settlement: (orderDraft.pricing.settlement ?? null) as JsonObject | null,
-    deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
-  });
-
-  // Task 18 (G2): a scheduled order lands in 'scheduled', an immediate one in
-  // 'placed'. Everything else on this path is unchanged.
-  const landedStatus = orderDraft.scheduledFor ? ORDER_STATUS.SCHEDULED : ORDER_STATUS.PLACED;
-
-  let orderCreation: { createdAt: string; timeline: JsonObject };
-  try {
-    if (groupedOrders) {
-      orderCreation = await createOrderGroupWithItems({
-        customerId: context.uid,
-        deliveryLocation: orderDraft.deliveryLocation,
-        fulfillmentType: orderDraft.fulfillmentType,
-        groupId: orderId,
-        orders: groupedOrders,
-        payment,
-        paymentMethod: orderDraft.paymentMethod,
-        pricing: orderDraft.pricing,
-        scheduledFor: orderDraft.scheduledFor,
-      });
-    } else {
-      orderCreation = await createOrderWithItems({
-        customerId: context.uid,
-        deliveryLocation: orderDraft.deliveryLocation,
-        fulfillmentType: orderDraft.fulfillmentType,
-        // Not the grouped branch, so this draft is the single-restaurant
-        // shape and carries items. Narrowed the same way `orders` is above.
-        items: (orderDraft as { items: PreparedOrderItem[] }).items,
-        orderId,
-        payment,
-        pricing: orderDraft.pricing,
-        restaurantId: orderDraft.restaurantId,
-        restaurantName: sanitizeText(
-          (orderDraft as { restaurant?: RestaurantRecordRow }).restaurant?.name,
-          'Restaurant'
-        ),
-        scheduledFor: orderDraft.scheduledFor,
-      });
-    }
-  } catch (error) {
-    if (orderDraft.resolvedPromo) {
-      await releasePromoRedemption(orderId);
-    }
-    throw error;
-  }
-
-  await insertDeliveryEvent({
-    orderId,
-    eventType: 'order_placed',
-    actorUid: context.uid,
-    details: {
-      fulfillmentType: orderDraft.fulfillmentType,
-      paymentMethod: orderDraft.paymentMethod,
-      scheduledFor: orderDraft.scheduledFor,
-      total: orderDraft.pricing.total,
-    },
-  });
-
-  // BEST-EFFORT -- never allowed to fail the placement. By this point the order
-  // row and its audit entry are already written, so a throw here would report
-  // failure for an order that actually exists: the customer retries and places a
-  // duplicate, and on a prepaid method pays twice. Risk capture reads
-  // CustomerOrder and writes RiskEvent, and loadRecentCustomerOrders turns any
-  // PostgREST error into a throw, so an ordinary transient blip was enough.
-  // Signals are observability; they do not get to take down a paid order.
-  // Same discipline as releasePromoRedemption in _shared/orders.ts.
-  try {
-    await captureOrderPlacementRiskSignals({
-      customerId: context.uid,
-      deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
-      orderId,
-    });
-  } catch (error) {
-    logEdgeEvent('error', 'order placement risk signal capture failed', {
-      error: error instanceof Error ? error.message : String(error),
-      orderId,
-    });
-  }
-
-  const response = {
-    orderId,
-    paymentStatus: sanitizeText(payment.status, PAYMENT_STATUS.PENDING),
-    scheduledFor: orderDraft.scheduledFor,
-    status: landedStatus,
-    total: orderDraft.pricing.total,
-  };
-
-  if (idempotencyKey) {
-    await storeIdempotencyRecord(idempotencyKey, 'place_customer_order', context.uid, response);
-  }
-
-  if (groupedOrders) {
-    for (const restaurantOrder of groupedOrders) {
-      await notifyRestaurantUsers(restaurantOrder.restaurantId, {
-        title: 'New cash order',
-        body: `Order ${orderId.slice(-6).toUpperCase()} is waiting for restaurant confirmation.`,
-        data: buildNotificationData({
-          app: 'partner',
-          orderId: restaurantOrder.orderId,
-          routeKey: 'partner_order_detail',
-          type: 'order_update',
-        }),
-      });
-    }
-  } else {
-    await notifyRestaurantUsers(orderDraft.restaurantId, {
-      title: 'New cash order',
-      body: `Order ${orderId.slice(-6).toUpperCase()} is waiting for restaurant confirmation.`,
-      data: buildNotificationData({
-        app: 'partner',
-        orderId,
-        routeKey: 'partner_order_detail',
-        type: 'order_update',
-      }),
-    });
-  }
-
-  await notifySafely(async () => {
-    const restaurantName = sanitizeText(
-      (orderDraft as { primaryRestaurant?: RestaurantRecordRow | null }).primaryRestaurant?.name ??
-        (orderDraft as { restaurant?: RestaurantRecordRow | null }).restaurant?.name,
-      'the restaurant'
-    );
-    await sendTransactionalEmail({
-      to: context.email,
-      subject: `Order ${shortOrderCode(orderId)} placed`,
-      html: buildTransactionalEmailHtml({
-        heading: 'Your order has been placed',
-        lines: [
-          groupedOrders
-            ? `We received your multi-store order ${shortOrderCode(orderId)} for ${restaurantName} and other selected restaurants.`
-            : `We received your order ${shortOrderCode(orderId)} for ${restaurantName}.`,
-          `Total: ${formatNairaAmount(orderDraft.pricing.total)} (pay with cash on ${
-            orderDraft.fulfillmentType === 'delivery' ? 'delivery' : 'pickup'
-          }).`,
-          'We will keep you posted as the restaurant confirms and prepares your order.',
-        ],
-      }),
-    });
-  });
-
-  return json(200, { data: response });
+const placeCustomerOrder: Handler = async () => {
+  // SP-4: cash removed platform-wide. The action is kept in the route map so
+  // old clients receive a clear 410 rejection rather than an unknown-action
+  // error. In-flight cash orders (payment.method = 'cash') that were placed
+  // before this deploy need manual admin settlement -- the dispatch/partner
+  // delivered-transition no longer sets cash_collected_on_delivery.
+  fail(410, 'Cash payments are no longer accepted. Please use card or bank transfer.');
 };
 
 const initializeCustomerPayment: Handler = async ({ context, data }) => {

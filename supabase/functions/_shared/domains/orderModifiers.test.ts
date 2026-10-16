@@ -222,45 +222,26 @@ const place = async (data: Row) =>
   // deno-lint-ignore no-explicit-any
   await (placeHandler as any)({ context: CUSTOMER_CONTEXT, data, request: fakeRequest() });
 
+// SP-4: placeCustomerOrder is now a stub returning 410. These tests are
+// retained as 410 assertions; the original assertions on pricing and DB
+// writes are removed (handler exits before any DB access).
 Deno.test('placeCustomerOrder prices modifier selections and persists the selection payload', async () => {
   const mocks = installMocks(buildRestaurant());
   try {
-    const response = await place({
-      fulfillmentType: 'pickup',
-      idempotencyKey: 'modifier-test',
-      items: [
-        {
-          id: 'item-1',
-          quantity: 1,
-          selectedOptions: [{ groupId: 'protein', optionId: 'chicken' }],
-        },
-      ],
-      paymentMethod: 'cash',
-      restaurantId: 'restaurant-1',
-      tipAmount: 0,
-    });
-
-    const body = await response.json();
-    expectEqual(body.data.status, 'placed', 'order lands immediately');
-    expectEqual(body.data.total, 2860, 'option-inclusive price is marked up');
-    expectEqual(mocks.state.orderInserts.length, 1, 'one order is written');
-    expectEqual(mocks.state.itemInserts.length, 1, 'one item payload is written');
-
-    const insertedItem = (mocks.state.itemInserts[0] as Row[])[0] ?? {};
-    expectEqual(insertedItem.price, 2860, 'stored item carries the option-inclusive customer price');
-    expectEqual(
-      JSON.stringify(insertedItem.selectedOptions),
-      JSON.stringify([
-        {
-          groupId: 'protein',
-          groupLabel: 'Protein',
-          optionId: 'chicken',
-          optionLabel: 'Chicken',
-          priceDelta: 300,
-        },
-      ]),
-      'stored item carries the selected option payload'
-    );
+    let thrown: unknown = null;
+    try {
+      await place({
+        fulfillmentType: 'pickup',
+        idempotencyKey: 'modifier-test',
+        items: [{ id: 'item-1', quantity: 1, selectedOptions: [{ groupId: 'protein', optionId: 'chicken' }] }],
+        paymentMethod: 'cash',
+        restaurantId: 'restaurant-1',
+        tipAmount: 0,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
   } finally {
     mocks.restore();
   }
@@ -368,29 +349,29 @@ Deno.test('resolveModifierSelections derives a bound when max is unconfigured', 
 Deno.test('placeCustomerOrder accepts add-ons from a group with no configured max', async () => {
   const mocks = installMocks(buildRestaurantWithOpenModifierGroup());
   try {
-    const response = await place({
-      fulfillmentType: 'pickup',
-      idempotencyKey: 'modifier-null-max-test',
-      items: [
-        {
-          id: 'item-1',
-          quantity: 1,
-          selectedOptions: [
-            { groupId: 'extras', optionId: 'plantain' },
-            { groupId: 'extras', optionId: 'salad' },
-          ],
-        },
-      ],
-      paymentMethod: 'cash',
-      restaurantId: 'restaurant-1',
-      tipAmount: 0,
-    });
-
-    const body = await response.json();
-    expectEqual(response.status, 200, `checkout is not blocked by a null max (${JSON.stringify(body)})`);
-    expectEqual(body.data.status, 'placed', 'order lands immediately');
-    // (2000 base + 300 + 200) × 1.2 + 100 = 3100
-    expectEqual(body.data.total, 3100, 'option-inclusive price is marked up');
+    let thrown: unknown = null;
+    try {
+      await place({
+        fulfillmentType: 'pickup',
+        idempotencyKey: 'modifier-null-max-test',
+        items: [
+          {
+            id: 'item-1',
+            quantity: 1,
+            selectedOptions: [
+              { groupId: 'extras', optionId: 'plantain' },
+              { groupId: 'extras', optionId: 'salad' },
+            ],
+          },
+        ],
+        paymentMethod: 'cash',
+        restaurantId: 'restaurant-1',
+        tipAmount: 0,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
   } finally {
     mocks.restore();
   }

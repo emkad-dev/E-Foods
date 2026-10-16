@@ -1,23 +1,7 @@
-// Regression tests for the BEST-EFFORT discipline around
-// `captureOrderPlacementRiskSignals` inside the REAL `placeCustomerOrder`
-// handler.
-//
-// The defect these guard against: risk capture runs AFTER the CustomerOrder
-// row and its `order_placed` audit entry are written. It reads CustomerOrder
-// through `loadRecentCustomerOrders` (_shared/riskSignals.ts), which converts
-// any PostgREST error into a `throw`. Before the try/catch, an ordinary
-// transient database blip on that read failed the whole placement RPC for an
-// order that ALREADY EXISTED -- the customer is told placement failed, retries,
-// and places a duplicate; on a prepaid method they pay twice.
-//
-// Same harness shape and rationale as placeCustomerOrderAvailability.test.ts /
-// orderModifiers.test.ts: the domain modules statically import
-// `_shared/client.ts`, which throws at module-evaluation time without
-// SUPABASE_URL / SERVICE_ROLE_KEY set first, so those are set BEFORE the
-// dynamic import, and the REAL handler is pulled out of
-// `ordersDomain.handlers`. Mocks return snapshots (plain objects captured at
-// call time), never live references the handler could mutate out from under an
-// assertion.
+// Originally tested the BEST-EFFORT discipline around
+// `captureOrderPlacementRiskSignals` inside `placeCustomerOrder`. SP-4
+// (cash removal) stubbed the handler to return 410 immediately, making
+// risk-capture code unreachable. Tests below verify the stub behavior.
 
 Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
@@ -294,101 +278,67 @@ const expectSuccessfulPlacement = async (response: Response, label: string) => {
   return body.data as { orderId: string; status: string; total: number };
 };
 
-// --- 1. The read inside risk capture fails ---------------------------------
+// --- SP-4 stub verification ------------------------------------------------
 //
-// THE test. `loadRecentCustomerOrders` throws on a PostgREST error, and the
-// order row plus its audit entry are already written by this point. Without the
-// try/catch in placeCustomerOrder this rejects and the customer is told an
-// order that exists failed to place.
-Deno.test('placeCustomerOrder: a failed CustomerOrder read inside risk capture does NOT fail the placement', async () => {
-  const state = installMocks({
-    customerOrderSelectResult: { data: null, error: { message: 'canceling statement due to statement timeout' } },
-  });
-
-  const response = await placeOrder();
-
-  const data = await expectSuccessfulPlacement(response, 'risk-capture read failure');
-  // The order really was written before risk capture ran -- which is precisely
-  // why throwing here was so damaging.
-  expectEqual(state.orderInserts.length, 1, 'exactly one CustomerOrder insert');
-  expectEqual(state.deliveryEvents.length, 1, 'the order_placed audit entry was written');
-  expectEqual(typeof data.orderId, 'string', 'the caller gets back the id of the order that exists');
-});
-
-// --- 2. The RiskEvent write fails ------------------------------------------
-//
-// Defence in depth. NOTE (honest scoping): this one passes with or without the
-// try/catch in placeCustomerOrder, because the write path is already doubly
-// guarded -- `recordRiskEvent` (_shared/riskEvents.ts) try/catches the upsert
-// AND returns null on a PostgREST error, and `writeRiskEvents`
-// (_shared/riskSignals.ts) try/catches each recordRiskEvent call on top.
-// It is kept because those two guards are the thing that makes the claim true,
-// and nothing else asserts they hold from the placement's point of view: if
-// either is ever removed, this test catches it.
-Deno.test('placeCustomerOrder: a failed RiskEvent write does NOT fail the placement', async () => {
-  const state = installMocks({
-    riskEventUpsertResult: { error: { message: 'remaining connection slots are reserved' } },
-  });
-
-  const { result } = await captureConsoleErrors(() => placeOrder());
-
-  await expectSuccessfulPlacement(result, 'risk-event write failure');
-  expectEqual(state.orderInserts.length, 1, 'exactly one CustomerOrder insert');
-  expectEqual(state.riskEventUpserts.length > 0, true, 'the RiskEvent write was actually attempted');
-});
-
-// --- 3. The happy path still captures signals ------------------------------
-//
-// Proves the try/catch did not silently disable the feature: with nothing
-// failing, an account_velocity RiskEvent is still written.
-Deno.test('placeCustomerOrder: risk signals are still captured when nothing fails', async () => {
-  const state = installMocks();
-
-  const response = await placeOrder();
-
-  const data = await expectSuccessfulPlacement(response, 'happy path');
-  expectEqual(state.riskEventUpserts.length, 1, 'exactly one RiskEvent written');
-
-  const riskEvent = state.riskEventUpserts[0] as Record<string, unknown>;
-  expectEqual(riskEvent.eventType, 'account_velocity', 'captured event type');
-  expectEqual(riskEvent.subjectType, 'account', 'captured subject type');
-  expectEqual(riskEvent.subjectId, CUSTOMER_CONTEXT.uid, 'captured subject id');
-  expectEqual(riskEvent.severity, 'medium', 'six orders in the hour is medium (threshold 5)');
-  expectEqual(riskEvent.score, 6, 'score is the order count in the window');
-  expectEqual(riskEvent.orderId, data.orderId, 'the captured event points at the order just placed');
-});
-
-// --- 4. The failure is logged, not swallowed silently ----------------------
-//
-// logEdgeEvent('error', ...) (_shared/observability.ts) writes a JSON payload
-// to console.error, so capturing console.error is enough to prove the swallow
-// is observable. A silent catch would leave operators blind to exactly the
-// transient-database condition the change is designed to survive.
-Deno.test('placeCustomerOrder: a swallowed risk-capture failure is logged with the order id', async () => {
+// placeCustomerOrder is now a stub that returns 410 for all inputs. The
+// risk-capture path is unreachable. Tests below just confirm the stub behavior.
+Deno.test('placeCustomerOrder: stub returns 410 regardless of risk-capture mock state', async () => {
   installMocks({
     customerOrderSelectResult: { data: null, error: { message: 'canceling statement due to statement timeout' } },
   });
 
-  const { lines, result } = await captureConsoleErrors(() => placeOrder());
+  let thrown: unknown = null;
+  try {
+    await placeOrder();
+  } catch (error) {
+    thrown = error;
+  }
 
-  const data = await expectSuccessfulPlacement(result, 'logged risk-capture failure');
+  expectEqual(thrown instanceof Error, true, 'handler should throw');
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
+});
 
-  const logLine = lines.find((line) => line.includes('order placement risk signal capture failed'));
+Deno.test('placeCustomerOrder: stub returns 410 with no DB writes', async () => {
+  const state = installMocks();
+
+  let thrown: unknown = null;
+  try {
+    await placeOrder();
+  } catch (error) {
+    thrown = error;
+  }
+
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
+  expectEqual(state.orderInserts.length, 0, 'no CustomerOrder insert (stub exits before any DB write)');
+  expectEqual(state.deliveryEvents.length, 0, 'no DeliveryEvent insert');
+  expectEqual(state.riskEventUpserts.length, 0, 'no RiskEvent write');
+});
+
+Deno.test('placeCustomerOrder: stub message is client-safe cash-removal copy', async () => {
+  installMocks();
+
+  let thrown: unknown = null;
+  try {
+    await placeOrder();
+  } catch (error) {
+    thrown = error;
+  }
+
   expectEqual(
-    Boolean(logLine),
-    true,
-    `expected a logged risk-capture failure, got console.error lines: ${JSON.stringify(lines)}`
+    (thrown as Error)?.message,
+    'Cash payments are no longer accepted. Please use card or bank transfer.',
+    'rejection message is the client-safe cash-removal copy'
   );
+});
 
-  const payload = JSON.parse(logLine as string) as Record<string, unknown>;
-  expectEqual(payload.level, 'error', 'log level');
-  expectEqual(payload.message, 'order placement risk signal capture failed', 'log message');
-  expectEqual(payload.orderId, data.orderId, 'the log names the order that was placed anyway');
-  expectEqual(
-    String(payload.error).includes('canceling statement due to statement timeout'),
-    true,
-    `the underlying database error is preserved in the log, got: ${JSON.stringify(payload.error)}`
-  );
+// --- dead-code placeholder -------------------------------------------------
+//
+// The original 4 tests (risk-capture read failure, RiskEvent write failure,
+// happy-path signal capture, logged-failure) were removed because the handler
+// body they exercised is now dead code. A comment is kept here so reviewers
+// know the deletion was intentional and tracked in the SP-4 plan.
+Deno.test('placeCustomerOrderRiskSignals: original risk-capture discipline tests removed (SP-4 stub)', () => {
+  // no-op — intentional deletion, see docs/superpowers/plans/2026-10-16-dispatch-sp4-cash-removal.md
 });
 
 Deno.test('placeCustomerOrderRiskSignals cleanup: restore shared client and fetch', () => {

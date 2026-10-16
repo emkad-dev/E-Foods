@@ -1,18 +1,10 @@
-// Tests for Task 16 (F2)'s server-side enforcement inside the REAL
-// `placeCustomerOrder` handler (out of `ordersDomain.handlers`, not a
-// synthetic stub — same rationale and env-var setup as
-// registry.real-domains.test.ts / adminSetRestaurantPublished.test.ts: the
-// domain modules statically import `_shared/client.ts`, which throws at
-// module-evaluation time without SUPABASE_URL / SERVICE_ROLE_KEY set first,
-// so those two are set, then the domain module is dynamically imported.
-//
-// `catalog.ts` (public-catalog's card-list filter) has no such module-scope
-// throw — `_shared/media.ts`'s own env reads default to '' rather than
-// throwing — so it is imported statically up top, same as catalog.test.ts
-// itself does.
-//
-// Mocks return snapshots (plain objects captured at call time), never live
-// references the handler could mutate out from under an assertion.
+// Originally tested Task 16 (F2) item-availability enforcement in the REAL
+// `placeCustomerOrder` handler. SP-4 (cash removal) stubbed the handler to
+// return 410 immediately for all inputs, making the availability logic
+// unreachable. Tests below are updated to reflect the new stub behavior.
+// The drift guard is kept so catalog availability logic stays tested (the
+// stub makes placement permanently disagree, so the drift-guard assertion
+// is replaced with a stub-aware check).
 
 import { hasAvailableMenuItem } from '../../public-catalog/catalog.ts';
 
@@ -216,7 +208,7 @@ const BASE_ORDER_INPUT = {
 const futureIso = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
 const pastIso = () => new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
-Deno.test('placeCustomerOrder: rejects a manually-unavailable item, naming it, with 412', async () => {
+Deno.test('placeCustomerOrder: rejects any input with 410 (handler is a stub since SP-4 cash removal)', async () => {
   const restaurant = buildRestaurant({
     menu: buildMenu({ id: 'item-1', name: 'Jollof Rice', price: 2000, isAvailable: false }),
   });
@@ -229,16 +221,11 @@ Deno.test('placeCustomerOrder: rejects a manually-unavailable item, naming it, w
     thrown = error;
   }
 
-  expectEqual(thrown instanceof Error, true, 'an unavailable item should throw');
-  expectEqual((thrown as { status?: number })?.status, 412, 'unavailable item status');
-  expectEqual(
-    (thrown as Error).message.includes('Jollof Rice'),
-    true,
-    `rejection message should name the item, got: "${(thrown as Error).message}"`
-  );
+  expectEqual(thrown instanceof Error, true, 'handler should throw');
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410 for any input');
 });
 
-Deno.test('placeCustomerOrder: rejects an item timed-unavailable in the FUTURE, naming it, with 412', async () => {
+Deno.test('placeCustomerOrder: stub returns 410 regardless of item availability state', async () => {
   const restaurant = buildRestaurant({
     menu: buildMenu({ id: 'item-1', name: 'Jollof Rice', price: 2000, unavailableUntil: futureIso() }),
   });
@@ -251,29 +238,26 @@ Deno.test('placeCustomerOrder: rejects an item timed-unavailable in the FUTURE, 
     thrown = error;
   }
 
-  expectEqual((thrown as { status?: number })?.status, 412, 'future-timed-unavailable item status');
-  expectEqual(
-    (thrown as Error).message.includes('Jollof Rice'),
-    true,
-    `rejection message should name the item, got: "${(thrown as Error)?.message}"`
-  );
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
 });
 
-Deno.test('placeCustomerOrder: accepts an item whose unavailableUntil is in the PAST (auto-resumed, no write needed)', async () => {
+Deno.test('placeCustomerOrder: stub returns 410 even with a past unavailableUntil', async () => {
   const restaurant = buildRestaurant({
     menu: buildMenu({ id: 'item-1', name: 'Jollof Rice', price: 2000, unavailableUntil: pastIso() }),
   });
-  const state = installMocks(restaurant);
+  installMocks(restaurant);
 
-  const response = await placeOrder({ ...BASE_ORDER_INPUT, items: [{ id: 'item-1', quantity: 1 }] });
+  let thrown: unknown = null;
+  try {
+    await placeOrder({ ...BASE_ORDER_INPUT, items: [{ id: 'item-1', quantity: 1 }] });
+  } catch (error) {
+    thrown = error;
+  }
 
-  expectEqual(response.status, 200, 'a past unavailableUntil should not block the order');
-  const body = await response.json();
-  expectEqual(typeof body?.data?.orderId, 'string', 'response carries an orderId');
-  expectEqual(state.orderInserts.length, 1, 'exactly one CustomerOrder insert');
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
 });
 
-Deno.test('placeCustomerOrder: rejects placement from a paused store with 412', async () => {
+Deno.test('placeCustomerOrder: stub returns 410 even for a paused store', async () => {
   const restaurant = buildRestaurant({ pausedUntil: futureIso() });
   installMocks(restaurant);
 
@@ -284,52 +268,31 @@ Deno.test('placeCustomerOrder: rejects placement from a paused store with 412', 
     thrown = error;
   }
 
-  expectEqual((thrown as { status?: number })?.status, 412, 'paused store status');
-  expectEqual(
-    /paused/i.test((thrown as Error)?.message ?? ''),
-    true,
-    `rejection should mention the store is paused, got: "${(thrown as Error)?.message}"`
-  );
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
 });
 
-Deno.test('placeCustomerOrder: a pausedUntil in the PAST does not block placement (auto-resumed, no write needed)', async () => {
+Deno.test('placeCustomerOrder: stub returns 410 even with a past pausedUntil', async () => {
   const restaurant = buildRestaurant({ pausedUntil: pastIso() });
   installMocks(restaurant);
 
   let thrown: unknown = null;
   try {
-    // Empty items deliberately trips a DIFFERENT, later 400 ("Add at least
-    // one item...") — proving the request got past the pause gate into
-    // buildOrderItems instead of being rejected by the pause check. If the
-    // pause check still fired here, this would be a 412 pause message, not a
-    // 400 empty-items message.
     await placeOrder({ ...BASE_ORDER_INPUT, items: [] });
   } catch (error) {
     thrown = error;
   }
 
-  expectEqual((thrown as { status?: number })?.status, 400, 'should fail on empty items, not the (expired) pause check');
-  expectEqual(
-    (thrown as Error)?.message,
-    'Add at least one item before placing an order.',
-    'failure must be the empty-items message, not a paused-store rejection'
-  );
+  expectEqual((thrown as { status?: number })?.status, 410, 'stub returns 410');
 });
 
 // --- Drift guard -----------------------------------------------------------
 //
-// Drives BOTH real call sites — public-catalog/catalog.ts's
-// hasAvailableMenuItem (the card-list filter) and the real
-// ordersDomain.handlers.placeCustomerOrder (the placement check) — with the
-// IDENTICAL item fixture across every availability state, and asserts they
-// always agree. This is the regression guard for the "ONE shared predicate"
-// requirement: today both delegate to _shared/availability.ts's
-// isMenuItemAvailable, so they agree by construction, but this test asserts
-// the observable BEHAVIOR, not the import graph — if either file ever stops
-// importing the shared predicate and hand-rolls its own check instead, this
-// test starts failing the moment the two diverge, exactly the "hidden from
-// the list but orderable at checkout" bug class Task 16's brief calls out.
-Deno.test('drift guard: hasAvailableMenuItem (catalog list filter) and placeCustomerOrder (placement) agree on every item state', async () => {
+// SP-4: placeCustomerOrder is now a stub returning 410 for all inputs, so
+// the original "catalog and placement agree" assertion no longer applies.
+// The catalog half of the guard is kept so hasAvailableMenuItem's behavior
+// continues to be asserted directly; the placement half now just verifies
+// the stub always returns 410 (not that it agrees with the catalog).
+Deno.test('drift guard: hasAvailableMenuItem (catalog list filter) returns expected availability per item state', async () => {
   const cases: Array<{ expectAvailable: boolean; item: MenuItemFixture; label: string }> = [
     { expectAvailable: true, item: { id: 'item-1', name: 'Jollof Rice', price: 2000 }, label: 'available, no fields set' },
     {
@@ -359,24 +322,18 @@ Deno.test('drift guard: hasAvailableMenuItem (catalog list filter) and placeCust
       `fixture sanity check for "${testCase.label}" (hasAvailableMenuItem)`
     );
 
+    // Placement is now a stub: always 410 regardless of item state.
     const restaurant = buildRestaurant({ menu });
     installMocks(restaurant);
 
-    let placementAccepted = true;
-    let rejectionMessage = '';
+    let placementStatus: number | undefined;
     try {
       await placeOrder({ ...BASE_ORDER_INPUT, items: [{ id: 'item-1', quantity: 1 }] });
     } catch (error) {
-      placementAccepted = false;
-      rejectionMessage = error instanceof Error ? error.message : String(error);
+      placementStatus = (error as { status?: number })?.status;
     }
 
-    expectEqual(
-      placementAccepted,
-      catalogSaysAvailable,
-      `placeCustomerOrder disagreed with hasAvailableMenuItem for "${testCase.label}" ` +
-        `(catalog says available=${catalogSaysAvailable}, placement accepted=${placementAccepted}, rejection: "${rejectionMessage}")`
-    );
+    expectEqual(placementStatus, 410, `stub returns 410 for "${testCase.label}"`);
   }
 });
 
