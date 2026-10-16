@@ -23,6 +23,12 @@ export type CustomerOrderRow = {
   customerId: string;
   deliveryAddress?: string | null;
   deliveryLocation?: JsonObject | null;
+  // SP-2 proof-of-delivery OTP. The code is customer-only: it is read by
+  // customerGetOrderDetail and deliberately never copied by
+  // toOrderSnapshotResponse (the rider/partner/admin shape).
+  deliveryCode?: string | null;
+  deliveryCodeAttempts?: number | null;
+  deliveryCodeVerifiedAt?: string | null;
   fulfillmentType?: string | null;
   id: string;
   needsAttention?: boolean | null;
