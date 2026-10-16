@@ -1221,21 +1221,52 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
 
   // Proof of delivery: the rider must enter the customer's 4-digit handoff code
-  // to mark an order delivered. Admins override for disputes (audited). The
-  // verified stamp rides on the single status write below.
+  // to mark an order delivered. Admins override for disputes (audited after the
+  // status write lands). The verified stamp rides on the single status write
+  // below.
+  //
+  // Every non-admin guess RESERVES an attempt slot with a compare-and-swap
+  // BEFORE the code is evaluated. A read-compare-then-write counter is
+  // bypassable: N parallel guesses all read the same value, all get evaluated,
+  // and all write the same increment, so a burst enumerates the 10,000-code
+  // space for the price of one attempt. With the CAS, only one racer wins each
+  // slot; losers are never evaluated, so at most DELIVERY_CODE_MAX_ATTEMPTS
+  // guesses are ever compared against an order's code.
   let deliveryCodeVerifiedAt: string | null = null;
+  let deliveryCodeOverridden = false;
   if (nextAction === 'delivered') {
     if (context.role === 'admin') {
-      await insertDeliveryEvent({
-        actorUid: context.uid,
-        details: {},
-        eventType: 'delivery_code_overridden',
-        orderId,
-      });
+      deliveryCodeOverridden = true;
     } else {
+      const lockedMessage = 'Too many incorrect delivery codes. Contact support to complete this delivery.';
       const attempts = bundle.order.deliveryCodeAttempts ?? 0;
       if (attempts >= DELIVERY_CODE_MAX_ATTEMPTS) {
-        fail(429, 'Too many incorrect delivery codes. Contact support to complete this delivery.');
+        fail(429, lockedMessage);
+      }
+      const { data: reserved, error: reserveError } = await serviceClient
+        .from('CustomerOrder')
+        .update({ deliveryCodeAttempts: attempts + 1 })
+        .eq('id', orderId)
+        .eq('deliveryCodeAttempts', attempts)
+        .select('id');
+      if (reserveError) {
+        throw new Error(reserveError.message);
+      }
+      if (!Array.isArray(reserved) || reserved.length === 0) {
+        // A concurrent request took this slot. Do not evaluate this guess and do
+        // not retry: report the lock if it has now tripped, else a plain miss.
+        const { data: current, error: rereadError } = await serviceClient
+          .from('CustomerOrder')
+          .select('deliveryCodeAttempts')
+          .eq('id', orderId)
+          .maybeSingle<{ deliveryCodeAttempts: number | null }>();
+        if (rereadError) {
+          throw new Error(rereadError.message);
+        }
+        if ((current?.deliveryCodeAttempts ?? 0) >= DELIVERY_CODE_MAX_ATTEMPTS) {
+          fail(429, lockedMessage);
+        }
+        fail(400, 'That delivery code is incorrect.');
       }
       const submittedCode = data.deliveryCode;
       const storedCode = bundle.order.deliveryCode;
@@ -1244,13 +1275,6 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
         typeof storedCode === 'string' &&
         constantTimeEqual(String(submittedCode), storedCode);
       if (!codeMatches) {
-        const { error: attemptsError } = await serviceClient
-          .from('CustomerOrder')
-          .update({ deliveryCodeAttempts: attempts + 1 })
-          .eq('id', orderId);
-        if (attemptsError) {
-          throw new Error(attemptsError.message);
-        }
         fail(400, 'That delivery code is incorrect.');
       }
       deliveryCodeVerifiedAt = nowIso();
@@ -1364,6 +1388,14 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     }
   }
 
+  if (deliveryCodeOverridden) {
+    await insertDeliveryEvent({
+      actorUid: context.uid,
+      details: {},
+      eventType: 'delivery_code_overridden',
+      orderId,
+    });
+  }
   await insertDeliveryEvent({
     orderId,
     eventType: `dispatch_${nextAction}`,

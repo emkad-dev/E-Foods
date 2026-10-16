@@ -122,7 +122,7 @@ const originalFrom = serviceClient.from.bind(serviceClient);
 const originalRpc = serviceClient.rpc.bind(serviceClient);
 const originalFetch = globalThis.fetch;
 
-const installMocks = (opts: { attempts?: number } = {}) => {
+const installMocks = (opts: { attempts?: number; racerBumpsAttempts?: boolean } = {}) => {
   const tables = {
     CustomerOrder: createTable([
       {
@@ -185,6 +185,21 @@ const installMocks = (opts: { attempts?: number } = {}) => {
   }) as typeof fetch;
 
   const order = () => tables.CustomerOrder.rows[0];
+
+  // Simulates a concurrent request taking the attempt slot between this
+  // handler's snapshot read and its compare-and-swap reservation.
+  if (opts.racerBumpsAttempts) {
+    const realUpdate = tables.CustomerOrder.update.bind(tables.CustomerOrder);
+    let bumped = false;
+    tables.CustomerOrder.update = (payload: Row) => {
+      if (!bumped && 'deliveryCodeAttempts' in payload) {
+        bumped = true;
+        order().deliveryCodeAttempts = (order().deliveryCodeAttempts as number) + 1;
+      }
+      return realUpdate(payload);
+    };
+  }
+
   return { events: () => tables.DeliveryEvent.rows, order };
 };
 
@@ -244,7 +259,7 @@ Deno.test('delivered with the correct deliveryCode: transitions and stamps deliv
     expectEqual(response.status, 200, 'handler succeeds');
     expectEqual(state.order().status, 'delivered', 'order delivered');
     expectEqual(typeof state.order().deliveryCodeVerifiedAt, 'string', 'verified stamp set');
-    expectEqual(state.order().deliveryCodeAttempts, 0, 'no attempt counted');
+    expectEqual(state.order().deliveryCodeAttempts, 1, 'the slot was reserved before the compare');
     expectEqual(
       state.events().some((event) => event.eventType === 'delivery_code_overridden'),
       false,
@@ -276,6 +291,42 @@ Deno.test('delivered by an admin with no code: succeeds and records delivery_cod
     const override = state.events().find((event) => event.eventType === 'delivery_code_overridden');
     expectEqual(override?.actorUid, ADMIN_ID, 'override event carries the admin uid');
     expectEqual(override?.orderId, ORDER_ID, 'override event carries the order id');
+  } finally {
+    restoreMocks();
+  }
+});
+
+Deno.test('lost attempt-slot race: the guess is never evaluated (even a correct code gets 400)', async () => {
+  const state = installMocks({ racerBumpsAttempts: true });
+  try {
+    await expectFailure(() => deliver('dispatch', '1234'), 400, 'lost race');
+    expectEqual(state.order().status, 'on_the_way', 'a guess that lost the slot cannot deliver');
+    expectEqual(state.order().deliveryCodeVerifiedAt, null, 'not verified');
+    expectEqual(state.order().deliveryCodeAttempts, 1, 'only the racing request increment landed');
+  } finally {
+    restoreMocks();
+  }
+});
+
+Deno.test('lost attempt-slot race that trips the lock reports 429', async () => {
+  const state = installMocks({ attempts: 4, racerBumpsAttempts: true });
+  try {
+    await expectFailure(() => deliver('dispatch', '9999'), 429, 'lost race at the cap');
+    expectEqual(state.order().deliveryCodeAttempts, 5, 'counter stays at the cap');
+    expectEqual(state.order().status, 'on_the_way', 'status unchanged');
+  } finally {
+    restoreMocks();
+  }
+});
+
+Deno.test('4th to 5th boundary: the 5th wrong guess gets 400 and locks; the next guess gets 429', async () => {
+  const state = installMocks({ attempts: 4 });
+  try {
+    await expectFailure(() => deliver('dispatch', '9999'), 400, '5th wrong guess');
+    expectEqual(state.order().deliveryCodeAttempts, 5, 'attempts now at the cap');
+    await expectFailure(() => deliver('dispatch', '1234'), 429, 'guess after lock');
+    expectEqual(state.order().deliveryCodeAttempts, 5, 'counter not advanced past the cap');
+    expectEqual(state.order().status, 'on_the_way', 'status unchanged');
   } finally {
     restoreMocks();
   }
