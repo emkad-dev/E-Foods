@@ -285,7 +285,12 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
         longitude: null,
         status: 'Available',
         vehicleType: 'bike',
+        // Re-offer selection gates on KYC approval + a fresh ping (SP-1 Task 3).
+        verificationStatus: 'approved',
       }))
+    ),
+    rider_live_location: createTable(
+      riders.map((id) => ({ rider_id: id, updated_at: new Date().toISOString() }))
     ),
     // loadDispatchWeights reads this; without it the loader logs a warning and
     // falls back to identical defaults. Modelled so the re-offer path exercises
