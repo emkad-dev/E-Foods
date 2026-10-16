@@ -7,6 +7,7 @@ import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
 import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
+import { RiderAvailabilityProvider, useRiderAvailability } from '../src/contexts/RiderAvailabilityContext';
 import DispatchComingSoon from '../src/components/DispatchComingSoon';
 import { installWebFocusRing } from '../../../packages/design-system/src/a11y/focusRing';
 import { dispatchTheme } from '../src/theme/palette';
@@ -26,10 +27,17 @@ const initializeSentry = createSentryInitializer({
 // login, and live location tracking back online — no deleted code to restore.
 const DISPATCH_ENABLED = false;
 
+const ACTIVE_LOCATION_INTERVAL_MS = 5000;
+const IDLE_HEARTBEAT_INTERVAL_MS = 60000;
+const ACTIVE_MIN_ACCURACY_M = 50;
+const IDLE_MIN_ACCURACY_M = 200;
+// Under the server's 120s freshness window, so a genuinely fresh beat still sends.
+const MAX_FIX_AGE_MS = 90000;
+
 function DispatchLocationSyncBridge() {
   const { user } = useAuth();
-  // Battery/cost gate: only stream location while this rider actually holds
-  // a live delivery, not just because their queue screen is showing unowned
+  // Battery/cost gate: only stream location while this rider is Available or
+  // actually holds a live delivery, not just because their queue screen is showing unowned
   // manual-queue work they could self-assign. `activeDeliveryOrders` (from
   // useDispatchOrders) is deliberately broader than that for a `dispatch`
   // role - dispatchGetDeliveryQueue surfaces both this rider's own assigned
@@ -44,14 +52,36 @@ function DispatchLocationSyncBridge() {
     () => activeDeliveryOrders.some((order) => order.assignment?.courierId === user?.uid),
     [activeDeliveryOrders, user?.uid]
   );
+  // Presence: an idle rider who is Available must still ping, otherwise SP-1's
+  // 120s freshness gate never sees them and they can never be offered work.
+  // Offline + no assignment streams nothing.
+  const { isAvailable } = useRiderAvailability();
+  const shouldStream = isAvailable || hasActiveAssignment;
+  // Cadence: a live delivery keeps the fast beat customer tracking needs; an
+  // idle-but-Available rider only needs a slow heartbeat well inside the 120s
+  // freshness window (each beat is an edge-function invocation, so no faster).
+  // distanceInterval 0 so a parked rider still beats (Android ANDs time+distance).
   const { location } = useRealTimeLocation({
-    enabled: user?.role === 'dispatch' && hasActiveAssignment,
-    highAccuracy: true,
-    updateInterval: 5000,
+    enabled: user?.role === 'dispatch' && shouldStream,
+    highAccuracy: hasActiveAssignment,
+    updateInterval: hasActiveAssignment ? ACTIVE_LOCATION_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS,
+    distanceInterval: hasActiveAssignment ? 5 : 0,
+    // Idle presence only needs "alive", so tolerate coarse indoor/parked fixes
+    // (otherwise they're all dropped, the rider goes stale and never gets work);
+    // a live delivery keeps the strict 50m bar customer tracking needs.
+    minAccuracy: hasActiveAssignment ? ACTIVE_MIN_ACCURACY_M : IDLE_MIN_ACCURACY_M,
   });
 
   useEffect(() => {
-    if (!user || user.role !== 'dispatch' || !hasActiveAssignment || !location) {
+    if (!user || user.role !== 'dispatch' || !shouldStream || !location) {
+      return;
+    }
+
+    // The server stamps rider_live_location.updated_at at RECEIPT, not from the
+    // client timestamp, so replaying a stale retained fix (e.g. on Offline ->
+    // Available) would look fresh at a place the rider left long ago. Skip it;
+    // the next real fix syncs.
+    if (Date.now() - location.timestamp > MAX_FIX_AGE_MS) {
       return;
     }
 
@@ -63,7 +93,7 @@ function DispatchLocationSyncBridge() {
     }).catch((error) => {
       console.warn('Failed to sync dispatch location:', error);
     });
-  }, [hasActiveAssignment, location, user]);
+  }, [shouldStream, location, user]);
 
   return null;
 }
@@ -138,8 +168,10 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <FeatureFlagsProvider>
-        <RootLayoutNav />
-        <DispatchLocationSyncBridge />
+        <RiderAvailabilityProvider>
+          <RootLayoutNav />
+          <DispatchLocationSyncBridge />
+        </RiderAvailabilityProvider>
       </FeatureFlagsProvider>
     </AuthProvider>
   );

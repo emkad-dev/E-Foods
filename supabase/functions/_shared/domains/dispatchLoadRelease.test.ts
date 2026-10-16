@@ -370,6 +370,8 @@ const installHandlerMocks = (orderStatus: string, startingRiderLoad: number, opt
     }),
     DeliveryAssignment: createTable([buildAssignmentRow(assignmentCourierId)]),
     DeliveryEvent: createTable([]),
+    // Auto-dispatch is gated behind platform_dispatch; these scenarios exercise the enabled path.
+    FeatureFlag: createTable([{ description: null, enabled: true, key: 'platform_dispatch', updatedAt: new Date().toISOString() }]),
     DispatchRiderRecord: createTable(
       [buildRiderRow(RIDER_ID, 'Ada Rider'), buildRiderRow(RIDER_B_ID, 'Bode Rider')],
       {

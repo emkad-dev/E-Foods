@@ -194,6 +194,12 @@ export default function OrderTracking() {
     isPrepaidPaymentMethod(order.payment?.method) && ['paid', 'refunded'].includes(order.payment?.status ?? '');
   const isPendingPrepaidPayment =
     isPrepaidPaymentMethod(order.payment?.method) && (order.payment?.status ?? 'pending') === 'pending';
+  // The proof-of-delivery code is only useful (and only sent by the server)
+  // while the order is out for delivery; hide it in every other state.
+  const deliveryCode =
+    typeof order.deliveryCode === 'string' ? order.deliveryCode.trim() : '';
+  const showDeliveryCode =
+    deliveryCode.length > 0 && (normalizedStatus === 'picked_up' || normalizedStatus === 'on_the_way');
   const courierPhone = order.assignment?.courierPhone ?? null;
   const courierLatitude = order.assignment?.courierLatitude ?? null;
   const courierLongitude = order.assignment?.courierLongitude ?? null;
@@ -428,6 +434,20 @@ export default function OrderTracking() {
         <View style={styles.itemsCard}>
           <Text style={styles.sectionTitle}>Items</Text>
           <OrderItemRows items={orderItems} />
+        </View>
+      ) : null}
+
+      {showDeliveryCode ? (
+        <View style={styles.deliveryCodeCard}>
+          <Text style={styles.deliveryCodeLabel}>Delivery code</Text>
+          <Text
+            accessibilityLabel={`Delivery code ${deliveryCode.split('').join(' ')}`}
+            selectable
+            style={styles.deliveryCodeValue}
+          >
+            {deliveryCode}
+          </Text>
+          <Text style={styles.deliveryCodeHint}>Give this code to your rider at handoff.</Text>
         </View>
       ) : null}
 
@@ -831,6 +851,38 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 8,
+  },
+  deliveryCodeCard: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.accentTint,
+    borderColor: customerTheme.border,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 18,
+  },
+  deliveryCodeLabel: {
+    color: customerTheme.accentStrong,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  deliveryCodeValue: {
+    color: customerTheme.text,
+    fontSize: 44,
+    fontWeight: '800',
+    letterSpacing: 12,
+    marginTop: 8,
+    // letterSpacing trails the last glyph; pad the start so the digits stay centred.
+    paddingLeft: 12,
+  },
+  deliveryCodeHint: {
+    color: customerTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 8,
+    textAlign: 'center',
   },
   etaSummaryCard: {
     backgroundColor: customerTheme.accentTint,

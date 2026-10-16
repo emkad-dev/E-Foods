@@ -53,6 +53,7 @@
 
 import { serviceClient } from './client.ts';
 import { calculateDistanceKm, type GeoPoint } from './deliveryCoverage.ts';
+import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
 import { computeEtaRange } from './deliveryEta.ts';
 import {
   DISPATCH_OFFER_TTL_SECONDS,
@@ -61,6 +62,7 @@ import {
   offerDispatchAssignment,
 } from './dispatchOffers.ts';
 import { DEFAULT_DISPATCH_STATUS, type DispatchRiderRow } from './dispatchRiders.ts';
+import { DISPATCH_MAX_LOCATION_AGE_SECONDS, isRiderEligibleForOffer } from './riderEligibility.ts';
 import type { DispatchWeights } from './dispatchWeights.ts';
 import type { UserAccountRow } from './accounts.ts';
 import { buildNotificationData, notifyAdmins, notifyUsers } from './notifications.ts';
@@ -240,12 +242,19 @@ const loadDispatchCandidates = async (restaurantId: string | null): Promise<Disp
     return [];
   }
 
-  const [{ data: accounts, error: accountError }, { data: riders, error: riderError }] = await Promise.all([
+  const [
+    { data: accounts, error: accountError },
+    { data: riders, error: riderError },
+    { data: locations, error: locationError },
+  ] = await Promise.all([
     serviceClient.from('UserAccount').select('uid,accountDisabled').in('uid', userIds),
     serviceClient
       .from('DispatchRiderRecord')
-      .select('id,displayName,status,activeLoad,latitude,longitude')
+      .select('id,displayName,status,activeLoad,latitude,longitude,verificationStatus')
       .in('id', userIds),
+    // Last-ping recency gates eligibility (see riderEligibility.ts): a rider
+    // whose app has not reported a location recently is not really available.
+    serviceClient.from('rider_live_location').select('rider_id,updated_at').in('rider_id', userIds),
   ]);
 
   if (accountError) {
@@ -255,6 +264,19 @@ const loadDispatchCandidates = async (restaurantId: string | null): Promise<Disp
   if (riderError) {
     throw new Error(riderError.message);
   }
+
+  if (locationError) {
+    throw new Error(locationError.message);
+  }
+
+  const lastLocationAtById = new Map<string, number>();
+  for (const row of (locations ?? []) as { rider_id: string; updated_at: string | null }[]) {
+    const parsed = row.updated_at ? Date.parse(row.updated_at) : Number.NaN;
+    if (Number.isFinite(parsed)) {
+      lastLocationAtById.set(row.rider_id, parsed);
+    }
+  }
+  const nowMs = Date.now();
 
   const accountsById = new Map(((accounts ?? []) as Pick<UserAccountRow, 'uid' | 'accountDisabled'>[]).map((row) => [
     row.uid,
@@ -268,6 +290,17 @@ const loadDispatchCandidates = async (restaurantId: string | null): Promise<Disp
     const rider = ridersById.get(userId) ?? null;
 
     if (!isDispatcherEligible(account, rider)) {
+      continue;
+    }
+
+    if (
+      !isRiderEligibleForOffer({
+        lastLocationAtMs: lastLocationAtById.get(userId) ?? null,
+        maxAgeSeconds: DISPATCH_MAX_LOCATION_AGE_SECONDS,
+        nowMs,
+        verificationStatus: rider?.verificationStatus,
+      })
+    ) {
       continue;
     }
 
@@ -550,6 +583,15 @@ export const runAutomaticDispatchAssignment = async (
   }
 
   if (sanitizeText(order.fulfillmentType, 'delivery') !== 'delivery') {
+    return { outcome: 'skipped' };
+  }
+
+  // Platform dispatch is a pilot feature: until the flag is on there is no rider
+  // pool, so selecting would only emit empty-pool events and admin alerts.
+  // Checked after the cheap status/fulfillment returns and before any other
+  // DB read, candidate load, event insert or notification.
+  const flags = await loadFeatureFlagMap();
+  if (!isFeatureEnabled(flags, 'platform_dispatch')) {
     return { outcome: 'skipped' };
   }
 

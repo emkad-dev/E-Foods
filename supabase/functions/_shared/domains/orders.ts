@@ -22,6 +22,7 @@ import {
 } from '../email.ts';
 import { buildNotificationData, notifyRestaurantUsers, notifySafely, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
+import { generateDeliveryCode } from '../deliveryCode.ts';
 import {
   captureOrderPlacementRiskSignals,
   capturePaymentVerificationRiskSignals,
@@ -43,6 +44,7 @@ import {
   PAYSTACK_PAYMENT_METHODS,
   PREPAID_PAYMENT_METHODS,
   releasePromoRedemption,
+  TERMINAL_ORDER_STATUSES,
   toOrderSnapshotResponse,
   updateOrderRecord,
   upsertPaymentTransaction,
@@ -991,6 +993,7 @@ const createOrderWithItems = async ({
     payment,
     deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
     deliveryLocation,
+    deliveryCode: fulfillmentType === 'delivery' ? generateDeliveryCode() : null,
     attributedPromoId: attributedPromoId ?? null,
     cancellation: null,
     scheduledFor,
@@ -1087,6 +1090,7 @@ const createOrderGroupWithItems = async ({
         createdAt,
         customerId,
         deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
+        deliveryCode: fulfillmentType === 'delivery' ? generateDeliveryCode() : null,
         deliveryLocation,
         fulfillmentType,
         id: order.orderId,
@@ -1545,6 +1549,16 @@ const customerGetOrderDetail: Handler = async ({ context, data }) => {
     restaurantLongitude: restaurantCoordinates?.longitude ?? null,
   });
 
+  // SP-2 proof-of-delivery: the delivery code is handed to the order's own
+  // customer ONLY (the ownership gate above), and only while the order is live.
+  // It is added here, never inside toOrderSnapshotResponse, which is the shared
+  // rider/partner/admin shape and must stay code-free. An admin viewing a
+  // customer's order does not get it either.
+  const exposeDeliveryCode =
+    context.role !== 'admin' &&
+    !TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus(bundle!.order.status));
+  const deliveryCode = exposeDeliveryCode ? bundle!.order.deliveryCode ?? null : null;
+
   return json(
     200,
     {
@@ -1553,6 +1567,7 @@ const customerGetOrderDetail: Handler = async ({ context, data }) => {
           groupOrderRelations && groupOrders.length > 0
             ? {
                 ...orderSnapshot,
+                deliveryCode,
                 groupOrders: groupOrders.map((groupOrder) =>
                   toOrderSnapshotResponse(
                     groupOrder,
@@ -1561,7 +1576,7 @@ const customerGetOrderDetail: Handler = async ({ context, data }) => {
                   )
                 ),
               }
-            : orderSnapshot,
+            : { ...orderSnapshot, deliveryCode },
       },
     },
     { 'Cache-Control': 'private, max-age=6, must-revalidate' }

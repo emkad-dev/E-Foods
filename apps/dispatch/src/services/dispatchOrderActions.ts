@@ -19,10 +19,13 @@ export const assignDispatchCourier = async (
   });
 };
 
-const updateDispatchOrderStatus = async (orderId: string, action: string) => {
+const updateDispatchOrderStatus = async (orderId: string, action: string, deliveryCode?: string) => {
   await callDispatchBackendRpc('dispatchUpdateOrderStatus', {
     action,
     orderId,
+    // Only the `delivered` action carries a code; omitted entirely for every
+    // other action so their payloads are unchanged.
+    ...(deliveryCode !== undefined ? { deliveryCode } : {}),
   });
 };
 
@@ -32,8 +35,13 @@ export const markDispatchOrderPickedUp = async (orderId: string, _timeline: Reco
 export const markDispatchOrderOnTheWay = async (orderId: string, _timeline: Record<string, unknown> | null) =>
   updateDispatchOrderStatus(orderId, 'on_the_way');
 
-export const markDispatchOrderDelivered = async (orderId: string, _timeline: Record<string, unknown> | null) =>
-  updateDispatchOrderStatus(orderId, 'delivered');
+// The server rejects `delivered` without the customer's 4-digit delivery code
+// (400 when wrong or missing, 429 once locked after repeated wrong tries).
+export const markDispatchOrderDelivered = async (
+  orderId: string,
+  _timeline: Record<string, unknown> | null,
+  deliveryCode: string
+) => updateDispatchOrderStatus(orderId, 'delivered', deliveryCode);
 
 export const markDispatchOrderFailed = async (orderId: string, _timeline: Record<string, unknown> | null) =>
   updateDispatchOrderStatus(orderId, 'failed_delivery');
@@ -51,3 +59,11 @@ export const acceptDispatchOffer = async (offerId: string) =>
 
 export const declineDispatchOffer = async (offerId: string) =>
   callDispatchBackendRpc('dispatchDeclineOffer', { offerId });
+
+// Rider online/offline toggle (SP-3). `available: true` writes the caller's own
+// DispatchRiderRecord.status = 'Available'; `false` writes 'Offline'. The
+// server answers with the status it actually stored.
+export const setDispatchAvailability = async (available: boolean) =>
+  callDispatchBackendRpc<{ courierId: string; status: 'Available' | 'Offline' }>('dispatchSetAvailability', {
+    available,
+  });

@@ -237,6 +237,12 @@ const installMocks = (
     restaurantDeliveryTime?: string;
     restaurantLatitude?: number | null;
     restaurantLongitude?: number | null;
+    // Per-rider overrides for the eligibility gates (riderEligibility.ts).
+    // Default: every rider is approved with a location ping 5s old.
+    locationAgeMs?: Record<string, number | null>;
+    verificationStatus?: Record<string, string>;
+    // Per-rider availability status (DispatchRiderRecord.status). Default 'Available'.
+    riderStatus?: Record<string, string>;
   } = {}
 ): MockState => {
   const state: MockState = {
@@ -299,8 +305,28 @@ const installMocks = (
                 id,
                 latitude: null,
                 longitude: null,
-                status: 'Available',
+                status: options.riderStatus?.[id] ?? 'Available',
+                verificationStatus: options.verificationStatus?.[id] ?? 'approved',
               }))
+            ),
+            error: null,
+          }),
+        }),
+      };
+    }
+
+    if (table === 'rider_live_location') {
+      return {
+        select: () => ({
+          in: async (_col: string, _ids: string[]) => ({
+            data: snapshot(
+              riderIds.flatMap((id) => {
+                const ageMs = options.locationAgeMs && id in options.locationAgeMs ? options.locationAgeMs[id] : 5_000;
+                // null = this rider has never reported a location (no row).
+                return ageMs === null || ageMs === undefined
+                  ? []
+                  : [{ rider_id: id, updated_at: new Date(Date.now() - ageMs).toISOString() }];
+              })
             ),
             error: null,
           }),
@@ -403,6 +429,19 @@ const installMocks = (
                 return { data: existing ? { id: 'event-1' } : null, error: null };
               },
             }),
+          }),
+        }),
+      };
+    }
+
+    // Auto-dispatch is gated behind this flag; these scenarios exercise the
+    // enabled path (the off path lives in dispatchFeatureGate.test.ts).
+    if (table === 'FeatureFlag') {
+      return {
+        select: () => ({
+          returns: async () => ({
+            data: [{ description: null, enabled: true, key: 'platform_dispatch', updatedAt: new Date().toISOString() }],
+            error: null,
           }),
         }),
       };
@@ -836,6 +875,17 @@ const installEmptyPoolMocks = (): EmptyPoolMockState => {
       };
     }
 
+    if (table === 'FeatureFlag') {
+      return {
+        select: () => ({
+          returns: async () => ({
+            data: [{ description: null, enabled: true, key: 'platform_dispatch', updatedAt: new Date().toISOString() }],
+            error: null,
+          }),
+        }),
+      };
+    }
+
     throw new Error(`dispatchSelection.test.ts: unexpected table "${table}" in the empty-pool scenario`);
   };
 
@@ -891,6 +941,79 @@ Deno.test('runAutomaticDispatchAssignment: a second attempt against the same sti
   expectEqual(second.outcome, 'pool_empty', 'retry on the next status change: pool still empty');
   expectEqual(state.deliveryEvents.length, 1, 'still exactly one DeliveryEvent - the once-per-order guard held');
   expectEqual(state.adminRoleLookups, 1, 'admins were notified once, not once per retry');
+});
+
+// SP-1 Task 3: eligibility gates. Matching must only offer to a rider who is
+// KYC-approved AND has pinged a location within DISPATCH_MAX_LOCATION_AGE_SECONDS.
+Deno.test('runAutomaticDispatchAssignment: a rider with a stale location is never offered; the fresh rider is', async () => {
+  // rider-1 sorts first on the id tiebreak, so only the stale gate can send
+  // the offer to rider-2.
+  const state = installMocks(['rider-1', 'rider-2'], {
+    locationAgeMs: { 'rider-1': 5 * 60_000, 'rider-2': 10_000 },
+  });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'offered', 'the fresh rider is still offerable');
+  expectEqual(state.offers.length, 1, 'exactly one offer');
+  expectEqual(state.offers[0]?.courierId, 'rider-2', 'offered to the fresh rider, not the 5-minute-stale one');
+});
+
+Deno.test('runAutomaticDispatchAssignment: a rider with no location row is never offered', async () => {
+  const state = installMocks(['rider-1'], { locationAgeMs: { 'rider-1': null } });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'pool_empty', 'a rider who never reported a location is not in the pool');
+  expectEqual(state.offers.length, 0, 'no offer created');
+});
+
+Deno.test('runAutomaticDispatchAssignment: a pending (unapproved) rider is never offered', async () => {
+  const state = installMocks(['rider-1', 'rider-2'], {
+    verificationStatus: { 'rider-1': 'pending' },
+  });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'offered', 'the approved rider is still offerable');
+  expectEqual(state.offers[0]?.courierId, 'rider-2', 'rider-1 would win the id tiebreak but is unapproved');
+
+  // And with nobody approved there is no offer at all.
+  const onlyPending = installMocks(['rider-1'], { verificationStatus: { 'rider-1': 'pending' } });
+  const none = await runSelection(onlyPending);
+  expectEqual(none.outcome === 'offered', false, 'an unapproved sole rider is never offered');
+  expectEqual(onlyPending.offers.length, 0, 'no offer created for an unapproved rider');
+});
+
+// SP-3 Task 1: the rider online/offline toggle writes DispatchRiderRecord.status.
+// 'Offline' must exclude a rider even when every SP-1 gate (approved + fresh
+// location ping) would otherwise pass, and flipping back to 'Available' must
+// make the same rider offerable again. No production code involved.
+Deno.test('runAutomaticDispatchAssignment: an Offline rider with a fresh ping and approval is never offered', async () => {
+  const state = installMocks(['rider-1'], {
+    locationAgeMs: { 'rider-1': 5_000 },
+    verificationStatus: { 'rider-1': 'approved' },
+    riderStatus: { 'rider-1': 'Offline' },
+  });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'pool_empty', 'an Offline rider is not in the pool despite fresh ping + approval');
+  expectEqual(state.offers.length, 0, 'no offer created for an Offline rider');
+});
+
+Deno.test('runAutomaticDispatchAssignment: the same rider is offered once Available (fresh ping + approved)', async () => {
+  const state = installMocks(['rider-1'], {
+    locationAgeMs: { 'rider-1': 5_000 },
+    verificationStatus: { 'rider-1': 'approved' },
+    riderStatus: { 'rider-1': 'Available' },
+  });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'offered', 'an Available, approved, freshly-pinged rider is offered');
+  expectEqual(state.offers.length, 1, 'exactly one offer');
+  expectEqual(state.offers[0]?.courierId, 'rider-1', 'the offer goes to that rider');
 });
 
 // M-1: loadOrderOfferSummary counted `status = 'pending'` without consulting

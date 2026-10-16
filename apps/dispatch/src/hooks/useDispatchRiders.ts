@@ -268,6 +268,7 @@ export const useDispatchRiders = () => {
     idleRiders,
     loading,
     onlineRiders,
+    refresh: loadRiders,
     riders,
   };
 };

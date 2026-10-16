@@ -16,6 +16,11 @@ export interface UseRealTimeLocationOptions {
   updateInterval?: number;
   minAccuracy?: number;
   highAccuracy?: boolean;
+  // Minimum metres moved between updates. On Android this is ANDed with
+  // `updateInterval`, so a stationary device with a non-zero distance gets no
+  // updates at all; presence heartbeats pass 0 so a rider parked while
+  // Available still pings on the interval.
+  distanceInterval?: number;
 }
 
 export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
@@ -24,6 +29,7 @@ export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
     updateInterval = 5000,
     minAccuracy = 50,
     highAccuracy = false,
+    distanceInterval = 5,
   } = options;
 
   const [location, setLocation] = useState<LiveLocation | null>(null);
@@ -60,7 +66,7 @@ export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
           {
             accuracy: highAccuracy ? Location.Accuracy.Highest : Location.Accuracy.Balanced,
             timeInterval: updateInterval,
-            distanceInterval: 5,
+            distanceInterval,
             mayShowUserSettingsDialog: true,
           },
           (position) => {
@@ -113,7 +119,7 @@ export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
       }
       setIsTracking(false);
     };
-  }, [enabled, updateInterval, minAccuracy, highAccuracy]);
+  }, [enabled, updateInterval, minAccuracy, highAccuracy, distanceInterval]);
 
   const stopTracking = () => {
     if (subscriptionRef.current) {

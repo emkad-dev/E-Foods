@@ -41,6 +41,7 @@ export const DISPATCH_ACTIONS = [
   'submitDispatchApplication',
   'dispatchAcceptOffer',
   'dispatchDeclineOffer',
+  'dispatchSetAvailability',
 ] as const;
 
 export const PARTNER_ACTIONS = [

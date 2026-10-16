@@ -124,6 +124,10 @@ const createTable = (initialRows: Row[]) => {
       limit() {
         return builder;
       },
+      // loadFeatureFlagMap ends its chain with .returns<T>()
+      returns() {
+        return Promise.resolve({ data: filtered.map(snapshot), error: null });
+      },
       async maybeSingle() {
         return { data: filtered[0] ? snapshot(filtered[0]) : null, error: null };
       },
@@ -285,11 +289,18 @@ const installMocks = (orderStatus: string, options: MockOptions = {}) => {
         longitude: null,
         status: 'Available',
         vehicleType: 'bike',
+        // Re-offer selection gates on KYC approval + a fresh ping (SP-1 Task 3).
+        verificationStatus: 'approved',
       }))
+    ),
+    rider_live_location: createTable(
+      riders.map((id) => ({ rider_id: id, updated_at: new Date().toISOString() }))
     ),
     // loadDispatchWeights reads this; without it the loader logs a warning and
     // falls back to identical defaults. Modelled so the re-offer path exercises
     // the real scoring inputs rather than the fallback branch.
+    // Auto-dispatch is gated behind platform_dispatch; these scenarios exercise the enabled path.
+    FeatureFlag: createTable([{ description: null, enabled: true, key: 'platform_dispatch', updatedAt: new Date().toISOString() }]),
     PlatformSettings: createTable([{ id: 'dispatchWeights', value: { distance: 0.15, load: 1.0 } }]),
     RestaurantRecord: createTable([{ id: RESTAURANT_ID, latitude: null, longitude: null, ownerId: 'owner-1' }]),
     UserAccount: createTable(

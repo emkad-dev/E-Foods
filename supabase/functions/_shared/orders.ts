@@ -23,6 +23,12 @@ export type CustomerOrderRow = {
   customerId: string;
   deliveryAddress?: string | null;
   deliveryLocation?: JsonObject | null;
+  // SP-2 proof-of-delivery OTP. The code is customer-only: it is read by
+  // customerGetOrderDetail and deliberately never copied by
+  // toOrderSnapshotResponse (the rider/partner/admin shape).
+  deliveryCode?: string | null;
+  deliveryCodeAttempts?: number | null;
+  deliveryCodeVerifiedAt?: string | null;
   fulfillmentType?: string | null;
   id: string;
   needsAttention?: boolean | null;
@@ -118,7 +124,7 @@ export type OrderSnapshotOptions = {
 };
 
 export const CUSTOMER_ORDER_COLUMNS =
-  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,orderGroupId,createdAt,updatedAt';
+  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,orderGroupId,deliveryCode,deliveryCodeVerifiedAt,deliveryCodeAttempts,createdAt,updatedAt';
 
 export const ORDER_GROUP_COLUMNS =
   'id,customerId,primaryOrderId,orderIds,orderCount,pricing,payment,restaurantIds,restaurantCount';

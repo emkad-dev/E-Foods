@@ -5,8 +5,11 @@
 import { loadUserAccount, loadUserPhoneNumber, syncUserRoleState, upsertUserAccount } from '../accounts.ts';
 import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
+import { constantTimeEqual } from '../crypto.ts';
+import { DELIVERY_CODE_MAX_ATTEMPTS, isValidDeliveryCodeFormat } from '../deliveryCode.ts';
 import { serviceClient } from '../client.ts';
 import {
+  DISPATCH_DOCUMENT_MAX_BYTES,
   buildCourierWeeklyEarningsSummary,
   loadCourierEarnings,
   loadCourierPayouts,
@@ -14,6 +17,7 @@ import {
   upsertCourierShiftSlots,
   uploadDispatchDocument,
 } from '../courierSupply.ts';
+import { assertUploadAllowed, enforceDispatchRateLimit } from '../rateLimit.ts';
 import { recordDispatchRiderPing } from '../dispatchRiderPings.ts';
 import {
   DURABLE_SYNC_INTERVAL_SECONDS,
@@ -29,6 +33,7 @@ import {
   DEFAULT_DISPATCH_VEHICLE,
   DISPATCH_RIDER_COLUMNS,
   buildDispatchRiderResponse,
+  buildFleetRiderResponse,
   ensureDispatchRiderRecord,
   type DispatchRiderRow,
 } from '../dispatchRiders.ts';
@@ -72,6 +77,7 @@ import {
   type DeliveryAssignmentRow,
 } from '../orders.ts';
 import { buildRefundUpdate } from './orders.ts';
+import { redactOfferSnapshot } from '../offerRedaction.ts';
 import { loadDispatchWeights } from '../platformSettings.ts';
 import { recordPolicyAcceptance, validatePolicyAcceptancePayload } from '../policyAcceptance.ts';
 import { broadcastOrderChanged, broadcastRidersChanged } from '../realtime.ts';
@@ -535,10 +541,15 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
 
           return {
             ...buildDispatchOfferResponse(offer),
-            order: toOrderSnapshotResponse(
-              order,
-              offerRelations?.itemsByOrderId.get(order.id) ?? [],
-              offerRelations?.assignmentsByOrderId.get(order.id) ?? null
+            // A pending offer is not yet accepted: strip the customer's
+            // address/phone/id/payment detail server-side (SP-1 Task 2). The
+            // owned-order snapshots below stay full - the rider needs them.
+            order: redactOfferSnapshot(
+              toOrderSnapshotResponse(
+                order,
+                offerRelations?.itemsByOrderId.get(order.id) ?? [],
+                offerRelations?.assignmentsByOrderId.get(order.id) ?? null
+              )
             ),
           };
         })
@@ -556,10 +567,15 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
 
 const dispatchGetRiders: Handler = async ({ context }) => {
   ensureRole(context.role, ['dispatch', 'admin']);
-  const { data: riders, error } = await serviceClient
+  // A dispatch-role caller only ever sees their own record: this table holds
+  // every rider's licence, plate and GPS. Admin keeps the fleet-wide read but
+  // gets the PII-free, coarsened projection (see buildFleetRiderResponse).
+  const baseQuery = serviceClient
     .from('DispatchRiderRecord')
     .select(DISPATCH_RIDER_COLUMNS)
     .order('updatedAt', { ascending: false });
+  const { data: riders, error } =
+    context.role === 'admin' ? await baseQuery : await baseQuery.eq('id', context.uid);
 
   if (error) {
     throw new Error(error.message);
@@ -585,9 +601,12 @@ const dispatchGetRiders: Handler = async ({ context }) => {
 
   return json(200, {
     data: {
-      riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) =>
-        buildDispatchRiderResponse(mergeRiderLiveLocation(rider, liveById.get(rider.id), nowMs))
-      ),
+      riders: ((riders ?? []) as DispatchRiderRow[]).map((rider) => {
+        const merged = mergeRiderLiveLocation(rider, liveById.get(rider.id), nowMs);
+        return context.role === 'admin'
+          ? buildFleetRiderResponse(merged)
+          : buildDispatchRiderResponse(merged); // caller's own full record
+      }),
     },
   });
 };
@@ -920,7 +939,9 @@ const syncDispatchRiderLocation: Handler = async ({ context, data }) => {
 };
 
 const dispatchGetNearestRiders: Handler = async ({ context, data }) => {
-  ensureRole(context.role, ['dispatch', 'admin']);
+  // Admin-only: a nearest-riders lookup is a way to enumerate other riders'
+  // positions, and no dispatch-role client calls it.
+  ensureRole(context.role, ['admin']);
   const latitude = parseNumber(data.latitude, Number.NaN);
   const longitude = parseNumber(data.longitude, Number.NaN);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -952,7 +973,7 @@ const dispatchGetNearestRiders: Handler = async ({ context, data }) => {
   // joinRankedRiders preserves the geo ordering and drops ranked ids with no
   // profile row — see _shared/riderLocation.ts for why both matter.
   const ordered = joinRankedRiders(nearest, ridersById).map(({ rider, metres }) => ({
-    ...buildDispatchRiderResponse(rider),
+    ...buildFleetRiderResponse(rider),
     metres,
   }));
 
@@ -1199,6 +1220,67 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   };
   const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
 
+  // Proof of delivery: the rider must enter the customer's 4-digit handoff code
+  // to mark an order delivered. Admins override for disputes (audited after the
+  // status write lands). The verified stamp rides on the single status write
+  // below.
+  //
+  // Every non-admin guess RESERVES an attempt slot with a compare-and-swap
+  // BEFORE the code is evaluated. A read-compare-then-write counter is
+  // bypassable: N parallel guesses all read the same value, all get evaluated,
+  // and all write the same increment, so a burst enumerates the 10,000-code
+  // space for the price of one attempt. With the CAS, only one racer wins each
+  // slot; losers are never evaluated, so at most DELIVERY_CODE_MAX_ATTEMPTS
+  // guesses are ever compared against an order's code.
+  let deliveryCodeVerifiedAt: string | null = null;
+  let deliveryCodeOverridden = false;
+  if (nextAction === 'delivered') {
+    if (context.role === 'admin') {
+      deliveryCodeOverridden = true;
+    } else {
+      const lockedMessage = 'Too many incorrect delivery codes. Contact support to complete this delivery.';
+      const attempts = bundle.order.deliveryCodeAttempts ?? 0;
+      if (attempts >= DELIVERY_CODE_MAX_ATTEMPTS) {
+        fail(429, lockedMessage);
+      }
+      const { data: reserved, error: reserveError } = await serviceClient
+        .from('CustomerOrder')
+        .update({ deliveryCodeAttempts: attempts + 1 })
+        .eq('id', orderId)
+        .eq('deliveryCodeAttempts', attempts)
+        .select('id');
+      if (reserveError) {
+        throw new Error(reserveError.message);
+      }
+      if (!Array.isArray(reserved) || reserved.length === 0) {
+        // A concurrent request took this slot. Do not evaluate this guess and do
+        // not retry: report the lock if it has now tripped, else a plain miss.
+        const { data: current, error: rereadError } = await serviceClient
+          .from('CustomerOrder')
+          .select('deliveryCodeAttempts')
+          .eq('id', orderId)
+          .maybeSingle<{ deliveryCodeAttempts: number | null }>();
+        if (rereadError) {
+          throw new Error(rereadError.message);
+        }
+        if ((current?.deliveryCodeAttempts ?? 0) >= DELIVERY_CODE_MAX_ATTEMPTS) {
+          fail(429, lockedMessage);
+        }
+        fail(400, 'That delivery code is incorrect.');
+      }
+      const submittedCode = data.deliveryCode;
+      const storedCode = bundle.order.deliveryCode;
+      const codeMatches =
+        isValidDeliveryCodeFormat(submittedCode) &&
+        typeof storedCode === 'string' &&
+        constantTimeEqual(String(submittedCode), storedCode);
+      if (!codeMatches) {
+        fail(400, 'That delivery code is incorrect.');
+      }
+      deliveryCodeVerifiedAt = nowIso();
+    }
+  }
+
   // A full refund, matching the acceptance-deadline auto-cancel's rationale: an
   // order that had to be escalated and then written off is not a customer
   // cancellation, so the customer-cancellation rate table does not apply. Reuses
@@ -1244,6 +1326,7 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     status: nextState.status,
     timeline,
     updatedAt: nowIso(),
+    ...(deliveryCodeVerifiedAt ? { deliveryCodeVerifiedAt } : {}),
     // Same shape cancelCustomerOrder writes, so the admin console and any
     // reconciliation read one cancellation record regardless of which path
     // ended the order.
@@ -1305,6 +1388,14 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     }
   }
 
+  if (deliveryCodeOverridden) {
+    await insertDeliveryEvent({
+      actorUid: context.uid,
+      details: {},
+      eventType: 'delivery_code_overridden',
+      orderId,
+    });
+  }
   await insertDeliveryEvent({
     orderId,
     eventType: `dispatch_${nextAction}`,
@@ -1345,6 +1436,8 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
 };
 
 const submitDispatchApplication: Handler = async ({ context, data }) => {
+  await enforceDispatchRateLimit(`apply:${context.uid}`, { limit: 3, windowSecs: 3600, lockoutSecs: 900 });
+
   const displayName = sanitizeText(data.displayName);
   const phoneNumber = sanitizeText(data.phoneNumber);
   const region = sanitizeText(data.region);
@@ -1357,8 +1450,8 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   const currentAddress = sanitizeOptionalText(data.currentAddress);
   const licenceFrontBase64 = sanitizeText(data.licenceFrontBase64);
   const licenceBackBase64 = sanitizeText(data.licenceBackBase64);
-  const licenceFrontMimeType = sanitizeOptionalText(data.licenceFrontMimeType) ?? 'image/jpeg';
-  const licenceBackMimeType = sanitizeOptionalText(data.licenceBackMimeType) ?? 'image/jpeg';
+  const licenceFrontMimeType = sanitizeOptionalText(data.licenceFrontMimeType);
+  const licenceBackMimeType = sanitizeOptionalText(data.licenceBackMimeType);
   const policyAcceptance = validatePolicyAcceptancePayload(
     data.policyAcceptance,
     'dispatch',
@@ -1395,6 +1488,10 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   if (!licenceFrontBase64 || !licenceBackBase64) {
     fail(400, 'Upload both sides of your licence before submitting.');
   }
+  // Validate both images before storing either, so a bad back image cannot
+  // leave an orphaned front image in the KYC bucket.
+  assertUploadAllowed({ contentType: licenceFrontMimeType, base64: licenceFrontBase64, maxBytes: DISPATCH_DOCUMENT_MAX_BYTES });
+  assertUploadAllowed({ contentType: licenceBackMimeType, base64: licenceBackBase64, maxBytes: DISPATCH_DOCUMENT_MAX_BYTES });
 
   const existingApplication = await loadDispatchApplication(context.uid);
   const currentStatus = sanitizeText(existingApplication?.status, DISPATCH_APPLICATION_STATUS.PENDING);
@@ -1691,6 +1788,23 @@ const dispatchDeclineOffer: Handler = async ({ context, data }) => {
   });
 };
 
+// Rider online/offline toggle. A dispatch caller can only ever flip their OWN
+// row (any courierId they pass is ignored); an admin may target another rider.
+// 'Offline' is already excluded from offer matching, so this adds no selection
+// code - it just writes the status the matcher reads.
+const dispatchSetAvailability: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch', 'admin']);
+  const requested = sanitizeText(data.courierId);
+  const courierId = context.role === 'admin' && requested ? requested : context.uid;
+  const status = data.available === true ? 'Available' : 'Offline';
+  const { error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .update({ status, updatedAt: nowIso() })
+    .eq('id', courierId);
+  if (error) throw new Error(error.message);
+  return json(200, { data: { courierId, status } });
+};
+
 export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: DISPATCH_ACTIONS,
   name: 'dispatch',
@@ -1701,6 +1815,7 @@ export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
     dispatchGetDeliveryQueue,
     dispatchGetNearestRiders,
     dispatchGetOrderDetail,
+    dispatchSetAvailability,
     dispatchGetRiders,
     dispatchGetWeeklyEarnings,
     dispatchGetShiftSlots,
