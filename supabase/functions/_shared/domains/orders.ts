@@ -22,6 +22,7 @@ import {
 } from '../email.ts';
 import { buildNotificationData, notifyRestaurantUsers, notifySafely, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
+import { generateDeliveryCode } from '../deliveryCode.ts';
 import {
   captureOrderPlacementRiskSignals,
   capturePaymentVerificationRiskSignals,
@@ -991,6 +992,7 @@ const createOrderWithItems = async ({
     payment,
     deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
     deliveryLocation,
+    deliveryCode: fulfillmentType === 'delivery' ? generateDeliveryCode() : null,
     attributedPromoId: attributedPromoId ?? null,
     cancellation: null,
     scheduledFor,
@@ -1087,6 +1089,7 @@ const createOrderGroupWithItems = async ({
         createdAt,
         customerId,
         deliveryAddress: sanitizeOptionalText(deliveryLocation?.address),
+        deliveryCode: fulfillmentType === 'delivery' ? generateDeliveryCode() : null,
         deliveryLocation,
         fulfillmentType,
         id: order.orderId,
