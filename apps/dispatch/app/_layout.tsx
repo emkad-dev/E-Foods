@@ -29,6 +29,10 @@ const DISPATCH_ENABLED = false;
 
 const ACTIVE_LOCATION_INTERVAL_MS = 5000;
 const IDLE_HEARTBEAT_INTERVAL_MS = 60000;
+const ACTIVE_MIN_ACCURACY_M = 50;
+const IDLE_MIN_ACCURACY_M = 200;
+// Under the server's 120s freshness window, so a genuinely fresh beat still sends.
+const MAX_FIX_AGE_MS = 90000;
 
 function DispatchLocationSyncBridge() {
   const { user } = useAuth();
@@ -62,10 +66,22 @@ function DispatchLocationSyncBridge() {
     highAccuracy: hasActiveAssignment,
     updateInterval: hasActiveAssignment ? ACTIVE_LOCATION_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS,
     distanceInterval: hasActiveAssignment ? 5 : 0,
+    // Idle presence only needs "alive", so tolerate coarse indoor/parked fixes
+    // (otherwise they're all dropped, the rider goes stale and never gets work);
+    // a live delivery keeps the strict 50m bar customer tracking needs.
+    minAccuracy: hasActiveAssignment ? ACTIVE_MIN_ACCURACY_M : IDLE_MIN_ACCURACY_M,
   });
 
   useEffect(() => {
     if (!user || user.role !== 'dispatch' || !shouldStream || !location) {
+      return;
+    }
+
+    // The server stamps rider_live_location.updated_at at RECEIPT, not from the
+    // client timestamp, so replaying a stale retained fix (e.g. on Offline ->
+    // Available) would look fresh at a place the rider left long ago. Skip it;
+    // the next real fix syncs.
+    if (Date.now() - location.timestamp > MAX_FIX_AGE_MS) {
       return;
     }
 
