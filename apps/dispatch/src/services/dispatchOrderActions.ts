@@ -59,3 +59,11 @@ export const acceptDispatchOffer = async (offerId: string) =>
 
 export const declineDispatchOffer = async (offerId: string) =>
   callDispatchBackendRpc('dispatchDeclineOffer', { offerId });
+
+// Rider online/offline toggle (SP-3). `available: true` writes the caller's own
+// DispatchRiderRecord.status = 'Available'; `false` writes 'Offline'. The
+// server answers with the status it actually stored.
+export const setDispatchAvailability = async (available: boolean) =>
+  callDispatchBackendRpc<{ courierId: string; status: 'Available' | 'Offline' }>('dispatchSetAvailability', {
+    available,
+  });

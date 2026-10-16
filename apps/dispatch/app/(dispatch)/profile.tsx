@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -28,6 +29,7 @@ import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
+import { useRiderAvailability } from '../../src/hooks/useRiderAvailability';
 import { useWeeklyEarnings } from '../../src/hooks/useWeeklyEarnings';
 import {
   type DispatchRiderDraft,
@@ -105,6 +107,8 @@ export default function ProfileScreen() {
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
   const [saving, setSaving] = useState(false);
+  const { isOnline, setAvailable, status: availabilityStatus } = useRiderAvailability();
+  const [togglingAvailability, setTogglingAvailability] = useState(false);
   const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
   const lgaOptions = useMemo(() => getLgaOptionsForState(draft.zone), [draft.zone]);
   const currentRider = useMemo(
@@ -217,6 +221,29 @@ export default function ProfileScreen() {
     }
   };
 
+  // The switch flips at once (useRiderAvailability applies the change
+  // optimistically) and is disabled until the server answers. On failure the
+  // hook has already put the switch back; this only has to say why.
+  const handleToggleAvailability = async (next: boolean) => {
+    if (togglingAvailability) {
+      return;
+    }
+
+    setTogglingAvailability(true);
+
+    try {
+      await setAvailable(next);
+    } catch (nextError: any) {
+      showNotice({
+        tone: 'error',
+        title: next ? 'Could not go online' : 'Could not go offline',
+        message: toUserMessage(nextError, 'Could not update your availability. Try again.'),
+      });
+    } finally {
+      setTogglingAvailability(false);
+    }
+  };
+
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -256,9 +283,26 @@ export default function ProfileScreen() {
 
   const renderHeader = () => (
     <View style={styles.identityCard}>
-      <View>
+      <View style={styles.identityText}>
         <Text style={styles.nameText}>{currentRider?.name ?? user?.displayName ?? 'Feaster'}</Text>
-        <Text style={styles.statusText}>{currentRider?.status ?? 'Ready to go live'}</Text>
+        <Text style={styles.statusText}>
+          {availabilityStatus ?? 'Ready to go live'}
+        </Text>
+      </View>
+      <View style={styles.availabilityControl}>
+        <Text style={styles.availabilityLabel}>{isOnline ? 'Online' : 'Offline'}</Text>
+        <Switch
+          accessibilityLabel="Available for deliveries"
+          disabled={togglingAvailability || !currentRider}
+          onValueChange={handleToggleAvailability}
+          value={isOnline}
+          // react-native-web reads `thumbColor` only while the switch is OFF and
+          // falls back to Material Teal for the ON thumb unless `activeThumbColor`
+          // is also given; React Native's own API has no such prop, hence the cast.
+          thumbColor={dispatchTheme.surface}
+          trackColor={{ false: dispatchTheme.border, true: dispatchTheme.accent }}
+          {...({ activeThumbColor: dispatchTheme.surface } as Record<string, unknown>)}
+        />
       </View>
       {/* The trophy pill used to sit here showing `completedTripsCount`. That
           column is written as 0 when a rider is approved, carried forward
@@ -495,6 +539,20 @@ const styles = StyleSheet.create({
   nameText: {
     color: dispatchTheme.text,
     fontSize: 18,
+    fontWeight: '900',
+  },
+  identityText: {
+    flex: 1,
+  },
+  availabilityControl: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: MIN_TAP_TARGET,
+  },
+  availabilityLabel: {
+    color: dispatchTheme.text,
+    fontSize: 13,
     fontWeight: '900',
   },
   statusText: {
