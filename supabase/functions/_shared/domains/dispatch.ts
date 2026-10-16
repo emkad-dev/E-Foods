@@ -73,6 +73,7 @@ import {
   type DeliveryAssignmentRow,
 } from '../orders.ts';
 import { buildRefundUpdate } from './orders.ts';
+import { redactOfferSnapshot } from '../offerRedaction.ts';
 import { loadDispatchWeights } from '../platformSettings.ts';
 import { recordPolicyAcceptance, validatePolicyAcceptancePayload } from '../policyAcceptance.ts';
 import { broadcastOrderChanged, broadcastRidersChanged } from '../realtime.ts';
@@ -536,10 +537,15 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
 
           return {
             ...buildDispatchOfferResponse(offer),
-            order: toOrderSnapshotResponse(
-              order,
-              offerRelations?.itemsByOrderId.get(order.id) ?? [],
-              offerRelations?.assignmentsByOrderId.get(order.id) ?? null
+            // A pending offer is not yet accepted: strip the customer's
+            // address/phone/id/payment detail server-side (SP-1 Task 2). The
+            // owned-order snapshots below stay full - the rider needs them.
+            order: redactOfferSnapshot(
+              toOrderSnapshotResponse(
+                order,
+                offerRelations?.itemsByOrderId.get(order.id) ?? [],
+                offerRelations?.assignmentsByOrderId.get(order.id) ?? null
+              )
             ),
           };
         })
