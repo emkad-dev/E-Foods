@@ -28,8 +28,7 @@ import { toUserMessage } from '../../../../packages/observability/src/userMessag
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
-import { useRiderAvailability } from '../../src/hooks/useRiderAvailability';
+import { useRiderAvailability } from '../../src/contexts/RiderAvailabilityContext';
 import { useWeeklyEarnings } from '../../src/hooks/useWeeklyEarnings';
 import {
   type DispatchRiderDraft,
@@ -90,7 +89,6 @@ const formatDateTime = (value?: string | null) => {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
-  const { error, riders } = useDispatchRiders();
   const { confirm, confirmDialog } = useConfirm();
   // Saving and signing out reported failure through `Alert`, an empty function
   // under react-native-web. Floating rather than inline: the Save button is one
@@ -107,7 +105,15 @@ export default function ProfileScreen() {
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DispatchRiderDraft>(createDefaultDraft);
   const [saving, setSaving] = useState(false);
-  const { isOnline, setAvailable, status: availabilityStatus } = useRiderAvailability();
+  // One shared rider subscription for the whole app (RiderAvailabilityProvider);
+  // this screen reads from it rather than opening its own.
+  const {
+    isOnline,
+    ridersError: error,
+    riders,
+    setAvailable,
+    status: availabilityStatus,
+  } = useRiderAvailability();
   const [togglingAvailability, setTogglingAvailability] = useState(false);
   const [openPicker, setOpenPicker] = useState<'state' | 'lga' | null>(null);
   const lgaOptions = useMemo(() => getLgaOptionsForState(draft.zone), [draft.zone]);

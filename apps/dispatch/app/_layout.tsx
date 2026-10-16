@@ -7,6 +7,7 @@ import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
 import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
+import { RiderAvailabilityProvider } from '../src/contexts/RiderAvailabilityContext';
 import DispatchComingSoon from '../src/components/DispatchComingSoon';
 import { installWebFocusRing } from '../../../packages/design-system/src/a11y/focusRing';
 import { dispatchTheme } from '../src/theme/palette';
@@ -138,8 +139,10 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <FeatureFlagsProvider>
-        <RootLayoutNav />
-        <DispatchLocationSyncBridge />
+        <RiderAvailabilityProvider>
+          <RootLayoutNav />
+          <DispatchLocationSyncBridge />
+        </RiderAvailabilityProvider>
       </FeatureFlagsProvider>
     </AuthProvider>
   );
