@@ -5,6 +5,8 @@
 import { loadUserAccount, loadUserPhoneNumber, syncUserRoleState, upsertUserAccount } from '../accounts.ts';
 import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
+import { constantTimeEqual } from '../crypto.ts';
+import { DELIVERY_CODE_MAX_ATTEMPTS, isValidDeliveryCodeFormat } from '../deliveryCode.ts';
 import { serviceClient } from '../client.ts';
 import {
   DISPATCH_DOCUMENT_MAX_BYTES,
@@ -1218,6 +1220,43 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   };
   const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
 
+  // Proof of delivery: the rider must enter the customer's 4-digit handoff code
+  // to mark an order delivered. Admins override for disputes (audited). The
+  // verified stamp rides on the single status write below.
+  let deliveryCodeVerifiedAt: string | null = null;
+  if (nextAction === 'delivered') {
+    if (context.role === 'admin') {
+      await insertDeliveryEvent({
+        actorUid: context.uid,
+        details: {},
+        eventType: 'delivery_code_overridden',
+        orderId,
+      });
+    } else {
+      const attempts = bundle.order.deliveryCodeAttempts ?? 0;
+      if (attempts >= DELIVERY_CODE_MAX_ATTEMPTS) {
+        fail(429, 'Too many incorrect delivery codes. Contact support to complete this delivery.');
+      }
+      const submittedCode = data.deliveryCode;
+      const storedCode = bundle.order.deliveryCode;
+      const codeMatches =
+        isValidDeliveryCodeFormat(submittedCode) &&
+        typeof storedCode === 'string' &&
+        constantTimeEqual(String(submittedCode), storedCode);
+      if (!codeMatches) {
+        const { error: attemptsError } = await serviceClient
+          .from('CustomerOrder')
+          .update({ deliveryCodeAttempts: attempts + 1 })
+          .eq('id', orderId);
+        if (attemptsError) {
+          throw new Error(attemptsError.message);
+        }
+        fail(400, 'That delivery code is incorrect.');
+      }
+      deliveryCodeVerifiedAt = nowIso();
+    }
+  }
+
   // A full refund, matching the acceptance-deadline auto-cancel's rationale: an
   // order that had to be escalated and then written off is not a customer
   // cancellation, so the customer-cancellation rate table does not apply. Reuses
@@ -1263,6 +1302,7 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     status: nextState.status,
     timeline,
     updatedAt: nowIso(),
+    ...(deliveryCodeVerifiedAt ? { deliveryCodeVerifiedAt } : {}),
     // Same shape cancelCustomerOrder writes, so the admin console and any
     // reconciliation read one cancellation record regardless of which path
     // ended the order.
