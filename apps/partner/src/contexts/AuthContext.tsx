@@ -210,6 +210,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // reconciles the real state in the background.
   useEffect(() => {
     let active = true;
+    // Belt-and-suspenders: if getSession() or a PostgREST call hangs on a
+    // poor cellular connection (no error thrown, just never resolves), this
+    // releases the skeleton after 10 s so the user isn't stuck forever.
+    const fallbackTimer = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 10_000);
 
     void (async () => {
       const {
@@ -240,11 +246,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       ) {
         setUser(cachedUser);
         setLoading(false);
+      } else {
+        // Session exists but no matching cache (fresh install, cleared storage,
+        // or role mismatch). Don't block on the onAuthStateChange network chain
+        // — release the skeleton now and let the listener reconcile in the
+        // background. Worst case: a ~100 ms flash of the login screen before
+        // the INITIAL_SESSION fires from local storage and sets the user.
+        setLoading(false);
       }
     })();
 
     return () => {
       active = false;
+      clearTimeout(fallbackTimer);
     };
   }, []);
 

@@ -228,6 +228,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // onAuthStateChange listener reconciles the real state in the background.
   useEffect(() => {
     let active = true;
+    // Belt-and-suspenders: if getSession() hangs on a poor cellular connection
+    // (no error thrown, just never resolves), release the skeleton after 10 s.
+    const fallbackTimer = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 10_000);
 
     void (async () => {
       const cachedUser = await getStoredUserProfile<UserDocument>();
@@ -246,13 +251,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (active && !session) {
+      // Always release the skeleton: no session → go to login; session exists
+      // but no matching cache → let onAuthStateChange reconcile in background.
+      if (active) {
         setLoading(false);
       }
     })();
 
     return () => {
       active = false;
+      clearTimeout(fallbackTimer);
     };
   }, []);
 
