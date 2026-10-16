@@ -236,4 +236,8 @@ export interface OrderDocument extends DocumentData {
   restaurantLongitude?: number | null;
   eta?: { minMinutes: number; maxMinutes: number } | null;
   averageSpeedKmh?: number | null;
+  // Proof-of-delivery code from customerGetOrderDetail: a 4-digit string the
+  // customer reads to the rider at handoff. Server-side it is exposed only to
+  // the owner of a non-terminal delivery order, so it is null otherwise.
+  deliveryCode?: string | null;
 }
