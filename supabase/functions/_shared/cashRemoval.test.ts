@@ -38,7 +38,7 @@ const CUSTOMER_CONTEXT = {
 // initializeCustomerPayment calls prepareCustomerOrderDraft after passing
 // assertPaystackConfigured(). With the validation gate now excluding 'cash'
 // from the allowed set, a 'cash' request fails before any DB access.
-Deno.test('validateOrderData: paymentMethod cash is rejected with 400 (removed from allowed methods)', async () => {
+Deno.test('initializeCustomerPayment: paymentMethod cash is rejected with 400 (removed from allowed methods)', async () => {
   const handler = ordersDomain.handlers.initializeCustomerPayment;
   if (typeof handler !== 'function') {
     throw new Error('ordersDomain.handlers.initializeCustomerPayment is not registered.');
