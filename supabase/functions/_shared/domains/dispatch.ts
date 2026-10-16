@@ -7,6 +7,7 @@ import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applica
 import { createAuditEntry } from '../auditLog.ts';
 import { serviceClient } from '../client.ts';
 import {
+  DISPATCH_DOCUMENT_MAX_BYTES,
   buildCourierWeeklyEarningsSummary,
   loadCourierEarnings,
   loadCourierPayouts,
@@ -14,6 +15,7 @@ import {
   upsertCourierShiftSlots,
   uploadDispatchDocument,
 } from '../courierSupply.ts';
+import { assertUploadAllowed, enforceDispatchRateLimit } from '../rateLimit.ts';
 import { recordDispatchRiderPing } from '../dispatchRiderPings.ts';
 import {
   DURABLE_SYNC_INTERVAL_SECONDS,
@@ -1362,6 +1364,8 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
 };
 
 const submitDispatchApplication: Handler = async ({ context, data }) => {
+  await enforceDispatchRateLimit(`apply:${context.uid}`, { limit: 3, windowSecs: 3600, lockoutSecs: 900 });
+
   const displayName = sanitizeText(data.displayName);
   const phoneNumber = sanitizeText(data.phoneNumber);
   const region = sanitizeText(data.region);
@@ -1374,8 +1378,8 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   const currentAddress = sanitizeOptionalText(data.currentAddress);
   const licenceFrontBase64 = sanitizeText(data.licenceFrontBase64);
   const licenceBackBase64 = sanitizeText(data.licenceBackBase64);
-  const licenceFrontMimeType = sanitizeOptionalText(data.licenceFrontMimeType) ?? 'image/jpeg';
-  const licenceBackMimeType = sanitizeOptionalText(data.licenceBackMimeType) ?? 'image/jpeg';
+  const licenceFrontMimeType = sanitizeOptionalText(data.licenceFrontMimeType);
+  const licenceBackMimeType = sanitizeOptionalText(data.licenceBackMimeType);
   const policyAcceptance = validatePolicyAcceptancePayload(
     data.policyAcceptance,
     'dispatch',
@@ -1412,6 +1416,10 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   if (!licenceFrontBase64 || !licenceBackBase64) {
     fail(400, 'Upload both sides of your licence before submitting.');
   }
+  // Validate both images before storing either, so a bad back image cannot
+  // leave an orphaned front image in the KYC bucket.
+  assertUploadAllowed({ contentType: licenceFrontMimeType, base64: licenceFrontBase64, maxBytes: DISPATCH_DOCUMENT_MAX_BYTES });
+  assertUploadAllowed({ contentType: licenceBackMimeType, base64: licenceBackBase64, maxBytes: DISPATCH_DOCUMENT_MAX_BYTES });
 
   const existingApplication = await loadDispatchApplication(context.uid);
   const currentStatus = sanitizeText(existingApplication?.status, DISPATCH_APPLICATION_STATUS.PENDING);

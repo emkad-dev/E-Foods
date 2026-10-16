@@ -1,8 +1,10 @@
 import { serviceClient } from './client.ts';
 import { DEFAULT_CURRENCY } from './orders.ts';
+import { assertUploadAllowed } from './rateLimit.ts';
 import { nowIso, parseNumber, roundCurrency, sanitizeOptionalText, sanitizeText } from './rpc/coercion.ts';
 
 export const DISPATCH_DOCUMENT_BUCKET = 'dispatch-kyc';
+export const DISPATCH_DOCUMENT_MAX_BYTES = 5_000_000;
 
 export const DISPATCH_DOCUMENT_KINDS = ['licence_front', 'licence_back'] as const;
 export type DispatchDocumentKind = (typeof DISPATCH_DOCUMENT_KINDS)[number];
@@ -182,7 +184,7 @@ export const buildCourierWeeklyEarningsSummary = (input: {
 export const uploadDispatchDocument = async ({ base64, courierId, kind, mimeType }: UploadDispatchDocumentInput) => {
   const safeCourierId = sanitizeText(courierId);
   const safeBase64 = sanitizeText(base64);
-  const safeMimeType = sanitizeText(mimeType, 'image/jpeg');
+  const safeMimeType = sanitizeText(mimeType);
 
   if (!safeCourierId) {
     throw new Error('A courier id is required to upload dispatch documents.');
@@ -191,6 +193,8 @@ export const uploadDispatchDocument = async ({ base64, courierId, kind, mimeType
   if (!safeBase64) {
     throw new Error('A document payload is required.');
   }
+
+  assertUploadAllowed({ contentType: safeMimeType, base64: safeBase64, maxBytes: DISPATCH_DOCUMENT_MAX_BYTES });
 
   const extension = getExtensionForMimeType(safeMimeType);
   const filePath = `couriers/${safeCourierId}/${kind}/${nowIso().replace(/[:.]/g, '-')}.${extension}`;
