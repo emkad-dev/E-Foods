@@ -57,7 +57,6 @@ import {
   CUSTOMER_ORDER_COLUMNS,
   DEFAULT_CURRENCY,
   ORDER_STATUS,
-  PAYMENT_PROVIDER_CASH,
   PAYMENT_STATUS,
   TERMINAL_ORDER_STATUSES,
   assertNonTerminalOrder,
@@ -1295,15 +1294,6 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
         reason: 'dispatch_escalation_cancelled_full_refund',
       })
     );
-  }
-
-  if (nextAction === 'delivered' && sanitizeText(payment.method, 'cash') === 'cash') {
-    payment.capturedAmount = roundCurrency(parseNumber((bundle.order.pricing ?? {}).total, 0));
-    payment.lastEvent = 'cash_collected_on_delivery';
-    payment.paidAt = nowIso();
-    payment.processor = PAYMENT_PROVIDER_CASH;
-    payment.reference = sanitizeText(payment.reference, `CASH-${orderId.slice(-6).toUpperCase()}`);
-    payment.status = PAYMENT_STATUS.PAID;
   }
 
   // Compare-and-swap on the status this transition was validated against,

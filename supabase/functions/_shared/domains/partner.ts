@@ -20,7 +20,6 @@ import { buildNotificationData, notifyAdmins, notifyUsers } from '../notificatio
 import { logEdgeEvent } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
-  PAYMENT_PROVIDER_CASH,
   PAYMENT_STATUS,
   ORDER_STATUS,
   TERMINAL_ORDER_STATUSES,
@@ -1309,17 +1308,6 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   };
 
   const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
-
-  // Restaurant self-provisions delivery: when it completes the order, a cash
-  // order is collected on handoff.
-  if (nextState.status === ORDER_STATUS.DELIVERED && sanitizeText(payment.method, 'cash') === 'cash') {
-    payment.capturedAmount = roundCurrency(parseNumber((bundle.order.pricing ?? {}).total, 0));
-    payment.lastEvent = 'cash_collected_on_delivery';
-    payment.paidAt = nowIso();
-    payment.processor = PAYMENT_PROVIDER_CASH;
-    payment.reference = sanitizeText(payment.reference, `CASH-${orderId.slice(-6).toUpperCase()}`);
-    payment.status = PAYMENT_STATUS.PAID;
-  }
 
   // Compare-and-swap on the status this transition was computed from. bundle is
   // a stale snapshot (loadOrderBundle does a plain read, no FOR UPDATE), and the
