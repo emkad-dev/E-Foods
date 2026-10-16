@@ -241,6 +241,8 @@ const installMocks = (
     // Default: every rider is approved with a location ping 5s old.
     locationAgeMs?: Record<string, number | null>;
     verificationStatus?: Record<string, string>;
+    // Per-rider availability status (DispatchRiderRecord.status). Default 'Available'.
+    riderStatus?: Record<string, string>;
   } = {}
 ): MockState => {
   const state: MockState = {
@@ -303,7 +305,7 @@ const installMocks = (
                 id,
                 latitude: null,
                 longitude: null,
-                status: 'Available',
+                status: options.riderStatus?.[id] ?? 'Available',
                 verificationStatus: options.verificationStatus?.[id] ?? 'approved',
               }))
             ),
@@ -981,6 +983,37 @@ Deno.test('runAutomaticDispatchAssignment: a pending (unapproved) rider is never
   const none = await runSelection(onlyPending);
   expectEqual(none.outcome === 'offered', false, 'an unapproved sole rider is never offered');
   expectEqual(onlyPending.offers.length, 0, 'no offer created for an unapproved rider');
+});
+
+// SP-3 Task 1: the rider online/offline toggle writes DispatchRiderRecord.status.
+// 'Offline' must exclude a rider even when every SP-1 gate (approved + fresh
+// location ping) would otherwise pass, and flipping back to 'Available' must
+// make the same rider offerable again. No production code involved.
+Deno.test('runAutomaticDispatchAssignment: an Offline rider with a fresh ping and approval is never offered', async () => {
+  const state = installMocks(['rider-1'], {
+    locationAgeMs: { 'rider-1': 5_000 },
+    verificationStatus: { 'rider-1': 'approved' },
+    riderStatus: { 'rider-1': 'Offline' },
+  });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'pool_empty', 'an Offline rider is not in the pool despite fresh ping + approval');
+  expectEqual(state.offers.length, 0, 'no offer created for an Offline rider');
+});
+
+Deno.test('runAutomaticDispatchAssignment: the same rider is offered once Available (fresh ping + approved)', async () => {
+  const state = installMocks(['rider-1'], {
+    locationAgeMs: { 'rider-1': 5_000 },
+    verificationStatus: { 'rider-1': 'approved' },
+    riderStatus: { 'rider-1': 'Available' },
+  });
+
+  const outcome = await runSelection(state);
+
+  expectEqual(outcome.outcome, 'offered', 'an Available, approved, freshly-pinged rider is offered');
+  expectEqual(state.offers.length, 1, 'exactly one offer');
+  expectEqual(state.offers[0]?.courierId, 'rider-1', 'the offer goes to that rider');
 });
 
 // M-1: loadOrderOfferSummary counted `status = 'pending'` without consulting
