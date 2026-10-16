@@ -432,6 +432,19 @@ const installMocks = (
       };
     }
 
+    // Auto-dispatch is gated behind this flag; these scenarios exercise the
+    // enabled path (the off path lives in dispatchFeatureGate.test.ts).
+    if (table === 'FeatureFlag') {
+      return {
+        select: () => ({
+          returns: async () => ({
+            data: [{ description: null, enabled: true, key: 'platform_dispatch', updatedAt: new Date().toISOString() }],
+            error: null,
+          }),
+        }),
+      };
+    }
+
     throw new Error(`dispatchSelection.test.ts: unexpected table "${table}"`);
   };
 
@@ -855,6 +868,17 @@ const installEmptyPoolMocks = (): EmptyPoolMockState => {
                 return { data: alreadyRecorded ? { id: 'pool-empty-event-1' } : null, error: null };
               },
             }),
+          }),
+        }),
+      };
+    }
+
+    if (table === 'FeatureFlag') {
+      return {
+        select: () => ({
+          returns: async () => ({
+            data: [{ description: null, enabled: true, key: 'platform_dispatch', updatedAt: new Date().toISOString() }],
+            error: null,
           }),
         }),
       };

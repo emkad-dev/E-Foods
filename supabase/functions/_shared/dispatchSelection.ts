@@ -53,6 +53,7 @@
 
 import { serviceClient } from './client.ts';
 import { calculateDistanceKm, type GeoPoint } from './deliveryCoverage.ts';
+import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
 import { computeEtaRange } from './deliveryEta.ts';
 import {
   DISPATCH_OFFER_TTL_SECONDS,
@@ -582,6 +583,15 @@ export const runAutomaticDispatchAssignment = async (
   }
 
   if (sanitizeText(order.fulfillmentType, 'delivery') !== 'delivery') {
+    return { outcome: 'skipped' };
+  }
+
+  // Platform dispatch is a pilot feature: until the flag is on there is no rider
+  // pool, so selecting would only emit empty-pool events and admin alerts.
+  // Checked after the cheap status/fulfillment returns and before any other
+  // DB read, candidate load, event insert or notification.
+  const flags = await loadFeatureFlagMap();
+  if (!isFeatureEnabled(flags, 'platform_dispatch')) {
     return { outcome: 'skipped' };
   }
 
