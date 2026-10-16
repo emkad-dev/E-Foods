@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Imported by module path, not from the '@feasty/design-system' barrel, on
 // purpose: the barrel re-exports useFeastyFonts, which pulls expo-font and six
@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // it needs. Customer and partner, which already load the fonts, import it by
 // package name. See the same note in ../profile.tsx.
 import { useNotice } from '../../../../../packages/design-system/src/primitives/Notice';
-import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
+import { isSafeServerMessage, toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import {
   formatOrderStatusLabel,
@@ -35,6 +35,25 @@ import {
   describeExternalLinkFailure,
   openExternalLink,
 } from '../../../../../packages/runtime/src/externalLink';
+
+const DELIVERY_CODE_LENGTH = 4;
+
+// The delivery-code rejections carry specific copy the rider needs to act on:
+// 400 "That delivery code is incorrect." (retry) versus 429 "Too many incorrect
+// delivery codes..." (locked; stop guessing). `toUserMessage` passes a safe 4xx
+// message through but flattens EVERY 429 to its generic "Too many attempts",
+// which would hide that the order is now locked, so for these two statuses the
+// server's already-screened copy is shown directly.
+const toDeliveryCodeMessage = (error: unknown, fallback: string) => {
+  const status = (error as { status?: unknown } | null)?.status;
+  const message = error instanceof Error ? error.message : null;
+
+  if ((status === 400 || status === 429) && message && isSafeServerMessage(message)) {
+    return message;
+  }
+
+  return toUserMessage(error, fallback);
+};
 
 const formatRelativeAge = (value?: string | null) => {
   if (!value) {
@@ -66,6 +85,11 @@ export default function DispatchDeliveryDetailScreen() {
   const insets = useSafeAreaInsets();
   const { error, loading, order } = useDispatchOrder(id as string);
   const { error: ridersError, loading: ridersLoading, riders } = useDispatchRiders();
+  // The customer's delivery code, read back to the rider at the door. Kept in
+  // state across a rejected attempt so a mistyped digit can be corrected
+  // without retyping all four.
+  const [deliveryCode, setDeliveryCode] = useState('');
+  const [submittingDelivery, setSubmittingDelivery] = useState(false);
   // Every action on this screen reported failure through `Alert`, which is
   // `class Alert { static alert() {} }` under react-native-web. `error` above
   // belongs to `useDispatchOrder` and carries LOAD failures only (the early
@@ -180,14 +204,25 @@ export default function DispatchDeliveryDetailScreen() {
   };
 
   const handleMarkDelivered = async () => {
-    if (!order) {
+    if (!order || submittingDelivery) {
       return;
     }
 
+    if (deliveryCode.length !== DELIVERY_CODE_LENGTH) {
+      reportFailure('Code needed', `Enter the ${DELIVERY_CODE_LENGTH}-digit code from the customer.`);
+      return;
+    }
+
+    setSubmittingDelivery(true);
     try {
-      await markDispatchOrderDelivered(order.id, order.timeline ?? null);
+      await markDispatchOrderDelivered(order.id, order.timeline ?? null, deliveryCode);
+      setDeliveryCode('');
     } catch (nextError: any) {
-      reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this order delivered.'));
+      // The code stays in the field so the rider can correct it and retry
+      // (until the server locks the order).
+      reportFailure('Delivery not confirmed', toDeliveryCodeMessage(nextError, 'Could not mark this order delivered.'));
+    } finally {
+      setSubmittingDelivery(false);
     }
   };
 
@@ -420,12 +455,30 @@ export default function DispatchDeliveryDetailScreen() {
           >
             <Text style={styles.actionButtonText}>Mark on the way</Text>
           </TouchableOpacity>
+          <Text style={styles.codeLabel}>Customer delivery code</Text>
+          <TextInput
+            style={[styles.codeInput, !canMarkDelivered ? styles.actionButtonDisabled : null]}
+            placeholder="0000"
+            placeholderTextColor={dispatchTheme.textSoft}
+            value={deliveryCode}
+            onChangeText={(value) => setDeliveryCode(value.replace(/\D/g, '').slice(0, DELIVERY_CODE_LENGTH))}
+            keyboardType="number-pad"
+            maxLength={DELIVERY_CODE_LENGTH}
+            editable={canMarkDelivered && !submittingDelivery}
+            accessibilityLabel={`${DELIVERY_CODE_LENGTH}-digit customer delivery code`}
+          />
           <TouchableOpacity
-            style={[styles.actionButton, styles.deliverButton, !canMarkDelivered ? styles.actionButtonDisabled : null]}
+            style={[
+              styles.actionButton,
+              styles.deliverButton,
+              !canMarkDelivered || deliveryCode.length !== DELIVERY_CODE_LENGTH || submittingDelivery
+                ? styles.actionButtonDisabled
+                : null,
+            ]}
             onPress={handleMarkDelivered}
-            disabled={!canMarkDelivered}
+            disabled={!canMarkDelivered || deliveryCode.length !== DELIVERY_CODE_LENGTH || submittingDelivery}
           >
-            <Text style={styles.actionButtonText}>Mark delivered</Text>
+            <Text style={styles.actionButtonText}>{submittingDelivery ? 'Confirming...' : 'Confirm delivery'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, styles.warningButton, !canMarkFailed ? styles.actionButtonDisabled : null]}
@@ -719,6 +772,28 @@ const styles = StyleSheet.create({
   },
   deliverButton: {
     marginTop: 10,
+  },
+  codeLabel: {
+    color: dispatchTheme.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    marginTop: 14,
+    textTransform: 'uppercase',
+  },
+  codeInput: {
+    backgroundColor: dispatchTheme.cream,
+    borderColor: dispatchTheme.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    color: dispatchTheme.text,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 8,
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    textAlign: 'center',
   },
   warningButton: {
     backgroundColor: '#b45309',
