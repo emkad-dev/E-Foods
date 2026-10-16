@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Imported by module path, not from the '@feasty/design-system' barrel, on
 // purpose: the barrel re-exports useFeastyFonts, which pulls expo-font and six
@@ -208,6 +208,9 @@ export default function DispatchDeliveryDetailScreen() {
       return;
     }
 
+    // Close the keyboard first so the floating failure notice is not hidden behind it.
+    Keyboard.dismiss();
+
     if (deliveryCode.length !== DELIVERY_CODE_LENGTH) {
       reportFailure('Code needed', `Enter the ${DELIVERY_CODE_LENGTH}-digit code from the customer.`);
       return;
@@ -354,7 +357,10 @@ export default function DispatchDeliveryDetailScreen() {
     // positions itself absolutely: inside a ScrollView that would anchor it to
     // the bottom of the CONTENT and let it scroll away.
     <View style={styles.screen}>
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
+      <ScrollView
+        style={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + SCREEN_TOP_INSET }]}>
         <View style={styles.hero}>
           <Text style={styles.eyebrow}>Dispatch order</Text>
           <Text style={styles.title}>Order #{order.id.slice(-6)}</Text>
