@@ -319,6 +319,7 @@ export const notifyUsers = async (
   userIds: string[],
   payload: {
     body: string;
+    channelId?: string;
     data?: JsonObject;
     title: string;
   }
@@ -326,6 +327,7 @@ export const notifyUsers = async (
   await notifySafely(async () => {
     await sendPushNotificationsToUsers(userIds, {
       body: payload.body,
+      channelId: payload.channelId,
       data: payload.data ?? {},
       title: payload.title,
     });
