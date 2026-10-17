@@ -51,12 +51,12 @@ const GENERATOR_PATH = path.join(REPO_ROOT, 'scripts', 'generate-rpc-routes.mjs'
 // Do NOT derive these from scripts/rpc-routes-lib.mjs.
 const EXPECTED_DOMAIN_ACTION_COUNTS = {
   ORDER_ACTIONS: 13,
-  DISPATCH_ACTIONS: 15,
+  DISPATCH_ACTIONS: 16,
   PARTNER_ACTIONS: 18,
   ADMIN_ACTIONS: 29,
   ACCOUNT_ACTIONS: 17,
 };
-const EXPECTED_TOTAL_ACTIONS = 92;
+const EXPECTED_TOTAL_ACTIONS = 93;
 
 const actionsSource = fs.readFileSync(ACTIONS_SOURCE_PATH, 'utf8');
 

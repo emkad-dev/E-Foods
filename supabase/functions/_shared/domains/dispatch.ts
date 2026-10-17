@@ -1795,6 +1795,49 @@ const dispatchSetAvailability: Handler = async ({ context, data }) => {
   return json(200, { data: { courierId, status } });
 };
 
+const dispatchRiderSOS: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['dispatch']);
+  const orderId = sanitizeOptionalText(data.orderId) ?? null;
+  const riderUid = sanitizeText(context.uid, '');
+
+  // Fetch current rider location from DispatchRiderRecord
+  const { data: riderRow, error: riderErr } = await serviceClient
+    .from('DispatchRiderRecord')
+    .select('latitude,longitude')
+    .eq('id', riderUid)
+    .single();
+
+  if (riderErr || !riderRow) {
+    fail(404, 'Rider record not found.');
+  }
+
+  // Insert audit event
+  await insertDeliveryEvent({
+    courierId: riderUid,
+    eventType: 'sos_triggered',
+    latitude: riderRow!.latitude,
+    longitude: riderRow!.longitude,
+    orderId,
+    occurredAt: nowIso(),
+  });
+
+  // Notify admins (fire-and-forget via notifyAdmins which wraps notifySafely)
+  const latStr = riderRow!.latitude != null ? String(riderRow!.latitude) : 'unknown';
+  const lngStr = riderRow!.longitude != null ? String(riderRow!.longitude) : 'unknown';
+  await notifyAdmins({
+    body: `Rider ${riderUid.slice(-6).toUpperCase()} triggered SOS. Lat: ${latStr}, Lng: ${lngStr}.`,
+    data: buildNotificationData({
+      app: 'admin',
+      orderId: orderId ?? '',
+      routeKey: 'admin_order_detail',
+      type: 'rider_sos',
+    }),
+    title: 'Rider SOS',
+  });
+
+  return json(200, { data: { confirmedAt: nowIso() } });
+};
+
 export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: DISPATCH_ACTIONS,
   name: 'dispatch',
@@ -1805,6 +1848,7 @@ export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
     dispatchGetDeliveryQueue,
     dispatchGetNearestRiders,
     dispatchGetOrderDetail,
+    dispatchRiderSOS,
     dispatchSetAvailability,
     dispatchGetRiders,
     dispatchGetWeeklyEarnings,
