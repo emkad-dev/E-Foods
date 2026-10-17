@@ -67,3 +67,7 @@ export const setDispatchAvailability = async (available: boolean) =>
   callDispatchBackendRpc<{ courierId: string; status: 'Available' | 'Offline' }>('dispatchSetAvailability', {
     available,
   });
+
+export const triggerRiderSOS = async (orderId: string): Promise<void> => {
+  await callDispatchBackendRpc('dispatchRiderSOS', { orderId });
+};

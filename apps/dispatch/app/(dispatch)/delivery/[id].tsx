@@ -25,6 +25,7 @@ import {
   markDispatchOrderDelivered,
   markDispatchOrderOnTheWay,
   markDispatchOrderPickedUp,
+  triggerRiderSOS,
 } from '../../../src/services/dispatchOrderActions';
 import { dispatchTheme } from '../../../src/theme/palette';
 import { radius } from '../../../../../packages/design-system/src/tokens/radius';
@@ -90,6 +91,8 @@ export default function DispatchDeliveryDetailScreen() {
   // without retyping all four.
   const [deliveryCode, setDeliveryCode] = useState('');
   const [submittingDelivery, setSubmittingDelivery] = useState(false);
+  const [sosConfirming, setSosConfirming] = useState(false);
+  const [sosSent, setSosSent] = useState(false);
   // Every action on this screen reported failure through `Alert`, which is
   // `class Alert { static alert() {} }` under react-native-web. `error` above
   // belongs to `useDispatchOrder` and carries LOAD failures only (the early
@@ -265,6 +268,21 @@ export default function DispatchDeliveryDetailScreen() {
     }
   };
 
+  const handleSOS = async () => {
+    if (!order) {
+      return;
+    }
+
+    setSosConfirming(false);
+    try {
+      await triggerRiderSOS(order.id);
+      setSosSent(true);
+      setTimeout(() => setSosSent(false), 3000);
+    } catch (sosError) {
+      reportFailure('SOS failed', toUserMessage(sosError, 'Could not send SOS. Try again.'));
+    }
+  };
+
   // These used to catch a rejection from Linking.openURL, which for a blocked
   // popup never comes -- react-native-web resolves regardless, because it never
   // checks what window.open returned. The catch was therefore dead code on web.
@@ -337,6 +355,7 @@ export default function DispatchDeliveryDetailScreen() {
   const canMarkDelivered = ['picked_up', 'on_the_way'].includes(normalizedStatus) && hasAssignedCourier;
   const canMarkFailed = ['picked_up', 'on_the_way'].includes(normalizedStatus) && hasAssignedCourier;
   const canEscalate = !['cancelled', 'delivered', 'failed_delivery', 'rejected'].includes(normalizedStatus);
+  const canSOS = !['cancelled', 'delivered', 'failed_delivery', 'rejected'].includes(normalizedStatus);
   const assignmentHelperCopy =
     normalizedStatus === 'placed'
       ? 'Wait for the restaurant to accept this order before assigning a rider.'
@@ -500,6 +519,39 @@ export default function DispatchDeliveryDetailScreen() {
           >
             <Text style={styles.actionButtonText}>Escalate for manual intervention</Text>
           </TouchableOpacity>
+          {canSOS ? (
+            <View style={styles.sosContainer}>
+              {sosSent ? (
+                <Text style={styles.sosSentText}>SOS sent. Ops have been notified.</Text>
+              ) : sosConfirming ? (
+                <View style={styles.sosConfirmBox}>
+                  <Text style={styles.sosConfirmTitle}>Send emergency alert to FEASTY ops?</Text>
+                  <Text style={styles.sosConfirmNote}>This is NOT a call to 999/112. For emergencies call emergency services directly.</Text>
+                  <View style={styles.sosConfirmRow}>
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.sosButton]}
+                      onPress={handleSOS}
+                    >
+                      <Text style={styles.actionButtonText}>Send SOS</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.actionButtonDisabled]}
+                      onPress={() => setSosConfirming(false)}
+                    >
+                      <Text style={styles.actionButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.sosButton]}
+                  onPress={() => setSosConfirming(true)}
+                >
+                  <Text style={styles.actionButtonText}>SOS — emergency alert</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.sectionCard}>
@@ -906,5 +958,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginTop: 6,
+  },
+  sosContainer: {
+    marginTop: 12,
+  },
+  sosButton: {
+    backgroundColor: dispatchTheme.danger,
+  },
+  sosConfirmBox: {
+    borderRadius: radius.md,
+    backgroundColor: dispatchTheme.dangerSoft,
+    padding: 12,
+    marginTop: 8,
+  },
+  sosConfirmTitle: {
+    color: dispatchTheme.dangerText,
+    fontWeight: '600',
+    fontSize: 15,
+    marginBottom: 4,
+  },
+  sosConfirmNote: {
+    color: dispatchTheme.dangerText,
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  sosConfirmRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sosSentText: {
+    color: dispatchTheme.dangerText,
+    fontWeight: '600',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
