@@ -1777,6 +1777,41 @@ const adminSetPromoCodeActive: Handler = async ({ context, data }) => {
   return json(200, { data: { promoCode: updated } });
 };
 
+const adminGetDispatchOpsView: Handler = async ({ context }) => {
+  ensureRole(context.role, ['admin']);
+
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const [assignmentsResult, sosResult] = await Promise.all([
+    serviceClient
+      .from('DeliveryAssignment')
+      .select('orderId,courierId,courierName,assignedAt,dispatchOwnerId')
+      .order('assignedAt', { ascending: false })
+      .limit(50),
+    serviceClient
+      .from('DeliveryEvent')
+      .select('id,orderId,eventType,actorUid,details,createdAt')
+      .eq('eventType', 'sos_triggered')
+      .gte('createdAt', since24h)
+      .order('createdAt', { ascending: false })
+      .limit(50),
+  ]);
+
+  if (assignmentsResult.error) {
+    throw new Error(assignmentsResult.error.message);
+  }
+  if (sosResult.error) {
+    throw new Error(sosResult.error.message);
+  }
+
+  return json(200, {
+    data: {
+      activeAssignments: assignmentsResult.data ?? [],
+      sosEvents: sosResult.data ?? [],
+    },
+  });
+};
+
 export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: ADMIN_ACTIONS,
   name: 'admin',
@@ -1788,6 +1823,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetAccessOverview,
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,
+    adminGetDispatchOpsView,
     adminGetOperationalAlerts,
     adminGetAuditLog,
     adminGetRiskEvents,

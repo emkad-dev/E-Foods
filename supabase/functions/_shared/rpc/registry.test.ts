@@ -121,6 +121,7 @@ const EXPECTED_ADMIN_ACTIONS = [
   'adminListFeatureFlags',
   'adminUpsertFeatureFlag',
   'adminGetOperationalAlerts',
+  'adminGetDispatchOpsView',
   'supportGetInbox',
   'supportGetConversation',
   'supportSendAgentReply',
@@ -200,7 +201,7 @@ const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['orders', ORDER_ACTIONS, 13],
   ['dispatch', DISPATCH_ACTIONS, 16],
   ['partner', PARTNER_ACTIONS, 18],
-  ['admin', ADMIN_ACTIONS, 29],
+  ['admin', ADMIN_ACTIONS, 30],
   ['account', ACCOUNT_ACTIONS, 17],
 ];
 
@@ -232,7 +233,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 93-action surface', () => {
+Deno.test('the five domains together cover exactly the 94-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -241,14 +242,14 @@ Deno.test('the five domains together cover exactly the 93-action surface', () =>
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 93, 'total action count');
-  expectEqual(new Set(union).size, 93, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 93, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 94, 'total action count');
+  expectEqual(new Set(union).size, 94, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 94, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 93, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 94, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {

@@ -83,6 +83,7 @@ export const ADMIN_ACTIONS = [
   'adminListFeatureFlags',
   'adminUpsertFeatureFlag',
   'adminGetOperationalAlerts',
+  'adminGetDispatchOpsView',
   'supportGetInbox',
   'supportGetConversation',
   'supportSendAgentReply',

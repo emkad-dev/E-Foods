@@ -78,6 +78,31 @@ export type AdminOperationalAlertsResponse = {
 export const getAdminOperationalAlerts = (input?: Record<string, unknown>) =>
   callAdminRpc<AdminOperationalAlertsResponse>('adminGetOperationalAlerts', input);
 
+export type DispatchAssignmentRecord = {
+  orderId: string;
+  courierId: string | null;
+  courierName: string | null;
+  assignedAt: string | null;
+  dispatchOwnerId: string | null;
+};
+
+export type DispatchSosEventRecord = {
+  id: string;
+  orderId: string;
+  eventType: string;
+  actorUid: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: string | null;
+};
+
+export type AdminDispatchOpsView = {
+  activeAssignments: DispatchAssignmentRecord[];
+  sosEvents: DispatchSosEventRecord[];
+};
+
+export const getAdminDispatchOpsView = () =>
+  callAdminRpc<AdminDispatchOpsView>('adminGetDispatchOpsView');
+
 export type FeatureFlagRecord = {
   description: string | null;
   enabled: boolean;

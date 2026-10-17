@@ -1811,15 +1811,20 @@ const dispatchRiderSOS: Handler = async ({ context, data }) => {
     fail(404, 'Rider record not found.');
   }
 
-  // Insert audit event
-  await insertDeliveryEvent({
-    courierId: riderUid,
-    eventType: 'sos_triggered',
-    latitude: riderRow!.latitude,
-    longitude: riderRow!.longitude,
-    orderId,
-    occurredAt: nowIso(),
-  });
+  // Insert audit event — only when orderId is known (DeliveryEvent.orderId is NOT NULL).
+  // orderId is always provided when triggered from the delivery screen.
+  if (orderId) {
+    await insertDeliveryEvent({
+      actorUid: riderUid,
+      eventType: 'sos_triggered',
+      orderId,
+      details: {
+        courierId: riderUid,
+        latitude: riderRow!.latitude,
+        longitude: riderRow!.longitude,
+      },
+    });
+  }
 
   // Notify admins (fire-and-forget via notifyAdmins which wraps notifySafely)
   const latStr = riderRow!.latitude != null ? String(riderRow!.latitude) : 'unknown';

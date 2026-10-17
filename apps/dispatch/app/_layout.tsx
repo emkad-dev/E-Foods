@@ -25,7 +25,7 @@ const initializeSentry = createSentryInitializer({
 // Standalone rider dispatch is shelved for the MVP (restaurants self-provision
 // their own delivery). Set to true to bring the full authenticated rider app,
 // login, and live location tracking back online — no deleted code to restore.
-const DISPATCH_ENABLED = false;
+const DISPATCH_ENABLED = true;
 
 const ACTIVE_LOCATION_INTERVAL_MS = 5000;
 const IDLE_HEARTBEAT_INTERVAL_MS = 60000;
