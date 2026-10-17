@@ -1,5 +1,7 @@
 import { Redirect, Slot, Tabs, usePathname } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useActiveDeliveryNotification } from '../../src/hooks/useActiveDeliveryNotification';
+import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { dispatchTheme } from '../../src/theme/palette';
 
@@ -7,6 +9,8 @@ export default function DispatchLayout() {
   const pathname = usePathname();
   const { user } = useAuth();
   usePushNotifications();
+  const { activeDeliveryOrders } = useDispatchOrders();
+  useActiveDeliveryNotification(activeDeliveryOrders);
 
   if (user && user.role !== 'dispatch') {
     if (pathname !== '/complete-rider-details') {
