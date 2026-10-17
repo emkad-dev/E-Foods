@@ -762,6 +762,7 @@ export const runAutomaticDispatchAssignment = async (
 
   await notifyUsers([winner.id], {
     body: `Order ${order.id.slice(-6).toUpperCase()} is available - you have ${DISPATCH_OFFER_TTL_SECONDS} seconds to accept.`,
+    channelId: 'offers',
     data: buildNotificationData({
       app: 'dispatch',
       orderId: order.id,

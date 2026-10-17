@@ -74,6 +74,15 @@ export const usePushNotifications = () => {
             lightColor: '#E4A11B',
             vibrationPattern: [0, 250, 250, 250],
           });
+          await Notifications.setNotificationChannelAsync('offers', {
+            name: 'Delivery offers',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 500, 100, 500],
+            lightColor: '#F5B342',
+            enableLights: true,
+            enableVibrate: true,
+            sound: 'default',
+          });
         }
       } catch (error) {
         console.error('Push registration failed.', error);
