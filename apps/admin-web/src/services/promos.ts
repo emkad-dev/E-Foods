@@ -37,3 +37,46 @@ export const createPromo = (input: {
 
 export const setPromoActive = (id: string, active: boolean) =>
   callAdminRpc<{ promo: Promo }>('promoSetActive', { id, active });
+
+export type PromoCodeType = 'percent' | 'fixed' | 'free_delivery';
+export type PromoCodeFunding = 'platform' | 'restaurant';
+
+export interface PromoCode {
+  id: string;
+  code: string;
+  type: PromoCodeType;
+  value: number | null;
+  minBasket: number | null;
+  perUserCap: number | null;
+  globalCap: number | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  restaurantId: string | null;
+  fundingSource: PromoCodeFunding;
+  isActive: boolean;
+  isAutomatic: boolean;
+  createdAt?: string;
+}
+
+export interface CreatePromoCodeInput {
+  code: string;
+  type: PromoCodeType;
+  value: number;
+  minBasket?: number;
+  perUserCap?: number | null;
+  globalCap?: number | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  restaurantId?: string | null;
+  fundingSource: PromoCodeFunding;
+  isAutomatic?: boolean;
+  isActive?: boolean;
+}
+
+export const listPromoCodes = () => callAdminRpc<{ promoCodes: PromoCode[] }>('adminListPromoCodes');
+
+export const createPromoCode = (input: CreatePromoCodeInput) =>
+  callAdminRpc<{ promoCode: PromoCode }>('adminCreatePromoCode', input as unknown as Record<string, unknown>);
+
+export const setPromoCodeActive = (id: string, isActive: boolean) =>
+  callAdminRpc<{ promoCode: PromoCode }>('adminSetPromoCodeActive', { id, isActive });

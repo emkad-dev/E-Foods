@@ -25,6 +25,7 @@ const StatisticsPage = lazy(() => import('./pages/StatisticsPage'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
 const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage'));
 const PromosPage = lazy(() => import('./pages/PromosPage'));
+const PromoCodesPage = lazy(() => import('./pages/PromoCodesPage'));
 
 function RequireAdmin({ children }: { children: ReactNode }) {
   const { session, role, initializing } = useAuth();
@@ -147,6 +148,14 @@ export default function App() {
             element={
               <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <PromosPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/promo-codes"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
+                <PromoCodesPage />
               </Suspense>
             }
           />

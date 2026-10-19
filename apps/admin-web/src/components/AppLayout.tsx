@@ -31,6 +31,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/inbox', label: 'Inbox', countKey: 'inbox' },
   { to: '/broadcasts', label: 'Broadcasts' },
   { to: '/promos', label: 'Promos' },
+  { to: '/promo-codes', label: 'Promo codes' },
 ];
 
 /** The `support` role's whole nav. It is one link, and it is a queue. */
