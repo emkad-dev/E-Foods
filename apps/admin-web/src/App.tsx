@@ -16,6 +16,7 @@ import LoginPage from './pages/LoginPage';
 // own chunk loaded on navigation.
 const OverviewPage = lazy(() => import('./pages/OverviewPage'));
 const OrdersPage = lazy(() => import('./pages/OrdersPage'));
+const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage'));
 const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
 const ObservabilityPage = lazy(() => import('./pages/ObservabilityPage'));
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
@@ -71,6 +72,14 @@ export default function App() {
             element={
               <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <OrdersPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/orders/:orderId"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
+                <OrderDetailPage />
               </Suspense>
             }
           />

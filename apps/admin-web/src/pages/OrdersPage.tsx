@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
@@ -15,6 +16,27 @@ export default function OrdersPage() {
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
+  const [lookupValue, setLookupValue] = useState('');
+  const navigate = useNavigate();
+
+  // Cancelled, rejected and failed-delivery orders are not in the snapshot
+  // table (the feed drops them), so they cannot be clicked into. This opens
+  // any order by its full id; the 8-character code shown in the table is
+  // resolved against the snapshot first so it works for visible rows too.
+  const handleLookup = (event: FormEvent) => {
+    event.preventDefault();
+    const raw = lookupValue.trim().replace(/^#/, '');
+
+    if (!raw) {
+      return;
+    }
+
+    const upper = raw.toUpperCase();
+    const shortMatches = snapshot.orders.filter((order) => String(order.id).toUpperCase().endsWith(upper));
+    const resolvedId = shortMatches.length === 1 ? shortMatches[0].id : raw;
+
+    navigate(`/orders/${encodeURIComponent(resolvedId)}`);
+  };
 
   const statusOptions = useMemo(() => {
     const statuses = new Set<string>();
@@ -158,6 +180,20 @@ export default function OrdersPage() {
         ) : null}
       </div>
 
+      <form className="filters-row" onSubmit={handleLookup}>
+        <input
+          className="select-pill"
+          value={lookupValue}
+          onChange={(event) => setLookupValue(event.target.value)}
+          placeholder="Look up an order by id (includes cancelled / failed)"
+          aria-label="Order id"
+          style={{ minWidth: 320 }}
+        />
+        <button type="submit" className="btn btn-ghost btn-sm" disabled={lookupValue.trim() === ''}>
+          Open order
+        </button>
+      </form>
+
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
       <div className="card">
@@ -184,7 +220,11 @@ export default function OrdersPage() {
               <tbody>
                 {filteredOrders.map((order) => (
                   <tr key={order.id}>
-                    <td className="cell-strong">#{String(order.id).slice(-8).toUpperCase()}</td>
+                    <td className="cell-strong">
+                      <Link to={`/orders/${encodeURIComponent(order.id)}`}>
+                        #{String(order.id).slice(-8).toUpperCase()}
+                      </Link>
+                    </td>
                     <td>{order.restaurantName || 'Unknown restaurant'}</td>
                     <td className="muted">{humanizeStatus(order.fulfillmentType)}</td>
                     <td>

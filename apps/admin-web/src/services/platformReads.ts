@@ -77,6 +77,89 @@ export type AdminDispatchOpsView = {
 export const getAdminDispatchOpsView = () =>
   callAdminRpc<AdminDispatchOpsView>('adminGetDispatchOpsView');
 
+export type AdminOrderDetailPayment = {
+  amount: number;
+  channel: string | null;
+  createdAt: string | null;
+  currency: string | null;
+  failedAt: string | null;
+  gatewayStatus: string | null;
+  id: string;
+  lastError: string | null;
+  method: string | null;
+  paidAt: string | null;
+  provider: string | null;
+  reference: string;
+  settlementMode: string | null;
+  status: string;
+};
+
+export type AdminOrderDetailEvent = {
+  actorUid: string | null;
+  createdAt: string | null;
+  details: Record<string, unknown> | null;
+  eventType: string;
+  id: string;
+  note: string | null;
+};
+
+export type AdminOrderDetailItem = {
+  id: string;
+  name: string;
+  optionDelta: number;
+  price: number;
+  quantity: number;
+  selectedOptions: Array<Record<string, unknown>>;
+};
+
+/** Mirrors adminGetOrderDetail (supabase/functions/_shared/domains/admin.ts). */
+export type AdminOrderDetail = {
+  assignment: {
+    courierId: string | null;
+    courierName: string | null;
+    dispatchId: string | null;
+    dispatchOwnerId: string | null;
+  } | null;
+  cancellation: Record<string, unknown> | null;
+  createdAt: string | null;
+  customer: {
+    displayName: string | null;
+    email: string | null;
+    phoneNumber: string | null;
+    uid: string;
+  };
+  deliveryAddress: string | null;
+  deliveryCodeAttempts: number;
+  deliveryCodeVerifiedAt: string | null;
+  events: AdminOrderDetailEvent[];
+  fulfillmentType: string;
+  id: string;
+  items: AdminOrderDetailItem[];
+  needsAttention: boolean;
+  orderGroupId: string | null;
+  payment: Record<string, unknown>;
+  payments: AdminOrderDetailPayment[];
+  pricing: {
+    currency?: string;
+    deliveryFee?: number;
+    discount?: number;
+    serviceFee?: number;
+    subtotal?: number;
+    tip?: number;
+    total?: number;
+  } | null;
+  restaurantId: string;
+  restaurantName: string;
+  scheduledFor: string | null;
+  status: string;
+  timeline: Record<string, unknown> | null;
+  total: number;
+  updatedAt: string | null;
+};
+
+export const getAdminOrderDetail = (orderId: string) =>
+  callAdminRpc<{ order: AdminOrderDetail }>('adminGetOrderDetail', { orderId });
+
 export type FeatureFlagRecord = {
   description: string | null;
   enabled: boolean;
