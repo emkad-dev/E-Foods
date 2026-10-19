@@ -23,6 +23,7 @@ type NotificationRouteKey =
   | 'dispatch_login'
   | 'admin_access'
   | 'admin_approvals'
+  | 'admin_order_detail'
   | 'admin_profile'
   | 'admin_login';
 
@@ -112,6 +113,8 @@ const buildNotificationPath = (
       return '/access';
     case 'admin_approvals':
       return '/approvals';
+    case 'admin_order_detail':
+      return data.orderId ? `/orders/${data.orderId}` : '/orders';
     case 'admin_profile':
       return '/profile';
     case 'admin_login':
