@@ -885,6 +885,144 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
   });
 };
 
+// Keys of the order-level `payment` JSON that are safe to show an admin.
+// Anything else (raw gateway payloads, authorization URLs, codes) is dropped.
+const ADMIN_ORDER_PAYMENT_KEYS = [
+  'method',
+  'status',
+  'provider',
+  'reference',
+  'channel',
+  'capturedAmount',
+  'refundAmount',
+  'refundedAt',
+  'paidAt',
+] as const;
+
+// Event `details` are free-form JSON written by many call sites. Drop anything
+// that looks like a credential before it reaches the admin UI.
+const SENSITIVE_DETAIL_KEY = /code|otp|hash|secret|token|password/i;
+
+const stripSensitiveDetails = (details: unknown): Record<string, unknown> | null => {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return null;
+  }
+  const entries = Object.entries(details as Record<string, unknown>).filter(
+    ([key]) => !SENSITIVE_DETAIL_KEY.test(key)
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+};
+
+/**
+ * Admin drill-down for a single order. Unlike the dashboard snapshot this does
+ * NOT filter through isOrderCleanForReporting, so cancelled / rejected /
+ * failed-delivery and unpaid prepaid orders are reachable. Read-only: it never
+ * runs the unpaid-order expiry side effect.
+ */
+const adminGetOrderDetail: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+  const orderId = sanitizeText(data.orderId);
+  if (!orderId || orderId.length > 128) {
+    fail(400, 'An order id is required.');
+  }
+
+  const { data: order, error: orderError } = await serviceClient
+    .from('CustomerOrder')
+    .select(CUSTOMER_ORDER_COLUMNS)
+    .eq('id', orderId)
+    .maybeSingle<CustomerOrderRow>();
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+  if (!order) {
+    fail(404, 'Order not found.');
+  }
+
+  const [relations, paymentsResult, customerResult] = await Promise.all([
+    loadOrderRelations([order.id]),
+    serviceClient
+      .from('PaymentTransaction')
+      .select(
+        'id,reference,status,gatewayStatus,amount,currency,provider,method,channel,settlementMode,lastError,paidAt,failedAt,createdAt'
+      )
+      .eq('orderId', order.id)
+      .order('createdAt', { ascending: true }),
+    serviceClient
+      .from('UserAccount')
+      .select('uid,email,displayName,phoneNumber')
+      .eq('uid', order.customerId)
+      .maybeSingle<{ uid: string; email: string | null; displayName: string | null; phoneNumber: string | null }>(),
+  ]);
+  if (paymentsResult.error) {
+    throw new Error(paymentsResult.error.message);
+  }
+  if (customerResult.error) {
+    throw new Error(customerResult.error.message);
+  }
+
+  // Reuse the shared snapshot shape (items, assignment, status normalisation),
+  // then replace the pieces that need admin-specific redaction.
+  const snapshot = toOrderSnapshotResponse(
+    order,
+    relations.itemsByOrderId.get(order.id) ?? [],
+    relations.assignmentsByOrderId.get(order.id) ?? null,
+    []
+  );
+
+  const payment = (order.payment ?? {}) as Record<string, unknown>;
+  const safePayment = Object.fromEntries(
+    ADMIN_ORDER_PAYMENT_KEYS.filter((key) => payment[key] !== undefined && payment[key] !== null).map((key) => [
+      key,
+      payment[key],
+    ])
+  );
+
+  const customer = customerResult.data;
+  const payments = (paymentsResult.data ?? []) as Array<Record<string, unknown>>;
+
+  return json(200, {
+    data: {
+      order: {
+        ...snapshot,
+        payment: safePayment,
+        // Proof-of-delivery state only; the code itself is customer-only.
+        deliveryCodeVerifiedAt: order.deliveryCodeVerifiedAt ?? null,
+        deliveryCodeAttempts: order.deliveryCodeAttempts ?? 0,
+        customer: {
+          uid: order.customerId,
+          displayName: sanitizeOptionalText(customer?.displayName),
+          email: sanitizeOptionalText(customer?.email),
+          phoneNumber: sanitizeOptionalText(customer?.phoneNumber),
+        },
+        payments: payments.map((payment) => ({
+          amount: Number(payment.amount ?? 0),
+          channel: payment.channel ?? null,
+          createdAt: payment.createdAt ?? null,
+          currency: payment.currency ?? null,
+          failedAt: payment.failedAt ?? null,
+          gatewayStatus: payment.gatewayStatus ?? null,
+          id: payment.id,
+          lastError: payment.lastError ?? null,
+          method: payment.method ?? null,
+          paidAt: payment.paidAt ?? null,
+          provider: payment.provider ?? null,
+          reference: payment.reference,
+          settlementMode: payment.settlementMode ?? null,
+          status: payment.status,
+        })),
+        events: (relations.eventsByOrderId.get(order.id) ?? []).map((event) => ({
+          actorUid: sanitizeOptionalText(event.actorUid),
+          createdAt: event.createdAt ?? null,
+          details: stripSensitiveDetails(event.details),
+          eventType: event.eventType,
+          id: event.id,
+          note: sanitizeOptionalText(event.note),
+        })),
+      },
+    },
+  });
+};
+
 const adminGetAccessOverview: Handler = async ({ context }) => {
   ensureRole(context.role, ['admin']);
   const { data: users, error } = await serviceClient
@@ -1825,6 +1963,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetDashboardSnapshot,
     adminGetDispatchOpsView,
     adminGetOperationalAlerts,
+    adminGetOrderDetail,
     adminGetAuditLog,
     adminGetRiskEvents,
     adminListFeatureFlags,

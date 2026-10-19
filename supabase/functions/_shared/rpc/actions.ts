@@ -77,6 +77,7 @@ export const ADMIN_ACTIONS = [
   'adminReviewPartnerApplication',
   'adminSetRestaurantPublished',
   'adminGetDashboardSnapshot',
+  'adminGetOrderDetail',
   'adminGetAccessOverview',
   'adminGetAuditLog',
   'adminGetRiskEvents',
