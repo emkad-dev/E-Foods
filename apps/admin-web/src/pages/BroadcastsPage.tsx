@@ -4,11 +4,13 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import { formatDateTime } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import {
   broadcastTone,
   cancelBroadcast,
   createBroadcast,
+  getBroadcast,
   listBroadcasts,
   previewAudience,
   scheduleBroadcast,
@@ -26,6 +28,25 @@ const activityToSegment = (choice: ActivityChoice): BroadcastSegment['activity']
     return { notOrderedForDays: 60 };
   }
   return null;
+};
+
+/** The audience a stored segment targets, in words. */
+const describeSegment = (segment: BroadcastSegment | null | undefined): string => {
+  if (!segment) {
+    return 'Everyone eligible';
+  }
+  const parts: string[] = [];
+  parts.push(segment.roles && segment.roles.length > 0 ? `Roles: ${segment.roles.join(', ')}` : 'All roles');
+  if (segment.activity?.orderedWithinDays) {
+    parts.push(`ordered in the last ${segment.activity.orderedWithinDays} days`);
+  }
+  if (segment.activity?.notOrderedForDays) {
+    parts.push(`no order for ${segment.activity.notOrderedForDays}+ days`);
+  }
+  if (segment.restaurantId) {
+    parts.push(`restaurant ${segment.restaurantId}`);
+  }
+  return parts.join(' · ');
 };
 
 const SEGMENT_ROLES = ['customer', 'restaurant', 'dispatch'] as const;
@@ -62,6 +83,11 @@ export default function BroadcastsPage() {
   // canceled or failed broadcast be scheduled again, so neither of those is
   // a one-way door.
   const [sendConfirm, setSendConfirm] = useState<Broadcast | null>(null);
+  // The read-only detail panel opened by a row's View action. It has its own
+  // error so a failed detail read never masquerades as a list failure.
+  const [viewing, setViewing] = useState<Broadcast | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [viewLoadingId, setViewLoadingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -185,6 +211,20 @@ export default function BroadcastsPage() {
       setError(nextError instanceof Error ? nextError.message : 'Schedule failed.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onView = async (broadcast: Broadcast) => {
+    setViewLoadingId(broadcast.id);
+    setViewError(null);
+    try {
+      const res = await getBroadcast(broadcast.id);
+      setViewing(res.broadcast);
+    } catch (nextError) {
+      setViewing(null);
+      setViewError(nextError instanceof Error ? nextError.message : 'Unable to load this broadcast.');
+    } finally {
+      setViewLoadingId(null);
     }
   };
 
@@ -432,6 +472,16 @@ export default function BroadcastsPage() {
                             {selected?.id === broadcast.id ? 'Selected' : 'Send / schedule'}
                           </button>
                         ) : null}
+                        {broadcast.status !== 'draft' ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={viewLoadingId === broadcast.id}
+                            onClick={() => void onView(broadcast)}
+                          >
+                            {viewLoadingId === broadcast.id ? 'Loading…' : 'View'}
+                          </button>
+                        ) : null}
                         {broadcast.status === 'scheduled' ? (
                           <button
                             type="button"
@@ -448,6 +498,68 @@ export default function BroadcastsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        ) : null}
+
+        {viewError ? <ErrorBanner message={viewError} /> : null}
+        {viewing ? (
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-title-row">
+              <h3 className="card-title">{viewing.title}</h3>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setViewing(null)}>
+                Close
+              </button>
+            </div>
+            <dl className="audit-detail-grid">
+              <div className="audit-detail-field">
+                <dt className="muted">Status</dt>
+                <dd className="audit-detail-value">
+                  <StatusBadge label={viewing.status} tone={broadcastTone(viewing.status)} />
+                </dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Sent as</dt>
+                <dd className="audit-detail-value">
+                  {viewing.channels.length > 0 ? viewing.channels.join(' + ') : 'no channel'} · {viewing.category}
+                </dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Segment</dt>
+                <dd className="audit-detail-value">{describeSegment(viewing.segment)}</dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Recipients</dt>
+                <dd className="audit-detail-value">{viewing.recipientCount}</dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Scheduled for</dt>
+                <dd className="audit-detail-value">{viewing.scheduledAt ? formatDateTime(viewing.scheduledAt) : '—'}</dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Sent at</dt>
+                <dd className="audit-detail-value">{viewing.sentAt ? formatDateTime(viewing.sentAt) : '—'}</dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Email subject</dt>
+                <dd className="audit-detail-value">{viewing.emailSubject || '—'}</dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Email body</dt>
+                <dd className="audit-detail-value" style={{ whiteSpace: 'pre-wrap' }}>
+                  {viewing.emailBody || '—'}
+                </dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Push title</dt>
+                <dd className="audit-detail-value">{viewing.pushTitle || '—'}</dd>
+              </div>
+              <div className="audit-detail-field">
+                <dt className="muted">Push body</dt>
+                <dd className="audit-detail-value" style={{ whiteSpace: 'pre-wrap' }}>
+                  {viewing.pushBody || '—'}
+                </dd>
+              </div>
+            </dl>
           </div>
         ) : null}
       </div>

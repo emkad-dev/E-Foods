@@ -50,6 +50,8 @@ export const broadcastTone = (status: BroadcastStatus): AdminTone => {
 
 export const listBroadcasts = () => callAdminRpc<{ broadcasts: Broadcast[] }>('broadcastList');
 
+export const getBroadcast = (id: string) => callAdminRpc<{ broadcast: Broadcast }>('broadcastGet', { id });
+
 export const previewAudience = (segment: BroadcastSegment, category: string) =>
   callAdminRpc<{ recipientCount: number }>('broadcastPreviewAudience', { segment, category });
 
