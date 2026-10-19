@@ -3,6 +3,7 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/format';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
 import { useSupportRealtime } from '../lib/useSupportRealtime';
@@ -18,6 +19,21 @@ import {
   type SupportMessage,
   type SupportStatus,
 } from '../services/supportInbox';
+
+/**
+ * Who owns a conversation, in words. `assignedTo` is a bare uid; the viewer's
+ * own uid reads as "You" and anyone else as a short id suffix (the admin
+ * console has no staff directory to resolve a name from).
+ */
+const describeOwner = (assignedTo: string | null, myUid: string | undefined): string => {
+  if (!assignedTo) {
+    return 'Unassigned';
+  }
+  if (myUid && assignedTo === myUid) {
+    return 'You';
+  }
+  return `Agent ${assignedTo.slice(-6).toUpperCase()}`;
+};
 
 const STATUS_FILTERS: Array<SupportStatus | 'all'> = ['open', 'pending', 'closed', 'all'];
 
@@ -67,6 +83,8 @@ const emptyInboxCopy = (statusFilter: SupportStatus | 'all'): { title: string; b
 };
 
 export default function InboxPage() {
+  const { session } = useAuth();
+  const myUid = session?.user.id;
   const [statusFilter, setStatusFilter] = useState<SupportStatus | 'all'>('open');
   const [conversations, setConversations] = useState<InboxConversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -229,6 +247,18 @@ export default function InboxPage() {
     }
   };
 
+  const onUnassign = async () => {
+    if (!selectedId) {
+      return;
+    }
+    try {
+      await assignConversation(selectedId, null);
+      await loadInbox();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Unable to unassign this conversation.');
+    }
+  };
+
   return (
     <section className="page inbox-page">
       <div className="inbox-list card">
@@ -290,6 +320,7 @@ export default function InboxPage() {
                   <StatusBadge label={conversation.status} tone={getSupportTone(conversation.status)} />
                 </div>
                 <div className="muted">
+                  {describeOwner(conversation.assignedTo, myUid)} ·{' '}
                   {new Date(conversation.lastMessageAt).toLocaleString()}
                   {isNewSince(previousVisit, conversation.lastMessageAt) ? <UpdatedSinceMarker /> : null}
                 </div>
@@ -319,10 +350,19 @@ export default function InboxPage() {
               <div>
                 <h3>{selected.customerName}</h3>
                 <StatusBadge label={selected.status} tone={getSupportTone(selected.status)} />
+                <div className="muted">Owner: {describeOwner(selected.assignedTo, myUid)}</div>
               </div>
               <div className="inbox-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => void onAssignMe()}>
                   Assign to me
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={!selected.assignedTo}
+                  onClick={() => void onUnassign()}
+                >
+                  Unassign
                 </button>
                 <button type="button" className="btn btn-ghost" onClick={() => void onStatus('pending')}>
                   Pending
