@@ -279,10 +279,22 @@ export interface SettlementBreakdownRow {
 
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
+/**
+ * Only orders whose payment has actually been captured settle anything. The
+ * windowed order list also holds pending and failed payments, and counting
+ * those inflated Gross and Orders for money that never arrived.
+ */
+export const isSettledOrder = (order: OrderDocument): boolean =>
+  String(order.payment?.status ?? '').toLowerCase() === 'paid';
+
 export const buildSettlementBreakdown = (orders: OrderDocument[]): SettlementBreakdownRow[] => {
   const rows = new Map<string, SettlementBreakdownRow>();
 
   for (const order of orders) {
+    if (!isSettledOrder(order)) {
+      continue;
+    }
+
     const created = getOrderDate(order);
 
     if (!created) {

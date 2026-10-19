@@ -307,6 +307,7 @@ export default function StatisticsPage() {
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Settlement by restaurant and day</h3>
+              <span className="badge badge-neutral">Paid orders only</span>
               {settlementBreakdown.length > 0 ? (
                 <span className="muted">
                   {settlementBreakdown.length > SETTLEMENT_ROW_CAP
