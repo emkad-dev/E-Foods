@@ -23,37 +23,11 @@ export type AdminApprovalQueue = {
   restaurants: RestaurantDocument[];
 };
 
-export type RiskSeverity = 'low' | 'medium' | 'high';
-
-export type RiskEventRecord = {
-  actorUid?: string | null;
-  createdAt: string;
-  dedupeKey: string;
-  eventType: string;
-  id: string;
-  metadata: Record<string, unknown> | null;
-  orderId?: string | null;
-  paymentId?: string | null;
-  paymentReference?: string | null;
-  reason: string;
-  score: number;
-  severity: RiskSeverity;
-  subjectId: string;
-  subjectType: string;
-  updatedAt: string;
-};
-
-export type AdminRiskEventsResponse = {
-  riskEvents: RiskEventRecord[];
-};
-
 export const getAdminDashboardSnapshot = () => callAdminRpc<AdminDashboardSnapshot>('adminGetDashboardSnapshot');
 
 export const getAdminAccessOverview = () => callAdminRpc<{ users: UserDocument[] }>('adminGetAccessOverview');
 
 export const getAdminApprovalQueue = () => callAdminRpc<AdminApprovalQueue>('adminGetApprovalQueue');
-
-export const getAdminRiskEvents = () => callAdminRpc<AdminRiskEventsResponse>('adminGetRiskEvents');
 
 export type OperationalAlertSeverity = 'low' | 'medium' | 'high';
 
