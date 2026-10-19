@@ -309,6 +309,82 @@ export const evaluateAcceptanceDeadlineAlert = (input: { orderId: string; restau
   ] as OperationalAlertUpsertRow[],
 });
 
+/**
+ * A single-store checkout settled 'manual' because the restaurant has no
+ * Paystack subaccount: the platform receives 100% of the money and owes the
+ * restaurant a manual payout. This is silent by construction (checkout still
+ * succeeds), so admin needs a standing signal.
+ *
+ * Only a SINGLE-store cart can be "missing a subaccount" - multi-store carts
+ * are always 'manual' by design (one Paystack charge cannot split across
+ * several subaccounts), so they yield no alert here. One alert row per
+ * restaurant (dedupeKey) - repeated payments update it rather than add rows.
+ */
+export const evaluateManualSettlementFallbackAlert = (input: {
+  isMultiStore: boolean;
+  orderId: string;
+  paymentReference: string;
+  restaurantId: string;
+  restaurantName?: string | null;
+  settlementMode: string;
+}) => {
+  const restaurantId = sanitizeText(input.restaurantId);
+  if (input.isMultiStore || input.settlementMode !== 'manual' || !restaurantId) {
+    return { alerts: [] as OperationalAlertUpsertRow[] };
+  }
+
+  const restaurantName = sanitizeText(input.restaurantName, 'Restaurant');
+  return {
+    alerts: [
+      buildAlert({
+        alertType: 'manual_settlement_fallback',
+        dedupeKey: `ops:manual_settlement_fallback:${restaurantId}`,
+        details: `${restaurantName} has no Paystack subaccount, so payments are held by the platform (manual settlement) and the restaurant must be paid out by hand. Latest order: ${sanitizeText(input.orderId)}.`,
+        metadata: {
+          lastOrderId: sanitizeText(input.orderId),
+          lastPaymentReference: sanitizeText(input.paymentReference),
+          lastSeenAt: nowIso(),
+          restaurantId,
+          restaurantName,
+        },
+        severity: 'medium',
+        subjectId: restaurantId,
+        subjectType: 'restaurant',
+        title: 'Restaurant paid manually (no subaccount)',
+      }),
+    ] as OperationalAlertUpsertRow[],
+  };
+};
+
+/**
+ * A successful payment arrived for an order that was already closed
+ * (cancelled/rejected/failed_delivery). The payment is recorded as paid and the
+ * order is NOT revived or refunded automatically - a human decides.
+ */
+export const evaluatePaymentOnClosedOrderAlert = (input: {
+  orderId: string;
+  orderStatus: string;
+  paymentReference: string;
+  restaurantId: string;
+}) => ({
+  alerts: [
+    buildAlert({
+      alertType: 'payment_on_closed_order',
+      dedupeKey: `ops:payment_on_closed_order:${sanitizeText(input.orderId)}`,
+      details: `A successful payment (${sanitizeText(input.paymentReference)}) was received for order ${sanitizeText(input.orderId)}, which is already ${sanitizeText(input.orderStatus)}. The order was not revived and no refund was issued; review and refund or reinstate manually.`,
+      metadata: {
+        orderStatus: sanitizeText(input.orderStatus),
+        paymentReference: sanitizeText(input.paymentReference),
+        restaurantId: sanitizeText(input.restaurantId),
+      },
+      severity: 'high',
+      subjectId: sanitizeText(input.orderId),
+      subjectType: 'order',
+      title: 'Payment received for a closed order',
+    }),
+  ] as OperationalAlertUpsertRow[],
+});
+
 const writeAlerts = async (alerts: OperationalAlertUpsertRow[], client: OperationalAlertClient = serviceClient) => {
   for (const alert of alerts) {
     try {
@@ -349,6 +425,26 @@ export const captureDispatchOffersExhaustedAlert = async (input: {
   restaurantId: string;
 }, client: OperationalAlertClient = serviceClient) => {
   const alerts = evaluateDispatchOffersExhaustedAlert(input).alerts;
+  await writeAlerts(alerts, client);
+  return alerts;
+};
+
+/** Best-effort: never throws (writeAlerts swallows persistence failures). */
+export const captureManualSettlementFallbackAlert = async (
+  input: Parameters<typeof evaluateManualSettlementFallbackAlert>[0],
+  client: OperationalAlertClient = serviceClient
+) => {
+  const alerts = evaluateManualSettlementFallbackAlert(input).alerts;
+  await writeAlerts(alerts, client);
+  return alerts;
+};
+
+/** Best-effort: never throws (writeAlerts swallows persistence failures). */
+export const capturePaymentOnClosedOrderAlert = async (
+  input: Parameters<typeof evaluatePaymentOnClosedOrderAlert>[0],
+  client: OperationalAlertClient = serviceClient
+) => {
+  const alerts = evaluatePaymentOnClosedOrderAlert(input).alerts;
   await writeAlerts(alerts, client);
   return alerts;
 };

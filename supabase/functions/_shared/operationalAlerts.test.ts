@@ -9,10 +9,14 @@ const [
     captureAcceptanceDeadlineAlert,
     captureDispatchOffersExhaustedAlert,
     captureDispatchPoolEmptyAlert,
+    captureManualSettlementFallbackAlert,
+    capturePaymentOnClosedOrderAlert,
     capturePaymentWebhookFailureAlert,
     evaluateAcceptanceDeadlineAlert,
     evaluateDispatchOffersExhaustedAlert,
     evaluateDispatchPoolEmptyAlert,
+    evaluateManualSettlementFallbackAlert,
+    evaluatePaymentOnClosedOrderAlert,
     evaluatePaymentWebhookFailureAlert,
     recordOperationalAlert,
   },
@@ -153,4 +157,75 @@ Deno.test('best-effort capture helpers return the evaluated alerts', async () =>
   assertEquals(offersAlerts[0]?.alertType, 'dispatch_offers_exhausted');
   assertEquals(acceptanceAlerts[0]?.alertType, 'acceptance_deadline_escalated');
   assertEquals(calls.length, 4);
+});
+
+const manualFallbackInput = {
+  isMultiStore: false,
+  orderId: 'order-9',
+  paymentReference: 'FEASTY-CRD-ORDER-9',
+  restaurantId: 'rest-9',
+  restaurantName: 'Mama Put',
+  settlementMode: 'manual',
+};
+
+Deno.test('manual settlement fallback alert: one deduped row per restaurant for a single-store manual payment', () => {
+  const [alert] = evaluateManualSettlementFallbackAlert(manualFallbackInput).alerts;
+  assertEquals(alert?.alertType, 'manual_settlement_fallback');
+  assertEquals(alert?.dedupeKey, 'ops:manual_settlement_fallback:rest-9');
+  assertEquals(alert?.subjectType, 'restaurant');
+  assertEquals(alert?.subjectId, 'rest-9');
+
+  // A second order for the SAME restaurant maps to the SAME dedupe key.
+  const [again] = evaluateManualSettlementFallbackAlert({ ...manualFallbackInput, orderId: 'order-10' }).alerts;
+  assertEquals(again?.dedupeKey, alert?.dedupeKey);
+  // ...and a different restaurant to a different one.
+  const [other] = evaluateManualSettlementFallbackAlert({ ...manualFallbackInput, restaurantId: 'rest-2' }).alerts;
+  assertEquals(other?.dedupeKey, 'ops:manual_settlement_fallback:rest-2');
+});
+
+Deno.test('manual settlement fallback alert is silent for split settlement and for multi-store carts', () => {
+  assertEquals(evaluateManualSettlementFallbackAlert({ ...manualFallbackInput, settlementMode: 'split' }).alerts.length, 0);
+  assertEquals(evaluateManualSettlementFallbackAlert({ ...manualFallbackInput, isMultiStore: true }).alerts.length, 0);
+  assertEquals(evaluateManualSettlementFallbackAlert({ ...manualFallbackInput, restaurantId: '' }).alerts.length, 0);
+});
+
+Deno.test('alert capture for the payment path is best-effort: a failing write never throws', async () => {
+  const throwingClient = {
+    from() {
+      return {
+        upsert() {
+          throw new Error('db down');
+        },
+      };
+    },
+  };
+  const errorClient = {
+    from() {
+      return { upsert: () => Promise.resolve({ error: { message: 'boom' } }) };
+    },
+  };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await captureManualSettlementFallbackAlert(manualFallbackInput, throwingClient);
+    await captureManualSettlementFallbackAlert(manualFallbackInput, errorClient);
+    await capturePaymentOnClosedOrderAlert(
+      { orderId: 'o', orderStatus: 'cancelled', paymentReference: 'r', restaurantId: 'rest-1' },
+      throwingClient
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
+Deno.test('payment-on-closed-order alert is high severity and keyed per order', () => {
+  const [alert] = evaluatePaymentOnClosedOrderAlert({
+    orderId: 'order-11',
+    orderStatus: 'cancelled',
+    paymentReference: 'FEASTY-CRD-ORDER-11',
+    restaurantId: 'rest-1',
+  }).alerts;
+  assertEquals(alert?.alertType, 'payment_on_closed_order');
+  assertEquals(alert?.severity, 'high');
+  assertEquals(alert?.dedupeKey, 'ops:payment_on_closed_order:order-11');
 });

@@ -22,6 +22,7 @@ import {
 } from '../email.ts';
 import { buildNotificationData, notifyRestaurantUsers, notifySafely, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
+import { captureManualSettlementFallbackAlert } from '../operationalAlerts.ts';
 import { generateDeliveryCode } from '../deliveryCode.ts';
 import {
   captureOrderPlacementRiskSignals,
@@ -476,6 +477,54 @@ export const resolvePaymentSettlementSummary = (
     settlementMode,
     splitSubaccountCode: settlementMode === 'split' ? splitSubaccountCode : null,
   };
+};
+
+const MANUAL_SETTLEMENT_ALERT_TIMEOUT_MS = 1_500;
+
+/**
+ * Surface a silent 'manual' settlement (the platform holds 100% of the money)
+ * to admin via an OperationalAlert, deduped per restaurant. Multi-store carts
+ * are 'manual' by design and are only logged, never alerted as a missing
+ * subaccount.
+ *
+ * STRICTLY best-effort: it never throws, never alters the payment, and is
+ * bounded by a short timeout so a slow alert write cannot delay checkout.
+ * `capture` is injectable for tests.
+ */
+export const noteManualSettlementFallback = async (
+  input: {
+    isMultiStore: boolean;
+    orderId: string;
+    paymentReference: string;
+    restaurantId: string;
+    restaurantName?: string | null;
+    settlementMode: string;
+  },
+  capture: typeof captureManualSettlementFallbackAlert = captureManualSettlementFallbackAlert
+): Promise<void> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (input.settlementMode !== 'manual') return;
+
+    if (input.isMultiStore) {
+      logEdgeEvent('info', 'Multi-store checkout settles manually by design', {
+        orderId: input.orderId,
+        paymentReference: input.paymentReference,
+      });
+      return;
+    }
+
+    await Promise.race([
+      capture(input),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, MANUAL_SETTLEMENT_ALERT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    console.error('manual settlement fallback alert failed', error);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 };
 
 // ── Promo-code data access (service-role only; see promoCodes.ts for the
@@ -1861,6 +1910,17 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
       customerId: context.uid,
       deviceSessionId: sanitizeOptionalText(orderDraft.deviceSessionId),
       orderId,
+    });
+
+    // Best-effort operational signal only (never throws, bounded by a short
+    // timeout); does not touch the Paystack payload, order rows, or response.
+    await noteManualSettlementFallback({
+      isMultiStore: Boolean(groupedOrders && groupedOrders.length > 1),
+      orderId,
+      paymentReference,
+      restaurantId: sanitizeText(orderDraft.restaurantId),
+      restaurantName: orderDraft.restaurant?.name ?? null,
+      settlementMode: paymentSettlement.settlementMode,
     });
 
     const response = {
