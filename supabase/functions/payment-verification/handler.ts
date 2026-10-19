@@ -17,6 +17,7 @@ import {
   shortOrderCode,
 } from '../_shared/email.ts';
 import {
+  resolveGroupExpectedTotal,
   toKoboAmount,
   toNumber,
   validatePaystackVerificationForOrder,
@@ -333,10 +334,30 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
   }
 
   const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
+
+  // Multi-store checkout is ONE charge for the whole group; the order resolved
+  // here is only the primary one. Single-store orders carry no orderGroupId, so
+  // they skip this lookup entirely and validate exactly as before.
+  let expectedTotal: number | undefined;
+  if (order.orderGroupId) {
+    const { data: group, error: groupError } = await serviceClient
+      .from('OrderGroup')
+      .select('id,orderCount,pricing')
+      .eq('id', order.orderGroupId)
+      .maybeSingle<{ id: string; orderCount?: number | null; pricing?: JsonObject | null }>();
+
+    if (groupError) {
+      throw new Error(`Failed to load order group: ${groupError.message}`);
+    }
+
+    expectedTotal = resolveGroupExpectedTotal(group);
+  }
+
   validatePaystackVerificationForOrder({
     order,
     paymentReference,
     transactionData: verifiedTransaction,
+    expectedTotal,
   });
 
   const result = await markOrderPaymentState(order, verifiedTransaction, webhookEvent);

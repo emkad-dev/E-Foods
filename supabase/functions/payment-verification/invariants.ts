@@ -20,20 +20,41 @@ export const toNumber = (value: unknown, fallback = 0) => {
 
 export const toKoboAmount = (amount: unknown) => Math.round(toNumber(amount, 0) * 100);
 
+/**
+ * A multi-store checkout is ONE Paystack charge for the whole OrderGroup, but
+ * the webhook/queue resolves only the primary order, whose own `pricing.total`
+ * is just its restaurant's share. For a genuine multi-order group (orderCount
+ * > 1) this returns the group's total so the gateway amount can be checked
+ * against what was actually charged. For anything else (no group, a
+ * single-order group, or an unusable group total) it returns `undefined`, and
+ * the validator keeps using the order's own `pricing.total` exactly as before.
+ */
+export const resolveGroupExpectedTotal = (
+  group: { orderCount?: unknown; pricing?: JsonObject | null } | null | undefined
+): number | undefined => {
+  if (!group) return undefined;
+  if (toNumber(group.orderCount, 0) <= 1) return undefined;
+  const groupTotal = toNumber((group.pricing ?? {}).total, 0);
+  return groupTotal > 0 ? groupTotal : undefined;
+};
+
 export const validatePaystackVerificationForOrder = ({
   order,
   paymentReference,
   transactionData,
+  expectedTotal,
 }: {
   order: PaymentVerificationOrderSnapshot;
   paymentReference: string;
   transactionData: JsonObject;
+  /** Group total for a multi-order group; omit to use `order.pricing.total`. */
+  expectedTotal?: number;
 }) => {
   const storedReference = normalizeText(order.payment?.reference);
   const requestedReference = normalizeText(paymentReference);
   const verifiedReference = normalizeText(transactionData.reference);
   const verifiedStatus = normalizeText(transactionData.status);
-  const expectedAmount = toKoboAmount(order.pricing?.total);
+  const expectedAmount = toKoboAmount(expectedTotal === undefined ? order.pricing?.total : expectedTotal);
   const actualAmount = toNumber(transactionData.amount, -1);
 
   if (!storedReference) {
