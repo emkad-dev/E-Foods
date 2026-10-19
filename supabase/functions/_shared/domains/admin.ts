@@ -22,6 +22,16 @@ import {
   type DispatchApplicationRow,
   type PartnerApplicationRow,
 } from '../applications.ts';
+import {
+  buildRestaurantPayoutRow,
+  buildRiderRosterRow,
+  findPayoutProfile,
+  summarizeSettlement,
+  type PaidTransactionInput,
+  type PayoutProfileInput,
+  type PayoutRestaurantInput,
+  type RiderRosterInput,
+} from '../adminFleetReads.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { resolveBroadcastAudience, type BroadcastSegment } from '../broadcast.ts';
 import { serviceClient } from '../client.ts';
@@ -1023,6 +1033,115 @@ const adminGetOrderDetail: Handler = async ({ context, data }) => {
   });
 };
 
+const PAYOUT_WINDOW_DAYS = 30;
+const PAYOUT_PAGE_SIZE = 1000;
+// A hard stop so a runaway table cannot make one admin read unbounded.
+const PAYOUT_MAX_PAGES = 20;
+
+/**
+ * Admin visibility into where each restaurant's money goes. Orders are split
+ * only when RestaurantRecord.paystackSubaccountCode is set; otherwise the
+ * platform receives the whole payment ('manual' settlement) and nothing
+ * surfaced that. Returns booleans and totals only -- never the subaccount
+ * code, bank code, or account numbers.
+ */
+const adminGetRestaurantPayouts: Handler = async ({ context }) => {
+  ensureRole(context.role, ['admin']);
+
+  const since = new Date(Date.now() - PAYOUT_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const [restaurantsResult, payoutsResult] = await Promise.all([
+    serviceClient
+      .from('RestaurantRecord')
+      .select('id,ownerId,name,isPublished,pausedUntil,paystackSubaccountCode')
+      .order('name', { ascending: true }),
+    serviceClient.from('RestaurantPayout').select('uid,restaurantId,status,paystackSubaccountCode,lastError,updatedAt'),
+  ]);
+  if (restaurantsResult.error) {
+    throw new Error(restaurantsResult.error.message);
+  }
+  if (payoutsResult.error) {
+    throw new Error(payoutsResult.error.message);
+  }
+
+  const transactions: PaidTransactionInput[] = [];
+  for (let page = 0; page < PAYOUT_MAX_PAGES; page += 1) {
+    const { data, error } = await serviceClient
+      .from('PaymentTransaction')
+      .select('restaurantId,settlementMode,amount')
+      .eq('status', 'paid')
+      .gte('paidAt', since)
+      .order('paidAt', { ascending: false })
+      .range(page * PAYOUT_PAGE_SIZE, (page + 1) * PAYOUT_PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(error.message);
+    }
+    const rows = (data ?? []) as PaidTransactionInput[];
+    transactions.push(...rows);
+    if (rows.length < PAYOUT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  const restaurants = (restaurantsResult.data ?? []) as PayoutRestaurantInput[];
+  const profiles = (payoutsResult.data ?? []) as PayoutProfileInput[];
+  const { byRestaurant, platform } = summarizeSettlement(transactions);
+  const now = new Date();
+
+  return json(200, {
+    data: {
+      platformSettlement: platform,
+      restaurants: restaurants.map((restaurant) =>
+        buildRestaurantPayoutRow(
+          restaurant,
+          findPayoutProfile(restaurant, profiles),
+          byRestaurant.get(restaurant.id),
+          now
+        )
+      ),
+      windowDays: PAYOUT_WINDOW_DAYS,
+    },
+  });
+};
+
+const adminGetRiderRoster: Handler = async ({ context }) => {
+  ensureRole(context.role, ['admin']);
+
+  const { data: riders, error } = await serviceClient
+    .from('DispatchRiderRecord')
+    .select('id,displayName,status,zone,vehicleType,verificationStatus,acceptanceRate,activeLoad,completedTrips,updatedAt')
+    .order('displayName', { ascending: true })
+    .limit(500);
+  if (error) {
+    throw new Error(error.message);
+  }
+  const roster = (riders ?? []) as RiderRosterInput[];
+
+  // Only the freshness stamp is read -- never the coordinates.
+  const liveByRiderId = new Map<string, string>();
+  if (roster.length > 0) {
+    // No `.in()` filter: the table only holds currently-pinging riders, and a
+    // few hundred ids in the query string would risk the URL length limit.
+    const { data: live, error: liveError } = await serviceClient
+      .from('rider_live_location')
+      .select('rider_id,updated_at')
+      .limit(1000);
+    if (liveError) {
+      throw new Error(liveError.message);
+    }
+    for (const row of (live ?? []) as Array<{ rider_id: string; updated_at: string }>) {
+      liveByRiderId.set(row.rider_id, row.updated_at);
+    }
+  }
+
+  const nowMs = Date.now();
+  return json(200, {
+    data: {
+      riders: roster.map((rider) => buildRiderRosterRow(rider, liveByRiderId.get(rider.id) ?? null, nowMs)),
+    },
+  });
+};
+
 const adminGetAccessOverview: Handler = async ({ context }) => {
   ensureRole(context.role, ['admin']);
   const { data: users, error } = await serviceClient
@@ -1964,6 +2083,8 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetDispatchOpsView,
     adminGetOperationalAlerts,
     adminGetOrderDetail,
+    adminGetRestaurantPayouts,
+    adminGetRiderRoster,
     adminGetAuditLog,
     adminGetRiskEvents,
     adminListFeatureFlags,

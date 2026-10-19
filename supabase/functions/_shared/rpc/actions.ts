@@ -78,6 +78,8 @@ export const ADMIN_ACTIONS = [
   'adminSetRestaurantPublished',
   'adminGetDashboardSnapshot',
   'adminGetOrderDetail',
+  'adminGetRestaurantPayouts',
+  'adminGetRiderRoster',
   'adminGetAccessOverview',
   'adminGetAuditLog',
   'adminGetRiskEvents',
