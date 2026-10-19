@@ -160,6 +160,63 @@ export type AdminOrderDetail = {
 export const getAdminOrderDetail = (orderId: string) =>
   callAdminRpc<{ order: AdminOrderDetail }>('adminGetOrderDetail', { orderId });
 
+export type SettlementTotals = {
+  manualAmount: number;
+  manualCount: number;
+  splitAmount: number;
+  splitCount: number;
+  unknownAmount: number;
+  unknownCount: number;
+};
+
+export type RestaurantPayoutRow = {
+  hasSubaccount: boolean;
+  id: string;
+  isPaused: boolean;
+  isPublished: boolean;
+  name: string;
+  /** Published but no subaccount: the platform is receiving this restaurant's money. */
+  notSplitting: boolean;
+  pausedUntil: string | null;
+  payoutLastError: string | null;
+  payoutProfileHasSubaccount: boolean;
+  /** RestaurantPayout.status, 'none' when no payout profile exists. */
+  payoutStatus: string;
+  payoutUpdatedAt: string | null;
+  settlement: SettlementTotals;
+};
+
+/** Mirrors adminGetRestaurantPayouts (supabase/functions/_shared/domains/admin.ts). */
+export type AdminRestaurantPayouts = {
+  platformSettlement: SettlementTotals;
+  restaurants: RestaurantPayoutRow[];
+  windowDays: number;
+};
+
+export const getAdminRestaurantPayouts = () => callAdminRpc<AdminRestaurantPayouts>('adminGetRestaurantPayouts');
+
+export type RiderRosterRow = {
+  acceptanceRate: number | null;
+  activeLoad: number;
+  completedTrips: number;
+  displayName: string;
+  id: string;
+  lastSeenAt: string | null;
+  /** True when the live-location stamp is fresh (the rider's app is pinging). */
+  online: boolean;
+  status: string;
+  vehicleType: string;
+  verificationStatus: string;
+  zone: string | null;
+};
+
+/** Mirrors adminGetRiderRoster (supabase/functions/_shared/domains/admin.ts). */
+export type AdminRiderRoster = {
+  riders: RiderRosterRow[];
+};
+
+export const getAdminRiderRoster = () => callAdminRpc<AdminRiderRoster>('adminGetRiderRoster');
+
 export type FeatureFlagRecord = {
   description: string | null;
   enabled: boolean;

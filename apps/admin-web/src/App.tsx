@@ -17,6 +17,7 @@ import LoginPage from './pages/LoginPage';
 const OverviewPage = lazy(() => import('./pages/OverviewPage'));
 const OrdersPage = lazy(() => import('./pages/OrdersPage'));
 const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage'));
+const RestaurantsPage = lazy(() => import('./pages/RestaurantsPage'));
 const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
 const ObservabilityPage = lazy(() => import('./pages/ObservabilityPage'));
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
@@ -80,6 +81,14 @@ export default function App() {
             element={
               <Suspense fallback={<LoadingBlock label="Loading..." />}>
                 <OrderDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/restaurants"
+            element={
+              <Suspense fallback={<LoadingBlock label="Loading..." />}>
+                <RestaurantsPage />
               </Suspense>
             }
           />

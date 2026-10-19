@@ -22,6 +22,7 @@ type NavItem = {
 const ADMIN_NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/orders', label: 'Orders' },
+  { to: '/restaurants', label: 'Restaurants' },
   { to: '/approvals', label: 'Approvals', countKey: 'approvals' },
   { to: '/observability', label: 'Observability' },
   { to: '/audit', label: 'Audit log' },
