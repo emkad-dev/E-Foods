@@ -77,6 +77,7 @@ const makeBuilder = (table: string) => {
       return builder;
     },
     order: () => builder,
+    returns: () => builder,
     limit: () => builder,
     gte: () => builder,
     lte: () => builder,
@@ -212,6 +213,26 @@ Deno.test('single-store payment: order is placed + paid, restaurant notified, pa
     assertEquals(db.DeliveryEvent.length, 0);
     // Single-store orders carry no group, so no OrderGroup lookup for amount validation.
     assertEquals(writes.filter((w) => w.table === 'CustomerOrder').length, 1);
+    // The write is exactly the pre-existing shape: these four columns, nothing else
+    // (in particular no needsAttention and no extra payment/timeline keys).
+    const orderWrite = writes.find((w) => w.table === 'CustomerOrder')!;
+    assertEquals(Object.keys(orderWrite.payload).sort(), ['payment', 'status', 'timeline', 'updatedAt']);
+    assertEquals(
+      Object.keys(orderWrite.payload.payment).sort(),
+      [
+        'capturedAmount',
+        'lastEvent',
+        'method',
+        'paidAt',
+        'paystackResponse',
+        'provider',
+        'reference',
+        'settlementMode',
+        'status',
+        'verifiedAt',
+      ]
+    );
+    assertEquals(Object.keys(orderWrite.payload.timeline).sort(), ['confirmedAt', 'paidAt', 'placedAt']);
   });
 });
 
@@ -262,5 +283,193 @@ Deno.test('multi-store payment: charging only the primary order share is rejecte
 
     await assertRejects(() => verify('order-1'), Error, 'Amount mismatch: expected 1280000, got 430000');
     assertEquals(writes.length, 0);
+  });
+});
+
+// ───────────────────────── late / non-awaiting orders must not be overwritten ─────────────────────────
+
+Deno.test('scheduled order that is paid stays scheduled (not released into the kitchen early)', async () => {
+  await withHarness(async () => {
+    setup([
+      makeOrder({
+        status: 'scheduled',
+        scheduledFor: '2026-10-20T12:00:00.000Z',
+        timeline: { scheduledAt: '2026-10-19T10:00:00.000Z', scheduledFor: '2026-10-20T12:00:00.000Z' },
+      }),
+    ]);
+    paystackVerifyData = successfulCharge(250000);
+
+    const result = await verify('order-1');
+
+    assertEquals(result, { success: true, orderId: 'order-1', paymentStatus: 'paid' });
+    const order = orderById('order-1');
+    assertEquals(order.status, 'scheduled');
+    assertEquals(order.payment.status, 'paid');
+    assertEquals(order.payment.capturedAmount, 2500);
+    assertEquals(order.timeline.scheduledFor, '2026-10-20T12:00:00.000Z');
+    assertEquals('placedAt' in order.timeline, false);
+    assertEquals(typeof order.timeline.paidAt, 'string');
+    assertEquals(order.needsAttention, false);
+    assertEquals(db.OperationalAlert.length, 0);
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+  });
+});
+
+Deno.test('cancelled order that receives a payment: recorded as paid, NOT revived, NOT refunded, flagged for attention', async () => {
+  await withHarness(async () => {
+    setup([
+      makeOrder({
+        status: 'cancelled',
+        payment: {
+          method: 'card',
+          provider: 'paystack',
+          reference: REFERENCE,
+          status: 'failed',
+          lastEvent: 'payment_timeout',
+          failedAt: '2026-10-19T10:15:00.000Z',
+        },
+        cancellation: { actor: 'system', reason: 'payment_timeout' },
+        timeline: { placedAt: '2026-10-19T10:00:00.000Z', cancelledAt: '2026-10-19T10:15:00.000Z' },
+      }),
+    ]);
+    paystackVerifyData = successfulCharge(250000);
+
+    const result = await verify('order-1');
+
+    assertEquals(result, { success: true, orderId: 'order-1', paymentStatus: 'paid' });
+    const order = orderById('order-1');
+    assertEquals(order.status, 'cancelled'); // not marked placed
+    assertEquals(order.payment.status, 'paid'); // money recorded
+    assertEquals(order.payment.capturedAmount, 2500);
+    assertEquals('refundAmount' in order.payment, false); // no auto-refund
+    assertEquals('refundedAt' in order.payment, false);
+    assertEquals(order.needsAttention, true);
+    assertEquals(order.cancellation, { actor: 'system', reason: 'payment_timeout' });
+    assertEquals(order.timeline.cancelledAt, '2026-10-19T10:15:00.000Z'); // history preserved
+    assertEquals('confirmedAt' in order.timeline, false);
+    assertEquals(typeof order.timeline.paidAt, 'string');
+
+    assertEquals(db.DeliveryEvent.length, 1);
+    assertEquals(db.DeliveryEvent[0].eventType, 'payment_received_on_closed_order');
+    assertEquals(db.DeliveryEvent[0].orderId, 'order-1');
+    assertEquals(db.OperationalAlert.length, 1);
+    assertEquals(db.OperationalAlert[0].alertType, 'payment_on_closed_order');
+    assertEquals(db.OperationalAlert[0].severity, 'high');
+    assertEquals(db.OperationalAlert[0].dedupeKey, 'ops:payment_on_closed_order:order-1');
+
+    // The restaurant must not be told a cancelled order is "paid and ready for confirmation".
+    assertEquals(db.queue_notifications.length, 0);
+    // The money is still recorded.
+    assertEquals(db.PaymentTransaction.length, 1);
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+  });
+});
+
+Deno.test('order already in the kitchen (accepted) is not regressed to placed by a payment confirmation', async () => {
+  await withHarness(async () => {
+    setup([makeOrder({ status: 'accepted' })]);
+    paystackVerifyData = successfulCharge(250000);
+
+    await verify('order-1');
+
+    const order = orderById('order-1');
+    assertEquals(order.status, 'accepted');
+    assertEquals(order.payment.status, 'paid');
+    assertEquals(order.needsAttention, false);
+  });
+});
+
+Deno.test('multi-order group: awaiting order is placed, cancelled order is only flagged, amounts and settlement stay per-order', async () => {
+  await withHarness(async () => {
+    const settlement1 = { netSettlement: 3000 };
+    const settlement2 = { netSettlement: 7000 };
+    setup(
+      [
+        makeOrder({
+          id: 'order-1',
+          orderGroupId: 'order-1',
+          pricing: { total: 4300 },
+          payment: { method: 'card', reference: REFERENCE, status: 'pending', settlement: settlement1 },
+        }),
+        makeOrder({
+          id: 'order-2',
+          orderGroupId: 'order-1',
+          restaurantId: 'rest-2',
+          status: 'cancelled',
+          pricing: { total: 8500 },
+          payment: { method: 'card', reference: REFERENCE, status: 'failed', settlement: settlement2 },
+          timeline: { placedAt: '2026-10-19T10:00:00.000Z', cancelledAt: '2026-10-19T10:15:00.000Z' },
+        }),
+      ],
+      groupRow
+    );
+    paystackVerifyData = successfulCharge(1280000);
+
+    const result = await verify('order-1');
+
+    assertEquals(result, { success: true, orderId: 'order-1', paymentStatus: 'paid' });
+    const first = orderById('order-1');
+    const second = orderById('order-2');
+
+    assertEquals(first.status, 'placed');
+    assertEquals(first.payment.status, 'paid');
+    assertEquals(first.payment.capturedAmount, 4300);
+    assertEquals(first.payment.settlement, settlement1);
+    assertEquals(first.needsAttention, false);
+
+    assertEquals(second.status, 'cancelled');
+    assertEquals(second.payment.status, 'paid');
+    assertEquals(second.payment.capturedAmount, 8500);
+    assertEquals(second.payment.settlement, settlement2);
+    assertEquals(second.needsAttention, true);
+    assertEquals(second.timeline.cancelledAt, '2026-10-19T10:15:00.000Z');
+
+    assertEquals(db.DeliveryEvent.map((e) => e.orderId), ['order-2']);
+    assertEquals(db.OperationalAlert.map((a) => a.subjectId), ['order-2']);
+    // One Paystack charge, one transaction row, for the whole group total.
+    assertEquals(db.PaymentTransaction.length, 1);
+    assertEquals(db.PaymentTransaction[0].amount, 12800);
+    // The primary order was awaiting, so the normal restaurant notification still goes out.
+    assertEquals(db.queue_notifications.length, 1);
+  });
+});
+
+Deno.test('multi-order group: all orders awaiting are all placed and paid', async () => {
+  await withHarness(async () => {
+    setup(groupOrders(), groupRow);
+    paystackVerifyData = successfulCharge(1280000);
+
+    await verify('order-1');
+
+    assertEquals(orderById('order-1').status, 'placed');
+    assertEquals(orderById('order-2').status, 'placed');
+    assertEquals(orderById('order-1').payment.capturedAmount, 4300);
+    assertEquals(orderById('order-2').payment.capturedAmount, 8500);
+    assertEquals(db.OperationalAlert.length, 0);
+    assertEquals(db.DeliveryEvent.length, 0);
+  });
+});
+
+Deno.test('an order cancelled between the initial read and the write is not overwritten (compare-and-set)', async () => {
+  await withHarness(async () => {
+    setup([makeOrder()]);
+    // The cancel lands while Paystack verification is in flight: the handler
+    // already holds a snapshot that says 'placed'.
+    const stubbedFetch = globalThis.fetch;
+    globalThis.fetch = ((input: unknown, init?: unknown) => {
+      if (String(input).startsWith('https://api.paystack.co/transaction/verify/')) {
+        orderById('order-1').status = 'cancelled';
+      }
+      return stubbedFetch(input as never, init as never);
+    }) as typeof fetch;
+    paystackVerifyData = successfulCharge(250000);
+
+    await verify('order-1');
+
+    const order = orderById('order-1');
+    assertEquals(order.status, 'cancelled');
+    assertEquals(order.payment.status, 'paid');
+    assertEquals(order.needsAttention, true);
+    assertEquals(db.OperationalAlert.length, 1);
   });
 });

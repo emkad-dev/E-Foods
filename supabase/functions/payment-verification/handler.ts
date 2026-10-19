@@ -9,6 +9,8 @@ import {
   loadRestaurantRecipientUserIds,
 } from '../_shared/notifications.ts';
 import { broadcastOrderChanged } from '../_shared/realtime.ts';
+import { logEdgeEvent } from '../_shared/observability.ts';
+import { capturePaymentOnClosedOrderAlert } from '../_shared/operationalAlerts.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -93,7 +95,10 @@ const upsertPaymentTransaction = async (
   order: CustomerOrderRow,
   transactionData: JsonObject,
   paymentStatus: string,
-  webhookEvent: JsonObject | null
+  webhookEvent: JsonObject | null,
+  // A multi-store group is one Paystack charge: record the group total, not the
+  // primary order's own share. Omitted (single order) => the order's total.
+  amountOverride?: number
 ) => {
   const payment = (order.payment ?? {}) as JsonObject;
   const paymentReference = normalizeStatus(payment.reference, '');
@@ -118,7 +123,7 @@ const upsertPaymentTransaction = async (
     method: normalizeStatus(payment.method, 'card'),
     reference: paymentReference,
     currency: normalizeStatus(payment.currency, 'NGN'),
-    amount: toNumber((order.pricing ?? {}).total, 0),
+    amount: amountOverride ?? toNumber((order.pricing ?? {}).total, 0),
     splitSubaccountCode:
       typeof payment.splitSubaccountCode === 'string'
         ? payment.splitSubaccountCode
@@ -160,6 +165,59 @@ const upsertPaymentTransaction = async (
   if (error) throw new Error(`Failed to upsert payment transaction: ${error.message}`);
 };
 
+// Order statuses in which an order is genuinely waiting on this payment: orders
+// are inserted as 'placed' (or 'scheduled') BEFORE they are paid, and stay
+// invisible to the kitchen until payment.status is 'paid'. 'draft'/'pending'/
+// 'confirmed' are legacy spellings that normalize to the same thing. Anything
+// else ('scheduled', accepted and later, or closed) must keep its status.
+const AWAITING_PAYMENT_ORDER_STATUSES = ['placed', 'draft', 'pending', 'confirmed'];
+// Terminal-without-delivery statuses: money arrived for an order that is
+// already dead (typically the 15-minute unpaid timeout cancelled it first).
+const CLOSED_ORDER_STATUSES = new Set(['cancelled', 'rejected', 'failed_delivery']);
+
+const ORDER_STATE_COLUMNS = 'id,customerId,orderGroupId,restaurantId,status,payment,pricing,timeline';
+
+const normalizeOrderStatusText = (value: unknown) => normalizeStatus(value, '').toLowerCase();
+
+/**
+ * A successful payment landed on an order that is already closed. We do NOT
+ * revive it and do NOT refund automatically: the payment is recorded, and a
+ * human is pointed at it via the order's needsAttention flag (set by the
+ * caller), a DeliveryEvent on the order timeline and a high-severity
+ * OperationalAlert. Best-effort - a failure here must never fail the
+ * verification, because the money is already captured and recorded.
+ */
+const flagPaymentOnClosedOrder = async (input: {
+  orderId: string;
+  orderStatus: string;
+  paymentReference: string;
+  restaurantId: string;
+}) => {
+  logEdgeEvent('warn', 'Payment received for a closed order; flagged for manual review', {
+    orderId: input.orderId,
+    orderStatus: input.orderStatus,
+    paymentReference: input.paymentReference,
+  });
+
+  try {
+    const { error } = await serviceClient.from('DeliveryEvent').insert({
+      id: crypto.randomUUID(),
+      orderId: input.orderId,
+      eventType: 'payment_received_on_closed_order',
+      actorUid: null,
+      details: {
+        orderStatus: input.orderStatus,
+        paymentReference: input.paymentReference,
+      },
+    });
+    if (error) console.error(`Failed to record closed-order payment event for ${input.orderId}: ${error.message}`);
+  } catch (error) {
+    console.error(`Failed to record closed-order payment event for ${input.orderId}`, error);
+  }
+
+  await capturePaymentOnClosedOrderAlert(input);
+};
+
 const markOrderPaymentState = async (
   order: CustomerOrderRow,
   transactionData: JsonObject,
@@ -171,23 +229,6 @@ const markOrderPaymentState = async (
     typeof transactionData.gateway_response === 'string'
       ? transactionData.gateway_response
       : normalizeStatus(transactionData.status, 'success');
-
-  const nextPayment: JsonObject = {
-    ...payment,
-    provider: 'paystack',
-    status: 'paid',
-    reference: normalizeStatus(payment.reference, ''),
-    verifiedAt: nowIso,
-    paidAt: nowIso,
-    lastEvent: gatewayStatus,
-    paystackResponse: transactionData,
-  };
-
-  const nextTimeline: JsonObject = {
-    ...(order.timeline ?? {}),
-    paidAt: nowIso,
-    confirmedAt: (order.timeline ?? {}).confirmedAt ?? nowIso,
-  };
 
   const { data: groupRows, error: groupError } = await serviceClient
     .from('OrderGroup')
@@ -213,29 +254,138 @@ const markOrderPaymentState = async (
     ? toNumber((groupRows.pricing as JsonObject).total, toNumber((order.pricing ?? {}).total, 0))
     : toNumber((order.pricing ?? {}).total, 0);
 
-  for (const orderId of orderIds) {
-    const { error } = await serviceClient
+  const isGroup = orderIds.length > 1;
+
+  // Each order in the group is judged on its OWN current state. The primary
+  // order is the row this handler already loaded; the others are read here.
+  const rowsById = new Map<string, CustomerOrderRow>([[order.id, order]]);
+  const peerIds = orderIds.filter((orderId) => orderId !== order.id);
+  if (peerIds.length > 0) {
+    const { data: peerRows, error: peerError } = await serviceClient
       .from('CustomerOrder')
-      .update({
+      .select(ORDER_STATE_COLUMNS)
+      .in('id', peerIds)
+      .returns<CustomerOrderRow[]>();
+
+    if (peerError) {
+      throw new Error(`Failed to load group orders: ${peerError.message}`);
+    }
+    for (const peer of peerRows ?? []) rowsById.set(peer.id, peer);
+  }
+
+  const buildPaidPayment = (row: CustomerOrderRow): JsonObject => ({
+    ...((row.payment ?? {}) as JsonObject),
+    provider: 'paystack',
+    status: 'paid',
+    reference: normalizeStatus(payment.reference, ''),
+    verifiedAt: nowIso,
+    paidAt: nowIso,
+    lastEvent: gatewayStatus,
+    paystackResponse: transactionData,
+    // One order: the charged total, exactly as before. A multi-store group is
+    // one charge split across orders, so each order captures its OWN share
+    // (refunds are computed per order from this field).
+    capturedAmount: isGroup ? toNumber((row.pricing ?? {}).total, expectedAmount) : expectedAmount,
+  });
+
+  const confirmedTimeline = (row: CustomerOrderRow): JsonObject => ({
+    ...(row.timeline ?? {}),
+    paidAt: nowIso,
+    confirmedAt: (row.timeline ?? {}).confirmedAt ?? nowIso,
+  });
+
+  let primaryClosed = false;
+
+  for (const orderId of orderIds) {
+    let row = rowsById.get(orderId);
+    if (!row) continue;
+
+    if (AWAITING_PAYMENT_ORDER_STATUSES.includes(normalizeOrderStatusText(row.status))) {
+      const awaitingUpdate = {
         // 'placed' = awaiting restaurant acceptance. 'confirmed' is NOT a valid order
         // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
         // partner's kitchen actions on paid orders.
         status: 'placed',
-        payment: {
-          ...nextPayment,
-          capturedAmount: expectedAmount,
-        },
-        timeline: nextTimeline,
+        payment: buildPaidPayment(row),
+        timeline: confirmedTimeline(row),
         updatedAt: nowIso,
+      };
+
+      // Compare-and-set on the status: the order may have been cancelled (the
+      // 15-minute unpaid timeout) after it was read and before Paystack answered.
+      const { data: advanced, error } = await serviceClient
+        .from('CustomerOrder')
+        .update(awaitingUpdate)
+        .eq('id', orderId)
+        .in('status', AWAITING_PAYMENT_ORDER_STATUSES)
+        .select('id');
+
+      if (error) throw new Error(`Failed to update order: ${error.message}`);
+
+      if (Array.isArray(advanced) && advanced.length > 0) {
+        await broadcastOrderChanged(orderId, { restaurantId: row.restaurantId });
+        continue;
+      }
+
+      // Lost the race: judge the order on its current state instead.
+      const { data: fresh, error: freshError } = await serviceClient
+        .from('CustomerOrder')
+        .select(ORDER_STATE_COLUMNS)
+        .eq('id', orderId)
+        .maybeSingle<CustomerOrderRow>();
+
+      if (freshError) throw new Error(`Failed to reload order: ${freshError.message}`);
+      if (!fresh) continue;
+      row = fresh;
+
+      if (AWAITING_PAYMENT_ORDER_STATUSES.includes(normalizeOrderStatusText(row.status))) {
+        // Still awaiting (the guarded update simply reported no rows): fall back
+        // to the plain unconditional advance.
+        const { error: plainError } = await serviceClient
+          .from('CustomerOrder')
+          .update({ ...awaitingUpdate, payment: buildPaidPayment(row), timeline: confirmedTimeline(row) })
+          .eq('id', orderId);
+
+        if (plainError) throw new Error(`Failed to update order: ${plainError.message}`);
+        await broadcastOrderChanged(orderId, { restaurantId: row.restaurantId });
+        continue;
+      }
+    }
+
+    // NOT awaiting payment: record the money, never touch `status`.
+    //  - 'scheduled' (and anything already in the kitchen) keeps its status;
+    //  - a closed order is flagged for a human, NOT revived and NOT auto-refunded.
+    const currentStatus = normalizeOrderStatusText(row.status);
+    const closed = CLOSED_ORDER_STATUSES.has(currentStatus);
+    if (orderId === order.id) primaryClosed = closed;
+
+    const { error } = await serviceClient
+      .from('CustomerOrder')
+      .update({
+        payment: buildPaidPayment(row),
+        timeline: closed
+          ? { ...(row.timeline ?? {}), paidAt: nowIso, latePaymentAt: nowIso }
+          : confirmedTimeline(row),
+        updatedAt: nowIso,
+        ...(closed ? { needsAttention: true } : {}),
       })
       .eq('id', orderId);
 
     if (error) throw new Error(`Failed to update order: ${error.message}`);
 
-    await broadcastOrderChanged(orderId, { restaurantId: order.restaurantId });
+    if (closed) {
+      await flagPaymentOnClosedOrder({
+        orderId,
+        orderStatus: currentStatus,
+        paymentReference: normalizeStatus(payment.reference, ''),
+        restaurantId: row.restaurantId,
+      });
+    }
+
+    await broadcastOrderChanged(orderId, { restaurantId: row.restaurantId });
   }
 
-  await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent);
+  await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent, isGroup ? expectedAmount : undefined);
 
   await capturePaymentVerificationRiskSignals({
     customerId: order.customerId,
@@ -243,6 +393,12 @@ const markOrderPaymentState = async (
     paymentReference: normalizeStatus(payment.reference, ''),
     transactionData,
   });
+
+  // A payment that landed on a cancelled order must not tell the restaurant it
+  // has a paid order to prepare, nor tell the customer it will be prepared.
+  if (primaryClosed) {
+    return { success: true, orderId: order.id, paymentStatus: 'paid' };
+  }
 
   const restaurantUsers = await loadRestaurantRecipientUserIds(order.restaurantId);
   if (restaurantUsers.length > 0) {
