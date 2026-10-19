@@ -336,14 +336,18 @@ export default function AccessPage() {
                           >
                             Apply
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={busy || isSelf || user.role === 'customer'}
-                            onClick={() => void runAction(user.uid, () => revokeUserRole(user.uid))}
-                          >
-                            Revoke
-                          </button>
+                          {/* A customer has no elevated role to revoke, so the
+                              button is omitted rather than shown disabled. */}
+                          {user.role !== 'customer' ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              disabled={busy || isSelf}
+                              onClick={() => void runAction(user.uid, () => revokeUserRole(user.uid))}
+                            >
+                              Revoke
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                       <td>
