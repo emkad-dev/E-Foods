@@ -66,6 +66,11 @@ verify_jwt = false
 [functions.broadcast-runner]
 verify_jwt = false
 
+# rider-payouts is invoked by pg_cron with the x-queue-worker-token header
+# (no user JWT), exactly like broadcast-runner, and checks that token itself.
+[functions.rider-payouts]
+verify_jwt = false
+
 # order-placement is verify_jwt=true live (confirmed via
 # mcp__supabase__list_edge_functions), which already matches the platform
 # default for an undeclared function - added explicitly so it can't drift

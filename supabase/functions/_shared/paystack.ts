@@ -196,6 +196,141 @@ export const resolvePaystackBankAccount = async ({
   };
 };
 
+// ── Transfers (rider payouts) ──────────────────────────────────────────────
+//
+// Money LEAVES the platform balance through these, so the transport reports
+// what Paystack actually said instead of collapsing everything into a throw:
+//   ok        - Paystack answered status:true.
+//   rejected  - Paystack answered a 4xx with status:false. Nothing was created
+//               (validation, insufficient balance, duplicate reference, ...).
+//   unknown   - timeout, network failure, 5xx, unparsable body. The transfer
+//               MAY exist. Callers must never treat this as "not sent".
+export type PaystackCallOutcome =
+  | { data: JsonObject | null; kind: 'ok' }
+  | { httpStatus: number; kind: 'rejected'; message: string }
+  | { kind: 'unknown'; message: string };
+
+export const callPaystack = async ({
+  body = null,
+  method = 'GET',
+  path,
+}: {
+  body?: JsonObject | null;
+  method?: string;
+  path: string;
+}): Promise<PaystackCallOutcome> => {
+  assertPaystackConfigured();
+  const safePath = path.split('?')[0];
+
+  let response: Response;
+  try {
+    response = await fetch(`https://api.paystack.co${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${getPaystackSecretKey()}`,
+        'Content-Type': 'application/json',
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(PAYSTACK_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    return {
+      kind: 'unknown',
+      message:
+        error instanceof DOMException && error.name === 'TimeoutError'
+          ? `Paystack request to ${safePath} timed out after ${PAYSTACK_REQUEST_TIMEOUT_MS}ms.`
+          : `Paystack request to ${safePath} failed before a response.`,
+    };
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { data?: JsonObject | null; message?: string; status?: boolean }
+    | null;
+
+  if (response.ok && payload?.status === true) {
+    return { data: (payload.data ?? null) as JsonObject | null, kind: 'ok' };
+  }
+  if (response.status >= 400 && response.status < 500 && payload && payload.status === false) {
+    return {
+      httpStatus: response.status,
+      kind: 'rejected',
+      message: sanitizeText(payload.message, `Paystack rejected ${safePath}.`),
+    };
+  }
+  return {
+    kind: 'unknown',
+    message: sanitizeText(payload?.message, `Paystack request to ${safePath} returned HTTP ${response.status}.`),
+  };
+};
+
+// Creates (or, for an account Paystack already knows, returns) a NUBAN
+// transfer recipient. Resolve the account first; this does not.
+export const createPaystackTransferRecipient = async ({
+  accountName,
+  accountNumber,
+  bankCode,
+}: {
+  accountName: string;
+  accountNumber: string;
+  bankCode: string;
+}): Promise<{ bankName: string | null; recipientCode: string }> => {
+  const data = await fetchPaystackJson({
+    method: 'POST',
+    path: '/transferrecipient',
+    body: {
+      account_number: accountNumber,
+      bank_code: bankCode,
+      currency: DEFAULT_CURRENCY,
+      name: accountName,
+      type: 'nuban',
+    },
+  });
+
+  const recipientCode = sanitizeText((data as { recipient_code?: string } | null)?.recipient_code);
+  if (!recipientCode) {
+    fail(500, 'Paystack created the transfer recipient but returned no recipient code.');
+  }
+  const details = ((data as { details?: JsonObject } | null)?.details ?? null) as JsonObject | null;
+  return { bankName: sanitizeOptionalText(details?.bank_name), recipientCode };
+};
+
+/** Paystack transfer references: lowercase alphanumerics, '-' and '_' only. */
+export const isValidTransferReference = (reference: string) => /^[a-z0-9_-]{16,100}$/.test(reference);
+
+export const initiatePaystackTransfer = ({
+  amountKobo,
+  reason,
+  recipientCode,
+  reference,
+}: {
+  amountKobo: number;
+  reason: string;
+  recipientCode: string;
+  reference: string;
+}): Promise<PaystackCallOutcome> => {
+  if (!Number.isInteger(amountKobo) || amountKobo <= 0) {
+    throw new Error('Transfer amount must be a positive whole number of kobo.');
+  }
+  if (!isValidTransferReference(reference)) {
+    throw new Error('Transfer reference is not a valid Paystack reference.');
+  }
+  return callPaystack({
+    method: 'POST',
+    path: '/transfer',
+    body: {
+      amount: amountKobo,
+      currency: DEFAULT_CURRENCY,
+      reason,
+      recipient: recipientCode,
+      reference,
+      source: 'balance',
+    },
+  });
+};
+
+export const verifyPaystackTransfer = (reference: string): Promise<PaystackCallOutcome> =>
+  callPaystack({ method: 'GET', path: `/transfer/verify/${encodeURIComponent(reference)}` });
+
 export const verifyPaystackTransaction = async (reference: string) =>
   (await fetchPaystackJson({
     method: 'GET',

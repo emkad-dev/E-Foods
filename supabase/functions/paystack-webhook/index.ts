@@ -5,7 +5,10 @@ import { serviceClient } from '../_shared/client.ts';
 import { constantTimeEqual } from '../_shared/crypto.ts';
 import { clientErrorMessage, logEdgeEvent } from '../_shared/observability.ts';
 import { handlePaymentVerification } from '../payment-verification/handler.ts';
+import { recordOperationalAlert } from '../_shared/operationalAlerts.ts';
+import { settleRiderPayout } from '../_shared/riderPayouts.ts';
 import { resolveWebhookOrderIdForReference } from './invariants.ts';
+import { handleRiderTransferWebhook, isTransferEvent } from './transfers.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -95,6 +98,32 @@ Deno.serve(async (req) => {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  // Rider payout transfers. Handled before the charge path and returned from
+  // here; a thrown error answers 500 so Paystack retries (settlement is
+  // idempotent, so a retry is always safe).
+  if (isTransferEvent(eventType)) {
+    try {
+      const result = await handleRiderTransferWebhook(
+        { data: eventData, eventType },
+        { alert: recordOperationalAlert, settle: settleRiderPayout }
+      );
+      return new Response(JSON.stringify({ received: true, event: eventType, reference, result }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      logEdgeEvent('error', 'Paystack transfer webhook processing failed', {
+        event: eventType,
+        reference,
+        error: error instanceof Error ? { message: error.message, name: error.name } : String(error),
+      });
+      return new Response(
+        JSON.stringify({ received: true, processed: false, reference, error: 'Webhook processing failed' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
   }
 
   if (eventType !== 'charge.success') {
