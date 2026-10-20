@@ -4,90 +4,161 @@ import { useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { resolveNotificationHref, type AppNotificationPayload } from '../../../../packages/domain/src/notifications';
+import { clearUserPushToken, registerBeforeSignOut } from '../../../../packages/auth/src';
+import {
+  ANDROID_NOTIFICATION_CHANNELS,
+  resolveEasProjectId,
+  resolveNotificationHref,
+  type AppNotificationPayload,
+} from '../../../../packages/domain/src/notifications';
 import { appEnv } from '../config/env';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../services/supabase/config';
 import { updateUserDocument } from '../services/supabase/profile';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
+const pushSupported = !isExpoGo && Platform.OS !== 'web';
+
+// The token this device registered for the signed-in account. Module scope so
+// the before-sign-out hook (registered once) can detach exactly this token.
+let currentRegistration: { token: string; uid: string } | null = null;
+
+if (pushSupported) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+
+  registerBeforeSignOut(async () => {
+    const registration = currentRegistration;
+    currentRegistration = null;
+    if (registration) {
+      await clearUserPushToken(supabase, registration.uid, registration.token);
+    }
+  });
+}
+
+/**
+ * Channels must exist BEFORE the permission prompt and before any push
+ * arrives: on Android 13+ the POST_NOTIFICATIONS prompt is only shown once a
+ * channel exists, and a push naming a channel the device does not have is
+ * silently dropped. The server sends delivery offers on the `offers` channel.
+ */
+const ensureAndroidChannels = async () => {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
+    name: 'Delivery updates',
+    importance: Notifications.AndroidImportance.MAX,
+    lightColor: '#E4A11B',
+    vibrationPattern: [0, 250, 250, 250],
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.dispatchOffers, {
+    name: 'Delivery offers',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 500, 100, 500],
+    lightColor: '#F5B342',
+    enableLights: true,
+    enableVibrate: true,
+    sound: 'default',
+  });
+};
+
+const registerDeviceForUser = async (uid: string) => {
+  if (!Device.isDevice) {
+    console.warn('Push notifications require a physical device.');
+    return false;
+  }
+
+  await ensureAndroidChannels();
+
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  const { status: finalStatus } =
+    existingStatus === 'granted' ? { status: existingStatus } : await Notifications.requestPermissionsAsync();
+
+  if (finalStatus !== 'granted') {
+    console.warn('Push notification permission was not granted.');
+    return false;
+  }
+
+  const projectId = resolveEasProjectId(
+    Constants.easConfig?.projectId,
+    Constants.expoConfig?.extra?.eas?.projectId,
+    appEnv.projectId
+  );
+  if (!projectId) {
+    console.error('No EAS project id (extra.eas.projectId) is configured. Push registration skipped.');
+    return false;
+  }
+
+  const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+  await updateUserDocument(uid, {
+    expoPushToken: token,
+    pushTokenUpdatedAt: new Date().toISOString(),
+  });
+  currentRegistration = { token, uid };
+  return true;
+};
 
 export const usePushNotifications = () => {
   const { user } = useAuth();
-  const notificationListener = useRef<Notifications.Subscription | null>(null);
-  const responseListener = useRef<Notifications.Subscription | null>(null);
+  const uid = user?.uid ?? null;
   const registeredUserId = useRef<string | null>(null);
   const handledResponseIds = useRef<Set<string>>(new Set());
 
+  // Registration: once per signed-in account, again if FCM/APNs rotates the
+  // device token (the Expo token is derived from it).
   useEffect(() => {
-    if (isExpoGo || Platform.OS === 'web') {
+    if (!pushSupported) {
       return;
     }
 
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
+    if (!uid) {
+      registeredUserId.current = null;
+      return;
+    }
 
-    const registerForPushNotifications = async () => {
-      if (!user || registeredUserId.current === user.uid) {
+    let cancelled = false;
+
+    const register = async () => {
+      if (registeredUserId.current === uid) {
         return;
       }
-
       try {
-        if (!Device.isDevice) {
-          console.warn('Push notifications require a physical device.');
-          return;
-        }
-
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        const { status: finalStatus } =
-          existingStatus === 'granted'
-            ? { status: existingStatus }
-            : await Notifications.requestPermissionsAsync();
-
-        if (finalStatus !== 'granted') {
-          console.warn('Push notification permission was not granted.');
-          return;
-        }
-
-        const projectId = appEnv.projectId;
-        if (!projectId) {
-          console.error('EXPO project id is missing. Push registration skipped.');
-          return;
-        }
-
-        const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-        await updateUserDocument(user.uid, {
-          expoPushToken: token,
-          pushTokenUpdatedAt: new Date().toISOString(),
-        });
-        registeredUserId.current = user.uid;
-
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('default', {
-            name: 'default',
-            importance: Notifications.AndroidImportance.MAX,
-            lightColor: '#E4A11B',
-            vibrationPattern: [0, 250, 250, 250],
-          });
-          await Notifications.setNotificationChannelAsync('offers', {
-            name: 'Delivery offers',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 500, 100, 500],
-            lightColor: '#F5B342',
-            enableLights: true,
-            enableVibrate: true,
-            sound: 'default',
-          });
+        const registered = await registerDeviceForUser(uid);
+        if (registered && !cancelled) {
+          registeredUserId.current = uid;
         }
       } catch (error) {
         console.error('Push registration failed.', error);
       }
     };
+
+    void register();
+
+    const tokenSubscription = Notifications.addPushTokenListener(() => {
+      registeredUserId.current = null;
+      void register();
+    });
+
+    return () => {
+      cancelled = true;
+      tokenSubscription.remove();
+    };
+  }, [uid]);
+
+  // Taps: routed with the server's routeKey/path, including the tap that
+  // cold-started the app.
+  useEffect(() => {
+    if (!pushSupported) {
+      return;
+    }
 
     const handleNotificationResponse = async (response: Notifications.NotificationResponse | null) => {
       if (!response) {
@@ -109,26 +180,16 @@ export const usePushNotifications = () => {
         (response.notification.request.content.data ?? {}) as AppNotificationPayload
       );
 
-      if (!href) {
-        await Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
-        return;
+      if (href) {
+        setTimeout(() => {
+          router.push(href as never);
+        }, 50);
       }
-
-      setTimeout(() => {
-        router.push(href as never);
-      }, 50);
 
       await Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
     };
 
-    if (user) {
-      void registerForPushNotifications();
-    } else {
-      registeredUserId.current = null;
-    }
-
-    notificationListener.current = Notifications.addNotificationReceivedListener(() => {});
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
       void handleNotificationResponse(response);
     });
 
@@ -139,8 +200,7 @@ export const usePushNotifications = () => {
       });
 
     return () => {
-      notificationListener.current?.remove();
-      responseListener.current?.remove();
+      responseSubscription.remove();
     };
-  }, [user]);
+  }, []);
 };

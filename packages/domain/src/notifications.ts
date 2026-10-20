@@ -10,6 +10,7 @@ export const NOTIFICATION_ROUTE_KEYS = [
   'customer_order_detail',
   'customer_delivery_location',
   'customer_restaurant_detail',
+  'customer_support',
   'customer_login',
   'partner_profile',
   'partner_orders',
@@ -23,6 +24,7 @@ export const NOTIFICATION_ROUTE_KEYS = [
   'dispatch_login',
   'admin_access',
   'admin_approvals',
+  'admin_order_detail',
   'admin_profile',
   'admin_login',
 ] as const;
@@ -68,7 +70,7 @@ const resolveLegacyPath = (app: NotificationApp, path: string) => {
     if (/^\/home\/restaurant\/[^/]+$/.test(path)) {
       return path;
     }
-    if (path === '/orders' || path === '/profile' || path === '/deals' || path === '/delivery-location' || path === '/cart') {
+    if (path === '/orders' || path === '/profile' || path === '/deals' || path === '/delivery-location' || path === '/cart' || path === '/support') {
       return path;
     }
     if (path === '/home') {
@@ -92,7 +94,7 @@ const resolveLegacyPath = (app: NotificationApp, path: string) => {
   }
 
   if (app === 'dispatch') {
-    if (/^\/delivery\/[^/]+$/.test(path)) {
+    if (/^\/delivery\/[^/]+$/.test(path) || /^\/offer\/[^/]+$/.test(path)) {
       return path;
     }
     if (path === '/deliveries' || path === '/profile' || path === '/fleet') {
@@ -131,6 +133,8 @@ const resolveRouteKeyPath = (routeKey: NotificationRouteKey, data: AppNotificati
       return '/delivery-location';
     case 'customer_restaurant_detail':
       return data.restaurantId ? `/home/restaurant/${data.restaurantId}` : null;
+    case 'customer_support':
+      return '/support';
     case 'customer_login':
       return '/login';
     case 'partner_profile':
@@ -157,6 +161,8 @@ const resolveRouteKeyPath = (routeKey: NotificationRouteKey, data: AppNotificati
       return '/access';
     case 'admin_approvals':
       return '/approvals';
+    case 'admin_order_detail':
+      return data.orderId ? `/orders/${data.orderId}` : '/orders';
     case 'admin_profile':
       return '/profile';
     case 'admin_login':
@@ -183,6 +189,38 @@ const resolveFallbackPath = (app: NotificationApp, data: AppNotificationPayload)
     return '/approvals';
   }
 
+  return null;
+};
+
+/**
+ * Android notification channel ids the server targets. A push whose channelId
+ * does not exist on the device is DROPPED by Android, so every id here must be
+ * created by the app before its first push can arrive.
+ */
+export const ANDROID_NOTIFICATION_CHANNELS = {
+  default: 'default',
+  dispatchOffers: 'offers',
+} as const;
+
+const EAS_PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Picks the EAS project id to request an Expo push token for: the first
+ * candidate shaped like an EAS project UUID.
+ *
+ * Push registration used to read EXPO_PUBLIC_PROJECT_ID, which holds a legacy
+ * Google Analytics id ("G-...") in the customer and dispatch configs and is
+ * unset for partner, so getExpoPushTokenAsync either threw or was skipped and
+ * no device ever stored a token. The UUID check rejects that class of value
+ * instead of handing it to Expo.
+ */
+export const resolveEasProjectId = (...candidates: unknown[]) => {
+  for (const candidate of candidates) {
+    const value = sanitizeText(candidate);
+    if (value && EAS_PROJECT_ID_PATTERN.test(value)) {
+      return value;
+    }
+  }
   return null;
 };
 

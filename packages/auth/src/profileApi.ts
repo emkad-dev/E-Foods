@@ -97,6 +97,23 @@ export const createUserProfile = async (
   return nextUser;
 };
 
+/**
+ * Detaches `token` from the account - but only if the account still holds
+ * THAT token. If the user has since signed in on another phone, that phone's
+ * token is left alone.
+ */
+export const clearUserPushToken = async (supabase: SupabaseClient, userId: string, token: string) => {
+  const { error } = await supabase
+    .from('UserAccount')
+    .update({ expoPushToken: null, pushTokenUpdatedAt: new Date().toISOString() })
+    .eq('uid', userId)
+    .eq('expoPushToken', token);
+
+  if (error) {
+    throw error;
+  }
+};
+
 export const updateUserProfile = async (
   supabase: SupabaseClient,
   userId: string,

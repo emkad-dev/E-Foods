@@ -6,6 +6,7 @@ import type { AuthRole } from './types';
 // extensionless relative ESM specifiers, and every consuming tsconfig sets
 // `allowImportingTsExtensions`.
 import { toUserMessage } from '../../observability/src/userMessage.ts';
+import { runBeforeSignOutHooks } from './signOutHooks.ts';
 
 const NETWORK_ERROR_PATTERNS = [
   'failed to fetch',
@@ -139,6 +140,7 @@ export const signInWithEmail = async (
 };
 
 export const signOutUser = async (supabase: SupabaseClient) => {
+  await runBeforeSignOutHooks();
   const { error } = await supabase.auth.signOut();
   if (error) {
     throw error;
