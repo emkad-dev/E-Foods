@@ -69,7 +69,15 @@ import {
   scheduledSlotRejectionMessage,
   type RestaurantHoursRow,
 } from '../scheduledOrders.ts';
-import { calculateOrderPricing, toDisplayPrice, type PricingConfig, type ResolvedDiscount } from '../pricing.ts';
+import {
+  buildPaystackSplitFields,
+  calculateOrderPricing,
+  toDisplayPrice,
+  type PricingConfig,
+  type PricingDeliveryProvider,
+  type ResolvedDiscount,
+} from '../pricing.ts';
+import { resolveCheckoutDeliveryProviders } from '../deliveryProvider.ts';
 import {
   PROMO_CODE_COLUMNS,
   normalizePromoCode,
@@ -622,6 +630,7 @@ const redeemResolvedPromoOrFail = async (
 const resolveBasketPromo = async ({
   config,
   deliveryFee,
+  deliveryProvider = 'restaurant',
   items,
   now,
   rawCode,
@@ -631,6 +640,7 @@ const resolveBasketPromo = async ({
 }: {
   config: PricingConfig;
   deliveryFee: number;
+  deliveryProvider?: PricingDeliveryProvider;
   items: Array<{ basePrice: number; price: number; quantity: number }>;
   now: Date;
   rawCode: unknown;
@@ -645,7 +655,7 @@ const resolveBasketPromo = async ({
   // Amount a candidate discount actually yields once pricing.ts clamps it —
   // used to (a) drop 0-value candidates and (b) rank automatic offers.
   const discountAmountFor = (discount: ResolvedDiscount) =>
-    calculateOrderPricing({ config, deliveryFee, discount, items, tip }).discount;
+    calculateOrderPricing({ config, deliveryFee, deliveryProvider, discount, items, tip }).discount;
 
   if (code) {
     const promoCode = await loadPromoCodeByCode(code);
@@ -777,6 +787,13 @@ const prepareCustomerOrderDraft = async (
 
     const restaurantDrafts: PreparedRestaurantOrderDraft[] = [];
     let primaryRestaurant: RestaurantRecordRow | null = null;
+    // Decided per restaurant and stamped on each member order (multi-store
+    // always settles 'manual', so this changes no Paystack payload here - it
+    // records who holds each order's delivery fee for payouts and dispatch).
+    const multiStoreProviders = await resolveCheckoutDeliveryProviders({
+      fulfillmentType,
+      restaurantIds: groupedRequests.map((groupedRequest) => groupedRequest.restaurantId),
+    });
 
     for (const [index, groupedRequest] of groupedRequests.entries()) {
       const { restaurant, approval } = await loadRestaurantById(groupedRequest.restaurantId);
@@ -830,6 +847,7 @@ const prepareCustomerOrderDraft = async (
       const pricing = calculateOrderPricing({
         config: pricingConfig,
         deliveryFee,
+        deliveryProvider: multiStoreProviders.get(groupedRequest.restaurantId) ?? 'restaurant',
         items,
         tip: tipShare,
       });
@@ -932,6 +950,14 @@ const prepareCustomerOrderDraft = async (
     fail(412, 'This restaurant does not deliver to your selected location yet.');
   }
 
+  // Who delivers, decided now because the Paystack split is fixed now (see
+  // _shared/deliveryProvider.ts). 'restaurant' unless platform_dispatch is on
+  // AND the restaurant opted into FEASTY riders; any lookup failure is
+  // 'restaurant', i.e. today's behaviour.
+  const deliveryProvider =
+    (await resolveCheckoutDeliveryProviders({ fulfillmentType, restaurantIds: [restaurantId] })).get(restaurantId) ??
+    'restaurant';
+
   // Promo resolution is server-side and stale-client-proof: the client's
   // computed discount is never trusted — we re-load the code, re-check the
   // window/scope/min-basket here, and re-derive the discount in pricing.ts. A
@@ -940,6 +966,7 @@ const prepareCustomerOrderDraft = async (
   const promoResolution = await resolveBasketPromo({
     config: pricingConfig,
     deliveryFee,
+    deliveryProvider,
     items,
     now,
     rawCode: requestData.promoCode,
@@ -957,6 +984,7 @@ const prepareCustomerOrderDraft = async (
   const pricing = calculateOrderPricing({
     config: pricingConfig,
     deliveryFee,
+    deliveryProvider,
     discount: resolvedPromo?.discount ?? null,
     items,
     tip: tipAmount,
@@ -1815,23 +1843,24 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
     status: PAYMENT_STATUS.PENDING,
   });
 
+  // The split: restaurant subaccount gets netSettlement, the platform keeps
+  // total − netSettlement. Under platform delivery netSettlement excludes the
+  // delivery fee, so the fee (like the tip) stays in the platform balance to
+  // fund the rider's payout. Restaurant delivery is unchanged to the byte.
+  const paystackSplit = buildPaystackSplitFields({
+    pricing: orderDraft.pricing as { settlement?: unknown; total?: unknown },
+    settlementMode: paymentSettlement.settlementMode,
+    splitSubaccountCode: paymentSettlement.splitSubaccountCode,
+  });
+
   try {
     const initializedTransaction = await initializePaystackTransaction({
       amount: orderDraft.pricing.total,
       email: context.email,
       paymentMethod: orderDraft.paymentMethod,
       reference: paymentReference,
-      subaccount: paymentSettlement.settlementMode === 'split' ? paymentSettlement.splitSubaccountCode : null,
-      transactionCharge:
-        paymentSettlement.settlementMode === 'split'
-          ? roundCurrency(
-              Math.max(
-                parseNumber(orderDraft.pricing.total, 0) -
-                  parseNumber(((orderDraft.pricing.settlement ?? {}) as JsonObject).netSettlement, 0),
-                0
-              )
-            )
-          : null,
+      subaccount: paystackSplit.subaccount,
+      transactionCharge: paystackSplit.transactionCharge,
       metadata: {
         customerId: context.uid,
         fulfillmentType: orderDraft.fulfillmentType,
@@ -2421,11 +2450,16 @@ const customerValidatePromoCode: Handler = async ({ context, data }) => {
   );
   const deliveryFee = fulfillmentType === 'delivery' ? parseNumber(activeRestaurant.deliveryFee, 0) : 0;
   const tip = roundCurrency(parseNumber(data.tipAmount, 0));
+  // Same decision placement makes, so the previewed discount matches the charge.
+  const deliveryProvider =
+    (await resolveCheckoutDeliveryProviders({ fulfillmentType, restaurantIds: [restaurantId] })).get(restaurantId) ??
+    'restaurant';
 
   const code = normalizePromoCode(data.promoCode);
   const resolution = await resolveBasketPromo({
     config: pricingConfig,
     deliveryFee,
+    deliveryProvider,
     items,
     now,
     rawCode: data.promoCode,
@@ -2437,7 +2471,7 @@ const customerValidatePromoCode: Handler = async ({ context, data }) => {
   // A manually-entered code that failed validation: surface a client-safe
   // reason and the undiscounted totals.
   if ('rejected' in resolution) {
-    const baseline = calculateOrderPricing({ config: pricingConfig, deliveryFee, items, tip });
+    const baseline = calculateOrderPricing({ config: pricingConfig, deliveryFee, deliveryProvider, items, tip });
     return json(200, {
       data: {
         applied: null,
@@ -2456,6 +2490,7 @@ const customerValidatePromoCode: Handler = async ({ context, data }) => {
   const pricing = calculateOrderPricing({
     config: pricingConfig,
     deliveryFee,
+    deliveryProvider,
     discount: resolved?.discount ?? null,
     items,
     tip,
@@ -2472,6 +2507,7 @@ const customerValidatePromoCode: Handler = async ({ context, data }) => {
       const preview = calculateOrderPricing({
         config: pricingConfig,
         deliveryFee,
+        deliveryProvider,
         discount: result.discount,
         items,
         tip,

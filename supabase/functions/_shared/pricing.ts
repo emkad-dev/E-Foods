@@ -111,21 +111,38 @@ const rawDiscountAmount = (discount: ResolvedDiscount, subtotal: number, deliver
   return discount.value > 0 ? roundCurrency(Math.min(discount.value, deliveryFee)) : deliveryFee;
 };
 
+// Who delivers the order (see _shared/deliveryProvider.ts for how it is decided
+// at checkout). Declared here rather than imported so pricing.ts stays free of
+// any Supabase-client dependency.
+//   'restaurant' - today's model, unchanged to the byte: the restaurant's
+//                  subaccount receives restaurantPayable + the delivery fee.
+//   'platform'   - a FEASTY rider delivers. The delivery fee stays in the
+//                  platform balance (it funds the rider's pay) and the
+//                  restaurant receives restaurantPayable only. The tip already
+//                  stays with the platform in both modes and is paid to the
+//                  rider by the payout ledger.
+export type PricingDeliveryProvider = 'restaurant' | 'platform';
+
 export const calculateOrderPricing = ({
   config,
   deliveryFee,
+  deliveryProvider = 'restaurant',
   discount,
   items,
   tip,
 }: {
   config: PricingConfig;
   deliveryFee: number;
+  // Optional so every existing caller keeps its exact behaviour: absent ⇒
+  // 'restaurant', and the output object carries no new keys at all.
+  deliveryProvider?: PricingDeliveryProvider;
   // Optional so every existing caller (no promo) keeps its exact behaviour:
   // absent ⇒ discount 0 and the settlement is untouched.
   discount?: ResolvedDiscount | null;
   items: PricedOrderItem[];
   tip: number;
 }) => {
+  const platformDelivers = deliveryProvider === 'platform';
   const subtotal = roundCurrency(items.reduce((sum, item) => sum + item.price * item.quantity, 0));
   const restaurantBasis = roundCurrency(items.reduce((sum, item) => sum + item.basePrice * item.quantity, 0));
   const safeDeliveryFee = roundCurrency(Math.max(deliveryFee, 0));
@@ -152,10 +169,14 @@ export const calculateOrderPricing = ({
     const baseCap = discount.type === 'free_delivery' ? safeDeliveryFee : subtotal;
     const afterBaseCap = Math.min(Math.max(raw, 0), baseCap);
 
+    // Under platform delivery the restaurant never receives the delivery fee,
+    // so a restaurant-funded free_delivery cannot come out of it: it comes out
+    // of the restaurant's dish payable instead, capped there like any other
+    // restaurant-funded discount (the base cap above still limits it to the fee).
     const funderCapacity =
       discount.fundingSource === 'platform'
         ? platformFeeBase
-        : discount.type === 'free_delivery'
+        : discount.type === 'free_delivery' && !platformDelivers
           ? safeDeliveryFee
           : restaurantPayableBase;
 
@@ -163,9 +184,12 @@ export const calculateOrderPricing = ({
   }
 
   // ── The settlement split by funding source ──────────────────────────────
+  // The delivery fee the RESTAURANT's settlement includes: all of it under
+  // restaurant delivery, none of it under platform delivery.
+  const restaurantDeliveryShare = platformDelivers ? 0 : safeDeliveryFee;
   let platformFee = platformFeeBase;
   let restaurantPayable = restaurantPayableBase;
-  let netSettlement = roundCurrency(restaurantPayableBase + safeDeliveryFee);
+  let netSettlement = roundCurrency(restaurantPayableBase + restaurantDeliveryShare);
   let netDispatchFee = safeDeliveryFee;
 
   if (discount && discountAmount > 0 && fundingSource === 'platform') {
@@ -173,17 +197,38 @@ export const calculateOrderPricing = ({
     // out of the platform's margin (floored at 0 by the capacity cap above).
     platformFee = roundCurrency(Math.max(platformFeeBase - discountAmount, 0));
   } else if (discount && discountAmount > 0 && fundingSource === 'restaurant') {
-    if (discount.type === 'free_delivery') {
+    if (discount.type === 'free_delivery' && !platformDelivers) {
       // Comes off the restaurant's dispatch fee; the dish payable is untouched.
       netDispatchFee = roundCurrency(Math.max(safeDeliveryFee - discountAmount, 0));
       netSettlement = roundCurrency(restaurantPayableBase + netDispatchFee);
     } else {
       // Comes off the restaurant's own dish revenue; the platform take is
-      // untouched.
+      // untouched. Under platform delivery this is also where a
+      // restaurant-funded free_delivery lands, so the rider is still paid the
+      // full fee.
       restaurantPayable = roundCurrency(Math.max(restaurantPayableBase - discountAmount, 0));
-      netSettlement = roundCurrency(restaurantPayable + safeDeliveryFee);
+      netSettlement = roundCurrency(restaurantPayable + restaurantDeliveryShare);
     }
   }
+
+  // Only present under platform delivery, so a restaurant-delivered order's
+  // pricing object is byte-for-byte what it was before platform delivery
+  // existed (pinned by pricing.test.ts / riderPaySplit.test.ts).
+  //   deliveryProvider    - the stamp dispatch and the earning trigger read.
+  //   platformDeliveryFee - the delivery fee the platform balance retains.
+  //   riderDeliveryPay    - what the delivering FEASTY rider is owed for the
+  //                         trip (the full fee; promos never reduce it).
+  const platformDeliveryFields: {
+    deliveryProvider?: 'platform';
+    platformDeliveryFee?: number;
+    riderDeliveryPay?: number;
+  } = platformDelivers
+    ? {
+        deliveryProvider: 'platform',
+        platformDeliveryFee: safeDeliveryFee,
+        riderDeliveryPay: safeDeliveryFee,
+      }
+    : {};
 
   // total = subtotal + delivery + tip − discount, floored at 0. The discount is
   // a NEW line — it never alters the markup formula.
@@ -192,6 +237,7 @@ export const calculateOrderPricing = ({
   return {
     currency: PRICING_CURRENCY,
     deliveryFee: safeDeliveryFee,
+    ...platformDeliveryFields,
     discount: discountAmount,
     discountFundingSource: discountAmount > 0 ? fundingSource : null,
     dispatchFee: safeDeliveryFee,
@@ -203,6 +249,7 @@ export const calculateOrderPricing = ({
     serviceFee: 0,
     settlement: {
       basis: 'menu_base_prices',
+      ...platformDeliveryFields,
       discount: discountAmount,
       discountFundingSource: discountAmount > 0 ? fundingSource : null,
       dispatchFee: netDispatchFee,
@@ -223,15 +270,43 @@ export const calculateOrderPricing = ({
 };
 
 // The settlement balance identity every order must satisfy, to the kobo:
-//     netSettlement + platformFee + tip === total
+//     netSettlement + platformFee + platformDeliveryFee + tip === total
 // Equivalently: (subtotal + deliveryFee + tip) − discount === the sum of what
 // is paid out. Holds for a plain order (discount 0) and for BOTH funding
 // sources, because the discount reduces `total` and the funder's own payout
-// line by the identical clamped amount. Returns the signed residual (0 when
-// balanced) so tests can assert it directly.
+// line by the identical clamped amount. platformDeliveryFee is absent (0) for
+// restaurant delivery, where the fee is inside netSettlement instead. Returns
+// the signed residual (0 when balanced) so tests can assert it directly.
 export const settlementBalanceResidual = (pricing: {
   netSettlement: number;
+  platformDeliveryFee?: number;
   platformFee: number;
   tip: number;
   total: number;
-}) => roundCurrency(pricing.netSettlement + pricing.platformFee + pricing.tip - pricing.total);
+}) =>
+  roundCurrency(
+    pricing.netSettlement + pricing.platformFee + (pricing.platformDeliveryFee ?? 0) + pricing.tip - pricing.total
+  );
+
+// What the Paystack split must send for a single-store 'split' checkout: the
+// restaurant subaccount receives netSettlement and the platform main balance
+// keeps the rest (transaction_charge = total − netSettlement). Under platform
+// delivery netSettlement no longer contains the delivery fee, so the fee lands
+// in the platform balance through this same formula - no second code path.
+// 'manual' settlement sends neither field (the platform receives everything).
+export const buildPaystackSplitFields = (input: {
+  pricing: { settlement?: unknown; total?: unknown };
+  settlementMode: string;
+  splitSubaccountCode: string | null;
+}): { subaccount: string | null; transactionCharge: number | null } => {
+  if (input.settlementMode !== 'split') {
+    return { subaccount: null, transactionCharge: null };
+  }
+  const settlement = (input.pricing.settlement ?? {}) as Record<string, unknown>;
+  return {
+    subaccount: input.splitSubaccountCode,
+    transactionCharge: roundCurrency(
+      Math.max(parseNumber(input.pricing.total, 0) - parseNumber(settlement.netSettlement, 0), 0)
+    ),
+  };
+};

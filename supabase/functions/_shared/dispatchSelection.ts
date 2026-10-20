@@ -50,9 +50,15 @@
 // a different restaurant's order was never a deliberate product decision,
 // just a side effect of the original query not filtering restaurantId at
 // all in the fallback branch.
+//
+// SUPERSEDED (rider pay, 2026-10-20): the restaurant-first-then-global
+// fallback described above is gone. The pool is now chosen by the delivery
+// provider stamped on the order at checkout - see resolveDispatchPoolForOrder
+// below for why a fallback across the two would move money incorrectly.
 
 import { serviceClient } from './client.ts';
 import { calculateDistanceKm, type GeoPoint } from './deliveryCoverage.ts';
+import { readOrderDeliveryProvider } from './deliveryProvider.ts';
 import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
 import { computeEtaRange } from './deliveryEta.ts';
 import {
@@ -79,6 +85,24 @@ import { loadDispatchTrackingConfig } from './platformSettings.ts';
 import { broadcastOrderChanged } from './realtime.ts';
 import { parseInteger, sanitizeText, unique } from './rpc/coercion.ts';
 import { loadRestaurantPrepTimeEstimate, loadRestaurantTimingContext, type RestaurantTimingContext } from './prepTime.ts';
+
+// ---------------------------------------------------------------------------
+// Pool choice (rider pay). The order's delivery provider is decided at
+// checkout and stamped into pricing.deliveryProvider, because that is when the
+// Paystack split is fixed (see _shared/deliveryProvider.ts):
+//   'platform'   - FEASTY kept the delivery fee to pay a FEASTY rider, so only
+//                  the global pool (UserRole.restaurantId null) is offered it.
+//   'restaurant' - the restaurant's subaccount received the fee, so only its
+//                  own riders are offered it. There is deliberately NO global
+//                  fallback any more: a FEASTY rider sent on such an order
+//                  would be delivering for a fee the platform never held.
+//                  Legacy/unstamped orders are 'restaurant'.
+// ---------------------------------------------------------------------------
+
+export type DispatchPool = 'restaurant' | 'global';
+
+export const resolveDispatchPoolForOrder = (pricing: unknown): DispatchPool =>
+  readOrderDeliveryProvider(pricing) === 'platform' ? 'global' : 'restaurant';
 
 // ---------------------------------------------------------------------------
 // The scorer: pure functions, no I/O. Exported so tests can exercise them
@@ -671,9 +695,14 @@ export const runAutomaticDispatchAssignment = async (
     return { outcome: 'exhausted' };
   }
 
-  const [restaurantTiming, restaurantScopedCandidates] = (await Promise.all([
+  // Which pool may deliver this order follows the delivery provider stamped on
+  // it at checkout (see resolveDispatchPoolForOrder) - the Paystack split was
+  // already fixed then, so dispatch must not send a rider whose pay the money
+  // does not cover.
+  const pool = resolveDispatchPoolForOrder(order.pricing);
+  const [restaurantTiming, poolCandidates] = (await Promise.all([
     loadRestaurantTimingContext(order.restaurantId),
-    loadDispatchCandidates(order.restaurantId),
+    loadDispatchCandidates(pool === 'restaurant' ? order.restaurantId : null),
   ])) as [RestaurantTimingContext | null, DispatchCandidate[]];
 
   const restaurantCoordinate =
@@ -683,12 +712,8 @@ export const runAutomaticDispatchAssignment = async (
       ? { latitude: restaurantTiming.latitude, longitude: restaurantTiming.longitude }
       : null;
 
-  let restaurantScoped = true;
-  let candidates: DispatchCandidate[] = restaurantScopedCandidates.filter((candidate) => !excluded.has(candidate.id));
-  if (candidates.length === 0) {
-    restaurantScoped = false;
-    candidates = (await loadDispatchCandidates(null)).filter((candidate) => !excluded.has(candidate.id));
-  }
+  const restaurantScoped = pool === 'restaurant';
+  const candidates: DispatchCandidate[] = poolCandidates.filter((candidate) => !excluded.has(candidate.id));
 
   const weights = await loadWeights();
   const winner = selectLowestScoreCandidate(candidates, restaurantCoordinate, weights);
