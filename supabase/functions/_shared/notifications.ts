@@ -1,4 +1,14 @@
 import { serviceClient } from './client.ts';
+import { buildTransactionalEmailHtml, sendTransactionalEmail } from './email.ts';
+import {
+  checkExpoPushReceipts,
+  deliverExpoPushMessages,
+  summarizeFailures,
+  type ExpoPushFailure,
+  type ExpoPushMessage,
+} from './expoPush.ts';
+import { logEdgeEvent } from './observability.ts';
+import { enqueuePushReceiptCheck } from './queue.ts';
 
 type JsonObject = Record<string, unknown>;
 type NotificationApp = 'customer' | 'partner' | 'dispatch' | 'admin';
@@ -10,6 +20,7 @@ type NotificationRouteKey =
   | 'customer_order_detail'
   | 'customer_delivery_location'
   | 'customer_restaurant_detail'
+  | 'customer_support'
   | 'customer_login'
   | 'partner_profile'
   | 'partner_orders'
@@ -27,35 +38,15 @@ type NotificationRouteKey =
   | 'admin_profile'
   | 'admin_login';
 
-type ExpoPushMessage = {
-  to: string;
-  title: string;
-  body: string;
-  data?: JsonObject;
-  sound?: 'default' | null;
-  channelId?: string;
-};
-
 type UserPushRow = {
   expoPushToken?: string | null;
   uid: string;
 };
 
-const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 const EXPO_PUSH_TOKEN_PATTERN = /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/;
-const EXPO_BATCH_SIZE = 100;
-const EXPO_PUSH_TIMEOUT_MS = 10_000;
 
 const isExpoPushToken = (value: string | null | undefined): value is string =>
   Boolean(value && EXPO_PUSH_TOKEN_PATTERN.test(value));
-
-const chunkArray = <T>(values: T[], size: number) => {
-  const chunks: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size));
-  }
-  return chunks;
-};
 
 const unique = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 const sanitizeText = (value: unknown) =>
@@ -84,6 +75,8 @@ const buildNotificationPath = (
       return '/delivery-location';
     case 'customer_restaurant_detail':
       return data.restaurantId ? `/home/restaurant/${data.restaurantId}` : '/home';
+    case 'customer_support':
+      return '/support';
     case 'customer_login':
       return '/login';
     case 'partner_profile':
@@ -121,6 +114,37 @@ const buildNotificationPath = (
       return '/login';
     default:
       return app === 'customer' ? '/home' : '/profile';
+  }
+};
+
+/**
+ * Customer-facing wording for an order status push. The generic
+ * "Order ABC123 is now ready for pickup" read like a log line and, for a
+ * rejection, did not tell the customer what happens next.
+ */
+export const customerOrderStatusCopy = (status: string, orderId: string) => {
+  const code = orderId.slice(-6).toUpperCase();
+  switch (status) {
+    case 'accepted':
+      return { title: 'Order accepted', body: `The restaurant accepted order ${code} and will start on it shortly.` };
+    case 'preparing':
+      return { title: 'Your food is being prepared', body: `The kitchen is preparing order ${code}.` };
+    case 'ready_for_pickup':
+      return { title: 'Order ready', body: `Order ${code} is ready and waiting to be picked up.` };
+    case 'out_for_delivery':
+    case 'picked_up':
+      return { title: 'On the way', body: `Order ${code} is on its way to you.` };
+    case 'delivered':
+      return { title: 'Order delivered', body: `Order ${code} was delivered. Enjoy your meal!` };
+    case 'rejected':
+      return {
+        title: 'Order not accepted',
+        body: `The restaurant could not take order ${code}. Open the order to see your refund.`,
+      };
+    case 'cancelled':
+      return { title: 'Order cancelled', body: `Order ${code} was cancelled. Open the order for refund details.` };
+    default:
+      return { title: 'Order update', body: `Order ${code} is now ${status.replace(/_/g, ' ')}.` };
   }
 };
 
@@ -227,6 +251,44 @@ export const loadRestaurantRecipientUserIds = async (restaurantId: string) => {
   return unique([restaurant?.ownerId ?? '']);
 };
 
+/**
+ * Deletes tokens Expo has declared permanently dead (the app was uninstalled
+ * or the token was rotated). Matching on the token rather than a uid also
+ * clears it from any OTHER account that last registered from the same device.
+ */
+export const clearDeadPushTokens = async (tokens: string[]) => {
+  const deadTokens = unique(tokens);
+  if (deadTokens.length === 0) {
+    return;
+  }
+
+  const { error } = await serviceClient
+    .from('UserAccount')
+    .update({ expoPushToken: null, pushTokenUpdatedAt: new Date().toISOString() })
+    .in('expoPushToken', deadTokens);
+
+  if (error) {
+    logEdgeEvent('error', 'push dead-token cleanup failed', { count: deadTokens.length, error: error.message });
+    return;
+  }
+
+  logEdgeEvent('info', 'push dead tokens cleared', { count: deadTokens.length });
+};
+
+const reportPushFailures = (stage: 'ticket' | 'receipt', failures: ExpoPushFailure[]) => {
+  if (failures.length === 0) {
+    return;
+  }
+
+  const { counts, hints } = summarizeFailures(failures);
+  // Tokens are not logged: they are device identifiers, and the counts plus
+  // the error codes are what an operator needs to act.
+  logEdgeEvent(hints.length > 0 ? 'error' : 'warn', `expo push ${stage} errors`, {
+    counts,
+    ...(hints.length > 0 ? { action: hints } : null),
+  });
+};
+
 export const sendExpoPushMessages = async (messages: ExpoPushMessage[]) => {
   if (messages.length === 0) {
     return {
@@ -234,35 +296,39 @@ export const sendExpoPushMessages = async (messages: ExpoPushMessage[]) => {
     };
   }
 
-  let sent = 0;
+  const outcome = await deliverExpoPushMessages(messages);
 
-  for (const batch of chunkArray(messages, EXPO_BATCH_SIZE)) {
-    let response: Response;
+  reportPushFailures('ticket', outcome.failures);
+  await clearDeadPushTokens(outcome.deadTokens);
+
+  // Receipts carry the FCM/APNs verdict (most DeviceNotRegistered and every
+  // InvalidCredentials for a missing FCM V1 key arrive only here). Scheduling
+  // is best-effort: failing to schedule must not turn a delivered push into
+  // an error for the caller.
+  if (outcome.receiptTickets.length > 0) {
     try {
-      response = await fetch(EXPO_PUSH_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(batch),
-        signal: AbortSignal.timeout(EXPO_PUSH_TIMEOUT_MS),
-      });
+      await enqueuePushReceiptCheck(serviceClient, outcome.receiptTickets);
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new Error(`Expo push delivery timed out after ${EXPO_PUSH_TIMEOUT_MS}ms`);
-      }
-      throw error;
+      logEdgeEvent('warn', 'push receipt check could not be scheduled', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-
-    if (!response.ok) {
-      const payload = await response.text();
-      throw new Error(`Expo push delivery failed: ${response.status} ${payload}`);
-    }
-
-    sent += batch.length;
   }
 
-  return { sent };
+  return { sent: outcome.accepted };
+};
+
+/** Queue-drainer entry point for a deferred receipt check. */
+export const processPushReceiptCheck = async (tickets: Array<{ id: string; token: string }>) => {
+  const result = await checkExpoPushReceipts(tickets);
+  reportPushFailures('receipt', result.failures);
+  await clearDeadPushTokens(result.deadTokens);
+  return {
+    checked: result.checked,
+    deadTokens: result.deadTokens.length,
+    failed: result.failures.length,
+    pending: result.pending,
+  };
 };
 
 export const sendPushNotificationsToUsers = async (
@@ -344,13 +410,67 @@ export const notifyAdmins = async (
     title: string;
   }
 ) => {
+  const adminUserIds = await loadUserIdsByRoles(['admin']).catch((error) => {
+    console.error('Unable to load admin recipients.', error);
+    return [] as string[];
+  });
+
   await notifySafely(async () => {
-    await sendPushNotificationsToRoles(['admin'], {
+    await sendPushNotificationsToUsers(adminUserIds, {
       body: payload.body,
       data: payload.data ?? {},
       title: payload.title,
     });
   });
+
+  // Admins work from the web console (apps/admin-web), which cannot receive
+  // Expo pushes, and no admin account holds a push token. Push alone meant a
+  // rider SOS, an empty dispatch pool or a restaurant ignoring a paid order
+  // reached nobody. Email is the channel admins actually have.
+  await notifySafely(async () => {
+    await emailUsers(adminUserIds, {
+      heading: payload.title,
+      lines: [payload.body, 'Open the FEASTY admin console to act on this alert.'],
+      subject: `[FEASTY admin] ${payload.title}`,
+    });
+  });
+};
+
+const emailUsers = async (
+  userIds: string[],
+  message: { heading: string; lines: string[]; subject: string }
+) => {
+  const ids = unique(userIds);
+  if (ids.length === 0) {
+    return;
+  }
+
+  const { data, error } = await serviceClient
+    .from('UserAccount')
+    .select('uid,email,displayName,accountDisabled')
+    .in('uid', ids);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const row of (data ?? []) as Array<{
+    accountDisabled?: boolean | null;
+    displayName?: string | null;
+    email?: string | null;
+  }>) {
+    const email = sanitizeText(row.email);
+    if (!email || row.accountDisabled === true) continue;
+    await sendTransactionalEmail({
+      html: buildTransactionalEmailHtml({
+        heading: message.heading,
+        lines: message.lines,
+        recipientName: row.displayName ?? null,
+      }),
+      subject: message.subject,
+      to: email,
+    });
+  }
 };
 
 export const notifyRestaurantUsers = async (

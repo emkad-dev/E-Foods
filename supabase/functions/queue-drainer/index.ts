@@ -9,12 +9,14 @@ import { sweepScheduledOrderReleases } from '../_shared/scheduledOrderReleaseSwe
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
+  processPushReceiptCheck,
   sendPushNotificationsToRoles,
   sendPushNotificationsToUsers,
 } from '../_shared/notifications.ts';
 import {
   claimPendingQueueJobs,
   incrementRetry,
+  isPushReceiptCheckJob,
   updateJobStatus,
   type NotificationJob,
   type OrderPlacementJob,
@@ -151,7 +153,13 @@ const queueDefinitions: Record<
 > = {
   'notifications': {
     maxRetries: 3,
-    process: async (job) => processNotificationJob(job.payload as NotificationJob),
+    // The same queue carries deferred Expo receipt checks (scheduled by
+    // sendExpoPushMessages ~15 min after a send) so dead tokens get cleared
+    // and missing FCM/APNs credentials surface in the logs.
+    process: async (job) =>
+      isPushReceiptCheckJob(job.payload)
+        ? processPushReceiptCheck(job.payload.tickets)
+        : processNotificationJob(job.payload as NotificationJob),
   },
   'order-placement': {
     maxRetries: 3,

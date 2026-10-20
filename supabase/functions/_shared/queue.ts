@@ -91,11 +91,58 @@ export const enqueuePaymentVerification = async (
   return { jobId, queue: 'payment-verification' };
 };
 
+/**
+ * A deferred Expo receipt lookup, carried on the notifications queue so it
+ * needs no new table or cron: the drainer already runs every minute and
+ * `available_at` already defers a row. Expo recommends waiting ~15 minutes
+ * before fetching receipts.
+ */
+export type PushReceiptCheckJob = {
+  kind: 'push_receipts';
+  tickets: Array<{ id: string; token: string }>;
+};
+
+export const PUSH_RECEIPT_CHECK_DELAY_MS = 15 * 60_000;
+
+export const isPushReceiptCheckJob = (payload: unknown): payload is PushReceiptCheckJob =>
+  typeof payload === 'object' &&
+  payload !== null &&
+  (payload as { kind?: unknown }).kind === 'push_receipts' &&
+  Array.isArray((payload as { tickets?: unknown }).tickets);
+
+export const enqueuePushReceiptCheck = async (
+  client: SupabaseClient,
+  tickets: PushReceiptCheckJob['tickets'],
+  delayMs = PUSH_RECEIPT_CHECK_DELAY_MS
+) => {
+  if (tickets.length === 0) {
+    return null;
+  }
+
+  const jobId = `receipts:${crypto.randomUUID()}`;
+  const payload: PushReceiptCheckJob = { kind: 'push_receipts', tickets };
+  const { error } = await client.from('queue_notifications').insert({
+    id: jobId,
+    payload,
+    status: 'pending',
+    retry_count: 0,
+    available_at: new Date(Date.now() + delayMs).toISOString(),
+    created_at: new Date().toISOString(),
+  });
+
+  if (error) throw new Error(`Failed to enqueue push receipt check: ${error.message}`);
+  return { jobId, queue: 'notifications' };
+};
+
 export const enqueueNotification = async (
   client: SupabaseClient,
   job: NotificationJob
 ) => {
-  const jobId = `notif:${Date.now()}`;
+  // A bare `notif:${Date.now()}` id collided (primary-key violation, so the
+  // enqueue threw and the notification was lost) whenever two notifications
+  // were enqueued in the same millisecond - e.g. two restaurants in one
+  // multi-store checkout.
+  const jobId = `notif:${Date.now()}:${crypto.randomUUID()}`;
   const { error } = await client.from('queue_notifications').insert({
     id: jobId,
     payload: job,
