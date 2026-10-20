@@ -143,6 +143,7 @@ const EXPECTED_ADMIN_ACTIONS = [
   'adminCreatePromoCode',
   'adminSetPromoCodeActive',
   'bootstrapFirstAdmin',
+  'adminGetRiderPayouts',
 ];
 
 const EXPECTED_ACCOUNT_ACTIONS = [
@@ -163,6 +164,8 @@ const EXPECTED_ACCOUNT_ACTIONS = [
   'deleteOwnAccount',
   'deleteAdminAccess',
   'deleteUserAccountOnRequest',
+  'riderGetPayoutProfile',
+  'riderSubmitPayoutBank',
 ];
 
 const EXPECTED_ANONYMOUS_ACTIONS = [
@@ -204,8 +207,8 @@ const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['orders', ORDER_ACTIONS, 13],
   ['dispatch', DISPATCH_ACTIONS, 16],
   ['partner', PARTNER_ACTIONS, 18],
-  ['admin', ADMIN_ACTIONS, 33],
-  ['account', ACCOUNT_ACTIONS, 17],
+  ['admin', ADMIN_ACTIONS, 34],
+  ['account', ACCOUNT_ACTIONS, 19],
 ];
 
 for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
@@ -236,7 +239,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 97-action surface', () => {
+Deno.test('the five domains together cover exactly the 100-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -245,14 +248,14 @@ Deno.test('the five domains together cover exactly the 97-action surface', () =>
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 97, 'total action count');
-  expectEqual(new Set(union).size, 97, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 97, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 100, 'total action count');
+  expectEqual(new Set(union).size, 100, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 100, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 97, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 100, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {

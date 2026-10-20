@@ -107,6 +107,8 @@ export const ADMIN_ACTIONS = [
   'adminCreatePromoCode',
   'adminSetPromoCodeActive',
   'bootstrapFirstAdmin',
+  // Rider pay: recent Paystack rider payouts, held riders and ledger totals.
+  'adminGetRiderPayouts',
 ] as const;
 
 export const ACCOUNT_ACTIONS = [
@@ -132,6 +134,11 @@ export const ACCOUNT_ACTIONS = [
   // raw SQL. deleteAdminAccess refuses non-admin targets and this one refuses
   // admin targets, so the two partition the role space exactly.
   'deleteUserAccountOnRequest',
+  // Rider pay (FEASTY platform riders only): read the caller's own masked payout
+  // account and earnings, and submit/replace the bank account payouts go to.
+  // Account domain, not dispatch, because they are self-service account data.
+  'riderGetPayoutProfile',
+  'riderSubmitPayoutBank',
 ] as const;
 
 // The two actions that must run before authentication:

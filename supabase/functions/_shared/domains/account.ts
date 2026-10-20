@@ -42,6 +42,7 @@ import {
   resolveStaffJoinBranch,
   staffInviteCodeMatches,
 } from '../staffInviteCodes.ts';
+import { riderGetPayoutProfile, riderSubmitPayoutBank } from '../riderPayoutAccount.ts';
 import { ACCOUNT_ACTIONS } from '../rpc/actions.ts';
 import type { JsonObject } from '../rpc/coercion.ts';
 import { nowIso, parseInteger, sanitizeOptionalText, sanitizeText } from '../rpc/coercion.ts';
@@ -1344,6 +1345,8 @@ export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
     redeemStaffInvite,
     recordPolicyAcceptance: recordPolicyAcceptanceHandler,
     revokeUserRole,
+    riderGetPayoutProfile,
+    riderSubmitPayoutBank,
     syncUserClaims,
     updateUserRestaurantLink,
   },

@@ -33,6 +33,7 @@ import {
   type RiderRosterInput,
 } from '../adminFleetReads.ts';
 import { createAuditEntry } from '../auditLog.ts';
+import { adminGetRiderPayouts } from '../riderPayoutAccount.ts';
 import { resolveBroadcastAudience, type BroadcastSegment } from '../broadcast.ts';
 import { serviceClient } from '../client.ts';
 import { PROMO_CODE_COLUMNS, normalizePromoCode, type PromoCodeRow } from '../promoCodes.ts';
@@ -2087,6 +2088,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetOrderDetail,
     adminGetRestaurantPayouts,
     adminGetRiderRoster,
+    adminGetRiderPayouts,
     adminGetAuditLog,
     adminGetRiskEvents,
     adminListFeatureFlags,
