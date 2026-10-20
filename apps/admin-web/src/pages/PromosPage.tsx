@@ -237,7 +237,7 @@ export default function PromosPage() {
         </div>
         <div className="field">
           <label htmlFor="promo-image">Hero image (optional)</label>
-          <input id="promo-image" type="file" accept="image/*" onChange={(event) => void onPickImage(event)} />
+          <input id="promo-image" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void onPickImage(event)} />
           {uploading ? <span className="muted">Uploading…</span> : null}
           {imageUrl ? (
             <img src={imageUrl} alt="Promo hero preview" style={{ marginTop: 8, maxWidth: 240, borderRadius: 8 }} />

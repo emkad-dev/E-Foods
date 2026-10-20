@@ -8,7 +8,16 @@ const extensionFor = (type: string): string => {
   return 'jpg';
 };
 
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_BYTES = 5 * 1024 * 1024;
+
 export const uploadPromoAsset = async (file: File): Promise<string> => {
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error('Use a JPEG, PNG or WebP image.');
+  }
+  if (file.size > MAX_BYTES) {
+    throw new Error('Images must be 5 MB or smaller.');
+  }
   const extension = extensionFor(file.type);
   const filePath = `promos/${Date.now()}.${extension}`;
 
