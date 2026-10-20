@@ -51,7 +51,13 @@ import {
   reofferDispatchOrder,
 } from '../dispatchSelection.ts';
 import { getNigeriaAreaCoordinate } from '../nigeriaGeography.ts';
-import { buildNotificationData, notifyAdmins, notifyRestaurantUsers, notifyUsers } from '../notifications.ts';
+import {
+  buildNotificationData,
+  customerOrderStatusCopy,
+  notifyAdmins,
+  notifyRestaurantUsers,
+  notifyUsers,
+} from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
@@ -1426,9 +1432,10 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
       nextStatus: nextState.status,
     },
   });
+  // customerOrderStatusCopy gives the cancellation push its refund wording
+  // ("Open the order for refund details") instead of a log-line status.
   await notifyUsers([bundle.order.customerId], {
-    title: 'Delivery update',
-    body: `Order ${orderId.slice(-6).toUpperCase()} is now ${nextState.status.replace(/_/g, ' ')}.`,
+    ...customerOrderStatusCopy(nextState.status, orderId),
     data: buildNotificationData({
       app: 'customer',
       orderId,
@@ -1437,6 +1444,24 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
       type: 'order_update',
     }),
   });
+  // An admin writing off an escalated order (cancel_escalated) must also tell
+  // the rider carrying it, or they keep riding to a cancelled drop-off. The
+  // snapshot's courier is current: the CAS above proved the order was still in
+  // the status this snapshot saw.
+  const carryingCourierId = sanitizeText(bundle.assignment?.courierId);
+  if (nextState.status === ORDER_STATUS.CANCELLED && carryingCourierId && carryingCourierId !== context.uid) {
+    await notifyUsers([carryingCourierId], {
+      title: 'Delivery cancelled',
+      body: `Order ${orderId.slice(-6).toUpperCase()} was cancelled by FEASTY support. You do not need to deliver it.`,
+      data: buildNotificationData({
+        app: 'dispatch',
+        orderId,
+        routeKey: 'dispatch_delivery_detail',
+        status: nextState.status,
+        type: 'order_update',
+      }),
+    });
+  }
   await notifyRestaurantUsers(bundle.order.restaurantId, {
     title: 'Delivery progress update',
     body: `Order ${orderId.slice(-6).toUpperCase()} is now ${nextState.status.replace(/_/g, ' ')}.`,
@@ -1738,6 +1763,39 @@ const dispatchAcceptOffer: Handler = async ({ context, data }) => {
 
   await broadcastOrderChanged(orderId);
 
+  // Tell the customer a rider is on their order. This is the automatic-offer
+  // twin of the "Rider assigned" push dispatchAssignOrderCourier sends for a
+  // manual assignment; without it the customer heard nothing until pickup.
+  // Best-effort: the claim has committed, so a failed lookup or push must not
+  // turn the rider's successful accept into an error.
+  try {
+    const { data: orderRow } = await serviceClient
+      .from('CustomerOrder')
+      .select('customerId,status')
+      .eq('id', orderId)
+      .maybeSingle<{ customerId: string | null; status: string | null }>();
+    const customerId = sanitizeText(orderRow?.customerId);
+    if (customerId) {
+      await notifyUsers([customerId], {
+        title: 'Rider assigned',
+        body: `${courierName} is on the way to pick up order ${orderId.slice(-6).toUpperCase()}.`,
+        data: buildNotificationData({
+          app: 'customer',
+          orderId,
+          routeKey: 'customer_order_detail',
+          status: normalizeOrderStatus(sanitizeText(orderRow?.status)),
+          type: 'order_update',
+        }),
+      });
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'customer rider-assigned notification failed', {
+      action: 'dispatchAcceptOffer',
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+
   return json(200, {
     data: {
       accepted: true,
@@ -1827,10 +1885,34 @@ const dispatchSetAvailability: Handler = async ({ context, data }) => {
   return json(200, { data: { courierId, status } });
 };
 
+// Per-rider SOS limits. Every SOS emails and pushes every admin, so without a
+// cap one rider (or a stuck button) could flood the ops inbox. Burst first, so
+// a rapid double-tap is refused without spending the hourly allowance. The
+// rate-limit RPC fails OPEN on its own errors, which is the right side to
+// fail on for an emergency alert.
+const SOS_BURST_LIMIT = { limit: 1, windowSecs: 60, lockoutSecs: 60 };
+const SOS_HOURLY_LIMIT = { limit: 5, windowSecs: 3600, lockoutSecs: 3600 };
+const SOS_LIMITED_MESSAGE =
+  'Your SOS has already been sent and FEASTY support has been alerted. If you are in immediate danger, call 112.';
+
+const enforceSosRateLimit = async (riderUid: string) => {
+  try {
+    await enforceDispatchRateLimit(`sos-burst:${riderUid}`, SOS_BURST_LIMIT);
+    await enforceDispatchRateLimit(`sos-hour:${riderUid}`, SOS_HOURLY_LIMIT);
+  } catch (error) {
+    if ((error as { status?: unknown })?.status === 429) {
+      fail(429, SOS_LIMITED_MESSAGE);
+    }
+    throw error;
+  }
+};
+
 const dispatchRiderSOS: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['dispatch']);
   const requestedOrderId = sanitizeOptionalText(data.orderId) ?? null;
   const riderUid = sanitizeText(context.uid, '');
+
+  await enforceSosRateLimit(riderUid);
 
   // An SOS must reach the admins even when every lookup below comes back
   // empty or errors: a rider in trouble must never be told "not found". So

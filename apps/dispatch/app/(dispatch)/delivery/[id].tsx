@@ -279,6 +279,15 @@ export default function DispatchDeliveryDetailScreen() {
       setSosSent(true);
       setTimeout(() => setSosSent(false), 3000);
     } catch (sosError) {
+      // 429 = the per-rider SOS limit: an earlier SOS already reached support,
+      // so do not tell a rider in trouble that it "failed".
+      if ((sosError as { status?: unknown })?.status === 429) {
+        reportFailure(
+          'SOS already sent',
+          toUserMessage(sosError, 'FEASTY support has already been alerted. If you are in immediate danger, call 112.')
+        );
+        return;
+      }
       reportFailure('SOS failed', toUserMessage(sosError, 'Could not send SOS. Try again.'));
     }
   };

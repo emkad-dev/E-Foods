@@ -6,8 +6,12 @@
 //    queue and the detail read return them redacted like a pending offer (no
 //    customer address / id / phone / payment detail) until a rider takes one;
 //    an order the caller owns stays full.
-// 3. dispatchRiderSOS never fails for a missing rider record, and only links
-//    the alert to an order the caller is actually the courier on.
+// 3. dispatchRiderSOS never fails for a missing rider record, only links the
+//    alert to an order the caller is actually the courier on, and is rate
+//    limited per rider (it emails + pushes every admin).
+// 4. Missing notifications: the customer hears when a rider accepts their
+//    delivery offer, and the carrying rider hears when an admin cancels an
+//    escalated order through the dispatch flow.
 //
 // Calls the REAL handlers out of dispatchDomain.handlers. Env stubs must be set
 // before the dynamic import (client.ts throws at module scope without them).
@@ -21,11 +25,21 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 const { dispatchDomain } = await import('./domains/dispatch.ts');
 const { serviceClient } = await import('./client.ts');
 
+// No test here may touch the network (realtime broadcasts, Expo push, email):
+// an unreachable endpoint turns into minutes of retries.
+globalThis.fetch = (async () =>
+  new Response(JSON.stringify({ data: [] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })) as typeof fetch;
+
 const expect = (cond: boolean, label: string) => {
   if (!cond) throw new Error(label);
 };
 
 const assign = dispatchDomain.handlers.dispatchAssignOrderCourier;
+const acceptOffer = dispatchDomain.handlers.dispatchAcceptOffer;
+const updateStatus = dispatchDomain.handlers.dispatchUpdateOrderStatus;
 const getQueue = dispatchDomain.handlers.dispatchGetDeliveryQueue;
 const getDetail = dispatchDomain.handlers.dispatchGetOrderDetail;
 const sos = dispatchDomain.handlers.dispatchRiderSOS;
@@ -70,6 +84,19 @@ const baseOrder = (id: string) => ({
 // order-owned: rider-a holds it. order-manual: exhausted, no owner, no courier.
 const OWNED = baseOrder('order-owned');
 const MANUAL = baseOrder('order-manual');
+const ESCALATED = {
+  ...baseOrder('order-escalated'),
+  status: 'escalated',
+  timeline: { escalatedAt: '2026-10-15T10:30:00Z', escalatedFrom: 'on_the_way' },
+};
+const ESCALATED_ASSIGNMENT = {
+  orderId: 'order-escalated',
+  dispatchId: 'rider-a',
+  dispatchOwnerId: 'rider-a',
+  courierId: 'rider-a',
+  courierName: 'Ada',
+  assignedAt: '2026-10-15T10:05:00Z',
+};
 const OWNED_ASSIGNMENT = {
   orderId: 'order-owned',
   dispatchId: 'rider-a',
@@ -82,16 +109,24 @@ const OWNED_ASSIGNMENT = {
 type Recorded = {
   tablesTouched: string[];
   inserts: Array<{ table: string; payload: Record<string, unknown> }>;
+  // Every id-list / id filter a query carried, by table. Push recipients are
+  // asserted through this (the push-token lookup is queried with the
+  // recipient user ids) so the test does not depend on notifications.ts
+  // internals beyond "it looks up the recipient".
+  idFilters: Array<{ table: string; values: unknown[] }>;
+  rpcCalls: string[];
+  rateLimitKeys: string[];
 };
 
 type Fixture = {
+  rateLimited?: boolean;
   liveLocation?: { latitude: number; longitude: number } | null;
   riderRecord?: { latitude: number; longitude: number } | null;
   sosAssignmentCourierId?: string | null;
 };
 
 const installMocks = (fixture: Fixture = {}): Recorded => {
-  const recorded: Recorded = { tablesTouched: [], inserts: [] };
+  const recorded: Recorded = { tablesTouched: [], inserts: [], idFilters: [], rpcCalls: [], rateLimitKeys: [] };
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
@@ -102,7 +137,7 @@ const installMocks = (fixture: Fixture = {}): Recorded => {
     const rowsFor = (): Record<string, unknown>[] => {
       switch (table) {
         case 'CustomerOrder': {
-          const all = [OWNED, MANUAL];
+          const all = [OWNED, MANUAL, ESCALATED];
           if (typeof filters.id === 'string') return all.filter((o) => o.id === filters.id);
           if (inValues) return all.filter((o) => inValues!.includes(o.id));
           return all;
@@ -113,7 +148,7 @@ const installMocks = (fixture: Fixture = {}): Recorded => {
               ? []
               : [{ ...OWNED_ASSIGNMENT, orderId: filters.orderId, courierId: fixture.sosAssignmentCourierId }];
           }
-          return [OWNED_ASSIGNMENT].filter(
+          return [OWNED_ASSIGNMENT, ESCALATED_ASSIGNMENT].filter(
             (row) =>
               (typeof filters.orderId !== 'string' || row.orderId === filters.orderId) &&
               (!inValues || inValues.includes(row.orderId))
@@ -140,12 +175,19 @@ const installMocks = (fixture: Fixture = {}): Recorded => {
       order: () => builder,
       eq: (column: string, value: unknown) => {
         filters[column] = value;
+        recorded.idFilters.push({ table, values: [value] });
         return builder;
       },
       neq: () => builder,
       limit: () => builder,
+      gte: () => builder,
+      lte: () => builder,
+      is: () => builder,
+      update: () => builder,
+      upsert: async () => ({ data: null, error: null }),
       in: (_column: string, values: unknown[]) => {
         inValues = values;
+        recorded.idFilters.push({ table, values });
         return builder;
       },
       insert: async (payload: Record<string, unknown>) => {
@@ -161,7 +203,17 @@ const installMocks = (fixture: Fixture = {}): Recorded => {
   };
 
   // deno-lint-ignore no-explicit-any
-  (serviceClient as any).rpc = async () => ({ data: null, error: null });
+  (serviceClient as any).rpc = async (name: string, params: Record<string, unknown> = {}) => {
+    recorded.rpcCalls.push(name);
+    if (name === 'auth_rl_hit') {
+      recorded.rateLimitKeys.push(String(params.p_key));
+      return { data: [{ allowed: !fixture.rateLimited }], error: null };
+    }
+    if (name === 'ebuy_accept_dispatch_offer') {
+      return { data: [{ accepted: true, orderId: 'order-owned', reason: null }], error: null };
+    }
+    return { data: null, error: null };
+  };
 
   return recorded;
 };
@@ -306,4 +358,63 @@ Deno.test('SOS on the caller own order records the event with the LIVE position'
   expect(event!.payload.eventType === 'sos_triggered', 'event type');
   const details = event!.payload.details as { latitude: number; longitude: number };
   expect(details.latitude === 6.5 && details.longitude === 3.3, 'the fresher live position wins over the durable one');
+});
+
+Deno.test('SOS is rate limited per rider with a friendly 429, and no admin is alerted', async () => {
+  const recorded = installMocks({ rateLimited: true, liveLocation: { latitude: 6.5, longitude: 3.3 } });
+  let caught: { status?: unknown; message?: unknown } | null = null;
+  try {
+    await sos({ context: ctx('dispatch', 'rider-a'), data: {}, request: fakeRequest() } as never);
+  } catch (error) {
+    caught = error as { status?: unknown; message?: unknown };
+  }
+  expect(caught?.status === 429, `expected 429, got ${JSON.stringify(caught?.status)}`);
+  expect(String(caught?.message).includes('already been sent'), 'the limit message must reassure, not just say slow down');
+  expect(
+    JSON.stringify(recorded.rateLimitKeys) === JSON.stringify(['dispatch:sos-burst:rider-a']),
+    `burst limit checked first, hourly allowance not spent; got ${JSON.stringify(recorded.rateLimitKeys)}`
+  );
+  expect(!recorded.tablesTouched.includes('UserRole'), 'no admin recipients may be loaded once limited');
+});
+
+Deno.test('SOS checks both the burst and the hourly limit when allowed', async () => {
+  const recorded = installMocks({ liveLocation: { latitude: 6.5, longitude: 3.3 } });
+  const res = await sos({ context: ctx('dispatch', 'rider-a'), data: {}, request: fakeRequest() } as never);
+  expect(res.status === 200, `SOS must succeed, got ${res.status}`);
+  expect(
+    recorded.rateLimitKeys.includes('dispatch:sos-burst:rider-a') &&
+      recorded.rateLimitKeys.includes('dispatch:sos-hour:rider-a'),
+    `burst + hourly limits; got ${JSON.stringify(recorded.rateLimitKeys)}`
+  );
+});
+
+// --- 4. missing notifications ----------------------------------------------------
+
+const lookedUpRecipient = (recorded: Recorded, userId: string) =>
+  recorded.idFilters.some(
+    (entry) =>
+      entry.table !== 'CustomerOrder' && entry.table !== 'DeliveryAssignment' && entry.values.includes(userId)
+  );
+
+Deno.test('accepting an offer notifies the customer', async () => {
+  const recorded = installMocks({ riderRecord: { latitude: 6.5, longitude: 3.3 } });
+  const res = await acceptOffer({
+    context: ctx('dispatch', 'rider-a'),
+    data: { offerId: 'offer-1' },
+    request: fakeRequest(),
+  } as never);
+  expect(res.status === 200, `accept must succeed, got ${res.status}`);
+  expect(lookedUpRecipient(recorded, 'cust-order-owned'), 'the customer must be resolved as a push recipient');
+});
+
+Deno.test('admin cancel of an escalated order notifies the carrying rider and the customer', async () => {
+  const recorded = installMocks();
+  const res = await updateStatus({
+    context: ctx('admin', 'admin-1'),
+    data: { orderId: 'order-escalated', action: 'cancel_escalated' },
+    request: fakeRequest(),
+  } as never);
+  expect(res.status === 200, `cancel must succeed, got ${res.status}`);
+  expect(lookedUpRecipient(recorded, 'rider-a'), 'the carrying rider must be resolved as a push recipient');
+  expect(lookedUpRecipient(recorded, 'cust-order-escalated'), 'the customer must be resolved as a push recipient');
 });
