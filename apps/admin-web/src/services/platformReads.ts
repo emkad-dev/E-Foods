@@ -217,6 +217,38 @@ export type AdminRiderRoster = {
 
 export const getAdminRiderRoster = () => callAdminRpc<AdminRiderRoster>('adminGetRiderRoster');
 
+export type RiderPayoutRow = {
+  amount: number;
+  createdAt: string | null;
+  earningCount: number;
+  failureReason: string | null;
+  id: string;
+  paidAt: string | null;
+  reference: string;
+  riderId: string;
+  riderName: string | null;
+  /** processing | paid | failed | reversed */
+  status: string;
+  transferCode: string | null;
+};
+
+/** Mirrors adminGetRiderPayouts (supabase/functions/_shared/riderPayoutAccount.ts). */
+export type AdminRiderPayouts = {
+  autoPayoutsEnabled: boolean;
+  generatedAt: string;
+  heldRiders: Array<{ displayName: string | null; holdReason: string | null; holdUntil: string | null; riderId: string }>;
+  limits: {
+    maxPerRiderPerDay: number;
+    maxPerTransfer: number;
+    maxPlatformPerDay: number;
+    minPayout: number;
+  };
+  payouts: RiderPayoutRow[];
+  totals: { pendingEarnings: number; processingEarnings: number; ridersWithRecipient: number };
+};
+
+export const getAdminRiderPayouts = () => callAdminRpc<AdminRiderPayouts>('adminGetRiderPayouts');
+
 export type FeatureFlagRecord = {
   description: string | null;
   enabled: boolean;

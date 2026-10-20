@@ -2,10 +2,11 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
-import { getAdminDispatchOpsView, getAdminRiderRoster } from '../services/platformReads';
+import { getAdminDispatchOpsView, getAdminRiderPayouts, getAdminRiderRoster } from '../services/platformReads';
+import type { AdminTone } from '../theme/tones';
 
 const ID_STYLE: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px' };
 
@@ -162,6 +163,101 @@ export default function DispatchPage() {
           </div>
         )}
       </div>
+
+      <RiderPayoutsCard />
+    </div>
+  );
+}
+
+const payoutTone = (status: string): AdminTone =>
+  status === 'paid' ? 'success' : status === 'processing' ? 'info' : status === 'failed' || status === 'reversed' ? 'danger' : 'neutral';
+
+/**
+ * Rider pay: read-only view of the Paystack payout ledger. Its own polled read
+ * so a payout-ledger failure (e.g. the migration not applied yet) cannot blank
+ * the dispatch panels above.
+ */
+function RiderPayoutsCard() {
+  const payouts = usePolledRpc(getAdminRiderPayouts);
+  const state = resolveViewState({ hasData: payouts.data !== null, error: payouts.error });
+  const data = payouts.data;
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="card-title-row">
+        <h3 className="card-title">Rider payouts</h3>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={payouts.refresh} disabled={payouts.loading}>
+          Refresh
+        </button>
+      </div>
+
+      {payouts.error && <ErrorBanner message={payouts.error} onRetry={payouts.refresh} />}
+
+      {state === 'loading' ? (
+        <SkeletonRows count={3} />
+      ) : state === 'error' || !data ? (
+        <EmptyState
+          title="Rider payouts could not be loaded"
+          body="The payout ledger could not be read. If rider pay has not been set up yet, this is expected."
+        />
+      ) : (
+        <>
+          <p className="muted" style={{ margin: '0 0 12px' }}>
+            Automatic payouts are{' '}
+            <StatusBadge label={data.autoPayoutsEnabled ? 'on' : 'off'} tone={data.autoPayoutsEnabled ? 'success' : 'neutral'} />{' '}
+            (feature flag <code>rider_auto_payouts</code>). Unpaid earnings {formatCurrency(data.totals.pendingEarnings)}, in
+            flight {formatCurrency(data.totals.processingEarnings)}, riders with a payout account{' '}
+            {formatNumber(data.totals.ridersWithRecipient)}. Minimum payout {formatCurrency(data.limits.minPayout)}, max per
+            transfer {formatCurrency(data.limits.maxPerTransfer)}, platform daily cap{' '}
+            {formatCurrency(data.limits.maxPlatformPerDay)}.
+          </p>
+
+          {data.heldRiders.length > 0 ? (
+            <p className="muted" style={{ margin: '0 0 12px' }}>
+              Held:{' '}
+              {data.heldRiders
+                .map((rider) => `${rider.displayName ?? rider.riderId.slice(-6).toUpperCase()} (${humanizeStatus(rider.holdReason)})`)
+                .join(', ')}
+            </p>
+          ) : null}
+
+          {data.payouts.length === 0 ? (
+            <EmptyState title="No payouts yet" body="No rider payout has been created." />
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Rider</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Earnings</th>
+                    <th>Reference</th>
+                    <th>Created</th>
+                    <th>Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.payouts.map((payout) => (
+                    <tr key={payout.id}>
+                      <td>{payout.riderName ?? payout.riderId.slice(-6).toUpperCase()}</td>
+                      <td>{formatCurrency(payout.amount)}</td>
+                      <td>
+                        <StatusBadge label={payout.status} tone={payoutTone(payout.status)} />
+                        {payout.failureReason ? <div className="muted">{payout.failureReason}</div> : null}
+                      </td>
+                      <td>{formatNumber(payout.earningCount)}</td>
+                      <td style={ID_STYLE}>{payout.reference}</td>
+                      <td>{formatDateTime(payout.createdAt)}</td>
+                      <td>{payout.paidAt ? formatDateTime(payout.paidAt) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
