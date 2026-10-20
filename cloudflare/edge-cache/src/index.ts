@@ -48,8 +48,18 @@ const fetchOrigin = (env: Env, request: Request, rawBody: string) =>
     body: rawBody,
   });
 
+// The copy kept in the Cache API carries `max-age=86400` (that is what lets it
+// live long enough to be served stale) plus our internal cached-at stamp.
+// Neither belongs on the response a browser sees: without this, every catalog
+// response told clients and any intermediary to keep it for 24h, defeating the
+// 60s freshness window. Every response served from the cache path goes
+// through here; the edge copy itself is never mutated.
+const CLIENT_CACHE_CONTROL = 'no-store';
+
 const withExtraHeaders = (response: Response, extra: Record<string, string>) => {
   const next = new Response(response.body, response);
+  next.headers.set('cache-control', CLIENT_CACHE_CONTROL);
+  next.headers.delete(CACHED_AT_HEADER);
   for (const [name, value] of Object.entries(extra)) {
     next.headers.set(name, value);
   }
@@ -122,6 +132,8 @@ export default {
       // stale-serve budget — freshness is enforced above via CACHED_AT_HEADER.
       toStore.headers.set('cache-control', 'public, max-age=86400');
       ctx.waitUntil(cache.put(cacheKey, toStore.clone()));
+      // withExtraHeaders swaps the 24h cache-control for no-store on the copy
+      // returned to the client; the clone above (the edge copy) keeps it.
       return withExtraHeaders(toStore, { 'x-edge-cache': 'MISS' });
     }
 
