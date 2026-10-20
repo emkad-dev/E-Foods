@@ -417,6 +417,28 @@ const markOrderPaymentState = async (
     });
   }
 
+  // The webhook path is the one that confirms payments the customer walked
+  // away from (closed the Paystack sheet, lost signal); it used to send only
+  // an email, so the customer had no in-app signal the order went through.
+  await enqueueNotification(serviceClient, {
+    userIds: [order.customerId],
+    payload: {
+      title: 'Payment confirmed',
+      body: `We received your payment for order ${shortOrderCode(order.id)}. The restaurant has been notified.`,
+      data: buildNotificationData({
+        app: 'customer',
+        orderId: order.id,
+        routeKey: 'customer_order_detail',
+        type: 'payment_confirmed',
+      }),
+    },
+  }).catch((error) => {
+    logEdgeEvent('warn', 'customer payment push could not be queued', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId: order.id,
+    });
+  });
+
   const recipient = await loadUserEmailRecipient(order.customerId);
   if (recipient) {
     await sendTransactionalEmail({

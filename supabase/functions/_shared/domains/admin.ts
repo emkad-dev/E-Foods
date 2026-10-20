@@ -1504,7 +1504,9 @@ const supportSendAgentReply: Handler = async ({ context, data }) => {
     const pushResult = await sendPushNotificationsToUsers([conversation.customerId], {
       title: 'FEASTY Support',
       body: body.length > 120 ? `${body.slice(0, 117)}…` : body,
-      data: { type: 'support_reply', path: '/support', routeKey: 'customer_profile', app: 'customer' },
+      // routeKey wins over path in the app's resolver, so the old
+      // `routeKey: 'customer_profile'` opened Profile instead of the reply.
+      data: buildNotificationData({ app: 'customer', routeKey: 'customer_support', type: 'support_reply' }),
     });
     pushSent = pushResult.sent > 0;
   } catch (error) {

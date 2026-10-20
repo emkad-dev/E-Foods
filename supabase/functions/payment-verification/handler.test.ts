@@ -208,7 +208,12 @@ Deno.test('single-store payment: order is placed + paid, restaurant notified, pa
     assertEquals(db.PaymentTransaction.length, 1);
     assertEquals(db.PaymentTransaction[0].status, 'paid');
     assertEquals(db.PaymentTransaction[0].amount, 2500);
-    assertEquals(db.queue_notifications.length, 1);
+    // One push job for the restaurant, one telling the customer the payment landed.
+    assertEquals(db.queue_notifications.length, 2);
+    assertEquals(
+      db.queue_notifications.map((job) => (job.payload as { payload: { data: { app: string } } }).payload.data.app),
+      ['partner', 'customer']
+    );
     assertEquals(db.OperationalAlert.length, 0);
     assertEquals(db.DeliveryEvent.length, 0);
     // Single-store orders carry no group, so no OrderGroup lookup for amount validation.
@@ -429,8 +434,9 @@ Deno.test('multi-order group: awaiting order is placed, cancelled order is only 
     // One Paystack charge, one transaction row, for the whole group total.
     assertEquals(db.PaymentTransaction.length, 1);
     assertEquals(db.PaymentTransaction[0].amount, 12800);
-    // The primary order was awaiting, so the normal restaurant notification still goes out.
-    assertEquals(db.queue_notifications.length, 1);
+    // The primary order was awaiting, so the normal restaurant notification still goes out,
+    // plus the customer's payment confirmation.
+    assertEquals(db.queue_notifications.length, 2);
   });
 });
 

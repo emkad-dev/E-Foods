@@ -16,7 +16,7 @@ import {
 } from '../staffInviteCodes.ts';
 import { serviceClient } from '../client.ts';
 import { releaseDispatchAssignmentLoad, runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
-import { buildNotificationData, notifyAdmins, notifyUsers } from '../notifications.ts';
+import { buildNotificationData, customerOrderStatusCopy, notifyAdmins, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
@@ -1338,8 +1338,7 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
     },
   });
   await notifyUsers([bundle.order.customerId], {
-    title: 'Order update',
-    body: `Order ${orderId.slice(-6).toUpperCase()} is now ${nextState.status.replace(/_/g, ' ')}.`,
+    ...customerOrderStatusCopy(nextState.status, orderId),
     data: buildNotificationData({
       app: 'customer',
       orderId,
@@ -1348,6 +1347,38 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
       type: 'order_update',
     }),
   });
+
+  // The rider already holding this order (auto-assignment claims one as soon
+  // as the restaurant accepts) must hear about the two transitions that change
+  // what they should do next: food is ready to collect, or the trip is off.
+  // Previously a reject after accept left the rider driving to a restaurant
+  // for an order that no longer existed.
+  const assignedCourierId = sanitizeText(bundle.assignment?.courierId);
+  if (assignedCourierId && nextState.status === ORDER_STATUS.READY_FOR_PICKUP) {
+    await notifyUsers([assignedCourierId], {
+      title: 'Order ready for pickup',
+      body: `Order ${orderId.slice(-6).toUpperCase()} is packed and waiting at the restaurant.`,
+      data: buildNotificationData({
+        app: 'dispatch',
+        orderId,
+        routeKey: 'dispatch_delivery_detail',
+        status: nextState.status,
+        type: 'order_update',
+      }),
+    });
+  } else if (assignedCourierId && nextState.status === ORDER_STATUS.REJECTED) {
+    await notifyUsers([assignedCourierId], {
+      title: 'Delivery cancelled',
+      body: `Order ${orderId.slice(-6).toUpperCase()} was cancelled by the restaurant and no longer needs delivery.`,
+      data: buildNotificationData({
+        app: 'dispatch',
+        orderId,
+        routeKey: 'dispatch_delivery_detail',
+        status: nextState.status,
+        type: 'order_update',
+      }),
+    });
+  }
 
   // Automatic dispatch assignment: this is the call site (Task 9 / D1) - the
   // moment a delivery order becomes actionable for a rider is exactly when

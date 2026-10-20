@@ -20,7 +20,13 @@ import {
   sendTransactionalEmail,
   shortOrderCode,
 } from '../email.ts';
-import { buildNotificationData, notifyRestaurantUsers, notifySafely, notifyUsers } from '../notifications.ts';
+import {
+  buildNotificationData,
+  customerOrderStatusCopy,
+  notifyRestaurantUsers,
+  notifySafely,
+  notifyUsers,
+} from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import { captureManualSettlementFallbackAlert } from '../operationalAlerts.ts';
 import { generateDeliveryCode } from '../deliveryCode.ts';
@@ -1452,7 +1458,43 @@ const syncOrderPaymentState = async ({
     transactionData,
   });
 
-  if (sanitizeText(nextPayment.status) === PAYMENT_STATUS.PAID) {
+  // Notify on the TRANSITION only. refreshCustomerPaymentStatus can be called
+  // again after the order is already paid (the customer re-opening the order
+  // screen), and each call used to re-send "Paid order received" to the
+  // kitchen.
+  const previousPaymentStatus = sanitizeText(existingPayment.status);
+  const nextPaymentStatus = sanitizeText(nextPayment.status);
+  const becamePaid = nextPaymentStatus === PAYMENT_STATUS.PAID && previousPaymentStatus !== PAYMENT_STATUS.PAID;
+  const becameFailed =
+    nextPaymentStatus === PAYMENT_STATUS.FAILED &&
+    previousPaymentStatus !== PAYMENT_STATUS.FAILED &&
+    previousPaymentStatus !== PAYMENT_STATUS.PAID;
+
+  if (becamePaid) {
+    await notifyUsers([order.customerId], {
+      title: 'Payment confirmed',
+      body: `We received your payment for order ${order.id.slice(-6).toUpperCase()}. The restaurant has been notified.`,
+      data: buildNotificationData({
+        app: 'customer',
+        orderId: order.id,
+        routeKey: 'customer_order_detail',
+        type: 'payment_confirmed',
+      }),
+    });
+  } else if (becameFailed) {
+    await notifyUsers([order.customerId], {
+      title: 'Payment not completed',
+      body: `Payment for order ${order.id.slice(-6).toUpperCase()} did not go through. Open the order to try again.`,
+      data: buildNotificationData({
+        app: 'customer',
+        orderId: order.id,
+        routeKey: 'customer_order_detail',
+        type: 'payment_failed',
+      }),
+    });
+  }
+
+  if (becamePaid) {
     for (const groupOrder of groupOrders) {
       await insertDeliveryEvent({
         orderId: groupOrder.id,
@@ -2194,6 +2236,20 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
       type: 'order_update',
     }),
   });
+  // A customer cancelling knows they did; an admin cancelling on their behalf
+  // previously left the customer with no word at all.
+  if (context.role === 'admin') {
+    await notifyUsers([bundle.order.customerId], {
+      ...customerOrderStatusCopy(ORDER_STATUS.CANCELLED, orderId),
+      data: buildNotificationData({
+        app: 'customer',
+        orderId,
+        routeKey: 'customer_order_detail',
+        status: ORDER_STATUS.CANCELLED,
+        type: 'order_update',
+      }),
+    });
+  }
   if (sanitizeText(bundle.assignment?.courierId)) {
     await notifyUsers([sanitizeText(bundle.assignment?.courierId)], {
       title: 'Delivery cancelled',
