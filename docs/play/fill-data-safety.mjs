@@ -1,5 +1,5 @@
 // Fills Play's data safety CSV export for one FEASTY app.
-// usage: node fill-data-safety.mjs <in.csv> <out.csv> customer|partner
+// usage: node fill-data-safety.mjs <in.csv> <out.csv> customer|partner|dispatch
 import fs from 'node:fs';
 
 const [, , inPath, outPath, app] = process.argv;
@@ -53,8 +53,20 @@ const perApp = {
     PSL_PHOTOS: [REQ, ['PSL_APP_FUNCTIONALITY', 'PSL_FRAUD_PREVENTION_SECURITY']],
     PSL_OTHER: [REQ, ['PSL_APP_FUNCTIONALITY']],
   },
+  // Rider app. See docs/play/dispatch-data-safety.md for the reasoning. No
+  // support messaging exists in the rider app, so PSL_OTHER_MESSAGES is dropped.
+  dispatch: {
+    ...Object.fromEntries(Object.entries(common).filter(([type]) => type !== 'PSL_OTHER_MESSAGES')),
+    PSL_ADDRESS: [REQ, ['PSL_APP_FUNCTIONALITY', 'PSL_FRAUD_PREVENTION_SECURITY']],
+    PSL_OTHER_PERSONAL: [REQ, ['PSL_FRAUD_PREVENTION_SECURITY', 'PSL_ACCOUNT_MANAGEMENT']],
+    PSL_APPROX_LOCATION: [REQ, ['PSL_APP_FUNCTIONALITY']],
+    PSL_PRECISE_LOCATION: [REQ, ['PSL_APP_FUNCTIONALITY', 'PSL_FRAUD_PREVENTION_SECURITY']],
+    PSL_PHOTOS: [REQ, ['PSL_FRAUD_PREVENTION_SECURITY', 'PSL_ACCOUNT_MANAGEMENT']],
+    PSL_OTHER: [REQ, ['PSL_APP_FUNCTIONALITY']],
+    PSL_DEVICE_ID: [REQ, ['PSL_APP_FUNCTIONALITY']],
+  },
 }[app];
-if (!perApp) throw new Error('app must be customer|partner');
+if (!perApp) throw new Error('app must be customer|partner|dispatch');
 
 const top = {
   PSL_DATA_COLLECTION_COLLECTS_PERSONAL_DATA: 'true',
