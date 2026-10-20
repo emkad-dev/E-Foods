@@ -4,6 +4,8 @@ import {
   EXPO_PUSH_ENDPOINT,
   EXPO_RECEIPTS_ENDPOINT,
   interpretTickets,
+  REQUEST_FAILED,
+  selectPushTokens,
   splitByExperience,
   summarizeFailures,
   type ExpoPushMessage,
@@ -126,8 +128,70 @@ Deno.test('checkExpoPushReceipts collects dead tokens and credential errors', as
   );
   assertEquals(result.checked, 3);
   assertEquals(result.pending, 1);
+  assertEquals(result.pendingTickets, [{ id: 'r4', token: 'T[4]' }]);
   assertEquals(result.deadTokens, ['T[2]']);
   const summary = summarizeFailures(result.failures);
   assertEquals(summary.counts, { DeviceNotRegistered: 1, InvalidCredentials: 1 });
   assert(summary.hints.some((hint) => hint.includes('FCM V1')), 'expected an FCM V1 hint');
+});
+
+Deno.test('a failing project group does not discard the groups that were delivered', async () => {
+  const fetchImpl: FetchLike = async (_url, init) => {
+    const batch = JSON.parse(String(init.body)) as ExpoPushMessage[];
+    if (batch.length === 2) {
+      return jsonResponse(400, {
+        errors: [{ code: 'PUSH_TOO_MANY_EXPERIENCE_IDS', details: { '@x/c': ['T[c]'], '@x/p': ['T[p]'] } }],
+      });
+    }
+    if (batch[0].to === 'T[p]') {
+      return jsonResponse(503, { errors: [{ code: 'UNAVAILABLE' }] });
+    }
+    return jsonResponse(200, { data: [{ id: 'ok-c', status: 'ok' }] });
+  };
+
+  // Must NOT throw: a throw makes the queue retry and re-send to T[c].
+  const outcome = await deliverExpoPushMessages([message('T[c]'), message('T[p]')], { fetchImpl });
+  assertEquals(outcome.accepted, 1);
+  assertEquals(outcome.failures.map((failure) => [failure.token, failure.error]), [['T[p]', REQUEST_FAILED]]);
+});
+
+const valid = (token: string | null | undefined) => Boolean(token && token.startsWith('ExponentPushToken['));
+
+Deno.test('selectPushTokens routes each push to the install of the addressed app', () => {
+  const tokens = selectPushTokens({
+    app: 'partner',
+    deviceRows: [
+      { app: 'customer', token: 'ExponentPushToken[cust]', userId: 'u1' },
+      { app: 'partner', token: 'ExponentPushToken[part]', userId: 'u1' },
+    ],
+    isValidToken: valid,
+    legacyRows: [{ expoPushToken: 'ExponentPushToken[cust]', uid: 'u1' }],
+    userIds: ['u1'],
+  });
+  assertEquals(tokens, ['ExponentPushToken[part]']);
+});
+
+Deno.test('selectPushTokens falls back to the legacy column, but never into another app', () => {
+  // No PushDevice rows at all (migration not applied yet): legacy token.
+  assertEquals(
+    selectPushTokens({
+      app: 'customer',
+      deviceRows: [],
+      isValidToken: valid,
+      legacyRows: [{ expoPushToken: 'ExponentPushToken[old]', uid: 'u1' }],
+      userIds: ['u1'],
+    }),
+    ['ExponentPushToken[old]']
+  );
+  // The legacy token is the dispatch install's: a customer push must not go there.
+  assertEquals(
+    selectPushTokens({
+      app: 'customer',
+      deviceRows: [{ app: 'dispatch', token: 'ExponentPushToken[rider]', userId: 'u1' }],
+      isValidToken: valid,
+      legacyRows: [{ expoPushToken: 'ExponentPushToken[rider]', uid: 'u1' }],
+      userIds: ['u1'],
+    }),
+    []
+  );
 });

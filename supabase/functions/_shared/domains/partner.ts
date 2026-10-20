@@ -78,6 +78,7 @@ import {
 import { ensureRole, type AuthenticatedRequestContext } from '../rpc/context.ts';
 import { defineRpcDomain, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
+import { isRateLimitAllowed } from '../rateLimit.ts';
 
 type Handler = RpcHandler<AuthenticatedRequestContext>;
 
@@ -1471,7 +1472,19 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   });
 };
 
+// Each submission pages every admin (push + email). A per-account brake keeps
+// a retry loop or a scripted client from turning that into an inbox flood,
+// while leaving plenty of room for a real applicant fixing and resubmitting.
+const PARTNER_SUBMISSION_RATE_LIMIT = { limit: 5, lockoutSecs: 60 * 60, windowSecs: 60 * 60 };
+
+const assertPartnerSubmissionAllowed = async (uid: string, kind: 'application' | 'onboarding') => {
+  if (!(await isRateLimitAllowed(`partner-submit:${kind}:${uid}`, PARTNER_SUBMISSION_RATE_LIMIT))) {
+    fail(429, 'Too many submissions. Please wait a while and try again.');
+  }
+};
+
 const submitPartnerApplication: Handler = async ({ context, data }) => {
+  await assertPartnerSubmissionAllowed(context.uid, 'application');
   const contactName = sanitizeText(data.contactName);
   const phoneNumber = sanitizeText(data.phoneNumber);
   const restaurantName = sanitizeText(data.restaurantName);
@@ -1678,6 +1691,7 @@ const requestPartnerVerificationUploadUrl: Handler = async ({ context, data }) =
 };
 
 const submitPartnerOnboarding: Handler = async ({ context, data }) => {
+  await assertPartnerSubmissionAllowed(context.uid, 'onboarding');
   let submission: ReturnType<typeof validatePartnerOnboardingSubmission>;
   try {
     submission = validatePartnerOnboardingSubmission({

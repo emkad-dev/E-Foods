@@ -42,6 +42,8 @@ export const buildTransactionalEmailHtml = (input: {
   ].join('');
 };
 
+const RESEND_TIMEOUT_MS = 8_000;
+
 // Transactional email is best-effort: failures are logged and reported through
 // the return value, but never thrown, so order flows are not interrupted.
 export const sendTransactionalEmail = async (input: { html: string; subject: string; to: string }) => {
@@ -52,6 +54,9 @@ export const sendTransactionalEmail = async (input: { html: string; subject: str
 
   try {
     const response = await fetch(RESEND_ENDPOINT, {
+      // Bounded: these sends sit inside request handlers (order flows, admin
+      // alerts), and a hung Resend call must not hold the caller's response.
+      signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${resendApiKey}`,

@@ -98,11 +98,14 @@ export const enqueuePaymentVerification = async (
  * before fetching receipts.
  */
 export type PushReceiptCheckJob = {
+  attempt?: number;
   kind: 'push_receipts';
   tickets: Array<{ id: string; token: string }>;
 };
 
 export const PUSH_RECEIPT_CHECK_DELAY_MS = 15 * 60_000;
+/** First look plus one re-check for receipts Expo had not produced yet. */
+export const PUSH_RECEIPT_CHECK_MAX_ATTEMPTS = 2;
 
 export const isPushReceiptCheckJob = (payload: unknown): payload is PushReceiptCheckJob =>
   typeof payload === 'object' &&
@@ -113,14 +116,15 @@ export const isPushReceiptCheckJob = (payload: unknown): payload is PushReceiptC
 export const enqueuePushReceiptCheck = async (
   client: SupabaseClient,
   tickets: PushReceiptCheckJob['tickets'],
-  delayMs = PUSH_RECEIPT_CHECK_DELAY_MS
+  delayMs = PUSH_RECEIPT_CHECK_DELAY_MS,
+  attempt = 1
 ) => {
   if (tickets.length === 0) {
     return null;
   }
 
   const jobId = `receipts:${crypto.randomUUID()}`;
-  const payload: PushReceiptCheckJob = { kind: 'push_receipts', tickets };
+  const payload: PushReceiptCheckJob = { attempt, kind: 'push_receipts', tickets };
   const { error } = await client.from('queue_notifications').insert({
     id: jobId,
     payload,

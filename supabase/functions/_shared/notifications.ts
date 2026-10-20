@@ -3,12 +3,14 @@ import { buildTransactionalEmailHtml, sendTransactionalEmail } from './email.ts'
 import {
   checkExpoPushReceipts,
   deliverExpoPushMessages,
+  selectPushTokens,
   summarizeFailures,
   type ExpoPushFailure,
   type ExpoPushMessage,
 } from './expoPush.ts';
 import { logEdgeEvent } from './observability.ts';
-import { enqueuePushReceiptCheck } from './queue.ts';
+import { enqueuePushReceiptCheck, PUSH_RECEIPT_CHECK_MAX_ATTEMPTS } from './queue.ts';
+import { isRateLimitAllowed } from './rateLimit.ts';
 
 type JsonObject = Record<string, unknown>;
 type NotificationApp = 'customer' | 'partner' | 'dispatch' | 'admin';
@@ -199,7 +201,47 @@ const loadPushRowsByUserIds = async (userIds: string[]) => {
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as UserPushRow[]).filter((row) => isExpoPushToken(row.expoPushToken));
+  return (data ?? []) as UserPushRow[];
+};
+
+type PushDeviceRow = { app: string; token: string; userId: string };
+
+/**
+ * Per-app tokens (migration 20261021_push_devices). Deliberately non-fatal:
+ * before that migration is applied the table does not exist, and pushes must
+ * keep flowing through the legacy column rather than failing outright.
+ */
+const loadPushDevicesByUserIds = async (userIds: string[]): Promise<PushDeviceRow[]> => {
+  const nextUserIds = unique(userIds);
+  if (nextUserIds.length === 0) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await serviceClient
+      .from('PushDevice')
+      .select('userId,app,token')
+      .in('userId', nextUserIds);
+    if (error) {
+      logEdgeEvent('warn', 'PushDevice read failed; using legacy push tokens only', { error: error.message });
+      return [];
+    }
+    return (data ?? []) as PushDeviceRow[];
+  } catch (error) {
+    logEdgeEvent('warn', 'PushDevice read failed; using legacy push tokens only', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+};
+
+/** Tokens for these users in the app the push is addressed to (data.app). */
+export const resolvePushTokensForUsers = async (userIds: string[], app: string | null) => {
+  const [legacyRows, deviceRows] = await Promise.all([
+    loadPushRowsByUserIds(userIds),
+    loadPushDevicesByUserIds(userIds),
+  ]);
+  return selectPushTokens({ app, deviceRows, isValidToken: isExpoPushToken, legacyRows, userIds });
 };
 
 const loadUserIdsByRoles = async (roles: string[]) => {
@@ -269,7 +311,19 @@ export const clearDeadPushTokens = async (tokens: string[]) => {
 
   if (error) {
     logEdgeEvent('error', 'push dead-token cleanup failed', { count: deadTokens.length, error: error.message });
-    return;
+  }
+
+  // Per-app tokens too. Non-fatal for the same reason the read is: the table
+  // may not exist yet.
+  try {
+    const { error: deviceError } = await serviceClient.from('PushDevice').delete().in('token', deadTokens);
+    if (deviceError) {
+      logEdgeEvent('warn', 'PushDevice dead-token cleanup skipped', { error: deviceError.message });
+    }
+  } catch (deviceError) {
+    logEdgeEvent('warn', 'PushDevice dead-token cleanup skipped', {
+      error: deviceError instanceof Error ? deviceError.message : String(deviceError),
+    });
   }
 
   logEdgeEvent('info', 'push dead tokens cleared', { count: deadTokens.length });
@@ -319,10 +373,23 @@ export const sendExpoPushMessages = async (messages: ExpoPushMessage[]) => {
 };
 
 /** Queue-drainer entry point for a deferred receipt check. */
-export const processPushReceiptCheck = async (tickets: Array<{ id: string; token: string }>) => {
+export const processPushReceiptCheck = async (tickets: Array<{ id: string; token: string }>, attempt = 1) => {
   const result = await checkExpoPushReceipts(tickets);
   reportPushFailures('receipt', result.failures);
   await clearDeadPushTokens(result.deadTokens);
+
+  // Receipts Expo has not produced yet get one more look, then are let go
+  // (bounded, so a stuck ticket cannot re-queue itself forever).
+  if (result.pendingTickets.length > 0 && attempt < PUSH_RECEIPT_CHECK_MAX_ATTEMPTS) {
+    try {
+      await enqueuePushReceiptCheck(serviceClient, result.pendingTickets, undefined, attempt + 1);
+    } catch (error) {
+      logEdgeEvent('warn', 'push receipt re-check could not be scheduled', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   return {
     checked: result.checked,
     deadTokens: result.deadTokens.length,
@@ -341,14 +408,15 @@ export const sendPushNotificationsToUsers = async (
     title: string;
   }
 ) => {
-  const pushRows = await loadPushRowsByUserIds(userIds);
-  const messages = pushRows.map((row) => ({
+  const app = sanitizeText(payload.data?.app);
+  const tokens = await resolvePushTokensForUsers(userIds, app);
+  const messages = tokens.map((token) => ({
     body: payload.body,
     channelId: payload.channelId,
     data: payload.data,
     sound: payload.sound ?? 'default',
     title: payload.title,
-    to: row.expoPushToken as string,
+    to: token,
   }));
 
   return sendExpoPushMessages(messages);
@@ -403,6 +471,8 @@ export const notifyUsers = async (
   });
 };
 
+const ADMIN_ALERT_EMAIL_DEDUPE_SECS = 10 * 60;
+
 export const notifyAdmins = async (
   payload: {
     body: string;
@@ -427,6 +497,21 @@ export const notifyAdmins = async (
   // Expo pushes, and no admin account holds a push token. Push alone meant a
   // rider SOS, an empty dispatch pool or a restaurant ignoring a paid order
   // reached nobody. Email is the channel admins actually have.
+  // One email per alert subject per window: a burst of identical alerts
+  // (the same order re-escalating, an applicant resubmitting) must not flood
+  // the inbox. Fails open - an unreachable limiter still sends the email.
+  const dedupeSubject =
+    sanitizeText(payload.data?.orderId) ?? sanitizeText(payload.data?.restaurantId) ?? payload.title;
+  const dedupeType = sanitizeText(payload.data?.type) ?? 'admin_alert';
+  const firstInWindow = await isRateLimitAllowed(`admin-alert-email:${dedupeType}:${dedupeSubject}`, {
+    limit: 1,
+    lockoutSecs: 0,
+    windowSecs: ADMIN_ALERT_EMAIL_DEDUPE_SECS,
+  });
+  if (!firstInWindow) {
+    return;
+  }
+
   await notifySafely(async () => {
     await emailUsers(adminUserIds, {
       heading: payload.title,

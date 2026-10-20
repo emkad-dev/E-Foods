@@ -43,3 +43,30 @@ export const assertUploadAllowed = (input: {
     throw new ClientSafeError(400, 'Image is too large. Please upload a photo under 5 MB.');
   }
 };
+
+// Generic form of the same `auth_rl_hit` brake for non-dispatch callers
+// (partner submissions, admin alert email dedupe). Returns false when the key
+// is over its limit; fails OPEN (true) when the RPC itself errors, for the
+// same reason as above.
+export const isRateLimitAllowed = async (
+  key: string,
+  policy: DispatchRateLimitPolicy,
+): Promise<boolean> => {
+  try {
+    const { data, error } = await serviceClient.rpc('auth_rl_hit', {
+      p_key: key,
+      p_limit: policy.limit,
+      p_window_secs: policy.windowSecs,
+      p_lockout_secs: policy.lockoutSecs,
+    });
+    if (error) {
+      logEdgeEvent('error', 'rate limit RPC failed', { reason: error.message });
+      return true;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return !(row && row.allowed === false);
+  } catch (error) {
+    logEdgeEvent('error', 'rate limit RPC failed', { reason: error instanceof Error ? error.message : String(error) });
+    return true;
+  }
+};

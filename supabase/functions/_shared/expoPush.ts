@@ -185,6 +185,25 @@ const postJson = async (fetchImpl: FetchLike, url: string, payload: unknown, tim
   }
 };
 
+export const REQUEST_FAILED = 'RequestFailed';
+
+/** sendOneRequest, but a transport/HTTP failure becomes per-message failures. */
+const sendSettled = async (
+  messages: ExpoPushMessage[],
+  fetchImpl: FetchLike,
+  timeoutMs: number,
+  allowSplit: boolean
+): Promise<ExpoPushOutcome> => {
+  try {
+    return await sendOneRequest(messages, fetchImpl, timeoutMs, allowSplit);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const outcome = emptyOutcome();
+    outcome.failures.push(...messages.map((message) => ({ error: REQUEST_FAILED, message: reason, token: message.to })));
+    return outcome;
+  }
+};
+
 const sendOneRequest = async (
   messages: ExpoPushMessage[],
   fetchImpl: FetchLike,
@@ -203,9 +222,12 @@ const sendOneRequest = async (
   if (allowSplit) {
     const groups = splitByExperience(messages, body);
     if (groups) {
+      // Each project group is its own request. A failure in one must not
+      // throw away the others' results: throwing here made the queue retry
+      // the WHOLE job and re-send to the groups that had already succeeded.
       const outcome = emptyOutcome();
       for (const group of groups) {
-        mergeOutcome(outcome, await sendOneRequest(group, fetchImpl, timeoutMs, false));
+        mergeOutcome(outcome, await sendSettled(group, fetchImpl, timeoutMs, false));
       }
       return outcome;
     }
@@ -229,7 +251,18 @@ export const deliverExpoPushMessages = async (
   const outcome = emptyOutcome();
 
   for (const batch of chunk(messages, EXPO_PUSH_BATCH_SIZE)) {
-    mergeOutcome(outcome, await sendOneRequest(batch, fetchImpl, timeoutMs, true));
+    mergeOutcome(outcome, await sendSettled(batch, fetchImpl, timeoutMs, true));
+  }
+
+  // Only when NOTHING went out is it safe to throw (and let a queue retry the
+  // whole job): any partial success would be re-sent by that retry.
+  if (
+    messages.length > 0 &&
+    outcome.accepted === 0 &&
+    outcome.failures.length > 0 &&
+    outcome.failures.every((failure) => failure.error === REQUEST_FAILED)
+  ) {
+    throw new Error(`Expo push delivery failed: ${outcome.failures[0].message}`);
   }
 
   outcome.deadTokens = Array.from(new Set(outcome.deadTokens));
@@ -244,12 +277,19 @@ export const deliverExpoPushMessages = async (
 export const checkExpoPushReceipts = async (
   tickets: Array<{ id: string; token: string }>,
   options: { fetchImpl?: FetchLike; timeoutMs?: number } = {}
-): Promise<{ checked: number; deadTokens: string[]; failures: ExpoPushFailure[]; pending: number }> => {
+): Promise<{
+  checked: number;
+  deadTokens: string[];
+  failures: ExpoPushFailure[];
+  pending: number;
+  pendingTickets: Array<{ id: string; token: string }>;
+}> => {
   const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   const timeoutMs = options.timeoutMs ?? EXPO_PUSH_TIMEOUT_MS;
   const tokenById = new Map(tickets.map((ticket) => [ticket.id, ticket.token]));
   const deadTokens = new Set<string>();
   const failures: ExpoPushFailure[] = [];
+  const seen = new Set<string>();
   let checked = 0;
 
   for (const ids of chunk(Array.from(tokenById.keys()), EXPO_RECEIPT_BATCH_SIZE)) {
@@ -269,6 +309,7 @@ export const checkExpoPushReceipts = async (
 
     for (const [id, receipt] of Object.entries(receipts)) {
       if (!isRecord(receipt)) continue;
+      seen.add(id);
       checked += 1;
       if (receipt.status === 'ok') continue;
       const token = tokenById.get(id) ?? '';
@@ -281,7 +322,10 @@ export const checkExpoPushReceipts = async (
     }
   }
 
-  return { checked, deadTokens: Array.from(deadTokens), failures, pending: tokenById.size - checked };
+  // Expo omits receipts that are not ready yet; hand those back so the caller
+  // can look again later instead of silently dropping them.
+  const pendingTickets = tickets.filter((ticket) => !seen.has(ticket.id));
+  return { checked, deadTokens: Array.from(deadTokens), failures, pending: pendingTickets.length, pendingTickets };
 };
 
 /** Collapses failures into `{error: count}` plus the credential hints that apply. */
@@ -294,4 +338,60 @@ export const summarizeFailures = (failures: ExpoPushFailure[]) => {
     .filter((error) => error in CREDENTIAL_ERROR_HINTS)
     .map((error) => `${error}: ${CREDENTIAL_ERROR_HINTS[error]}`);
   return { counts, hints };
+};
+
+export type PushApp = 'customer' | 'partner' | 'dispatch' | 'admin';
+
+/**
+ * Chooses which tokens a push for `app` goes to.
+ *
+ * - A PushDevice row for that app wins: it is the token of THAT app's install.
+ * - Otherwise the legacy UserAccount.expoPushToken is used (pre-migration, and
+ *   installs that have not re-registered since) - unless that same token is
+ *   already known to belong to a DIFFERENT app, in which case sending would
+ *   just land the push in the wrong app.
+ * - With no app (a raw payload), the legacy token, else any device token.
+ */
+export const selectPushTokens = (input: {
+  app: string | null;
+  deviceRows: Array<{ app: string; token: string; userId: string }>;
+  isValidToken: (token: string | null | undefined) => boolean;
+  legacyRows: Array<{ expoPushToken?: string | null; uid: string }>;
+  userIds: string[];
+}) => {
+  const devicesByUser = new Map<string, Array<{ app: string; token: string }>>();
+  for (const row of input.deviceRows) {
+    if (!input.isValidToken(row.token)) continue;
+    const list = devicesByUser.get(row.userId) ?? [];
+    list.push({ app: row.app, token: row.token });
+    devicesByUser.set(row.userId, list);
+  }
+  const legacyByUser = new Map(input.legacyRows.map((row) => [row.uid, row.expoPushToken ?? null]));
+
+  const tokens = new Set<string>();
+  for (const userId of new Set(input.userIds)) {
+    const devices = devicesByUser.get(userId) ?? [];
+    const legacy = legacyByUser.get(userId) ?? null;
+    const legacyUsable = input.isValidToken(legacy);
+
+    if (input.app) {
+      const own = devices.find((device) => device.app === input.app);
+      if (own) {
+        tokens.add(own.token);
+        continue;
+      }
+      const legacyBelongsElsewhere = devices.some((device) => device.token === legacy);
+      if (legacyUsable && !legacyBelongsElsewhere) {
+        tokens.add(legacy as string);
+      }
+      continue;
+    }
+
+    if (legacyUsable) {
+      tokens.add(legacy as string);
+    } else if (devices[0]) {
+      tokens.add(devices[0].token);
+    }
+  }
+  return Array.from(tokens);
 };

@@ -158,7 +158,7 @@ const queueDefinitions: Record<
     // and missing FCM/APNs credentials surface in the logs.
     process: async (job) =>
       isPushReceiptCheckJob(job.payload)
-        ? processPushReceiptCheck(job.payload.tickets)
+        ? processPushReceiptCheck(job.payload.tickets, job.payload.attempt ?? 1)
         : processNotificationJob(job.payload as NotificationJob),
   },
   'order-placement': {
