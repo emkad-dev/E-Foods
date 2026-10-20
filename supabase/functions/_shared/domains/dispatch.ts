@@ -553,13 +553,17 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
           };
         })
         .filter((offer) => offer !== null),
-      orders: scopedOrderList.map((order) =>
-        toOrderSnapshotResponse(
-          order,
-          itemsByOrderId.get(order.id) ?? [],
-          assignmentsByOrderId.get(order.id) ?? null
-        )
-      ),
+      orders: scopedOrderList.map((order) => {
+        const assignment = assignmentsByOrderId.get(order.id) ?? null;
+        const snapshot = toOrderSnapshotResponse(order, itemsByOrderId.get(order.id) ?? [], assignment);
+        // Unowned manual-queue work is visible to EVERY dispatcher, so it gets
+        // the same redaction as a pending offer: no customer address, id,
+        // phone or payment detail until a rider has actually taken the order
+        // (self-assignment makes them the owner, and the next read is full).
+        return context.role === 'admin' || getDispatchAssignmentOwnerId(assignment) === context.uid
+          ? snapshot
+          : redactOfferSnapshot(snapshot);
+      }),
     },
   });
 };
@@ -582,10 +586,15 @@ const dispatchGetRiders: Handler = async ({ context }) => {
 
   // Live positions come from the unlogged table. A failure here is not fatal:
   // the durable DispatchRiderRecord columns are the fallback, at most
-  // DURABLE_SYNC_INTERVAL_SECONDS stale.
-  const { data: liveRows, error: liveError } = await serviceClient
+  // DURABLE_SYNC_INTERVAL_SECONDS stale. A dispatch caller reads only their
+  // own live row: the response was already scoped, but pulling every rider's
+  // GPS into this function just to discard it is the same exposure one bug
+  // away, so the read is scoped too.
+  const liveQuery = serviceClient
     .from('rider_live_location')
     .select('rider_id,latitude,longitude,accuracy,updated_at');
+  const { data: liveRows, error: liveError } =
+    context.role === 'admin' ? await liveQuery : await liveQuery.eq('rider_id', context.uid);
 
   if (liveError) {
     logEdgeEvent('error', 'live rider location read failed', {
@@ -684,7 +693,8 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
 
   assertOrderPaymentReadyForOperations(bundle.order);
   const dispatchOwnerId = getDispatchAssignmentOwnerId(bundle.assignment ?? null);
-  if (context.role !== 'admin' && dispatchOwnerId !== context.uid) {
+  const isOwnerOrAdmin = context.role === 'admin' || dispatchOwnerId === context.uid;
+  if (!isOwnerOrAdmin) {
     const inManualQueue = (await loadManualQueueOrderIds([orderId])).has(orderId);
     // bundle! : narrowed non-null by the fail() guard above (fail returns never),
     // a narrowing deno check does not carry across the awaits in between - the
@@ -692,6 +702,17 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
     if (!isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null, inManualQueue)) {
       fail(403, 'This delivery is not assigned to your dispatcher queue.');
     }
+
+    // Unowned manual-queue work: readable so a rider can decide to take it,
+    // but redacted like a pending offer, and the customer's phone is never
+    // even looked up. Taking the order makes the rider its owner.
+    return json(200, {
+      data: {
+        order: redactOfferSnapshot(
+          toOrderSnapshotResponse(bundle!.order, bundle!.items, bundle!.assignment, bundle!.events)
+        ),
+      },
+    });
   }
 
   const customerPhone = await loadUserPhoneNumber(bundle.order.customerId);
@@ -985,6 +1006,17 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
   const courierId = sanitizeText(data.courierId);
   if (!orderId || !courierId) {
     fail(400, 'Order id and courier id are required.');
+  }
+
+  // A dispatch-role caller is a rider: they may take work for THEMSELVES, never
+  // push an order onto another rider. Without this a rider holding an order (or
+  // any rider, for manual-queue work) could reassign it to any courier id they
+  // knew - no consent from that rider, no availability check, and the order's
+  // dispatch owner would move with it. dispatchGetRiders already only returns
+  // the caller's own record, so the app's assign list is self-only; this makes
+  // the server agree. Admins keep full reassignment.
+  if (context.role !== 'admin' && courierId !== context.uid) {
+    fail(403, 'Riders can only assign deliveries to themselves.');
   }
 
   const bundle = await loadOrderBundle(orderId);
@@ -1797,38 +1829,104 @@ const dispatchSetAvailability: Handler = async ({ context, data }) => {
 
 const dispatchRiderSOS: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['dispatch']);
-  const orderId = sanitizeOptionalText(data.orderId) ?? null;
+  const requestedOrderId = sanitizeOptionalText(data.orderId) ?? null;
   const riderUid = sanitizeText(context.uid, '');
 
-  // Fetch current rider location from DispatchRiderRecord
-  const { data: riderRow, error: riderErr } = await serviceClient
-    .from('DispatchRiderRecord')
-    .select('latitude,longitude')
-    .eq('id', riderUid)
-    .single();
-
-  if (riderErr || !riderRow) {
-    fail(404, 'Rider record not found.');
-  }
-
-  // Insert audit event — only when orderId is known (DeliveryEvent.orderId is NOT NULL).
-  // orderId is always provided when triggered from the delivery screen.
-  if (orderId) {
-    await insertDeliveryEvent({
-      actorUid: riderUid,
-      eventType: 'sos_triggered',
-      orderId,
-      details: {
-        courierId: riderUid,
-        latitude: riderRow!.latitude,
-        longitude: riderRow!.longitude,
-      },
+  // An SOS must reach the admins even when every lookup below comes back
+  // empty or errors: a rider in trouble must never be told "not found". So
+  // nothing here can fail the request; each read degrades to "unknown".
+  //
+  // Position: the live row first (written on every ping, so seconds old),
+  // then the durable DispatchRiderRecord columns (throttled, can be minutes
+  // stale). The old code read only the durable row with .single(), which
+  // 404'd the SOS outright for a rider whose record was missing.
+  let latitude: number | null = null;
+  let longitude: number | null = null;
+  try {
+    const { data: liveRow } = await serviceClient
+      .from('rider_live_location')
+      .select('latitude,longitude')
+      .eq('rider_id', riderUid)
+      .maybeSingle<{ latitude: number | null; longitude: number | null }>();
+    if (liveRow && liveRow.latitude != null && liveRow.longitude != null) {
+      latitude = liveRow.latitude;
+      longitude = liveRow.longitude;
+    } else {
+      const { data: riderRow } = await serviceClient
+        .from('DispatchRiderRecord')
+        .select('latitude,longitude')
+        .eq('id', riderUid)
+        .maybeSingle<{ latitude: number | null; longitude: number | null }>();
+      latitude = riderRow?.latitude ?? null;
+      longitude = riderRow?.longitude ?? null;
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'rider SOS location lookup failed', {
+      error: error instanceof Error ? error.message : String(error),
+      riderUid,
     });
   }
 
+  // The order id comes from the client, so it is only trusted when the caller
+  // is actually the courier on that order. Otherwise any rider could write an
+  // `sos_triggered` event (with their coordinates) into an arbitrary order's
+  // delivery log. An unverified id is dropped, not refused: the alert still
+  // goes out, just without the order link.
+  let orderId: string | null = null;
+  if (requestedOrderId) {
+    try {
+      const { data: assignmentRow } = await serviceClient
+        .from('DeliveryAssignment')
+        .select('courierId')
+        .eq('orderId', requestedOrderId)
+        .maybeSingle<{ courierId: string | null }>();
+      if (sanitizeText(assignmentRow?.courierId) === riderUid) {
+        orderId = requestedOrderId;
+      }
+    } catch (error) {
+      logEdgeEvent('error', 'rider SOS assignment lookup failed', {
+        error: error instanceof Error ? error.message : String(error),
+        orderId: requestedOrderId,
+        riderUid,
+      });
+    }
+  }
+
+  // Audit event only for a verified order (DeliveryEvent.orderId is NOT NULL).
+  if (orderId) {
+    try {
+      await insertDeliveryEvent({
+        actorUid: riderUid,
+        eventType: 'sos_triggered',
+        orderId,
+        details: {
+          courierId: riderUid,
+          latitude,
+          longitude,
+        },
+      });
+    } catch (error) {
+      logEdgeEvent('error', 'rider SOS delivery event insert failed', {
+        error: error instanceof Error ? error.message : String(error),
+        orderId,
+        riderUid,
+      });
+    }
+  }
+
+  // A server-side trace that does not depend on any admin having a working
+  // push token: the edge logs always carry it.
+  logEdgeEvent('warn', 'rider SOS triggered', {
+    latitude,
+    longitude,
+    orderId,
+    requestedOrderId,
+    riderUid,
+  });
+
   // Notify admins (fire-and-forget via notifyAdmins which wraps notifySafely)
-  const latStr = riderRow!.latitude != null ? String(riderRow!.latitude) : 'unknown';
-  const lngStr = riderRow!.longitude != null ? String(riderRow!.longitude) : 'unknown';
+  const latStr = latitude != null ? String(latitude) : 'unknown';
+  const lngStr = longitude != null ? String(longitude) : 'unknown';
   await notifyAdmins({
     body: `Rider ${riderUid.slice(-6).toUpperCase()} triggered SOS. Lat: ${latStr}, Lng: ${lngStr}.`,
     data: buildNotificationData({

@@ -10,6 +10,31 @@ Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
 const { dispatchDomain } = await import('./domains/dispatch.ts');
+const { serviceClient } = await import('./client.ts');
+
+// Every read answers "nothing found". The SOS handler deliberately degrades
+// past failed lookups (it must never refuse a rider in trouble), so without
+// this stub it reached the admin-notification path against an unreachable
+// localhost Supabase and sat in network retries for minutes. Behaviour with
+// real fixtures is covered in dispatchRiderAuthz.test.ts.
+const installEmptyDatabase = () => {
+  const builder: Record<string, unknown> = {
+    select: () => builder,
+    eq: () => builder,
+    in: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    insert: async () => ({ data: null, error: null }),
+    maybeSingle: async () => ({ data: null, error: null }),
+    single: async () => ({ data: null, error: null }),
+    // deno-lint-ignore no-explicit-any
+    then: (resolve: any, reject: any) => Promise.resolve({ data: [], error: null }).then(resolve, reject),
+  };
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).from = () => builder;
+  // deno-lint-ignore no-explicit-any
+  (serviceClient as any).rpc = async () => ({ data: null, error: null });
+};
 
 const fakeRequest = () => new Request('https://example.test/rpc', { method: 'POST' });
 
@@ -40,6 +65,7 @@ Deno.test('dispatchRiderSOS: dispatch role — handler is callable', async () =>
     throw new Error('dispatchDomain.handlers.dispatchRiderSOS is not registered.');
   }
 
+  installEmptyDatabase();
   let thrown: unknown = null;
   try {
     // deno-lint-ignore no-explicit-any

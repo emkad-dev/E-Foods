@@ -50,10 +50,10 @@ const RIDERS = [
   },
 ];
 
-type Recorded = { eqCalls: Array<[string, unknown]> };
+type Recorded = { eqCalls: Array<[string, unknown]>; liveEqCalls: Array<[string, unknown]> };
 
 const installMocks = (): Recorded => {
-  const recorded: Recorded = { eqCalls: [] };
+  const recorded: Recorded = { eqCalls: [], liveEqCalls: [] };
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
@@ -86,7 +86,16 @@ const installMocks = (): Recorded => {
     }
 
     if (table === 'rider_live_location') {
-      return { select: async () => ({ data: [], error: null }) };
+      const liveBuilder: Record<string, unknown> = {
+        select: () => liveBuilder,
+        eq: (column: string, value: string) => {
+          recorded.liveEqCalls.push([column, value]);
+          return liveBuilder;
+        },
+        // deno-lint-ignore no-explicit-any
+        then: (resolve: any, reject: any) => Promise.resolve({ data: [], error: null }).then(resolve, reject),
+      };
+      return liveBuilder;
     }
 
     throw new Error(`dispatchFleetScope.test.ts: unexpected table "${table}"`);
@@ -117,10 +126,16 @@ Deno.test('dispatch-role dispatchGetRiders returns only the caller own full reco
     recorded.eqCalls.some(([c, v]) => c === 'id' && v === 'rider-a'),
     'query must be scoped to the caller uid'
   );
+  expect(
+    recorded.liveEqCalls.length === 1 &&
+      recorded.liveEqCalls[0][0] === 'rider_id' &&
+      recorded.liveEqCalls[0][1] === 'rider-a',
+    'the live-location read must be scoped to the caller too, not pull every rider GPS'
+  );
 });
 
 Deno.test('admin dispatchGetRiders returns the fleet without PII and with coarse location', async () => {
-  installMocks();
+  const recorded = installMocks();
   const res = await getRiders({ context: ctx('admin', 'admin-1'), data: {}, request: fakeRequest() } as never);
   const riders = await ridersOf(res);
   expect(riders.length === 2, `expected 2 riders, got ${riders.length}`);
@@ -130,6 +145,7 @@ Deno.test('admin dispatchGetRiders returns the fleet without PII and with coarse
   }
   const ada = riders.find((r) => r.id === 'rider-a')!;
   expect(ada.latitude === 6.512 && ada.longitude === 3.379, 'location must be coarsened');
+  expect(recorded.liveEqCalls.length === 0, 'admin keeps the fleet-wide live-location read');
 });
 
 Deno.test('dispatchGetNearestRiders rejects the dispatch role with 403', async () => {
