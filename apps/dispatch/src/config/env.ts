@@ -39,10 +39,14 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_APP_SCHEME,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_SCHEME
     ) ?? 'feasty-dispatch',
-  projectId: getEnvValue(
-    process.env.EXPO_PUBLIC_PROJECT_ID,
-    Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID
-  ),
+  // The EAS project id (needed for Expo push tokens). Falls back to the
+  // extra.eas.projectId that `eas init` writes into app.json, so a store build
+  // gets it without a separate EXPO_PUBLIC_PROJECT_ID build variable.
+  projectId:
+    getEnvValue(
+      process.env.EXPO_PUBLIC_PROJECT_ID,
+      Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID
+    ) ?? getEnvValue(undefined, Constants.expoConfig?.extra?.eas?.projectId),
   backendRpcUrl: getEnvValue(
     process.env.EXPO_PUBLIC_BACKEND_RPC_URL,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_RPC_URL

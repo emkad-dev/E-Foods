@@ -7,9 +7,13 @@
     "icon": "./assets/images/icon.png",
     "scheme": "feasty-dispatch",
     "userInterfaceStyle": "automatic",
+    "owner": "ghosty_xx",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.feasty.dispatch"
+      "bundleIdentifier": "com.feasty.dispatch",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,9 +26,31 @@
       "intentFilters": [
         {
           "action": "VIEW",
-          "data": [{ "scheme": "feasty-dispatch" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "feasty-dispatch"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
+      ],
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
@@ -35,7 +61,18 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow FEASTY Dispatch to use your location for live delivery tracking."
+          "locationWhenInUsePermission": "Allow FEASTY Dispatch to use your location while you are online or on a delivery, so we can offer you nearby orders and show customers where their delivery is.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false,
+          "isIosBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow FEASTY Dispatch to access your photos so you can upload your driver's licence for verification.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       [
@@ -60,7 +97,12 @@
       "autolinkingModuleResolution": true
     },
     "extra": {
-      "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch"
+      "EXPO_PUBLIC_APP_SCHEME": "feasty-dispatch",
+      "EXPO_PUBLIC_SUPABASE_URL": "https://rgfbheorvtolixdcpjhy.supabase.co",
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnZmJoZW9ydnRvbGl4ZGNwamh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODE4MTgsImV4cCI6MjA5MzA1NzgxOH0.gJVihwyRHJTuPKxTKpm3UNIqUs5OiG5xCJK1fqweDzk",
+      "EXPO_PUBLIC_SUPABASE_PROJECT_REF": "rgfbheorvtolixdcpjhy",
+      "EXPO_PUBLIC_BACKEND_RPC_URL": "https://rgfbheorvtolixdcpjhy.supabase.co/functions/v1/app-rpc",
+      "router": {}
     }
   }
 }
