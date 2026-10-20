@@ -1,9 +1,55 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <!--
+    Location is FOREGROUND ONLY in this app: useRealTimeLocation uses
+    watchPositionAsync while the app is open, and nothing calls
+    startLocationUpdatesAsync / geofencing or requests background permission.
+    ACCESS_BACKGROUND_LOCATION is removed defensively so no future plugin or
+    library can add it without a Play background-location declaration.
+
+    This has to live here rather than in app.json's plugin config: android/ is
+    a committed prebuild, so EAS Build ignores app.json's android block
+    entirely. Keep app.json's blockedPermissions in step for iOS/prebuild.
+  -->
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+  <!--
+    CAMERA arrives through manifest merging from expo-image-picker, which this
+    app only uses to pick the licence photos from the LIBRARY
+    (launchImageLibraryAsync; there is no launchCameraAsync call).
+  -->
+  <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+  <!--
+    No foreground service runs in this app (see LocationTaskService below), so
+    none of the FGS permissions may appear in the merged manifest: each one is
+    a Play Console foreground-service declaration to justify.
+  -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" tools:node="remove"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove"/>
+  <!--
+    RECEIVE_BOOT_COMPLETED is removed, not merely absent. expo-notifications
+    declares it to re-arm LOCALLY SCHEDULED notifications after a reboot. The
+    only local notification here is the immediate (trigger: null) ongoing
+    "active delivery" card, which is re-posted from the app's own state on the
+    next launch, so a reboot hook buys nothing. Paired with the receiver
+    narrowed below, as in the customer and partner apps.
+  -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <!--
+    RECORD_AUDIO is not used by this app; removed in case a hoisted dependency
+    ever merges it in (it did in the customer app via expo-audio).
+  -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+  <!--
+    SYSTEM_ALERT_WINDOW ("draw over other apps") belongs to the debug variant,
+    which declares it separately in src/debug/AndroidManifest.xml for the React
+    Native dev overlay. Play treats it as sensitive, so release drops it.
+  -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
   <queries>
@@ -21,6 +67,24 @@
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
+    <!--
+      Narrowed copy of expo-notifications' receiver: the library version also
+      listens for BOOT_COMPLETED / REBOOT / QUICKBOOT_POWERON /
+      MY_PACKAGE_REPLACED to re-arm scheduled notifications. NOTIFICATION_EVENT
+      must stay: it dispatches every push receive/response/dismiss event.
+    -->
+    <receiver android:name="expo.modules.notifications.service.NotificationsService" android:enabled="true" android:exported="false" tools:node="replace">
+      <intent-filter android:priority="-1">
+        <action android:name="expo.modules.notifications.NOTIFICATION_EVENT"/>
+      </intent-filter>
+    </receiver>
+    <!--
+      expo-location ships a foregroundServiceType="location" service for
+      background location tasks. This app tracks location only while open
+      (watchPositionAsync), so the service is never started; removing it keeps
+      a location FGS out of the merged manifest and out of Play's FGS review.
+    -->
+    <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
@@ -30,13 +94,11 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="https" android:host="feasty.com"/>
         <data android:scheme="feasty-dispatch"/>
         <data android:scheme="exp+feasty-dispatch"/>
       </intent-filter>
       <intent-filter data-generated="true">
         <action android:name="android.intent.action.VIEW"/>
-        <data android:scheme="https" android:host="feasty.com"/>
         <data android:scheme="feasty-dispatch"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <category android:name="android.intent.category.DEFAULT"/>

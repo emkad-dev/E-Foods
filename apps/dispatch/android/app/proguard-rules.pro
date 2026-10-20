@@ -11,4 +11,15 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
+# --- R8 baseline keeps (added with minification; see gradle.properties) ---------------
+# Rely on libraries' bundled consumer rules first (React Native / react-android, Hermes,
+# Expo modules, @sentry/react-native, react-native-webview and Firebase Messaging via
+# expo-notifications all ship their own). The rules below only cover native-side classes
+# that are looked up from C++/JNI by name, which R8 cannot see being used and would
+# otherwise rename or strip. Same set as the partner app.
+
+# Hermes / fbjni: classes resolved by name from native code via JNI.
+-keep class com.facebook.hermes.unicode.** { *; }
+-keep class com.facebook.jni.** { *; }
+
 # Add any project specific keep options here:
