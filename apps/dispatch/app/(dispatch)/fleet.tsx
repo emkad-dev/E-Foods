@@ -34,7 +34,7 @@ export default function FleetScreen() {
         <View style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>No riders configured yet</Text>
           <Text style={styles.emptyCopy}>
-            Add rider documents to `dispatchProfiles` and this fleet board will start reading them live.
+            Your rider profile will appear here once it has been set up.
           </Text>
         </View>
       ) : (

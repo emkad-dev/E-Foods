@@ -61,14 +61,18 @@ export const useDispatchOrders = () => {
     []
   );
 
-  const enabled = !authLoading && Boolean(user);
+  // Only an approved rider (role 'dispatch') can call the dispatch RPCs. An
+  // applicant still on complete-rider-details is signed in too, and without
+  // this gate every poll 403'd for them in the background.
+  const isRider = user?.role === 'dispatch';
+  const enabled = !authLoading && isRider;
 
   useEffect(() => {
     if (authLoading) {
       return;
     }
 
-    if (!user) {
+    if (!user || user.role !== 'dispatch') {
       setOrders([]);
       setOffers([]);
       setError(null);

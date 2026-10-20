@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Redirect, Slot, Tabs, usePathname } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useActiveDeliveryNotification } from '../../src/hooks/useActiveDeliveryNotification';
@@ -10,7 +11,15 @@ export default function DispatchLayout() {
   const { user } = useAuth();
   usePushNotifications();
   const { activeDeliveryOrders } = useDispatchOrders();
-  useActiveDeliveryNotification(activeDeliveryOrders);
+  // activeDeliveryOrders also carries unowned manual-queue work any rider could
+  // pick up (see DispatchLocationSyncBridge in app/_layout.tsx), so passing it
+  // straight through put a "Delivery in progress" card up for orders this
+  // rider had never taken. Only orders where they are the assigned courier.
+  const myActiveDeliveries = useMemo(
+    () => activeDeliveryOrders.filter((order) => order.assignment?.courierId === user?.uid),
+    [activeDeliveryOrders, user?.uid]
+  );
+  useActiveDeliveryNotification(myActiveDeliveries);
 
   if (user && user.role !== 'dispatch') {
     if (pathname !== '/complete-rider-details') {
@@ -51,10 +60,14 @@ export default function DispatchLayout() {
           title: 'Deliveries',
         }}
       />
+      {/* Hidden: dispatchGetRiders only ever returns the caller's OWN record
+          to a rider (SP-1), so a "fleet" board showed one card - the rider
+          themselves - under developer copy. The route stays for a future
+          ops view; it just has no tab. */}
       <Tabs.Screen
         name="fleet"
         options={{
-          title: 'Fleet',
+          href: null,
         }}
       />
       <Tabs.Screen

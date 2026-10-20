@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import * as Location from 'expo-location';
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -70,6 +73,20 @@ const createDefaultDraft = (): DispatchRiderDraft => ({
   and where I work, and how to leave. Destructive last, which is where the
   customer app puts it too.
 */
+
+const PRIVACY_POLICY_URL = 'https://feasty.com.ng/privacy';
+const ACCOUNT_DELETION_URL = 'https://feasty.com.ng/account-deletion';
+
+// Prominent disclosure shown in-app BEFORE the OS location prompt (Google Play
+// User Data policy). Keep it accurate to DispatchLocationSyncBridge in
+// app/_layout.tsx: location streams only while the rider is Available or holds
+// a delivery, and only while the app is open (foreground watchPositionAsync,
+// no background permission, no foreground service).
+const LOCATION_DISCLOSURE_PARAGRAPHS = [
+  'FEASTY Dispatch collects your device location while you are online or on an active delivery, and only while the app is open.',
+  'It is used to offer you nearby delivery requests, and it is shared with the customer and restaurant on an order you have accepted so they can follow the delivery. FEASTY support can also see it if you send an SOS.',
+  'Location is not collected when you are offline or the app is closed. You can go offline at any time.',
+];
 
 const formatMoney = (amount: number) => `₦${amount.toFixed(2)}`;
 
@@ -238,6 +255,38 @@ export default function ProfileScreen() {
     setTogglingAvailability(true);
 
     try {
+      // Going online is what starts location streaming, so the disclosure and
+      // the OS prompt happen HERE, on the rider's explicit action, rather than
+      // as a bare system dialog fired from the root layout. A rider who
+      // declines stays offline: an Available rider with no location never
+      // pings, so they would silently never be offered work.
+      if (next && Platform.OS !== 'web') {
+        const current = await Location.getForegroundPermissionsAsync();
+        if (current.status !== 'granted') {
+          const accepted = await confirm({
+            title: 'Location while you are online',
+            paragraphs: LOCATION_DISCLOSURE_PARAGRAPHS,
+            confirmLabel: 'Continue',
+            cancelLabel: 'Not now',
+          });
+          if (!accepted) {
+            return;
+          }
+
+          const requested = await Location.requestForegroundPermissionsAsync();
+          if (requested.status !== 'granted') {
+            showNotice({
+              tone: 'error',
+              title: 'Location is off',
+              message: requested.canAskAgain
+                ? 'You need to allow location to go online and receive delivery requests.'
+                : 'Location is blocked for FEASTY Dispatch. Turn it on in your phone settings to go online.',
+            });
+            return;
+          }
+        }
+      }
+
       await setAvailable(next);
     } catch (nextError: any) {
       showNotice({
@@ -457,9 +506,9 @@ export default function ProfileScreen() {
     (defaulting to a national centroid), so "LGA pins" was ~always 0 and "Live
     pins" was just the rider count.
 
-    SEPARATELY, AND NOT FIXED BY THIS DELETION: that RPC still hands every
-    dispatch user every other rider's name and live coordinates. Removing the
-    screen removes the display, not the exposure. Raised with the owner.
+    The exposure behind it is closed server-side: dispatchGetRiders now returns
+    a rider only their own record (86a4cbd), and even its live-location read is
+    scoped to the caller.
   */
 
   const renderSession = () => (
@@ -470,6 +519,20 @@ export default function ProfileScreen() {
       </TouchableOpacity>
       <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} disabled={authLoading}>
         <Text style={styles.deleteButtonText}>Delete account</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="link"
+        style={styles.linkRow}
+        onPress={() => void Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}
+      >
+        <Text style={styles.linkText}>Privacy policy</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="link"
+        style={styles.linkRow}
+        onPress={() => void Linking.openURL(ACCOUNT_DELETION_URL).catch(() => undefined)}
+      >
+        <Text style={styles.linkText}>How account deletion works</Text>
       </TouchableOpacity>
       {deleteError ? (
         <Text accessibilityLiveRegion="polite" role="alert" style={styles.errorText}>
@@ -769,6 +832,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 12,
     paddingVertical: 15,
+  },
+  linkRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    minHeight: MIN_TAP_TARGET,
+  },
+  linkText: {
+    color: dispatchTheme.textMuted,
+    fontSize: 14,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   deleteButtonText: {
     color: dispatchTheme.dangerText,

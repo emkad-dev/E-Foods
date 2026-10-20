@@ -555,14 +555,14 @@ export default function DispatchDeliveryDetailScreen() {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Assign rider</Text>
+          <Text style={styles.sectionTitle}>Take this delivery</Text>
           <Text style={styles.assignCopy}>{assignmentHelperCopy}</Text>
           {ridersError ? <Text style={styles.assignError}>{ridersError}</Text> : null}
           {ridersLoading ? (
             <Text style={styles.assignLoading}>Loading riders...</Text>
           ) : ridersByDistance.length === 0 ? (
             <Text style={styles.assignEmpty}>
-              No rider records are available yet. Create riders from the dispatch management side first.
+              Your rider profile is still being set up. Save your dispatch area on the Rider tab, or contact support if this persists.
             </Text>
           ) : (
             ridersByDistance.map((rider) => {

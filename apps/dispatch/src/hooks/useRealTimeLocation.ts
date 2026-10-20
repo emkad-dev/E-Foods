@@ -96,6 +96,12 @@ export function useRealTimeLocation(options: UseRealTimeLocationOptions = {}) {
 
         if (mounted) {
           subscriptionRef.current = subscription;
+        } else {
+          // The effect was torn down (rider went offline, cadence changed)
+          // while watchPositionAsync was still resolving. The cleanup ran
+          // before this subscription existed, so nothing else will ever stop
+          // it: without this the GPS kept running for the rest of the session.
+          subscription.remove();
         }
       } catch (err) {
         console.error('Real-time location tracking error:', err);

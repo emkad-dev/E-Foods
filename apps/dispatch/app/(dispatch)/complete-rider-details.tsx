@@ -9,6 +9,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // system and does not declare those dependencies, so it takes the one primitive
 // it needs. See the same note in ./profile.tsx.
 import { useNotice } from '../../../../packages/design-system/src/primitives/Notice';
+import { useConfirm } from '../../../../packages/design-system/src/primitives/ConfirmDialog';
+import {
+  ACCOUNT_DELETION_CANCEL_LABEL,
+  ACCOUNT_DELETION_CONFIRM_LABEL,
+  ACCOUNT_DELETION_TITLE,
+  accountDeletionErrorMessage,
+  accountDeletionParagraphs,
+} from '../../../../packages/domain/src/accountDeletion';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../../src/contexts/AuthContext';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
@@ -43,7 +51,11 @@ type CapturedDocument = {
 export default function CompleteRiderDetailsScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ notice?: string | string[] }>();
-  const { clearError, error, loading, signOut, user } = useAuth();
+  const { clearError, deleteAccount, error, loading, signOut, user } = useAuth();
+  // An applicant (pending, rejected, or not yet submitted) is held on this
+  // screen by the (dispatch) layout and can never reach the Profile tab, so the
+  // in-app account deletion Google Play requires has to be offered here too.
+  const { confirm, confirmDialog } = useConfirm();
   // Register routes here with `notice=login-ready` when sign-up returned a
   // session. Rendered as a static line rather than through `showNotice` below
   // because it reports what happened on the PREVIOUS screen, not an answer to
@@ -262,6 +274,25 @@ export default function CompleteRiderDetailsScreen() {
         tone: 'error',
         title: 'Sign out failed',
         message: toUserMessage(nextError, 'Unable to sign out right now.'),
+      });
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      await confirm({
+        title: ACCOUNT_DELETION_TITLE,
+        paragraphs: accountDeletionParagraphs('dispatch'),
+        confirmLabel: ACCOUNT_DELETION_CONFIRM_LABEL,
+        cancelLabel: ACCOUNT_DELETION_CANCEL_LABEL,
+        destructive: true,
+        onConfirm: deleteAccount,
+      });
+    } catch (nextError) {
+      showNotice({
+        tone: 'error',
+        title: 'Account not deleted',
+        message: accountDeletionErrorMessage(nextError),
       });
     }
   };
@@ -509,7 +540,17 @@ export default function CompleteRiderDetailsScreen() {
         <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleSignOut()} disabled={loading}>
           <Text style={styles.secondaryButtonText}>Sign out</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.deleteButton}
+          onPress={() => void handleDeleteAccount()}
+          disabled={loading}
+        >
+          <Text style={styles.deleteButtonText}>Delete account</Text>
+        </TouchableOpacity>
       </View>
+      {confirmDialog}
     </ScrollView>
   );
 }
@@ -525,6 +566,19 @@ const formatDateTime = (value: string) =>
   }).format(new Date(value));
 
 const styles = StyleSheet.create({
+  deleteButton: {
+    alignItems: 'center',
+    borderColor: dispatchTheme.danger,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    marginTop: 12,
+    paddingVertical: 15,
+  },
+  deleteButtonText: {
+    color: dispatchTheme.dangerText,
+    fontSize: 15,
+    fontWeight: '900',
+  },
   progressRow: {
     flexDirection: 'row',
     gap: 6,
