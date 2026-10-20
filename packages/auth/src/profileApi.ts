@@ -114,6 +114,31 @@ export const clearUserPushToken = async (supabase: SupabaseClient, userId: strin
   }
 };
 
+export type PushDeviceApp = 'customer' | 'partner' | 'dispatch';
+
+/**
+ * Records this install's token for ONE app (migration 20261021_push_devices),
+ * so the customer, partner and dispatch apps stop overwriting each other's
+ * token in the single legacy column. The server function also detaches the
+ * token from any other account that registered on this device before.
+ *
+ * Callers treat a failure as non-fatal: until the migration is applied the
+ * function does not exist and the legacy column keeps delivering.
+ */
+export const registerPushDevice = async (supabase: SupabaseClient, app: PushDeviceApp, token: string) => {
+  const { error } = await supabase.rpc('ebuy_register_push_device', { p_app: app, p_token: token });
+  if (error) {
+    throw error;
+  }
+};
+
+export const unregisterPushDevice = async (supabase: SupabaseClient, app: PushDeviceApp, token: string) => {
+  const { error } = await supabase.rpc('ebuy_unregister_push_device', { p_app: app, p_token: token });
+  if (error) {
+    throw error;
+  }
+};
+
 export const updateUserProfile = async (
   supabase: SupabaseClient,
   userId: string,

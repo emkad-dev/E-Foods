@@ -2,7 +2,12 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import { clearUserPushToken, registerBeforeSignOut } from '../../../../packages/auth/src';
+import {
+  clearUserPushToken,
+  registerBeforeSignOut,
+  registerPushDevice,
+  unregisterPushDevice,
+} from '../../../../packages/auth/src';
 import {
   ANDROID_NOTIFICATION_CHANNELS,
   resolveEasProjectId,
@@ -45,13 +50,24 @@ const loadModules = () => {
 // The token this device registered for the signed-in account. Module scope so
 // the before-sign-out hook (registered once) can detach exactly this token.
 let currentRegistration: { token: string; uid: string } | null = null;
+// Last native (FCM/APNs) token seen by the rotation listener, and whether a
+// registration is running. getExpoPushTokenAsync itself makes iOS emit a
+// token event, so re-registering on EVERY event looped forever; only a token
+// that actually changed, outside a registration in flight, re-registers.
+let lastDeviceToken: string | null = null;
+let registrationInFlight = false;
+
+const deviceTokenKey = (data: unknown) => (typeof data === 'string' ? data : JSON.stringify(data ?? null));
 
 if (pushSupported) {
   registerBeforeSignOut(async () => {
     const registration = currentRegistration;
     currentRegistration = null;
     if (registration) {
-      await clearUserPushToken(supabase, registration.uid, registration.token);
+      await Promise.allSettled([
+        clearUserPushToken(supabase, registration.uid, registration.token),
+        unregisterPushDevice(supabase, 'customer', registration.token),
+      ]);
     }
   });
 }
@@ -105,9 +121,20 @@ const registerDeviceForUser = async (uid: string) => {
   }
 
   const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+  // Seed the rotation listener with the native token this registration used,
+  // so the event the registration itself triggers is recognised as no change.
+  const deviceToken = await Notifications.getDevicePushTokenAsync().catch(() => null);
+  if (deviceToken) {
+    lastDeviceToken = deviceTokenKey(deviceToken.data);
+  }
   await updateUserDocument(uid, {
     expoPushToken: token,
     pushTokenUpdatedAt: new Date().toISOString(),
+  });
+  // Per-app row (see packages/auth profileApi). Non-fatal so a backend
+  // without the PushDevice migration keeps working off the legacy column.
+  await registerPushDevice(supabase, 'customer', token).catch((error) => {
+    console.warn('Per-app push registration unavailable; using the legacy token only.', error);
   });
   currentRegistration = { token, uid };
   return true;
@@ -135,9 +162,10 @@ export const usePushNotifications = () => {
     let tokenSubscription: { remove: () => void } | null = null;
 
     const register = async () => {
-      if (registeredUserId.current === uid) {
+      if (registeredUserId.current === uid || registrationInFlight) {
         return;
       }
+      registrationInFlight = true;
       try {
         const registered = await registerDeviceForUser(uid);
         if (registered && !cancelled) {
@@ -145,6 +173,8 @@ export const usePushNotifications = () => {
         }
       } catch (error) {
         console.error('Push registration failed.', error);
+      } finally {
+        registrationInFlight = false;
       }
     };
 
@@ -154,7 +184,15 @@ export const usePushNotifications = () => {
       if (cancelled) {
         return;
       }
-      tokenSubscription = Notifications.addPushTokenListener(() => {
+      tokenSubscription = Notifications.addPushTokenListener((event) => {
+        const key = deviceTokenKey(event.data);
+          if (key === lastDeviceToken) {
+          return;
+        }
+        lastDeviceToken = key;
+        if (registrationInFlight) {
+          return;
+        }
         registeredUserId.current = null;
         void register();
       });
