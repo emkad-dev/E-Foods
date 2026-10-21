@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { useDispatchOrders } from '../src/hooks/useDispatchOrders';
 import { useRealTimeLocation } from '../src/hooks/useRealTimeLocation';
 import { syncDispatchRiderLocation } from '../src/services/dispatchRiderActions';
+import {
+  canResendFix,
+  isForcedSyncDue,
+  shouldSyncFix,
+  type SyncPoint,
+} from '../src/utils/locationSyncThrottle';
 import { createSentryInitializer } from '../../../packages/observability/src/sentry';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { RiderAvailabilityProvider, useRiderAvailability } from '../src/contexts/RiderAvailabilityContext';
@@ -27,12 +33,20 @@ const initializeSentry = createSentryInitializer({
 // login, and live location tracking back online — no deleted code to restore.
 const DISPATCH_ENABLED = true;
 
-const ACTIVE_LOCATION_INTERVAL_MS = 5000;
+// Active delivery: a 15s / 25m watch (was 5s / 5m). Each sync is one edge
+// invocation against the Free plan's 500K/month quota; 5s cost ~300 per
+// delivery (~4.5M/month at 500 orders/day). See utils/locationSyncThrottle.ts
+// for the client-side gate, the 60s keep-alive and the transition sync.
+const ACTIVE_LOCATION_INTERVAL_MS = 15000;
+const ACTIVE_DISTANCE_INTERVAL_M = 25;
 const IDLE_HEARTBEAT_INTERVAL_MS = 60000;
 const ACTIVE_MIN_ACCURACY_M = 50;
 const IDLE_MIN_ACCURACY_M = 200;
-// Under the server's 120s freshness window, so a genuinely fresh beat still sends.
+// Under the server's freshness windows (ebuy_nearest_riders: 90s), so a
+// genuinely fresh beat still sends.
 const MAX_FIX_AGE_MS = 90000;
+
+type LocationFix = { accuracy: number; latitude: number; longitude: number; timestamp: number };
 
 function DispatchLocationSyncBridge() {
   const { user } = useAuth();
@@ -48,32 +62,99 @@ function DispatchLocationSyncBridge() {
   // narrows it to orders this specific rider is actually the assigned
   // courier for.
   const { activeDeliveryOrders } = useDispatchOrders();
-  const hasActiveAssignment = useMemo(
-    () => activeDeliveryOrders.some((order) => order.assignment?.courierId === user?.uid),
+  const myActiveOrders = useMemo(
+    () => activeDeliveryOrders.filter((order) => order.assignment?.courierId === user?.uid),
     [activeDeliveryOrders, user?.uid]
   );
+  const hasActiveAssignment = myActiveOrders.length > 0;
+  // Changes whenever one of this rider's deliveries changes status (picked up,
+  // on the way...), which triggers an immediate sync so ETA/arrival logic sees
+  // the position at the transition rather than up to 60s later.
+  const transitionSignature = useMemo(
+    () =>
+      myActiveOrders
+        .map((order) => `${order.id}:${order.status}`)
+        .sort()
+        .join('|'),
+    [myActiveOrders]
+  );
   // Presence: an idle rider who is Available must still ping, otherwise SP-1's
-  // 120s freshness gate never sees them and they can never be offered work.
+  // freshness gate never sees them and they can never be offered work.
   // Offline + no assignment streams nothing.
   const { isAvailable } = useRiderAvailability();
   const shouldStream = isAvailable || hasActiveAssignment;
-  // Cadence: a live delivery keeps the fast beat customer tracking needs; an
-  // idle-but-Available rider only needs a slow heartbeat well inside the 120s
-  // freshness window (each beat is an edge-function invocation, so no faster).
-  // distanceInterval 0 so a parked rider still beats (Android ANDs time+distance).
+  const isStreaming = user?.role === 'dispatch' && shouldStream;
+  // Cadence: a live delivery keeps a tracking beat; an idle-but-Available rider
+  // only needs a slow heartbeat inside the freshness window. Idle keeps
+  // distanceInterval 0 so a parked rider still beats (Android ANDs
+  // time+distance); active uses 25m and relies on the 60s keep-alive below.
   const { location } = useRealTimeLocation({
-    enabled: user?.role === 'dispatch' && shouldStream,
+    enabled: isStreaming,
     highAccuracy: hasActiveAssignment,
     updateInterval: hasActiveAssignment ? ACTIVE_LOCATION_INTERVAL_MS : IDLE_HEARTBEAT_INTERVAL_MS,
-    distanceInterval: hasActiveAssignment ? 5 : 0,
+    distanceInterval: hasActiveAssignment ? ACTIVE_DISTANCE_INTERVAL_M : 0,
     // Idle presence only needs "alive", so tolerate coarse indoor/parked fixes
     // (otherwise they're all dropped, the rider goes stale and never gets work);
     // a live delivery keeps the strict 50m bar customer tracking needs.
     minAccuracy: hasActiveAssignment ? ACTIVE_MIN_ACCURACY_M : IDLE_MIN_ACCURACY_M,
   });
 
+  const latestFixRef = useRef<LocationFix | null>(null);
+  const lastSyncRef = useRef<SyncPoint | null>(null);
+  const inFlightRef = useRef(false);
+  // A forced sync requested while another was in flight runs once it lands.
+  const pendingForcedRef = useRef(false);
+
+  const sendSync = useCallback((fix: LocationFix) => {
+    if (inFlightRef.current) {
+      pendingForcedRef.current = true;
+      return;
+    }
+
+    inFlightRef.current = true;
+    void syncDispatchRiderLocation({
+      accuracy: fix.accuracy,
+      latitude: fix.latitude,
+      longitude: fix.longitude,
+      timestamp: fix.timestamp,
+    })
+      .then(() => {
+        lastSyncRef.current = { latitude: fix.latitude, longitude: fix.longitude, at: Date.now() };
+      })
+      .catch((error) => {
+        console.warn('Failed to sync dispatch location:', error);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (pendingForcedRef.current) {
+          pendingForcedRef.current = false;
+          const latest = latestFixRef.current;
+          if (latest && canResendFix({ fixTimestamp: latest.timestamp, now: Date.now() })) {
+            sendSync(latest);
+          }
+        }
+      });
+  }, []);
+
+  // Forced/transition sync of the most recent fix. Re-sending it is truthful:
+  // with a 25m distanceInterval the OS reports nothing while the rider moves
+  // less than that, and canResendFix refuses a fix too old to vouch for.
+  const forceSync = useCallback(() => {
+    const latest = latestFixRef.current;
+    if (latest && canResendFix({ fixTimestamp: latest.timestamp, now: Date.now() })) {
+      sendSync(latest);
+    }
+  }, [sendSync]);
+
   useEffect(() => {
-    if (!user || user.role !== 'dispatch' || !shouldStream || !location) {
+    if (!isStreaming) {
+      lastSyncRef.current = null;
+      latestFixRef.current = null;
+    }
+  }, [isStreaming]);
+
+  useEffect(() => {
+    if (!isStreaming || !location) {
       return;
     }
 
@@ -81,19 +162,49 @@ function DispatchLocationSyncBridge() {
     // client timestamp, so replaying a stale retained fix (e.g. on Offline ->
     // Available) would look fresh at a place the rider left long ago. Skip it;
     // the next real fix syncs.
-    if (Date.now() - location.timestamp > MAX_FIX_AGE_MS) {
+    const now = Date.now();
+    if (now - location.timestamp > MAX_FIX_AGE_MS) {
       return;
     }
 
-    void syncDispatchRiderLocation({
-      accuracy: location.accuracy,
-      latitude: location.latitude,
-      longitude: location.longitude,
-      timestamp: location.timestamp,
-    }).catch((error) => {
-      console.warn('Failed to sync dispatch location:', error);
-    });
-  }, [shouldStream, location, user]);
+    latestFixRef.current = location;
+    if (inFlightRef.current) {
+      // At most one sync in flight; the next fix (or the keep-alive) catches up.
+      return;
+    }
+
+    if (shouldSyncFix({ activeDelivery: hasActiveAssignment, fix: location, lastSync: lastSyncRef.current, now })) {
+      sendSync(location);
+    }
+  }, [hasActiveAssignment, isStreaming, location, sendSync]);
+
+  // Keep-alive while a delivery is active, so a parked rider (no fixes under a
+  // 25m distanceInterval) still refreshes at least every 60s.
+  useEffect(() => {
+    if (!isStreaming || !hasActiveAssignment) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (isForcedSyncDue({ lastSync: lastSyncRef.current, now: Date.now() })) {
+        forceSync();
+      }
+    }, 15000);
+
+    return () => clearInterval(timer);
+  }, [forceSync, hasActiveAssignment, isStreaming]);
+
+  const previousSignatureRef = useRef(transitionSignature);
+  useEffect(() => {
+    if (previousSignatureRef.current === transitionSignature) {
+      return;
+    }
+
+    previousSignatureRef.current = transitionSignature;
+    if (isStreaming && transitionSignature) {
+      forceSync();
+    }
+  }, [forceSync, isStreaming, transitionSignature]);
 
   return null;
 }
