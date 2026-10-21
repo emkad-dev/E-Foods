@@ -43,7 +43,7 @@ The Expo start scripts load `.env.apps` automatically for all four app commands.
 - `apps/customer` covers discovery, cart, delivery location, card and bank-transfer checkout, and order tracking.
 - `apps/partner` covers store setup, menu management, restaurant linking, and partner order actions.
 - `apps/dispatch` covers rider management, assignment, delivery-state actions, and live queue views.
-- `apps/admin` covers access oversight, restaurant approvals, browser-only first-admin bootstrap, and staff provisioning.
+- `apps/admin-web` (Vite, admin.feasty.com.ng) covers access oversight, restaurant approvals, orders, dispatch ops, payouts, promos, broadcasts, support inbox, and staff provisioning.
 - `functions/` contains trusted backend logic, claim-based auth checks, and SQL sync and read paths.
 - `packages/domain` centralizes shared role, entity, and order types used across the apps.
 

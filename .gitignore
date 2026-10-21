@@ -100,3 +100,10 @@ scripts/.*.env
 supabase/.branches/
 
 cloudflare/**/.wrangler/
+
+# crash dumps and nested CLI state
+*.stackdump
+supabase/supabase/
+
+# per-machine Claude Code launch config
+.claude/launch.json
