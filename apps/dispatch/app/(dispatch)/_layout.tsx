@@ -94,6 +94,13 @@ export default function DispatchLayout() {
           href: null,
         }}
       />
+      {/* Payout bank account, pushed from the Rider tab. */}
+      <Tabs.Screen
+        name="payout"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

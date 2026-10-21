@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 // Imported by module path, not from the '@feasty/design-system' barrel, on
 // purpose: the barrel re-exports useFeastyFonts, which pulls expo-font and six
 // @expo-google-fonts faces into the bundle. This app has not adopted the design
@@ -31,6 +32,8 @@ import { toUserMessage } from '../../../../packages/observability/src/userMessag
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { useFeatureFlags } from '../../src/contexts/FeatureFlagsContext';
+import { isFeatureEnabled } from '../../../../packages/domain/src/featureFlags';
 import { useRiderAvailability } from '../../src/contexts/RiderAvailabilityContext';
 import { useWeeklyEarnings } from '../../src/hooks/useWeeklyEarnings';
 import {
@@ -105,6 +108,13 @@ const formatDateTime = (value?: string | null) => {
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  // FEASTY payouts exist only for global-pool riders, which only exist once
+  // platform dispatch is on - the same switch the rider-pay migration and the
+  // payout RPCs ship behind. Until then the entry point stays hidden rather
+  // than opening a screen whose backend is not live.
+  const { featureFlags } = useFeatureFlags();
+  const showPayouts = isFeatureEnabled(featureFlags, 'platform_dispatch');
   const { deleteAccount, loading: authLoading, signOut, user } = useAuth();
   const { confirm, confirmDialog } = useConfirm();
   // Saving and signing out reported failure through `Alert`, an empty function
@@ -552,6 +562,21 @@ export default function ProfileScreen() {
         {/* Earnings first. It is the reason a rider opens this screen, and it
             used to be two taps away behind a menu. */}
         {renderWeeklyEarnings()}
+        {showPayouts ? (
+        <View style={styles.detailCard}>
+          <Text style={styles.detailTitle}>Payouts</Text>
+          <Text style={styles.emptyText}>
+            Add the bank account your earnings are paid into. Payouts are automatic once it is verified.
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={styles.secondaryButton}
+            onPress={() => router.push('/(dispatch)/payout' as never)}
+          >
+            <Text style={styles.secondaryButtonText}>Payout bank account</Text>
+          </TouchableOpacity>
+        </View>
+        ) : null}
         {renderProfileEditor()}
         {renderSession()}
         {confirmDialog}
