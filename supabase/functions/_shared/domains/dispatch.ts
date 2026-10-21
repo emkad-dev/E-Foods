@@ -49,6 +49,7 @@ import {
   reassignDispatchAssignmentCourier,
   releaseDispatchAssignmentLoad,
   reofferDispatchOrder,
+  resolveDispatchPoolForOrder,
 } from '../dispatchSelection.ts';
 import { getNigeriaAreaCoordinate } from '../nigeriaGeography.ts';
 import {
@@ -153,12 +154,55 @@ const UNOWNED_DISPATCHABLE_STATUSES: readonly string[] = [
  * assertOrderPaymentReadyForOperations, the ACCEPTED/PREPARING/READY_FOR_PICKUP
  * window) is untouched and still applies.
  */
+/**
+ * Which rider pools the caller belongs to: the global FEASTY pool (a dispatch
+ * UserRole with no restaurantId) and/or specific restaurants' own fleets.
+ */
+type DispatchCallerScope = { global: boolean; restaurantIds: Set<string> };
+
+const loadDispatchCallerScope = async (uid: string): Promise<DispatchCallerScope> => {
+  const { data, error } = await serviceClient
+    .from('UserRole')
+    .select('restaurantId')
+    .eq('userId', uid)
+    .eq('role', 'dispatch');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as Array<{ restaurantId?: string | null }>;
+  return {
+    global: rows.some((row) => !sanitizeText(row.restaurantId)),
+    restaurantIds: new Set(rows.map((row) => sanitizeText(row.restaurantId)).filter(Boolean)),
+  };
+};
+
+/**
+ * Manual-queue work follows the same money rule as auto-dispatch (rider pay,
+ * resolveDispatchPoolForOrder): a 'platform' order - FEASTY kept the delivery
+ * fee - may only be taken by a global-pool rider, and a 'restaurant' order -
+ * the restaurant's subaccount received the fee - only by that restaurant's own
+ * riders. Without this, the auto-dispatch fallback removal was undone the
+ * moment an order exhausted into the manual queue, where ANY dispatcher could
+ * self-assign it.
+ */
+const callerMayTakeOrderPool = (order: CustomerOrderRow, scope: DispatchCallerScope) =>
+  resolveDispatchPoolForOrder(order.pricing) === 'global'
+    ? scope.global
+    : scope.restaurantIds.has(sanitizeText(order.restaurantId));
+
 const isUnownedDispatchableOrder = (
   order: CustomerOrderRow,
   assignment: DeliveryAssignmentRow | null,
-  inManualQueue: boolean
+  inManualQueue: boolean,
+  callerScope: DispatchCallerScope
 ) => {
   if (!inManualQueue) {
+    return false;
+  }
+
+  if (!callerMayTakeOrderPool(order, callerScope)) {
     return false;
   }
 
@@ -488,6 +532,10 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
     context.role === 'admin'
       ? new Set<string>()
       : await loadManualQueueOrderIds(orderList.map((order) => order.id));
+  const callerScope: DispatchCallerScope =
+    context.role === 'admin' || manualQueueOrderIds.size === 0
+      ? { global: false, restaurantIds: new Set<string>() }
+      : await loadDispatchCallerScope(context.uid);
   const scopedOrderList =
     context.role === 'admin'
       ? sortedOrderList
@@ -498,7 +546,7 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
           // and why an order still inside a live offer window is NOT here.
           return (
             getDispatchAssignmentOwnerId(assignment) === context.uid ||
-            isUnownedDispatchableOrder(order, assignment, manualQueueOrderIds.has(order.id))
+            isUnownedDispatchableOrder(order, assignment, manualQueueOrderIds.has(order.id), callerScope)
           );
         });
 
@@ -705,7 +753,15 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
     // bundle! : narrowed non-null by the fail() guard above (fail returns never),
     // a narrowing deno check does not carry across the awaits in between - the
     // file's pre-existing, already-baselined pattern.
-    if (!isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null, inManualQueue)) {
+    if (
+      !inManualQueue ||
+      !isUnownedDispatchableOrder(
+        bundle!.order,
+        bundle!.assignment ?? null,
+        inManualQueue,
+        await loadDispatchCallerScope(context.uid)
+      )
+    ) {
       fail(403, 'This delivery is not assigned to your dispatcher queue.');
     }
 
@@ -1041,7 +1097,15 @@ const dispatchAssignOrderCourier: Handler = async ({ context, data }) => {
     // bundle! : narrowed non-null by the fail() guard above (fail returns never),
     // a narrowing deno check does not carry across the awaits in between - the
     // file's pre-existing, already-baselined pattern.
-    if (!isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null, inManualQueue)) {
+    if (
+      !inManualQueue ||
+      !isUnownedDispatchableOrder(
+        bundle!.order,
+        bundle!.assignment ?? null,
+        inManualQueue,
+        await loadDispatchCallerScope(context.uid)
+      )
+    ) {
       fail(403, 'This delivery is not assigned to your dispatcher queue.');
     }
   }
@@ -1216,11 +1280,8 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
     // to have picked anything up - because they fail the `escalate` check here.
     const canEscalateUnowned =
       nextAction === 'escalate' &&
-      isUnownedDispatchableOrder(
-        bundle!.order,
-        bundle!.assignment ?? null,
-        (await loadManualQueueOrderIds([orderId])).has(orderId)
-      );
+      (await loadManualQueueOrderIds([orderId])).has(orderId) &&
+      isUnownedDispatchableOrder(bundle!.order, bundle!.assignment ?? null, true, await loadDispatchCallerScope(context.uid));
     if (!canEscalateUnowned) {
       fail(403, 'This delivery is not assigned to your dispatcher queue.');
     }

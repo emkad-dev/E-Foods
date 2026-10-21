@@ -84,6 +84,21 @@ const baseOrder = (id: string) => ({
 // order-owned: rider-a holds it. order-manual: exhausted, no owner, no courier.
 const OWNED = baseOrder('order-owned');
 const MANUAL = baseOrder('order-manual');
+// A manual-queue order FEASTY delivers (fee kept by the platform): only the
+// global rider pool may take it.
+const PLATFORM_MANUAL = {
+  ...baseOrder('order-platform'),
+  pricing: { total: 4300, deliveryProvider: 'platform' },
+};
+
+// Dispatch roles: rider-a / rider-b are rest-1's own riders, rider-g is a
+// global FEASTY rider (UserRole.restaurantId null).
+const DISPATCH_ROLES: Record<string, Array<{ restaurantId: string | null }>> = {
+  'rider-a': [{ restaurantId: 'rest-1' }],
+  'rider-b': [{ restaurantId: 'rest-1' }],
+  'rider-g': [{ restaurantId: null }],
+};
+
 const ESCALATED = {
   ...baseOrder('order-escalated'),
   status: 'escalated',
@@ -137,7 +152,7 @@ const installMocks = (fixture: Fixture = {}): Recorded => {
     const rowsFor = (): Record<string, unknown>[] => {
       switch (table) {
         case 'CustomerOrder': {
-          const all = [OWNED, MANUAL, ESCALATED];
+          const all = [OWNED, MANUAL, ESCALATED, PLATFORM_MANUAL];
           if (typeof filters.id === 'string') return all.filter((o) => o.id === filters.id);
           if (inValues) return all.filter((o) => inValues!.includes(o.id));
           return all;
@@ -156,9 +171,15 @@ const installMocks = (fixture: Fixture = {}): Recorded => {
         case 'DeliveryEvent':
           // The exhaustion marker that puts order-manual in the manual queue.
           if (filters.eventType === 'dispatch_offers_exhausted') {
-            return [{ orderId: 'order-manual' }].filter((row) => !inValues || inValues.includes(row.orderId));
+            return [{ orderId: 'order-manual' }, { orderId: 'order-platform' }].filter(
+              (row) => !inValues || inValues.includes(row.orderId)
+            );
           }
           return [];
+        case 'UserRole':
+          return typeof filters.userId === 'string' && filters.role === 'dispatch'
+            ? DISPATCH_ROLES[filters.userId] ?? []
+            : [];
         case 'rider_live_location':
           return fixture.liveLocation ? [{ rider_id: 'rider-a', ...fixture.liveLocation }] : [];
         case 'DispatchRiderRecord':
@@ -417,4 +438,39 @@ Deno.test('admin cancel of an escalated order notifies the carrying rider and th
   expect(res.status === 200, `cancel must succeed, got ${res.status}`);
   expect(lookedUpRecipient(recorded, 'rider-a'), 'the carrying rider must be resolved as a push recipient');
   expect(lookedUpRecipient(recorded, 'cust-order-escalated'), 'the customer must be resolved as a push recipient');
+});
+
+// --- 5. manual queue follows the delivery-provider pool ---------------------------
+
+const queueIdsFor = async (uid: string) => {
+  installMocks();
+  const res = await getQueue({ context: ctx('dispatch', uid), data: {}, request: fakeRequest() } as never);
+  return ((await res.json()).data.orders as Array<{ id: string }>).map((order) => order.id);
+};
+
+Deno.test('manual queue: a restaurant rider sees its restaurant order, never a platform order', async () => {
+  const ids = await queueIdsFor('rider-b');
+  expect(ids.includes('order-manual'), 'rest-1 rider must see rest-1 restaurant-delivery work');
+  expect(!ids.includes('order-platform'), 'a restaurant rider must not see FEASTY-delivered work');
+});
+
+Deno.test('manual queue: a global FEASTY rider sees platform orders, never a restaurant order', async () => {
+  const ids = await queueIdsFor('rider-g');
+  expect(ids.includes('order-platform'), 'global rider must see platform-delivery work');
+  expect(!ids.includes('order-manual'), 'global rider must not see restaurant-delivery work');
+});
+
+Deno.test('manual queue: a global rider cannot self-assign a restaurant-delivery order', async () => {
+  installMocks();
+  let status: unknown = null;
+  try {
+    await assign({
+      context: ctx('dispatch', 'rider-g'),
+      data: { courierId: 'rider-g', orderId: 'order-manual' },
+      request: fakeRequest(),
+    } as never);
+  } catch (error) {
+    status = (error as { status?: unknown }).status;
+  }
+  expect(status === 403, `expected 403, got ${JSON.stringify(status)}`);
 });
