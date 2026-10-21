@@ -2,6 +2,9 @@
 
 import { corsHeaders } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/client.ts';
+import { constantTimeEqual } from '../_shared/crypto.ts';
+import { recordDrainerHeartbeat } from '../_shared/drainerHeartbeat.ts';
+import { recordOperationalAlert } from '../_shared/operationalAlerts.ts';
 import { sweepUnacceptedOrders } from '../_shared/acceptanceDeadlineSweep.ts';
 import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
 import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
@@ -24,6 +27,7 @@ import {
 } from '../_shared/queue.ts';
 import {
   createEdgeObservation,
+  logEdgeEvent,
   finishEdgeObservation,
   jsonResponse,
   runWithBackpressure,
@@ -79,7 +83,8 @@ const assertWorkerAccess = (request: Request) => {
   }
 
   const token = sanitizeText(request.headers.get('x-queue-worker-token'));
-  if (!token || token !== WORKER_TOKEN) {
+  // Constant-time: a plain !== leaks how many leading characters matched.
+  if (!token || !constantTimeEqual(token, WORKER_TOKEN)) {
     throw new QueueWorkerError(403, 'Invalid queue worker token.');
   }
 };
@@ -181,7 +186,23 @@ const queueDefinitions: Record<
 };
 
 const drainQueue = async (queue: QueueName, batchSize: number, concurrency: number) => {
-  const claimedJobs = await claimPendingQueueJobs(serviceClient, queue, batchSize);
+  const definition = queueDefinitions[queue];
+  const claimedJobs = await claimPendingQueueJobs(serviceClient, queue, batchSize, {
+    maxRetries: definition.maxRetries,
+    onDeadLetter: async (job) => {
+      logEdgeEvent('error', 'queue job dead-lettered after repeated worker timeouts', job);
+      await recordOperationalAlert({
+        alertType: 'queue_job_dead_lettered',
+        dedupeKey: `queue-dead-letter:${job.queue}:${job.id}`,
+        details: `${job.queue} job ${job.id} timed out the worker ${job.retryCount} times and was marked failed. It will not run again unless re-queued.`,
+        metadata: { jobId: job.id, queue: job.queue, retryCount: job.retryCount },
+        severity: 'high',
+        subjectId: job.id,
+        subjectType: 'queue_job',
+        title: `Queue job dead-lettered (${job.queue})`,
+      });
+    },
+  });
   if (claimedJobs.length === 0) {
     return {
       claimed: 0,
@@ -191,7 +212,6 @@ const drainQueue = async (queue: QueueName, batchSize: number, concurrency: numb
     };
   }
 
-  const definition = queueDefinitions[queue];
   let completed = 0;
   let failed = 0;
 
@@ -342,6 +362,14 @@ Deno.serve(async (request) => {
     // sweepUnacceptedOrders - so it cannot meaningfully delay the drain or turn
     // a successful one into a 500.
     const acceptanceSweep = queueSelection === 'all' ? await sweepUnacceptedOrders() : null;
+
+    // Liveness stamp for the watchdogs (broadcast-runner + a pg_cron SQL job,
+    // migration 20261021b). Stamped here - after the sweeps, before the
+    // backpressure-guarded drain - because the sweeps are what must not stop
+    // silently, and a shed drain minute still ran them. Cron ('all') runs only.
+    if (queueSelection === 'all') {
+      await recordDrainerHeartbeat({ acceptanceSweep, offerSweep, scheduledReleaseSweep });
+    }
 
     const results = await runWithBackpressure(
       'queue-drainer',

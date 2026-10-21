@@ -9,6 +9,8 @@ import {
   type BroadcastSegment,
 } from '../_shared/broadcast.ts';
 import { sendExpoPushMessages } from '../_shared/notifications.ts';
+import { constantTimeEqual } from '../_shared/crypto.ts';
+import { checkDrainerHeartbeat } from '../_shared/drainerHeartbeat.ts';
 
 const WORKER_TOKEN = Deno.env.get('QUEUE_WORKER_TOKEN')?.trim() ?? '';
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
@@ -145,9 +147,14 @@ Deno.serve(async (request) => {
   }
 
   const token = request.headers.get('x-queue-worker-token')?.trim() ?? '';
-  if (!WORKER_TOKEN || token !== WORKER_TOKEN) {
+  if (!WORKER_TOKEN || !token || !constantTimeEqual(token, WORKER_TOKEN)) {
     return json(401, { error: { message: 'Unauthorized' } });
   }
+
+  // Independent watchdog for queue-drainer (own cron job, own function): if
+  // the drainer's heartbeat is >5 min stale, raise a HIGH OperationalAlert and
+  // email the admins. Never throws, so it cannot block broadcasts.
+  const drainerHeartbeat = await checkDrainerHeartbeat();
 
   // Atomic claim: scheduled + due -> sending, so a second tick can't double-send.
   const nowIso = new Date().toISOString();
@@ -175,5 +182,5 @@ Deno.serve(async (request) => {
     }
   }
 
-  return json(200, { data: { processed: broadcasts.length } });
+  return json(200, { data: { drainerHeartbeat, processed: broadcasts.length } });
 });
