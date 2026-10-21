@@ -141,8 +141,8 @@ export const RPC_ROUTES: Record<string, RpcFunction> = {
   "deleteOwnAccount": 'feasty-account',
   "deleteAdminAccess": 'feasty-account',
   "deleteUserAccountOnRequest": 'feasty-account',
-  "s own masked payout\n  // account and earnings, and submit/replace the bank account payouts go to.\n  // Account domain, not dispatch, because they are self-service account data.\n  ": 'feasty-account',
-  ",\n  ": 'feasty-account',
+  "riderGetPayoutProfile": 'feasty-account',
+  "riderSubmitPayoutBank": 'feasty-account',
 };
 
 /**

@@ -134,7 +134,7 @@ export const ACCOUNT_ACTIONS = [
   // raw SQL. deleteAdminAccess refuses non-admin targets and this one refuses
   // admin targets, so the two partition the role space exactly.
   'deleteUserAccountOnRequest',
-  // Rider pay (FEASTY platform riders only): read the caller's own masked payout
+  // Rider pay (FEASTY platform riders only): read the own masked payout (of the caller)
   // account and earnings, and submit/replace the bank account payouts go to.
   // Account domain, not dispatch, because they are self-service account data.
   'riderGetPayoutProfile',
