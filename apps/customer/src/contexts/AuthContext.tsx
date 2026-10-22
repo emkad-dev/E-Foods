@@ -31,8 +31,13 @@ import {
 } from '../services/session';
 import { getUserDocument, createUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { supabase } from '../services/supabase/config';
-import { shouldHydrateCachedUserProfile, shouldShowSignInLoading } from '../../../../packages/auth/src';
+import {
+  resolveSingleDeviceSessionDecision,
+  shouldHydrateCachedUserProfile,
+  shouldShowSignInLoading,
+} from '../../../../packages/auth/src';
 import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
+import { fetchCustomerBootstrap } from '../services/customerBootstrap';
 import {
   getCustomerPolicyAcceptance,
   recordCustomerPolicyAcceptance,
@@ -161,6 +166,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
   const hasUserRef = useRef(false);
+  // True only for the duration of an interactive signIn() call. The passive
+  // onAuthStateChange reconcile below reads it to step out of signIn's way:
+  // signIn owns the SIGNED_IN transition it triggers, so running the reconcile
+  // concurrently would duplicate its round trips and race its single-device
+  // claim (reading a half-written activeSessionId and self-evicting).
+  const signInInProgressRef = useRef(false);
 
   useEffect(() => {
     hasUserRef.current = Boolean(user);
@@ -310,7 +321,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const localSessionId = await getStoredSessionId();
     const remoteSessionId = userDocument.activeSessionId ?? null;
 
-    if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
+    // Customer keeps the single-device lock (enforceSingleDevice: true). The
+    // decision is centralised in packages/auth so the "missing remote",
+    // "first sight", "same device" and "real takeover" cases are covered by
+    // one tested function instead of ad-hoc inline comparisons.
+    const decision = resolveSingleDeviceSessionDecision({
+      localSessionId,
+      remoteSessionId,
+      enforceSingleDevice: true,
+    });
+
+    if (decision.type === 'evict') {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
@@ -318,8 +339,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return false;
     }
 
-    if (!localSessionId && remoteSessionId) {
-      await storeSessionId(remoteSessionId);
+    if (decision.type === 'adopt') {
+      await storeSessionId(decision.sessionId);
     }
 
     return true;
@@ -396,6 +417,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // An interactive signIn() owns the SIGNED_IN it triggers: it builds the
+      // user, claims the single-device session and reconciles policy itself,
+      // and drives the spinner. Doing that work again here would double its
+      // cold starts and race its session claim (self-eviction), so step aside.
+      if (event === 'SIGNED_IN' && signInInProgressRef.current) {
+        return;
+      }
+
       // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
       // re-block the UI once the first paint has resolved. Only a *fresh*
       // sign-in returns to the full-screen spinner -- on web, refocusing the
@@ -411,19 +440,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const authUser = session?.user ?? null;
 
         if (authUser) {
+          // The profile is the gate for letting the customer in. Release the
+          // UI as soon as it resolves; the single-device check and policy
+          // acceptance run concurrently in the background and surface a
+          // session conflict or the policy gate only once their own result
+          // arrives, instead of chaining four serial round trips ahead of
+          // first paint.
           const nextUser = await buildNextUser(authUser);
           if (!nextUser) {
             return;
           }
-          const sessionIsValid = await syncSingleDeviceSession(nextUser);
-          if (!sessionIsValid) {
-            return;
-          }
-
-          await flushPendingCustomerPolicyAcceptance();
-          await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
           setUser(nextUser);
           await storeUserProfile(nextUser);
+          setLoading(false);
+
+          void (async () => {
+            try {
+              const sessionIsValid = await syncSingleDeviceSession(nextUser);
+              if (!sessionIsValid) {
+                return;
+              }
+              await flushPendingCustomerPolicyAcceptance();
+              await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
+            } catch (reconcileError) {
+              if (!isOfflineError(reconcileError)) {
+                reportAuthFailure('customer.authStateChange.reconcile', reconcileError);
+              }
+            }
+          })();
         } else {
           setUser(null);
           setPolicyAccepted(false);
@@ -567,6 +611,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string): Promise<void> => {
+    // Held for the whole call so the passive onAuthStateChange reconcile steps
+    // aside (no duplicate cold starts, no racing the single-device claim).
+    signInInProgressRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -580,16 +627,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setError(CUSTOMER_ACCESS_ERROR);
         throw new Error(CUSTOMER_ACCESS_ERROR);
       }
-      const nextUser = await buildNextUser(authUser);
+
+      // One cold start for the whole sign-in: profile + policy acceptance +
+      // remote activeSessionId in a single call. Returns null when the backend
+      // does not implement the action yet (pre-deploy), falling back to the
+      // original per-call chain (callBackendRpc already reports real failures).
+      const bootstrap = await fetchCustomerBootstrap().catch((bootstrapError) => {
+        console.warn('customerBootstrap unavailable, falling back to individual RPCs:', bootstrapError);
+        return null;
+      });
+
+      const nextUser = bootstrap?.profile
+        ? ({
+            ...bootstrap.profile,
+            uid: authUser.id,
+            email: authUser.email ?? bootstrap.profile.email ?? '',
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: DEFAULT_APP_ROLE,
+          } satisfies UserDocument)
+        : await buildNextUser(authUser);
       if (!nextUser) {
         throw new Error(CUSTOMER_ACCESS_ERROR);
       }
 
-      await flushPendingCustomerPolicyAcceptance();
-
       // Explicit sign-in deliberately claims this device as the active session.
-      // Takeover detection lives in the passive onAuthStateChange path; re-checking
-      // here against the pre-claim snapshot would always false-positive on re-login.
+      // It mints and persists the id uncontended because the passive reconcile
+      // skips itself while signInInProgressRef is set, so the device that just
+      // signed in always matches remote and never self-evicts on the next
+      // refresh. Takeover detection stays in the passive path.
       await startSingleDeviceSession(authUser.id);
 
       identifyAnalyticsUser(authUser.id);
@@ -598,13 +663,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
       setUser(nextUser);
       await storeUserProfile(nextUser);
-      await refreshPolicyAcceptance();
+
+      if (bootstrap) {
+        setPolicyAccepted(bootstrap.policyAccepted);
+        void storePolicyAccepted(bootstrap.policyAccepted);
+        // Any acceptance captured locally during signup still needs flushing,
+        // but it must not block entering the app.
+        void flushPendingCustomerPolicyAcceptance();
+      } else {
+        await flushPendingCustomerPolicyAcceptance();
+        await refreshPolicyAcceptance();
+      }
     } catch (err: any) {
       reportAuthFailure('customer.signIn', err);
       const formattedError = getCustomerAuthErrorMessage(err, 'Unable to sign in');
       setError(formattedError);
       throw new Error(formattedError);
     } finally {
+      signInInProgressRef.current = false;
       setLoading(false);
     }
   };

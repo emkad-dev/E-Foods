@@ -4,7 +4,7 @@ import { supabase } from './config';
 const USER_PROFILE_COLUMNS =
   'uid,email,displayName,phoneNumber,photoURL,emailVerified,role,partnerApplicationStatus,partnerApplicationReviewedAt,partnerApplicationRejectionReason,dispatchApplicationStatus,dispatchApplicationReviewedAt,dispatchApplicationRejectionReason,expoPushToken,pushTokenUpdatedAt,activeSessionId,activeSessionUpdatedAt,accountDisabled,disabledAt,disabledByUid,lastPrivilegedRole,restaurantId,restaurantName,restaurantLinkedAt,restaurantLinkSource,createdAt,updatedAt';
 
-const mapProfile = (record: Record<string, any>): UserDocument => ({
+export const mapProfile = (record: Record<string, any>): UserDocument => ({
   uid: record.uid,
   email: record.email,
   role: record.role,
