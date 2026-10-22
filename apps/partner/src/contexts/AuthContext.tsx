@@ -15,7 +15,6 @@ import { supabase } from '../services/supabase/config';
 import {
   clearStoredUserProfile,
   clearStoredSessionId,
-  createSessionId,
   getStoredUserProfile,
   getStoredSessionId,
   storeSessionId,
@@ -24,7 +23,11 @@ import {
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
-import { shouldHydrateCachedUserProfile, shouldShowSignInLoading } from '../../../../packages/auth/src';
+import {
+  resolveSingleDeviceSessionDecision,
+  shouldHydrateCachedUserProfile,
+  shouldShowSignInLoading,
+} from '../../../../packages/auth/src';
 import { isStaleSupabaseSessionError } from '../../../../packages/auth/src/session';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
@@ -107,14 +110,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
 
-  const startSingleDeviceSession = useCallback(async (userId: string) => {
-    const sessionId = createSessionId();
-
-    await updateUserDocument(userId, {
-      activeSessionId: sessionId,
-      activeSessionUpdatedAt: new Date().toISOString(),
-    });
-    await storeSessionId(sessionId);
+  // Partner is MULTI-DEVICE: a restaurant runs the app on several staff devices
+  // at once, so a partner sign-in must NOT claim a single active session. We
+  // deliberately do not write UserAccount.activeSessionId here (writing it
+  // would churn the shared column and, combined with the old eviction rule,
+  // sign other staff devices out). The column stays for customer/dispatch; the
+  // partner path simply never participates in the single-device rule.
+  const startSingleDeviceSession = useCallback(async (_userId: string) => {
+    // No-op on purpose. See the comment above.
   }, []);
 
   const releaseSingleDeviceSession = useCallback(async (userId?: string | null) => {
@@ -144,7 +147,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const localSessionId = await getStoredSessionId();
     const remoteSessionId = userDocument.activeSessionId ?? null;
 
-    if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
+    // Partner is multi-device (enforceSingleDevice: false): the shared decision
+    // always resolves to 'ok', so no partner device is ever evicted when
+    // another signs in, and none adopts a single session id. Routed through the
+    // same helper as customer/dispatch so the scoping is explicit rather than a
+    // silently deleted block.
+    const decision = resolveSingleDeviceSessionDecision({
+      localSessionId,
+      remoteSessionId,
+      enforceSingleDevice: false,
+    });
+
+    if (decision.type === 'evict') {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
@@ -152,8 +166,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return false;
     }
 
-    if (!localSessionId && remoteSessionId) {
-      await storeSessionId(remoteSessionId);
+    if (decision.type === 'adopt') {
+      await storeSessionId(decision.sessionId);
     }
 
     return true;

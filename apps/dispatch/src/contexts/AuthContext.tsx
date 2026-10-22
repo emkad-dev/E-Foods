@@ -25,7 +25,7 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
-import { shouldShowSignInLoading } from '../../../../packages/auth/src';
+import { resolveSingleDeviceSessionDecision, shouldShowSignInLoading } from '../../../../packages/auth/src';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { MISSING_PROFILE_ERROR, resolveDispatchAccessState } from './dispatchAuthFlow';
@@ -100,6 +100,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     hasUserRef.current = Boolean(user);
   }, [user]);
 
+  // True only during an interactive signIn(): the passive onAuthStateChange
+  // reconcile reads it to step aside so signIn's single-device claim is not
+  // raced into a self-eviction on the next refresh.
+  const signInInProgressRef = useRef(false);
+
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
   }, []);
@@ -148,7 +153,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const localSessionId = await getStoredSessionId();
     const remoteSessionId = userDocument.activeSessionId ?? null;
 
-    if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
+    // Dispatch keeps the single-device lock (enforceSingleDevice: true), using
+    // the shared tested decision so "missing remote", "first sight", "same
+    // device" and "real takeover" are handled identically to customer.
+    const decision = resolveSingleDeviceSessionDecision({
+      localSessionId,
+      remoteSessionId,
+      enforceSingleDevice: true,
+    });
+
+    if (decision.type === 'evict') {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
@@ -156,8 +170,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return false;
     }
 
-    if (!localSessionId && remoteSessionId) {
-      await storeSessionId(remoteSessionId);
+    if (decision.type === 'adopt') {
+      await storeSessionId(decision.sessionId);
     }
 
     return true;
@@ -268,6 +282,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // An interactive signIn() owns the SIGNED_IN it triggers (it builds the
+      // user, claims the single-device session and drives the spinner). Running
+      // this reconcile at the same time would race that claim and self-evict on
+      // the next refresh, so step aside.
+      if (event === 'SIGNED_IN' && signInInProgressRef.current) {
+        return;
+      }
+
       // Background reconciliation must not re-block the UI once the first paint
       // has resolved. Only a *fresh* sign-in returns to the full-screen
       // spinner -- on web, refocusing the tab re-fires SIGNED_IN for an
@@ -401,6 +423,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    // Held for the whole call so the passive reconcile skips the SIGNED_IN this
+    // triggers and does not race the single-device claim below.
+    signInInProgressRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -425,6 +450,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
+      signInInProgressRef.current = false;
       setLoading(false);
     }
   };
