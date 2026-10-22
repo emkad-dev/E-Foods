@@ -22,6 +22,12 @@ Run each file's contents, in this order. All are additive and re-runnable.
 2. `supabase/migrations/20261021_push_devices.sql` — per-app push token table
 3. `supabase/migrations/20261021b_drainer_heartbeat.sql` — queue-drainer watchdog + pg_cron check
 4. `supabase/migrations/20261020_rider_payouts.sql` — rider-pay ledger, recipients, state machine, `rider_auto_payouts` flag seeded OFF, `RestaurantRecord.deliveryProvider` default 'restaurant'
+5. `supabase/migrations/20261022_fn_warmer.sql` — pg_cron keep-warm ping (dormant until the `project_url` Vault secret is present); cuts edge-function cold starts that made sign-in slow
+
+Note: the sign-in speed-up adds a `customerBootstrap` RPC in the feasty-account
+function — **no migration needed**, but deploy feasty-account before clients
+lean on it (the client falls back to the old path if the action is unknown, so
+order is not strict). RPC contract is now 102 actions total / account 20.
 
 Then, separately (own query, brief lock, reclaims ~190 MB):
 ```sql
