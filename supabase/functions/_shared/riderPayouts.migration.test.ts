@@ -85,3 +85,26 @@ Deno.test('cron schedule targets rider-payouts with the worker token', () => {
   has("/functions/v1/rider-payouts'", 'function url', schedule);
   has("'x-queue-worker-token', credentials.queue_worker_token", 'worker token header', schedule);
 });
+
+Deno.test('payout creation enforces the clearing delay, rider eligibility and the bank-change hold', () => {
+  has('p_clearing_days integer', 'clearing delay is a parameter');
+  has("or e.\"deliveredAt\" >= now() - make_interval(days => p_clearing_days)", 'uncleared earnings counted');
+  has("'earnings_not_cleared'", 'uncleared refused');
+  has('r."verificationStatus" = \'approved\'', 'approved riders only');
+  has('coalesce(a."accountDisabled", false)', 'suspended riders refused');
+  has("'rider_not_eligible'", 'ineligible refused');
+  has('"bankChangedAt"     timestamptz', 'bank change stored separately');
+  has('v_recipient."bankChangedAt" + make_interval(hours => p_bank_change_hold_hours) > now()', 'bank-change hold enforced');
+});
+
+Deno.test('settlement never touches the bank-change stamp', () => {
+  const settle = sql.slice(sql.indexOf('create or replace function public.ebuy_settle_rider_payout'));
+  const settleBody = settle.slice(0, settle.indexOf('$$;'));
+  assertEquals(settleBody.includes('bankChangedAt'), false, 'a failure hold cannot overwrite the bank-change brake');
+});
+
+Deno.test('a lease row keeps payout runs from overlapping', () => {
+  has('create table if not exists public."RiderPayoutRunLease"', 'lease table');
+  has('where public."RiderPayoutRunLease"."lockedUntil" <= now()', 'acquired only when expired');
+  has('alter table public."RiderPayoutRunLease" enable row level security;', 'lease RLS');
+});

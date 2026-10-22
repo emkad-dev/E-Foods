@@ -27,7 +27,7 @@ import { fail, json } from './rpc/respond.ts';
 type Handler = RpcHandler<AuthenticatedRequestContext>;
 
 /** A rider who changes bank account cannot be paid for this long (takeover brake). */
-export const BANK_CHANGE_HOLD_HOURS = 24;
+export const BANK_CHANGE_HOLD_HOURS = RIDER_PAYOUT_LIMITS.bankChangeHoldHours;
 /** Minimum gap between submissions; each one costs two Paystack calls. */
 export const BANK_SUBMIT_COOLDOWN_SECONDS = 60;
 
@@ -49,6 +49,7 @@ export const validateRiderBankInput = (data: Record<string, unknown>) => {
 type RecipientRow = {
   accountName: string;
   accountNumberMasked: string;
+  bankChangedAt: string | null;
   bankCode: string;
   bankName: string | null;
   holdReason: string | null;
@@ -60,39 +61,66 @@ type RecipientRow = {
 };
 
 /**
- * Decides the hold after a (re)submission. Pure so the rule is testable:
- *   first submission                 -> no hold
- *   same account re-submitted        -> clears a failure hold (the rider is
- *                                       confirming the account), keeps any
- *                                       unexpired bank-change hold
- *   different account                -> BANK_CHANGE_HOLD_HOURS hold
+ * Decides the stored hold columns after a (re)submission. Pure so the rule is
+ * testable. The two holds are separate columns on purpose:
+ *   holdUntil/holdReason (failure hold, written by ebuy_settle_rider_payout)
+ *     -> always cleared by a submission: the rider is confirming or replacing
+ *        the account the failed transfer went to.
+ *   bankChangedAt (24h bank-change brake)
+ *     -> stamped NOW when the account differs from the stored one, otherwise
+ *        carried over unchanged. A transfer outcome never writes it, so a
+ *        failure followed by a same-account re-submit cannot shortcut it.
  */
 export const resolveBankSubmissionHold = (
-  existing: Pick<RecipientRow, 'holdReason' | 'holdUntil' | 'recipientCode'> | null,
+  existing: Pick<RecipientRow, 'bankChangedAt' | 'recipientCode'> | null,
   nextRecipientCode: string,
   now: Date
-): { changed: boolean; holdReason: string | null; holdUntil: string | null } => {
+): { bankChangedAt: string | null; changed: boolean; holdReason: null; holdUntil: null } => {
   if (!existing) {
-    return { changed: false, holdReason: null, holdUntil: null };
+    return { bankChangedAt: null, changed: false, holdReason: null, holdUntil: null };
   }
   if (existing.recipientCode !== nextRecipientCode) {
-    return {
-      changed: true,
-      holdReason: 'bank_details_changed',
-      holdUntil: new Date(now.getTime() + BANK_CHANGE_HOLD_HOURS * 3_600_000).toISOString(),
-    };
+    return { bankChangedAt: now.toISOString(), changed: true, holdReason: null, holdUntil: null };
   }
-  const keepsChangeHold =
-    existing.holdReason === 'bank_details_changed' &&
-    Number.isFinite(Date.parse(existing.holdUntil ?? '')) &&
-    Date.parse(existing.holdUntil ?? '') > now.getTime();
-  return keepsChangeHold
-    ? { changed: false, holdReason: existing.holdReason, holdUntil: existing.holdUntil }
-    : { changed: false, holdReason: null, holdUntil: null };
+  return { bankChangedAt: existing.bankChangedAt ?? null, changed: false, holdReason: null, holdUntil: null };
+};
+
+/**
+ * The hold a rider actually sees: the LATER of the failure hold and the
+ * bank-change brake ('infinity' - a failed/reversed transfer - always wins).
+ */
+export const resolveEffectiveHold = (
+  recipient: Pick<RecipientRow, 'bankChangedAt' | 'holdReason' | 'holdUntil'>,
+  now: Date
+): { holdReason: string | null; holdUntil: string | null } => {
+  const candidates: Array<{ at: number; reason: string | null; until: string }> = [];
+  if (recipient.holdUntil) {
+    const parsed = Date.parse(recipient.holdUntil);
+    const at = Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+    if (at > now.getTime()) {
+      candidates.push({ at, reason: recipient.holdReason, until: recipient.holdUntil });
+    }
+  }
+  if (recipient.bankChangedAt) {
+    const parsed = Date.parse(recipient.bankChangedAt);
+    const at = Number.isFinite(parsed) ? parsed + BANK_CHANGE_HOLD_HOURS * 3_600_000 : Number.POSITIVE_INFINITY;
+    if (at > now.getTime()) {
+      candidates.push({
+        at,
+        reason: 'bank_details_changed',
+        until: Number.isFinite(at) ? new Date(at).toISOString() : 'infinity',
+      });
+    }
+  }
+  if (candidates.length === 0) {
+    return { holdReason: null, holdUntil: null };
+  }
+  const latest = candidates.reduce((a, b) => (b.at > a.at ? b : a));
+  return { holdReason: latest.reason, holdUntil: latest.until };
 };
 
 const RECIPIENT_COLUMNS =
-  'riderId,recipientCode,accountName,accountNumberMasked,bankCode,bankName,verifiedAt,holdUntil,holdReason,updatedAt';
+  'riderId,recipientCode,accountName,accountNumberMasked,bankCode,bankName,verifiedAt,holdUntil,holdReason,bankChangedAt,updatedAt';
 
 const loadRecipient = async (riderId: string) => {
   const { data, error } = await serviceClient
@@ -127,9 +155,9 @@ const toRecipientResponse = (recipient: RecipientRow | null) =>
         accountNumberMasked: recipient.accountNumberMasked,
         bankCode: recipient.bankCode,
         bankName: recipient.bankName,
-        // 'infinity' (failed/reversed transfer) is reported as an open-ended hold.
-        holdReason: recipient.holdReason,
-        holdUntil: recipient.holdUntil,
+        // The effective (later) hold; 'infinity' (failed/reversed transfer) is
+        // reported as an open-ended hold.
+        ...resolveEffectiveHold(recipient, new Date()),
         verifiedAt: recipient.verifiedAt,
       }
     : null;
@@ -174,6 +202,7 @@ export const riderSubmitPayoutBank: Handler = async ({ context, data }) => {
   const row = {
     accountName,
     accountNumberMasked: maskAccountNumber(accountNumber),
+    bankChangedAt: hold.bankChangedAt,
     bankCode,
     bankName: created!.bankName ?? bankName,
     holdReason: hold.holdReason,
@@ -192,8 +221,8 @@ export const riderSubmitPayoutBank: Handler = async ({ context, data }) => {
     await recordOperationalAlert({
       alertType: 'rider_payout_bank_changed',
       dedupeKey: `ops:rider_payout_bank_changed:${context.uid}:${now.toISOString().slice(0, 10)}`,
-      details: `Rider ${context.uid} changed their payout account to ${row.bankName ?? bankCode} ${row.accountNumberMasked} (${accountName}). Payouts are held until ${hold.holdUntil}. If the rider did not make this change, keep the hold and contact them.`,
-      metadata: { holdUntil: hold.holdUntil, riderId: context.uid },
+      details: `Rider ${context.uid} changed their payout account to ${row.bankName ?? bankCode} ${row.accountNumberMasked} (${accountName}). Payouts are held for ${BANK_CHANGE_HOLD_HOURS}h. If the rider did not make this change, keep the hold and contact them.`,
+      metadata: { bankChangedAt: hold.bankChangedAt, riderId: context.uid },
       severity: 'medium',
       subjectId: context.uid,
       subjectType: 'rider',
@@ -259,7 +288,7 @@ export const adminGetRiderPayouts: Handler = async ({ context }) => {
       .order('createdAt', { ascending: false })
       .limit(100),
     serviceClient.from('RiderEarning').select('riderId,amount,status').in('status', ['pending', 'processing']).limit(10000),
-    serviceClient.from('RiderPayoutRecipient').select('riderId,holdUntil,holdReason,verifiedAt').limit(5000),
+    serviceClient.from('RiderPayoutRecipient').select('riderId,holdUntil,holdReason,bankChangedAt,verifiedAt').limit(5000),
     loadFeatureFlagMap(),
   ]);
   for (const result of [payoutsResult, earningsResult, recipientsResult]) {
@@ -269,7 +298,7 @@ export const adminGetRiderPayouts: Handler = async ({ context }) => {
   }
 
   const payouts = (payoutsResult.data ?? []) as Array<Record<string, unknown>>;
-  const recipients = (recipientsResult.data ?? []) as Array<{ holdReason: string | null; holdUntil: string | null; riderId: string; verifiedAt: string | null }>;
+  const recipients = (recipientsResult.data ?? []) as Array<{ bankChangedAt: string | null; holdReason: string | null; holdUntil: string | null; riderId: string; verifiedAt: string | null }>;
   const riderIds = [...new Set([...payouts.map((payout) => sanitizeText(payout.riderId)), ...recipients.map((r) => r.riderId)])].filter(Boolean);
 
   const names = new Map<string, string>();
@@ -289,12 +318,10 @@ export const adminGetRiderPayouts: Handler = async ({ context }) => {
   const sum = (rows: Array<{ amount: unknown }>) =>
     Math.round(rows.reduce((total, row) => total + parseNumber(row.amount, 0), 0) * 100) / 100;
   const earnings = (earningsResult.data ?? []) as Array<{ amount: unknown; riderId: string; status: string }>;
-  const nowMs = Date.now();
-  const heldRecipients = recipients.filter((recipient) => {
-    if (!recipient.holdUntil) return false;
-    const parsed = Date.parse(recipient.holdUntil);
-    return !Number.isFinite(parsed) || parsed > nowMs;
-  });
+  const now = new Date();
+  const heldRecipients = recipients
+    .map((recipient) => ({ ...recipient, ...resolveEffectiveHold(recipient, now) }))
+    .filter((recipient) => recipient.holdUntil !== null);
 
   return json(200, {
     data: {

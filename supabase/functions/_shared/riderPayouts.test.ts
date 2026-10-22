@@ -5,7 +5,15 @@ Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
-const { RIDER_PAYOUT_LIMITS, classifyTransferStatus, isRecipientOnHold, planRiderPayouts, runRiderPayouts } =
+const {
+  RIDER_PAYOUT_LIMITS,
+  classifyTransferStatus,
+  isBankChangeHoldLive,
+  isEarningCleared,
+  isRecipientOnHold,
+  planRiderPayouts,
+  runRiderPayouts,
+} =
   await import('./riderPayouts.ts');
 const { createTestLedger } = await import('./riderPayoutsTestLedger.ts');
 
@@ -15,7 +23,8 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
   }
 };
 
-const NOW = new Date('2026-10-20T08:00:00.000Z');
+// Earnings below are delivered 2026-10-19, i.e. 11 days before NOW: cleared.
+const NOW = new Date('2026-10-30T08:00:00.000Z');
 const verified = (riderId: string, extra: Record<string, unknown> = {}) => ({
   recipientCode: `RCP_${riderId}`,
   riderId,
@@ -28,12 +37,15 @@ const earning = (id: string, riderId: string, amount: number, deliveredAt = '202
   id,
   riderId,
 });
-const plan = (overrides: Partial<Parameters<typeof planRiderPayouts>[0]>) =>
+const plan = (overrides: Partial<Parameters<typeof planRiderPayouts>[0]> & { ineligible?: string[] }) =>
   planRiderPayouts({
     earnings: [],
     now: NOW,
     platformPaidToday: 0,
     recipients: [],
+    eligibleRiders: new Set(
+      (overrides.earnings ?? []).map((e) => e.riderId).filter((id) => !(overrides.ineligible ?? []).includes(id))
+    ),
     riderPaidToday: new Map(),
     ridersWithInFlight: new Set(),
     ...overrides,
@@ -46,10 +58,12 @@ Deno.test('flag off: the run returns before reading or writing anything else', a
     throw new Error('must not be called while the flag is off');
   };
   const summary = await runRiderPayouts({
+    acquireLease: explode,
     alert: explode,
     createPayout: explode,
     initiateTransfer: explode,
     isFlagEnabled: async () => false,
+    loadEligibleRiders: explode,
     loadInFlightRiders: explode,
     loadPaidToday: explode,
     loadPendingEarnings: explode,
@@ -58,6 +72,7 @@ Deno.test('flag off: the run returns before reading or writing anything else', a
     markInitiated: explode,
     newPayoutId: explode,
     now: () => NOW,
+    releaseLease: explode,
     settle: explode,
     verifyTransfer: explode,
   });
@@ -72,7 +87,7 @@ Deno.test('planner: skips riders without a verified recipient, on hold, or with 
     earnings: [earning('e1', 'r-none', 2000), earning('e2', 'r-unverified', 2000), earning('e3', 'r-held', 2000), earning('e4', 'r-inflight', 2000), earning('e5', 'r-infinity', 2000)],
     recipients: [
       verified('r-unverified', { verifiedAt: null }),
-      verified('r-held', { holdUntil: '2026-10-21T00:00:00.000Z' }),
+      verified('r-held', { holdUntil: '2026-11-01T00:00:00.000Z' }),
       verified('r-inflight'),
       verified('r-infinity', { holdUntil: 'infinity' }),
     ],
@@ -288,4 +303,81 @@ Deno.test('run: the database refusal is the backstop even if the planner is wron
   expectEqual(result, { ok: false, reason: 'earnings_changed' }, 'refused');
   const mismatch = await deps.createPayout({ amount: 1_999, earningIds: [ledger.addEarning('r1', 2_000)], payoutId: 'b'.repeat(32), riderId: 'r1' });
   expectEqual(mismatch, { ok: false, reason: 'amount_mismatch' }, 'amount must match the locked rows');
+});
+
+// ── Clearing delay, eligibility, bank-change hold, run lease ───────────────
+
+Deno.test('clearing: only earnings older than clearingDays are paid; newer ones wait', () => {
+  const day = 86_400_000;
+  expectEqual(RIDER_PAYOUT_LIMITS.clearingDays, 7, 'default clearing delay');
+  const old = new Date(NOW.getTime() - 8 * day).toISOString();
+  const fresh = new Date(NOW.getTime() - 6 * day).toISOString();
+  expectEqual(isEarningCleared(old, 7, NOW), true, '8 days old clears');
+  expectEqual(isEarningCleared(fresh, 7, NOW), false, '6 days old waits');
+  expectEqual(isEarningCleared(null, 7, NOW), false, 'no delivery date never clears');
+
+  const result = plan({
+    earnings: [earning('old', 'r1', 1_500, old), earning('new', 'r1', 1_500, fresh), earning('x', 'r2', 5_000, fresh)],
+    recipients: [verified('r1'), verified('r2')],
+  });
+  expectEqual(result.batches, [{ amount: 1_500, earningIds: ['old'], riderId: 'r1' }], 'only the cleared one');
+  expectEqual(result.skipped, [{ amount: 5_000, reason: 'awaiting_clearing', riderId: 'r2' }], 'r2 waits');
+});
+
+Deno.test('eligibility: unapproved or suspended riders are never paid', () => {
+  const result = plan({
+    earnings: [earning('e1', 'r1', 2_000), earning('e2', 'r2', 2_000)],
+    ineligible: ['r2'],
+    recipients: [verified('r1'), verified('r2')],
+  });
+  expectEqual(result.batches.map((b) => b.riderId), ['r1'], 'only the eligible rider');
+  expectEqual(result.skipped, [{ amount: 2_000, reason: 'rider_not_eligible', riderId: 'r2' }], 'r2 refused');
+});
+
+Deno.test('bank-change hold is independent of the failure hold', () => {
+  const hourAgo = new Date(NOW.getTime() - 3_600_000).toISOString();
+  expectEqual(isBankChangeHoldLive(hourAgo, 24, NOW), true, 'changed an hour ago: held');
+  expectEqual(isBankChangeHoldLive('2026-10-28T00:00:00.000Z', 24, NOW), false, 'changed 2 days ago: free');
+  const result = plan({
+    earnings: [earning('e1', 'r1', 2_000)],
+    // Failure hold already cleared by a re-submit, bank change still live.
+    recipients: [verified('r1', { bankChangedAt: hourAgo, holdUntil: null })],
+  });
+  expectEqual(result.skipped[0]?.reason, 'recipient_on_hold', 'still held by the bank-change brake');
+});
+
+Deno.test('run: the database also refuses uncleared earnings and ineligible riders', async () => {
+  const { deps, ledger } = createTestLedger();
+  ledger.addRecipient('r1');
+  ledger.addRecipient('r2');
+  const fresh = ledger.addEarning('r1', 2_000, 60);
+  const r2 = ledger.addEarning('r2', 2_000);
+  ledger.setIneligible('r2');
+  expectEqual(
+    await deps.createPayout({ amount: 2_000, earningIds: [fresh], payoutId: 'c'.repeat(32), riderId: 'r1' }),
+    { ok: false, reason: 'earnings_not_cleared' },
+    'clearing re-checked'
+  );
+  expectEqual(
+    await deps.createPayout({ amount: 2_000, earningIds: [r2], payoutId: 'd'.repeat(32), riderId: 'r2' }),
+    { ok: false, reason: 'rider_not_eligible' },
+    'eligibility re-checked'
+  );
+  const summary = await runRiderPayouts(deps);
+  expectEqual([summary.created, ledger.transfers.size], [0, 0], 'nothing sent');
+});
+
+Deno.test('run lease: an overlapping run does nothing, and the lease is released afterwards', async () => {
+  const { deps, ledger } = createTestLedger();
+  ledger.addRecipient('r1');
+  ledger.addEarning('r1', 2_000);
+  ledger.lease.holder = 'someone-else';
+  ledger.lease.until = Date.parse('2026-10-20T08:00:00.000Z') + 60_000;
+  const blocked = await runRiderPayouts(deps);
+  expectEqual([blocked.status, blocked.created], ['lease_held', 0], 'second run backs off');
+
+  ledger.advanceMinutes(2); // the other run's lease expired
+  const ran = await runRiderPayouts(deps);
+  expectEqual([ran.status, ran.created], ['ran', 1], 'runs once the lease is free');
+  expectEqual(ledger.lease.until <= Date.parse('2026-10-20T08:02:00.000Z'), true, 'released in finally');
 });

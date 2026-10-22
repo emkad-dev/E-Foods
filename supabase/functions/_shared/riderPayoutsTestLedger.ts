@@ -12,6 +12,8 @@ import type { PaystackCallOutcome } from './paystack.ts';
 import type { RecordOperationalAlertInput } from './operationalAlerts.ts';
 import {
   RIDER_PAYOUT_LIMITS,
+  isBankChangeHoldLive,
+  isEarningCleared,
   isRecipientOnHold,
   type CreatePayoutResult,
   type RiderPayoutDeps,
@@ -40,6 +42,7 @@ export type FakePayout = {
 };
 
 export type FakeRecipient = {
+  bankChangedAt: string | null;
   holdReason: string | null;
   holdUntil: string | null;
   recipientCode: string;
@@ -68,6 +71,8 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
   const initiateQueue: InitiateBehaviour[] = [];
   const calls = { initiate: 0, verify: 0 };
   let flag = true;
+  const ineligible = new Set<string>();
+  const lease = { holder: null as string | null, until: 0 };
 
   const nowIso = () => new Date(clock).toISOString();
   const kobo = (naira: number) => Math.round(naira * 100);
@@ -82,7 +87,9 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
     advanceMinutes: (minutes: number) => {
       clock += minutes * 60_000;
     },
-    addEarning: (riderId: string, amountNaira: number, minutesAgo = 60) => {
+    lease,
+    /** Default: delivered 8 days ago, i.e. past the 7-day clearing delay. */
+    addEarning: (riderId: string, amountNaira: number, minutesAgo = 8 * 24 * 60) => {
       idCounter += 1;
       const id = `earning-${String(idCounter).padStart(3, '0')}`;
       earnings.set(id, {
@@ -97,6 +104,7 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
     },
     addRecipient: (riderId: string, overrides: Partial<FakeRecipient> = {}) => {
       recipients.set(riderId, {
+        bankChangedAt: null,
         holdReason: null,
         holdUntil: null,
         recipientCode: `RCP_${riderId}`,
@@ -110,6 +118,9 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
     },
     setFlag: (enabled: boolean) => {
       flag = enabled;
+    },
+    setIneligible: (riderId: string) => {
+      ineligible.add(riderId);
     },
     /** Total kobo Paystack actually accepted for a rider, across all transfers. */
     sentToRider: (riderId: string) =>
@@ -127,6 +138,10 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
       const recipient = recipients.get(input.riderId);
       if (!recipient || !recipient.verifiedAt) return { ok: false, reason: 'no_verified_recipient' };
       if (isRecipientOnHold(recipient.holdUntil, new Date(clock))) return { ok: false, reason: 'recipient_on_hold' };
+      if (isBankChangeHoldLive(recipient.bankChangedAt, limits.bankChangeHoldHours, new Date(clock))) {
+        return { ok: false, reason: 'recipient_on_hold' };
+      }
+      if (ineligible.has(input.riderId)) return { ok: false, reason: 'rider_not_eligible' };
       if ([...payouts.values()].some((p) => p.riderId === input.riderId && p.status === 'processing')) {
         return { ok: false, reason: 'payout_in_flight' };
       }
@@ -135,6 +150,9 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
         .map((id) => earnings.get(id))
         .filter((e): e is FakeEarning => !!e && e.riderId === input.riderId && e.status === 'pending' && e.payoutId === null);
       if (locked.length !== ids.length) return { ok: false, reason: 'earnings_changed' };
+      if (locked.some((e) => !isEarningCleared(e.deliveredAt, limits.clearingDays, new Date(clock)))) {
+        return { ok: false, reason: 'earnings_not_cleared' };
+      }
       const sum = locked.reduce((total, e) => total + e.amountKobo, 0);
       if (sum !== kobo(input.amount)) return { ok: false, reason: 'amount_mismatch' };
       if (sum < kobo(limits.minPayout)) return { ok: false, reason: 'below_minimum' };
@@ -260,12 +278,19 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
   };
 
   const deps: RiderPayoutDeps = {
+    acquireLease: async (holder, ttlSeconds) => {
+      if (lease.holder && lease.holder !== holder && lease.until > clock) return false;
+      lease.holder = holder;
+      lease.until = clock + ttlSeconds * 1000;
+      return true;
+    },
     alert: async (input) => {
       alerts.push(input);
     },
     createPayout: ledger.createPayout,
     initiateTransfer: ledger.initiateTransfer,
     isFlagEnabled: async () => flag,
+    loadEligibleRiders: async (riderIds) => new Set(riderIds.filter((id) => !ineligible.has(id))),
     loadInFlightRiders: async () =>
       new Set([...payouts.values()].filter((p) => p.status === 'processing').map((p) => p.riderId)),
     loadPaidToday: async () => {
@@ -286,7 +311,9 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
     loadRecipients: async (riderIds) =>
       riderIds.flatMap((id) => {
         const r = recipients.get(id);
-        return r ? [{ holdUntil: r.holdUntil, recipientCode: r.recipientCode, riderId: id, verifiedAt: r.verifiedAt }] : [];
+        return r
+          ? [{ bankChangedAt: r.bankChangedAt, holdUntil: r.holdUntil, recipientCode: r.recipientCode, riderId: id, verifiedAt: r.verifiedAt }]
+          : [];
       }),
     loadStaleProcessing: async (olderThanIso) =>
       [...payouts.values()]
@@ -312,6 +339,11 @@ export const createTestLedger = (startAt = new Date('2026-10-20T08:00:00.000Z'))
       return idCounter.toString(16).padStart(32, '0');
     },
     now: () => new Date(clock),
+    releaseLease: async (holder) => {
+      if (lease.holder === holder) {
+        lease.until = clock;
+      }
+    },
     settle: ledger.settle,
     verifyTransfer: ledger.verifyTransfer,
   };

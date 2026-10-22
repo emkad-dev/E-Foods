@@ -63,11 +63,17 @@ create table if not exists public."RiderPayoutRecipient" (
   "bankCode"          text not null,
   "bankName"          text,
   "verifiedAt"        timestamptz,
-  -- Payouts are skipped while holdUntil is in the future. Set for 24h when an
-  -- existing rider changes bank account (account-takeover brake) and to
-  -- 'infinity' when a transfer fails or is reversed (cleared by resubmitting).
+  -- TWO independent holds; payouts are skipped while EITHER is live:
+  --   holdUntil/holdReason - set to 'infinity' when a transfer fails or is
+  --     reversed; cleared when the rider re-submits bank details.
+  --   bankChangedAt - stamped when an existing rider switches to a different
+  --     account (account-takeover brake); payouts wait until bankChangedAt +
+  --     the bank-change hold (24h, passed in by the caller). Never cleared or
+  --     overwritten by a transfer outcome, so a failure hold followed by a
+  --     re-submit cannot shortcut it.
   "holdUntil"         timestamptz,
   "holdReason"        text,
+  "bankChangedAt"     timestamptz,
   "createdAt"         timestamptz not null default now(),
   "updatedAt"         timestamptz not null default now()
 );
@@ -362,6 +368,14 @@ create trigger "RiderEarning_on_verified_delivery"
 -- function re-validates every hard invariant under locks and either creates
 -- the payout atomically or refuses with a reason. Serialized platform-wide by
 -- an advisory xact lock because the daily caps are read-then-write.
+--
+-- Eligibility it enforces beyond the caps:
+--   * CLEARING DELAY: every earning must have been delivered more than
+--     p_clearing_days ago, so card chargebacks/refunds surface before the
+--     rider is paid. An earning with no deliveredAt never clears.
+--   * the rider is approved (DispatchRiderRecord.verificationStatus) and not
+--     suspended (UserAccount.accountDisabled);
+--   * neither recipient hold is live (failure hold, bank-change hold).
 -- ---------------------------------------------------------------------------
 create or replace function public.ebuy_create_rider_payout(
   p_payout_id text,
@@ -371,7 +385,9 @@ create or replace function public.ebuy_create_rider_payout(
   p_min_payout numeric,
   p_max_per_transfer numeric,
   p_max_per_rider_day numeric,
-  p_max_platform_day numeric
+  p_max_platform_day numeric,
+  p_clearing_days integer,
+  p_bank_change_hold_hours integer
 )
 returns jsonb
 language plpgsql
@@ -387,6 +403,7 @@ declare
   v_rider_today numeric(12, 2);
   v_platform_today numeric(12, 2);
   v_reference text;
+  v_uncleared integer;
 begin
   perform pg_advisory_xact_lock(hashtext('ebuy_rider_payouts'));
 
@@ -395,7 +412,9 @@ begin
   end if;
   if p_min_payout is null or p_max_per_transfer is null or p_max_per_rider_day is null or p_max_platform_day is null
      or p_min_payout <= 0 or p_max_per_transfer <= 0 or p_max_per_rider_day <= 0 or p_max_platform_day <= 0
-     or p_min_payout > p_max_per_transfer then
+     or p_min_payout > p_max_per_transfer
+     or p_clearing_days is null or p_clearing_days < 0
+     or p_bank_change_hold_hours is null or p_bank_change_hold_hours < 0 then
     return jsonb_build_object('ok', false, 'reason', 'invalid_caps');
   end if;
 
@@ -411,6 +430,22 @@ begin
   if v_recipient."holdUntil" is not null and v_recipient."holdUntil" > now() then
     return jsonb_build_object('ok', false, 'reason', 'recipient_on_hold');
   end if;
+  if v_recipient."bankChangedAt" is not null
+     and v_recipient."bankChangedAt" + make_interval(hours => p_bank_change_hold_hours) > now() then
+    return jsonb_build_object('ok', false, 'reason', 'recipient_on_hold');
+  end if;
+
+  if not exists (
+    select 1 from public."DispatchRiderRecord" r
+     where r."id" = p_rider_id and r."verificationStatus" = 'approved'
+  ) or exists (
+    select 1 from public."UserAccount" a
+     where a."uid" = p_rider_id and coalesce(a."accountDisabled", false)
+  ) or not exists (
+    select 1 from public."UserAccount" a where a."uid" = p_rider_id
+  ) then
+    return jsonb_build_object('ok', false, 'reason', 'rider_not_eligible');
+  end if;
 
   if exists (
     select 1 from public."RiderPayout" where "riderId" = p_rider_id and "status" = 'processing'
@@ -418,9 +453,15 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'payout_in_flight');
   end if;
 
-  select count(*), coalesce(sum(e."amount"), 0) into v_locked, v_sum
+  select count(*),
+         coalesce(sum(e."amount"), 0),
+         count(*) filter (
+           where e."deliveredAt" is null
+              or e."deliveredAt" >= now() - make_interval(days => p_clearing_days)
+         )
+    into v_locked, v_sum, v_uncleared
     from (
-      select "amount" from public."RiderEarning"
+      select "amount", "deliveredAt" from public."RiderEarning"
        where "id" = any(p_earning_ids)
          and "riderId" = p_rider_id
          and "status" = 'pending'
@@ -430,6 +471,9 @@ begin
 
   if v_locked <> v_requested then
     return jsonb_build_object('ok', false, 'reason', 'earnings_changed');
+  end if;
+  if v_uncleared > 0 then
+    return jsonb_build_object('ok', false, 'reason', 'earnings_not_cleared');
   end if;
   if v_sum <> round(p_amount, 2) then
     return jsonb_build_object('ok', false, 'reason', 'amount_mismatch', 'amount', v_sum);
@@ -479,9 +523,9 @@ begin
 end;
 $$;
 
-revoke all on function public.ebuy_create_rider_payout(text, text, text[], numeric, numeric, numeric, numeric, numeric)
+revoke all on function public.ebuy_create_rider_payout(text, text, text[], numeric, numeric, numeric, numeric, numeric, integer, integer)
   from public, anon, authenticated;
-grant execute on function public.ebuy_create_rider_payout(text, text, text[], numeric, numeric, numeric, numeric, numeric)
+grant execute on function public.ebuy_create_rider_payout(text, text, text[], numeric, numeric, numeric, numeric, numeric, integer, integer)
   to service_role;
 
 -- ---------------------------------------------------------------------------
@@ -606,5 +650,76 @@ revoke all on function public.ebuy_settle_rider_payout(text, text, text, bigint,
   from public, anon, authenticated;
 grant execute on function public.ebuy_settle_rider_payout(text, text, text, bigint, text, boolean)
   to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 8. Run lease: at most one payout run at a time.
+--
+-- Two overlapping runs (a slow run still going when the next cron tick or a
+-- manual invocation starts) could both pick the same stale 'processing'
+-- payout in reconcile and both re-send it. Paystack's reference uniqueness
+-- should refuse the second, but the platform should not rely on that alone.
+--
+-- Why a lease row and not pg_try_advisory_lock: a run is many separate
+-- PostgREST calls, each possibly on a different pooled connection. A
+-- transaction-scoped advisory lock ends with the first call, and a
+-- session-scoped one would stay held by whichever pooled connection took it
+-- (and could only be released from that same connection). The lease below is
+-- acquired atomically in one statement and expires on its own if a run dies
+-- without releasing it.
+-- ---------------------------------------------------------------------------
+create table if not exists public."RiderPayoutRunLease" (
+  "id"          text primary key default 'rider-payouts',
+  "holder"      text not null,
+  "lockedUntil" timestamptz not null,
+  "updatedAt"   timestamptz not null default now(),
+  constraint "RiderPayoutRunLease_singleton" check ("id" = 'rider-payouts')
+);
+
+alter table public."RiderPayoutRunLease" enable row level security;
+revoke all on table public."RiderPayoutRunLease" from public, anon, authenticated;
+grant select, insert, update, delete on table public."RiderPayoutRunLease" to service_role;
+
+create or replace function public.ebuy_acquire_rider_payout_lease(p_holder text, p_ttl_seconds integer)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_acquired text;
+begin
+  if p_holder is null or btrim(p_holder) = '' or p_ttl_seconds is null or p_ttl_seconds < 1 or p_ttl_seconds > 3600 then
+    return false;
+  end if;
+
+  insert into public."RiderPayoutRunLease" ("id", "holder", "lockedUntil", "updatedAt")
+  values ('rider-payouts', p_holder, now() + make_interval(secs => p_ttl_seconds), now())
+  on conflict ("id") do update set
+    "holder" = excluded."holder",
+    "lockedUntil" = excluded."lockedUntil",
+    "updatedAt" = now()
+  where public."RiderPayoutRunLease"."lockedUntil" <= now()
+     or public."RiderPayoutRunLease"."holder" = excluded."holder"
+  returning "holder" into v_acquired;
+
+  return v_acquired is not null;
+end;
+$$;
+
+create or replace function public.ebuy_release_rider_payout_lease(p_holder text)
+returns void
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+  update public."RiderPayoutRunLease"
+     set "lockedUntil" = now(), "updatedAt" = now()
+   where "id" = 'rider-payouts' and "holder" = p_holder;
+$$;
+
+revoke all on function public.ebuy_acquire_rider_payout_lease(text, integer) from public, anon, authenticated;
+grant execute on function public.ebuy_acquire_rider_payout_lease(text, integer) to service_role;
+revoke all on function public.ebuy_release_rider_payout_lease(text) from public, anon, authenticated;
+grant execute on function public.ebuy_release_rider_payout_lease(text) to service_role;
 
 notify pgrst, 'reload schema';

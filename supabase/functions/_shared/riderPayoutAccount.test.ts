@@ -4,7 +4,13 @@ Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
-const { BANK_CHANGE_HOLD_HOURS, maskAccountNumber, resolveBankSubmissionHold, validateRiderBankInput } = await import(
+const {
+  BANK_CHANGE_HOLD_HOURS,
+  maskAccountNumber,
+  resolveBankSubmissionHold,
+  resolveEffectiveHold,
+  validateRiderBankInput,
+} = await import(
   './riderPayoutAccount.ts'
 );
 
@@ -33,26 +39,40 @@ Deno.test('only the last four digits are ever stored', () => {
 });
 
 Deno.test('first submission is not held', () => {
-  expectEqual(resolveBankSubmissionHold(null, 'RCP_1', NOW), { changed: false, holdReason: null, holdUntil: null }, 'no hold');
-});
-
-Deno.test('changing to a different account holds payouts for 24 hours', () => {
-  const result = resolveBankSubmissionHold({ holdReason: null, holdUntil: null, recipientCode: 'RCP_old' }, 'RCP_new', NOW);
-  expectEqual(result.changed, true, 'changed');
-  expectEqual(result.holdReason, 'bank_details_changed', 'reason');
-  expectEqual(result.holdUntil, new Date(NOW.getTime() + BANK_CHANGE_HOLD_HOURS * 3_600_000).toISOString(), 'until');
-});
-
-Deno.test('re-submitting the same account clears a failed-transfer hold but not a live bank-change hold', () => {
   expectEqual(
-    resolveBankSubmissionHold({ holdReason: 'transfer_failed', holdUntil: 'infinity', recipientCode: 'RCP_1' }, 'RCP_1', NOW),
-    { changed: false, holdReason: null, holdUntil: null },
-    'failure hold cleared by confirmation'
+    resolveBankSubmissionHold(null, 'RCP_1', NOW),
+    { bankChangedAt: null, changed: false, holdReason: null, holdUntil: null },
+    'no hold'
   );
-  const live = { holdReason: 'bank_details_changed', holdUntil: '2026-10-20T20:00:00.000Z', recipientCode: 'RCP_1' };
+});
+
+Deno.test('changing to a different account stamps bankChangedAt (24h brake)', () => {
+  const result = resolveBankSubmissionHold({ bankChangedAt: null, recipientCode: 'RCP_old' }, 'RCP_new', NOW);
+  expectEqual(result, { bankChangedAt: NOW.toISOString(), changed: true, holdReason: null, holdUntil: null }, 'stamped');
+  expectEqual(BANK_CHANGE_HOLD_HOURS, 24, '24h brake');
+});
+
+Deno.test('a failed transfer then a same-account re-submit cannot shortcut the bank-change brake', () => {
+  // Rider switched bank an hour ago, then a transfer failed (settle wrote the
+  // failure hold), then the rider re-submits the SAME (new) account.
+  const changedAt = new Date(NOW.getTime() - 3_600_000).toISOString();
+  const resubmit = resolveBankSubmissionHold({ bankChangedAt: changedAt, recipientCode: 'RCP_new' }, 'RCP_new', NOW);
+  expectEqual(resubmit, { bankChangedAt: changedAt, changed: false, holdReason: null, holdUntil: null }, 'brake kept');
+  const effective = resolveEffectiveHold({ bankChangedAt: resubmit.bankChangedAt, holdReason: null, holdUntil: null }, NOW);
+  expectEqual(effective.holdReason, 'bank_details_changed', 'still held');
+  expectEqual(effective.holdUntil, new Date(Date.parse(changedAt) + 24 * 3_600_000).toISOString(), 'until change + 24h');
+});
+
+Deno.test('effective hold is the later of the two; an infinite failure hold wins', () => {
+  const changedAt = new Date(NOW.getTime() - 3_600_000).toISOString();
   expectEqual(
-    resolveBankSubmissionHold(live, 'RCP_1', NOW),
-    { changed: false, holdReason: live.holdReason, holdUntil: live.holdUntil },
-    'cannot shortcut the 24h brake by re-submitting'
+    resolveEffectiveHold({ bankChangedAt: changedAt, holdReason: 'transfer_failed', holdUntil: 'infinity' }, NOW),
+    { holdReason: 'transfer_failed', holdUntil: 'infinity' },
+    'failure hold wins'
+  );
+  expectEqual(
+    resolveEffectiveHold({ bankChangedAt: '2026-10-01T00:00:00.000Z', holdReason: null, holdUntil: null }, NOW),
+    { holdReason: null, holdUntil: null },
+    'expired brake'
   );
 });

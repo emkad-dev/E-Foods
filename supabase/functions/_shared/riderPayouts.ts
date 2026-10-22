@@ -20,6 +20,11 @@
 //     failed and its earnings released, and the run STOPS (circuit breaker).
 //   * transfer OTP enabled on the Paystack account -> alert and stop; the
 //     owner must disable OTP for automated transfers.
+//   * only earnings older than the clearing delay (clearingDays) are paid,
+//     only to approved, non-suspended riders, and never while a failure hold
+//     or the 24h bank-change hold is live - all re-checked in SQL.
+//   * one run at a time, via a lease row (ebuy_acquire_rider_payout_lease).
+// Operating notes (stuck payouts, clearing a halt): docs/ops/rider-payouts.md.
 
 import { serviceClient } from './client.ts';
 import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
@@ -51,6 +56,15 @@ export const RIDER_PAYOUT_LIMITS = {
   reconcileAfterMinutes: 30,
   /** Past this age a never-confirmed payout is only alerted on, never re-sent. */
   reinitiateWithinHours: 24,
+  /**
+   * Clearing delay: an earning is payable only once its delivery is older than
+   * this, so card chargebacks and refunds surface before the rider is paid.
+   */
+  clearingDays: 7,
+  /** After a rider switches to a different bank account, payouts wait this long. */
+  bankChangeHoldHours: 24,
+  /** Run lease TTL; a crashed run frees the lease on its own after this. */
+  leaseTtlSeconds: 900,
 } as const;
 
 export type RiderPayoutLimits = typeof RIDER_PAYOUT_LIMITS;
@@ -71,6 +85,7 @@ export type PendingEarning = {
 };
 
 export type RecipientState = {
+  bankChangedAt?: string | null;
   holdUntil?: string | null;
   recipientCode?: string | null;
   riderId: string;
@@ -86,7 +101,9 @@ export type PayoutSkipReason =
   | 'earning_exceeds_transfer_cap'
   | 'below_minimum'
   | 'daily_cap_reached'
-  | 'run_limit_reached';
+  | 'run_limit_reached'
+  | 'awaiting_clearing'
+  | 'rider_not_eligible';
 
 export type PayoutPlan = {
   batches: PlannedPayout[];
@@ -103,12 +120,30 @@ export const isRecipientOnHold = (holdUntil: string | null | undefined, now: Dat
   return !Number.isFinite(parsed) || parsed > now.getTime();
 };
 
+/** The bank-change brake: held until bankChangedAt + hours. Unparsable = held. */
+export const isBankChangeHoldLive = (bankChangedAt: string | null | undefined, holdHours: number, now: Date) => {
+  const raw = sanitizeOptionalText(bankChangedAt);
+  if (!raw) {
+    return false;
+  }
+  const parsed = Date.parse(raw);
+  return !Number.isFinite(parsed) || parsed + holdHours * 3_600_000 > now.getTime();
+};
+
+/** True once the delivery is older than the clearing delay. No/unparsable date never clears. */
+export const isEarningCleared = (deliveredAt: string | null | undefined, clearingDays: number, now: Date) => {
+  const parsed = Date.parse(sanitizeText(deliveredAt));
+  return Number.isFinite(parsed) && parsed < now.getTime() - clearingDays * 86_400_000;
+};
+
 export const planRiderPayouts = (input: {
   earnings: PendingEarning[];
   limits?: RiderPayoutLimits;
   now: Date;
   platformPaidToday: number;
   recipients: RecipientState[];
+  /** Riders who are approved and not suspended. Anyone else is never paid. */
+  eligibleRiders: Set<string>;
   riderPaidToday: Map<string, number>;
   ridersWithInFlight: Set<string>;
 }): PayoutPlan => {
@@ -116,15 +151,26 @@ export const planRiderPayouts = (input: {
   const plan: PayoutPlan = { batches: [], skipped: [] };
   const recipients = new Map(input.recipients.map((recipient) => [recipient.riderId, recipient]));
 
-  const byRider = new Map<string, Array<{ deliveredAt: string; id: string; kobo: number }>>();
+  const byRider = new Map<string, Array<{ deliveredAtMs: number; id: string; kobo: number }>>();
+  const unclearedKobo = new Map<string, number>();
   for (const earning of input.earnings) {
     const kobo = toKobo(earning.amount);
     if (!earning.id || !earning.riderId || kobo <= 0) {
       continue;
     }
+    if (!isEarningCleared(earning.deliveredAt, limits.clearingDays, input.now)) {
+      unclearedKobo.set(earning.riderId, (unclearedKobo.get(earning.riderId) ?? 0) + kobo);
+      continue;
+    }
     const list = byRider.get(earning.riderId) ?? [];
-    list.push({ deliveredAt: sanitizeText(earning.deliveredAt), id: earning.id, kobo });
+    list.push({ deliveredAtMs: Date.parse(sanitizeText(earning.deliveredAt)), id: earning.id, kobo });
     byRider.set(earning.riderId, list);
+  }
+  // Riders whose every earning is still inside the clearing window.
+  for (const [riderId, kobo] of [...unclearedKobo.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!byRider.has(riderId)) {
+      plan.skipped.push({ amount: fromKobo(kobo), reason: 'awaiting_clearing', riderId });
+    }
   }
 
   const minKobo = toKobo(limits.minPayout);
@@ -134,7 +180,7 @@ export const planRiderPayouts = (input: {
   for (const riderId of [...byRider.keys()].sort()) {
     // Oldest first, id as a deterministic tiebreak.
     const earnings = byRider.get(riderId)!.sort((a, b) =>
-      a.deliveredAt === b.deliveredAt ? a.id.localeCompare(b.id) : a.deliveredAt.localeCompare(b.deliveredAt)
+      a.deliveredAtMs === b.deliveredAtMs ? a.id.localeCompare(b.id) : a.deliveredAtMs - b.deliveredAtMs
     );
     const totalKobo = earnings.reduce((sum, earning) => sum + earning.kobo, 0);
     const skip = (reason: PayoutSkipReason) => plan.skipped.push({ amount: fromKobo(totalKobo), reason, riderId });
@@ -144,8 +190,15 @@ export const planRiderPayouts = (input: {
       skip('no_verified_recipient');
       continue;
     }
-    if (isRecipientOnHold(recipient.holdUntil, input.now)) {
+    if (
+      isRecipientOnHold(recipient.holdUntil, input.now) ||
+      isBankChangeHoldLive(recipient.bankChangedAt, limits.bankChangeHoldHours, input.now)
+    ) {
       skip('recipient_on_hold');
+      continue;
+    }
+    if (!input.eligibleRiders.has(riderId)) {
+      skip('rider_not_eligible');
       continue;
     }
     if (input.ridersWithInFlight.has(riderId)) {
@@ -254,6 +307,11 @@ export type RiderPayoutDeps = {
     reference: string;
   }) => Promise<PaystackCallOutcome>;
   isFlagEnabled: () => Promise<boolean>;
+  /** Lease for this run; false means another run holds it. */
+  acquireLease: (holder: string, ttlSeconds: number) => Promise<boolean>;
+  releaseLease: (holder: string) => Promise<void>;
+  /** Of these riders, the ones approved (verificationStatus) and not suspended (accountDisabled). */
+  loadEligibleRiders: (riderIds: string[]) => Promise<Set<string>>;
   loadInFlightRiders: () => Promise<Set<string>>;
   loadPaidToday: () => Promise<{ byRider: Map<string, number>; platform: number }>;
   loadPendingEarnings: () => Promise<PendingEarning[]>;
@@ -281,7 +339,7 @@ export type RiderPayoutRunSummary = {
   reconciled: number;
   refused: Array<{ reason: string; riderId: string }>;
   skipped: PayoutPlan['skipped'];
-  status: 'flag_off' | 'ran';
+  status: 'flag_off' | 'lease_held' | 'ran';
 };
 
 const alertPayout = (
@@ -506,6 +564,24 @@ export const runRiderPayouts = async (
     return { ...summary, status: 'flag_off' };
   }
 
+  // One run at a time (see ebuy_acquire_rider_payout_lease): two overlapping
+  // runs could otherwise both reconcile - and re-send - the same stale payout.
+  const leaseHolder = deps.newPayoutId();
+  if (!(await deps.acquireLease(leaseHolder, limits.leaseTtlSeconds))) {
+    return { ...summary, status: 'lease_held' };
+  }
+  try {
+    return await runLeasedRiderPayouts(deps, limits, summary);
+  } finally {
+    await deps.releaseLease(leaseHolder);
+  }
+};
+
+const runLeasedRiderPayouts = async (
+  deps: RiderPayoutDeps,
+  limits: RiderPayoutLimits,
+  summary: RiderPayoutRunSummary
+): Promise<RiderPayoutRunSummary> => {
   const reconcile = await reconcileStaleProcessing(deps, limits);
   summary.reconciled = reconcile.reconciled;
   if (reconcile.halted) {
@@ -518,14 +594,16 @@ export const runRiderPayouts = async (
     return summary;
   }
   const riderIds = [...new Set(earnings.map((earning) => earning.riderId))];
-  const [recipients, paidToday, inFlight] = await Promise.all([
+  const [recipients, paidToday, inFlight, eligibleRiders] = await Promise.all([
     deps.loadRecipients(riderIds),
     deps.loadPaidToday(),
     deps.loadInFlightRiders(),
+    deps.loadEligibleRiders(riderIds),
   ]);
 
   const plan = planRiderPayouts({
     earnings,
+    eligibleRiders,
     limits,
     now: deps.now(),
     platformPaidToday: paidToday.platform,
@@ -617,6 +695,8 @@ export const buildDefaultRiderPayoutDeps = (): RiderPayoutDeps => ({
         p_max_per_rider_day: RIDER_PAYOUT_LIMITS.maxPerRiderPerDay,
         p_max_per_transfer: RIDER_PAYOUT_LIMITS.maxPerTransfer,
         p_max_platform_day: RIDER_PAYOUT_LIMITS.maxPlatformPerDay,
+        p_bank_change_hold_hours: RIDER_PAYOUT_LIMITS.bankChangeHoldHours,
+        p_clearing_days: RIDER_PAYOUT_LIMITS.clearingDays,
         p_min_payout: RIDER_PAYOUT_LIMITS.minPayout,
         p_payout_id: payoutId,
         p_rider_id: riderId,
@@ -633,8 +713,32 @@ export const buildDefaultRiderPayoutDeps = (): RiderPayoutDeps => ({
     }
     return { ok: false, reason: sanitizeText(data?.reason, 'unknown') };
   },
+  acquireLease: async (holder, ttlSeconds) =>
+    (throwOnError(
+      await serviceClient.rpc('ebuy_acquire_rider_payout_lease', { p_holder: holder, p_ttl_seconds: ttlSeconds })
+    ) as boolean | null) === true,
   initiateTransfer: (input) => initiatePaystackTransfer(input),
   isFlagEnabled: async () => isFeatureEnabled(await loadFeatureFlagMap(), RIDER_AUTO_PAYOUTS_FLAG),
+  loadEligibleRiders: async (riderIds) => {
+    if (riderIds.length === 0) {
+      return new Set<string>();
+    }
+    const [riders, accounts] = await Promise.all([
+      serviceClient.from('DispatchRiderRecord').select('id,verificationStatus').in('id', riderIds),
+      serviceClient.from('UserAccount').select('uid,accountDisabled').in('uid', riderIds),
+    ]);
+    const approved = new Set(
+      ((throwOnError(riders) ?? []) as Array<{ id: string; verificationStatus: string | null }>)
+        .filter((row) => row.verificationStatus === 'approved')
+        .map((row) => row.id)
+    );
+    const active = new Set(
+      ((throwOnError(accounts) ?? []) as Array<{ accountDisabled: boolean | null; uid: string }>)
+        .filter((row) => row.accountDisabled !== true)
+        .map((row) => row.uid)
+    );
+    return new Set(riderIds.filter((id) => approved.has(id) && active.has(id)));
+  },
   loadInFlightRiders: async () => {
     const rows = throwOnError(
       await serviceClient.from('RiderPayout').select('riderId').eq('status', 'processing')
@@ -674,7 +778,7 @@ export const buildDefaultRiderPayoutDeps = (): RiderPayoutDeps => ({
       : ((throwOnError(
           await serviceClient
             .from('RiderPayoutRecipient')
-            .select('riderId,recipientCode,verifiedAt,holdUntil')
+            .select('riderId,recipientCode,verifiedAt,holdUntil,bankChangedAt')
             .in('riderId', riderIds)
         ) as RecipientState[] | null) ?? []),
   loadStaleProcessing: async (olderThanIso) =>
@@ -702,6 +806,9 @@ export const buildDefaultRiderPayoutDeps = (): RiderPayoutDeps => ({
     );
   },
   newPayoutId: () => crypto.randomUUID().replace(/-/g, ''),
+  releaseLease: async (holder) => {
+    throwOnError(await serviceClient.rpc('ebuy_release_rider_payout_lease', { p_holder: holder }));
+  },
   now: () => new Date(),
   settle: async (input) => settleRiderPayout(input),
   verifyTransfer: (reference) => verifyPaystackTransfer(reference),
