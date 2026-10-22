@@ -53,10 +53,10 @@ const EXPECTED_DOMAIN_ACTION_COUNTS = {
   ORDER_ACTIONS: 13,
   DISPATCH_ACTIONS: 16,
   PARTNER_ACTIONS: 18,
-  ADMIN_ACTIONS: 34,
+  ADMIN_ACTIONS: 35,
   ACCOUNT_ACTIONS: 19,
 };
-const EXPECTED_TOTAL_ACTIONS = 100;
+const EXPECTED_TOTAL_ACTIONS = 101;
 
 const actionsSource = fs.readFileSync(ACTIONS_SOURCE_PATH, 'utf8');
 
@@ -79,7 +79,7 @@ test('actions.ts has exactly the expected per-domain action counts', () => {
   }
 });
 
-test('actions.ts has exactly 100 total actions across all five domains', () => {
+test('actions.ts has exactly 101 total actions across all five domains', () => {
   const total = Object.keys(EXPECTED_DOMAIN_ACTION_COUNTS).reduce(
     (sum, constName) => sum + extractActionArrayIndependently(actionsSource, constName).length,
     0
@@ -87,7 +87,7 @@ test('actions.ts has exactly 100 total actions across all five domains', () => {
   assert.equal(total, EXPECTED_TOTAL_ACTIONS);
 });
 
-test('RPC_ROUTES covers exactly the 100 actions', () => {
+test('RPC_ROUTES covers exactly the 101 actions', () => {
   assert.equal(Object.keys(RPC_ROUTES).length, EXPECTED_TOTAL_ACTIONS);
 });
 

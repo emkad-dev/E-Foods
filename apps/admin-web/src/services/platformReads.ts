@@ -187,13 +187,29 @@ export type RestaurantPayoutRow = {
 };
 
 /** Mirrors adminGetRestaurantPayouts (supabase/functions/_shared/domains/admin.ts). */
+export type RestaurantDeliveryProvider = 'restaurant' | 'platform';
+
 export type AdminRestaurantPayouts = {
+  /** restaurantId -> who delivers its orders (rider pay). Absent on older backends. */
+  deliveryProviders?: Record<string, RestaurantDeliveryProvider>;
+  /** Checkout honours 'platform' only while this flag is on. */
+  platformDispatchEnabled?: boolean;
   platformSettlement: SettlementTotals;
   restaurants: RestaurantPayoutRow[];
   windowDays: number;
 };
 
 export const getAdminRestaurantPayouts = () => callAdminRpc<AdminRestaurantPayouts>('adminGetRestaurantPayouts');
+
+/** Mirrors adminSetRestaurantDeliveryProvider (supabase/functions/_shared/restaurantDeliveryProviderAdmin.ts). */
+export const setAdminRestaurantDeliveryProvider = (input: {
+  deliveryProvider: RestaurantDeliveryProvider;
+  restaurantId: string;
+}) =>
+  callAdminRpc<{ deliveryProvider: RestaurantDeliveryProvider; id: string; name: string | null; previous: RestaurantDeliveryProvider }>(
+    'adminSetRestaurantDeliveryProvider',
+    input
+  );
 
 export type RiderRosterRow = {
   acceptanceRate: number | null;

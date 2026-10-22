@@ -76,3 +76,11 @@ Deno.test('effective hold is the later of the two; an infinite failure hold wins
     'expired brake'
   );
 });
+
+Deno.test('admin delivery-provider input accepts only the two exact values', async () => {
+  const { parseDeliveryProviderInput } = await import('./restaurantDeliveryProviderAdmin.ts');
+  expectEqual(parseDeliveryProviderInput('platform'), 'platform', 'platform');
+  expectEqual(parseDeliveryProviderInput('restaurant'), 'restaurant', 'restaurant');
+  expectEqual(parseDeliveryProviderInput('PLATFORM'), null, 'case-sensitive');
+  expectEqual(parseDeliveryProviderInput(true), null, 'non-string');
+});

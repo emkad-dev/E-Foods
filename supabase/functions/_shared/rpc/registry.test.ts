@@ -144,6 +144,7 @@ const EXPECTED_ADMIN_ACTIONS = [
   'adminSetPromoCodeActive',
   'bootstrapFirstAdmin',
   'adminGetRiderPayouts',
+  'adminSetRestaurantDeliveryProvider',
 ];
 
 const EXPECTED_ACCOUNT_ACTIONS = [
@@ -207,7 +208,7 @@ const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['orders', ORDER_ACTIONS, 13],
   ['dispatch', DISPATCH_ACTIONS, 16],
   ['partner', PARTNER_ACTIONS, 18],
-  ['admin', ADMIN_ACTIONS, 34],
+  ['admin', ADMIN_ACTIONS, 35],
   ['account', ACCOUNT_ACTIONS, 19],
 ];
 
@@ -239,7 +240,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 100-action surface', () => {
+Deno.test('the five domains together cover exactly the 101-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -248,14 +249,14 @@ Deno.test('the five domains together cover exactly the 100-action surface', () =
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 100, 'total action count');
-  expectEqual(new Set(union).size, 100, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 100, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 101, 'total action count');
+  expectEqual(new Set(union).size, 101, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 101, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 100, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 101, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {

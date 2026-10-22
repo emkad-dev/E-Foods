@@ -109,6 +109,9 @@ export const ADMIN_ACTIONS = [
   'bootstrapFirstAdmin',
   // Rider pay: recent Paystack rider payouts, held riders and ledger totals.
   'adminGetRiderPayouts',
+  // Rider pay: switch a restaurant between FEASTY riders and its own delivery
+  // (RestaurantRecord.deliveryProvider), which decides who keeps the delivery fee.
+  'adminSetRestaurantDeliveryProvider',
 ] as const;
 
 export const ACCOUNT_ACTIONS = [

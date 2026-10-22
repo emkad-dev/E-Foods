@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import KpiCard from '../components/KpiCard';
@@ -7,7 +8,12 @@ import StatusBadge from '../components/StatusBadge';
 import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
-import { getAdminRestaurantPayouts, type RestaurantPayoutRow } from '../services/platformReads';
+import {
+  getAdminRestaurantPayouts,
+  setAdminRestaurantDeliveryProvider,
+  type RestaurantDeliveryProvider,
+  type RestaurantPayoutRow,
+} from '../services/platformReads';
 import type { AdminTone } from '../theme/tones';
 
 /**
@@ -54,9 +60,56 @@ export default function RestaurantsPage() {
   const notSplittingCount = rows.filter((row) => row.notSplitting).length;
   const windowDays = data?.windowDays ?? 30;
 
+  // Rider pay: who delivers each restaurant's delivery orders.
+  const [pendingProvider, setPendingProvider] = useState<{
+    name: string;
+    next: RestaurantDeliveryProvider;
+    restaurantId: string;
+  } | null>(null);
+  const [providerBusy, setProviderBusy] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const providerOf = (restaurantId: string): RestaurantDeliveryProvider =>
+    data?.deliveryProviders?.[restaurantId] === 'platform' ? 'platform' : 'restaurant';
+
+  const confirmProviderChange = async () => {
+    if (!pendingProvider) return;
+    setProviderBusy(true);
+    setProviderError(null);
+    try {
+      await setAdminRestaurantDeliveryProvider({
+        deliveryProvider: pendingProvider.next,
+        restaurantId: pendingProvider.restaurantId,
+      });
+      setPendingProvider(null);
+      refresh();
+    } catch (changeError) {
+      setProviderError(changeError instanceof Error ? changeError.message : 'Could not change who delivers.');
+      setPendingProvider(null);
+    } finally {
+      setProviderBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
+      {providerError ? <ErrorBanner message={providerError} /> : null}
+
+      {pendingProvider ? (
+        <ConfirmDialog
+          title={pendingProvider.next === 'platform' ? 'Use FEASTY riders?' : 'Switch to own delivery?'}
+          body={
+            pendingProvider.next === 'platform'
+              ? `From the next checkout, ${pendingProvider.name}'s delivery fee and tips stay with FEASTY to pay our riders, and its orders go to FEASTY riders only. Orders already placed are not affected.${data?.platformDispatchEnabled ? '' : ' Platform dispatch is OFF, so checkout keeps treating this restaurant as self-delivering until it is turned on.'}`
+              : `From the next checkout, ${pendingProvider.name} keeps its delivery fee and delivers its own orders. Orders already placed are not affected.`
+          }
+          confirmLabel={pendingProvider.next === 'platform' ? 'Use FEASTY riders' : 'Use own delivery'}
+          busy={providerBusy}
+          busyLabel="Saving…"
+          onCancel={() => setPendingProvider(null)}
+          onConfirm={() => void confirmProviderChange()}
+        />
+      ) : null}
 
       {viewState === 'ready' && data ? (
         <div className="kpi-grid">
@@ -104,6 +157,7 @@ export default function RestaurantsPage() {
                   <th>Status</th>
                   <th>Paystack subaccount</th>
                   <th>Payout profile</th>
+                  <th>Delivery</th>
                   <th>Manual ({windowDays}d)</th>
                   <th>Split ({windowDays}d)</th>
                 </tr>
@@ -144,6 +198,30 @@ export default function RestaurantsPage() {
                       {row.payoutLastError ? (
                         <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
                           {row.payoutLastError}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <StatusBadge
+                        label={providerOf(row.id) === 'platform' ? 'FEASTY riders' : 'Own delivery'}
+                        tone={providerOf(row.id) === 'platform' ? 'info' : 'neutral'}
+                      />
+                      {data?.deliveryProviders ? (
+                        <div style={{ marginTop: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={providerBusy}
+                            onClick={() =>
+                              setPendingProvider({
+                                name: row.name,
+                                next: providerOf(row.id) === 'platform' ? 'restaurant' : 'platform',
+                                restaurantId: row.id,
+                              })
+                            }
+                          >
+                            {providerOf(row.id) === 'platform' ? 'Use own delivery' : 'Use FEASTY riders'}
+                          </button>
                         </div>
                       ) : null}
                     </td>

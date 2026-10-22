@@ -34,6 +34,8 @@ import {
 } from '../adminFleetReads.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { adminGetRiderPayouts } from '../riderPayoutAccount.ts';
+import { adminSetRestaurantDeliveryProvider } from '../restaurantDeliveryProviderAdmin.ts';
+import { loadPlatformDispatchEnabled, loadRestaurantDeliveryProviders } from '../deliveryProvider.ts';
 import { resolveBroadcastAudience, type BroadcastSegment } from '../broadcast.ts';
 import { serviceClient } from '../client.ts';
 import { PROMO_CODE_COLUMNS, normalizePromoCode, type PromoCodeRow } from '../promoCodes.ts';
@@ -1088,9 +1090,18 @@ const adminGetRestaurantPayouts: Handler = async ({ context }) => {
   const profiles = (payoutsResult.data ?? []) as PayoutProfileInput[];
   const { byRestaurant, platform } = summarizeSettlement(transactions);
   const now = new Date();
+  // Rider pay: who delivers each restaurant's orders. Both reads are tolerant
+  // (fall back to 'restaurant' / off), so this page keeps working before the
+  // rider-pay migration adds the column.
+  const [deliveryProviders, platformDispatchEnabled] = await Promise.all([
+    loadRestaurantDeliveryProviders(restaurants.map((restaurant) => restaurant.id)),
+    loadPlatformDispatchEnabled(),
+  ]);
 
   return json(200, {
     data: {
+      deliveryProviders: Object.fromEntries(deliveryProviders),
+      platformDispatchEnabled,
       platformSettlement: platform,
       restaurants: restaurants.map((restaurant) =>
         buildRestaurantPayoutRow(
@@ -2089,6 +2100,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminGetRestaurantPayouts,
     adminGetRiderRoster,
     adminGetRiderPayouts,
+    adminSetRestaurantDeliveryProvider,
     adminGetAuditLog,
     adminGetRiskEvents,
     adminListFeatureFlags,
