@@ -142,6 +142,11 @@ export const ACCOUNT_ACTIONS = [
   // Account domain, not dispatch, because they are self-service account data.
   'riderGetPayoutProfile',
   'riderSubmitPayoutBank',
+  // One cold start for interactive customer sign-in: profile, policy
+  // acceptance and the remote activeSessionId in a single authenticated call,
+  // so the client no longer chains getPolicyAcceptance behind a profile read.
+  // Read-only; the single-device claim write still happens client-side.
+  'customerBootstrap',
 ] as const;
 
 // The two actions that must run before authentication:

@@ -242,6 +242,44 @@ const recordPolicyAcceptanceHandler: Handler = async ({ context, data }) => {
   });
 };
 
+// Columns the customer app reads from the user_profiles view (see
+// apps/customer services/supabase/profile.ts). Selected verbatim so the
+// bootstrap profile maps through the same client mapper with no reshaping.
+const CUSTOMER_PROFILE_COLUMNS =
+  'uid,email,displayName,phoneNumber,photoURL,emailVerified,role,partnerApplicationStatus,partnerApplicationReviewedAt,partnerApplicationRejectionReason,dispatchApplicationStatus,dispatchApplicationReviewedAt,dispatchApplicationRejectionReason,expoPushToken,pushTokenUpdatedAt,activeSessionId,activeSessionUpdatedAt,accountDisabled,disabledAt,disabledByUid,lastPrivilegedRole,restaurantId,restaurantName,restaurantLinkedAt,restaurantLinkSource,createdAt,updatedAt';
+
+// Interactive customer sign-in in one authenticated round trip: the profile
+// row, the current policy-acceptance status, and the remote activeSessionId.
+// Read-only. The profile and policy reads run concurrently so the call is a
+// single cold start rather than a serial chain. The single-device claim WRITE
+// stays on the client, which mints the device id; this only reports the id the
+// client compares against.
+const customerBootstrap: Handler = async ({ context }) => {
+  const [profileResult, policyAcceptance] = await Promise.all([
+    serviceClient
+      .from('user_profiles')
+      .select(CUSTOMER_PROFILE_COLUMNS)
+      .eq('uid', context.uid)
+      .maybeSingle<Record<string, unknown>>(),
+    hasCurrentPolicyAcceptance(context.uid, 'customer'),
+  ]);
+
+  if (profileResult.error) {
+    throw new Error(profileResult.error.message);
+  }
+
+  const profile = profileResult.data ?? null;
+
+  return json(200, {
+    data: {
+      profile,
+      policyAcceptance,
+      activeSessionId:
+        profile && typeof profile.activeSessionId === 'string' ? profile.activeSessionId : null,
+    },
+  });
+};
+
 /**
  * Shared validation for the two PRE-AUTH invite actions below.
  *
@@ -1334,6 +1372,7 @@ export const accountDomain = defineRpcDomain<AuthenticatedRequestContext>({
   },
   handlers: {
     assignUserRole,
+    customerBootstrap,
     deleteAdminAccess,
     deleteOwnAccount,
     deleteUserAccountOnRequest,
