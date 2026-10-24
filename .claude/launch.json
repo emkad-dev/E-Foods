@@ -33,6 +33,20 @@
         "web"
       ],
       "port": 8082
+    },
+    {
+      "name": "dispatch-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "apps/dispatch",
+        "run",
+        "web",
+        "--",
+        "--port",
+        "8086"
+      ],
+      "port": 8086
     }
   ]
 }

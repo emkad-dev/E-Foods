@@ -1,4 +1,4 @@
-﻿-- ============================================================================
+-- ============================================================================
 -- FEASTY — PRE-PUSH migration bundle (apply in Supabase SQL editor, in order)
 -- Generated 2026-10-23. Run this WHOLE file once, top to bottom.
 -- After it succeeds: (1) run the VACUUM line at the very bottom in ITS OWN query
