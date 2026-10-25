@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "674074319976",
+    "project_id": "feasty-b6281",
+    "storage_bucket": "feasty-b6281.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674074319976:android:a2cfe04907ef61b1396fdd",
+        "android_client_info": {
+          "package_name": "com.feasty.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWHo1h8VISywx8VFCLqZ0ZCvA2TtWwQkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674074319976:android:b00af4cb3cd8aae5396fdd",
+        "android_client_info": {
+          "package_name": "com.feasty.dispatch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWHo1h8VISywx8VFCLqZ0ZCvA2TtWwQkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674074319976:android:005b76c3bc90a7a3396fdd",
+        "android_client_info": {
+          "package_name": "com.feasty.partner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWHo1h8VISywx8VFCLqZ0ZCvA2TtWwQkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
