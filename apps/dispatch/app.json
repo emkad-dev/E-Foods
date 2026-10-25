@@ -17,7 +17,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#FFF3D4",
+        "backgroundColor": "#14241B",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -103,7 +103,10 @@
       "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnZmJoZW9ydnRvbGl4ZGNwamh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODE4MTgsImV4cCI6MjA5MzA1NzgxOH0.gJVihwyRHJTuPKxTKpm3UNIqUs5OiG5xCJK1fqweDzk",
       "EXPO_PUBLIC_SUPABASE_PROJECT_REF": "rgfbheorvtolixdcpjhy",
       "EXPO_PUBLIC_BACKEND_RPC_URL": "https://rgfbheorvtolixdcpjhy.supabase.co/functions/v1/app-rpc",
-      "router": {}
+      "router": {},
+      "eas": {
+        "projectId": "5d49aed9-3b39-45d7-a001-484b1e993fbc"
+      }
     }
   }
 }
