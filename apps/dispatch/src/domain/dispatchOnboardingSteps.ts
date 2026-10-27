@@ -46,26 +46,29 @@ export type DispatchOnboardingFormState = {
 const filled = (value: string | null | undefined) => Boolean((value ?? '').trim());
 
 /**
- * Light two-wheelers (a bike or a scooter) often have no manufacturer badge a
- * courier can report, so the make is optional for them while still required for
- * a car or van. Model and plate stay required for every type.
+ * Light two-wheelers (a bike or a scooter) are frequently unbadged and
+ * unplated in practice — make, model and plate number rarely get formally
+ * registered the way a car's or van's do. All three are optional for them;
+ * they stay required for a car or van.
  */
-export const VEHICLE_TYPES_WITH_OPTIONAL_MAKE: readonly string[] = ['Bike', 'Scooter'];
+export const VEHICLE_TYPES_WITH_OPTIONAL_DETAILS: readonly string[] = ['Bike', 'Scooter'];
 
-export const isVehicleMakeRequired = (vehicleType: string | null | undefined): boolean =>
-  !VEHICLE_TYPES_WITH_OPTIONAL_MAKE.includes((vehicleType ?? '').trim());
+export const isVehicleDetailRequired = (vehicleType: string | null | undefined): boolean =>
+  !VEHICLE_TYPES_WITH_OPTIONAL_DETAILS.includes((vehicleType ?? '').trim());
 
 export const isStepComplete = (step: DispatchOnboardingStepId, form: DispatchOnboardingFormState): boolean => {
   switch (step) {
     case 'area':
       return filled(form.region) && filled(form.lga) && filled(form.currentAddress);
-    case 'vehicle':
+    case 'vehicle': {
+      const detailsRequired = isVehicleDetailRequired(form.vehicleType);
       return (
         filled(form.vehicleType) &&
-        (!isVehicleMakeRequired(form.vehicleType) || filled(form.vehicleMake)) &&
-        filled(form.vehicleModel) &&
-        filled(form.vehiclePlateNumber)
+        (!detailsRequired || filled(form.vehicleMake)) &&
+        (!detailsRequired || filled(form.vehicleModel)) &&
+        (!detailsRequired || filled(form.vehiclePlateNumber))
       );
+    }
     case 'licence':
       // Both sides: a licence is only verifiable with both faces.
       return filled(form.licenseNumber) && form.hasLicenceFront && form.hasLicenceBack;

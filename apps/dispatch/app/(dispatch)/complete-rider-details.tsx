@@ -29,7 +29,7 @@ import {
   DISPATCH_ONBOARDING_STEPS,
   canSubmitDispatchOnboarding,
   isStepComplete,
-  isVehicleMakeRequired,
+  isVehicleDetailRequired,
   type DispatchOnboardingFormState,
   type DispatchOnboardingStepId,
 } from '../../src/domain/dispatchOnboardingSteps';
@@ -201,11 +201,12 @@ export default function CompleteRiderDetailsScreen() {
     // they are the backstop if that gate and these rules ever drift apart --
     // but a backstop that reports through a no-op is not a backstop at all,
     // which is what `Alert` made them.
+    const vehicleDetailsRequired = isVehicleDetailRequired(vehicleType);
     if (
       !lga.trim() ||
-      (isVehicleMakeRequired(vehicleType) && !vehicleMake.trim()) ||
-      !vehicleModel.trim() ||
-      !vehiclePlateNumber.trim() ||
+      (vehicleDetailsRequired && !vehicleMake.trim()) ||
+      (vehicleDetailsRequired && !vehicleModel.trim()) ||
+      (vehicleDetailsRequired && !vehiclePlateNumber.trim()) ||
       !licenseNumber.trim()
     ) {
       showNotice({
@@ -435,7 +436,7 @@ export default function CompleteRiderDetailsScreen() {
         <Text style={styles.sectionLabel}>Vehicle details</Text>
         <TextInput
           style={styles.input}
-          placeholder={isVehicleMakeRequired(vehicleType) ? 'Vehicle make' : 'Vehicle make (optional)'}
+          placeholder={isVehicleDetailRequired(vehicleType) ? 'Vehicle make' : 'Vehicle make (optional)'}
           placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={vehicleMake}
           onChangeText={handleFieldChange(setVehicleMake)}
@@ -443,7 +444,7 @@ export default function CompleteRiderDetailsScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder="Vehicle model"
+          placeholder={isVehicleDetailRequired(vehicleType) ? 'Vehicle model' : 'Vehicle model (optional)'}
           placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={vehicleModel}
           onChangeText={handleFieldChange(setVehicleModel)}
@@ -451,7 +452,7 @@ export default function CompleteRiderDetailsScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder="Plate number"
+          placeholder={isVehicleDetailRequired(vehicleType) ? 'Plate number' : 'Plate number (optional)'}
           placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={vehiclePlateNumber}
           onChangeText={handleFieldChange(setVehiclePlateNumber)}
