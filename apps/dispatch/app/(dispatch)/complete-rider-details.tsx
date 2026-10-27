@@ -29,6 +29,7 @@ import {
   DISPATCH_ONBOARDING_STEPS,
   canSubmitDispatchOnboarding,
   isStepComplete,
+  isVehicleMakeRequired,
   type DispatchOnboardingFormState,
   type DispatchOnboardingStepId,
 } from '../../src/domain/dispatchOnboardingSteps';
@@ -200,7 +201,13 @@ export default function CompleteRiderDetailsScreen() {
     // they are the backstop if that gate and these rules ever drift apart --
     // but a backstop that reports through a no-op is not a backstop at all,
     // which is what `Alert` made them.
-    if (!lga.trim() || !vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlateNumber.trim() || !licenseNumber.trim()) {
+    if (
+      !lga.trim() ||
+      (isVehicleMakeRequired(vehicleType) && !vehicleMake.trim()) ||
+      !vehicleModel.trim() ||
+      !vehiclePlateNumber.trim() ||
+      !licenseNumber.trim()
+    ) {
       showNotice({
         tone: 'error',
         title: 'Missing details',
@@ -428,7 +435,7 @@ export default function CompleteRiderDetailsScreen() {
         <Text style={styles.sectionLabel}>Vehicle details</Text>
         <TextInput
           style={styles.input}
-          placeholder="Vehicle make"
+          placeholder={isVehicleMakeRequired(vehicleType) ? 'Vehicle make' : 'Vehicle make (optional)'}
           placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
           value={vehicleMake}
           onChangeText={handleFieldChange(setVehicleMake)}

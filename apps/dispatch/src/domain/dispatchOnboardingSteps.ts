@@ -45,6 +45,16 @@ export type DispatchOnboardingFormState = {
 
 const filled = (value: string | null | undefined) => Boolean((value ?? '').trim());
 
+/**
+ * Light two-wheelers (a bike or a scooter) often have no manufacturer badge a
+ * courier can report, so the make is optional for them while still required for
+ * a car or van. Model and plate stay required for every type.
+ */
+export const VEHICLE_TYPES_WITH_OPTIONAL_MAKE: readonly string[] = ['Bike', 'Scooter'];
+
+export const isVehicleMakeRequired = (vehicleType: string | null | undefined): boolean =>
+  !VEHICLE_TYPES_WITH_OPTIONAL_MAKE.includes((vehicleType ?? '').trim());
+
 export const isStepComplete = (step: DispatchOnboardingStepId, form: DispatchOnboardingFormState): boolean => {
   switch (step) {
     case 'area':
@@ -52,7 +62,7 @@ export const isStepComplete = (step: DispatchOnboardingStepId, form: DispatchOnb
     case 'vehicle':
       return (
         filled(form.vehicleType) &&
-        filled(form.vehicleMake) &&
+        (!isVehicleMakeRequired(form.vehicleType) || filled(form.vehicleMake)) &&
         filled(form.vehicleModel) &&
         filled(form.vehiclePlateNumber)
       );

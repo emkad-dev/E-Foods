@@ -34,13 +34,14 @@ test('a fully filled form can be submitted', () => {
   assert.equal(firstIncompleteStep(completeForm()), 'review');
 });
 
-test('every field the old single check required still blocks submission', () => {
+test('every unconditionally required field still blocks submission', () => {
+  // vehicleMake is deliberately absent: it is conditional (see the bike/scooter
+  // test below), not one of the always-required fields.
   const requiredText: (keyof DispatchOnboardingFormState)[] = [
     'region',
     'lga',
     'currentAddress',
     'vehicleType',
-    'vehicleMake',
     'vehicleModel',
     'vehiclePlateNumber',
     'licenseNumber',
@@ -76,7 +77,7 @@ test('whitespace does not satisfy a required field', () => {
 
 test('firstIncompleteStep walks the steps in order', () => {
   assert.equal(firstIncompleteStep(completeForm({ lga: '' })), 'area');
-  assert.equal(firstIncompleteStep(completeForm({ vehicleMake: '' })), 'vehicle');
+  assert.equal(firstIncompleteStep(completeForm({ vehicleModel: '' })), 'vehicle');
   assert.equal(firstIncompleteStep(completeForm({ hasLicenceFront: false })), 'licence');
 
   assert.equal(
@@ -84,6 +85,18 @@ test('firstIncompleteStep walks the steps in order', () => {
     'area',
     'the earliest gap wins, so a courier is sent to the first thing actually missing'
   );
+});
+
+test('vehicle make is optional for a bike or scooter, required for a car or van', () => {
+  // A bike or scooter often has no manufacturer badge a courier can report.
+  assert.equal(canSubmitDispatchOnboarding(completeForm({ vehicleType: 'Bike', vehicleMake: '' })), true);
+  assert.equal(canSubmitDispatchOnboarding(completeForm({ vehicleType: 'Scooter', vehicleMake: '   ' })), true);
+  // A car or van still needs a make.
+  assert.equal(canSubmitDispatchOnboarding(completeForm({ vehicleType: 'Car', vehicleMake: '' })), false);
+  assert.equal(canSubmitDispatchOnboarding(completeForm({ vehicleType: 'Van', vehicleMake: '' })), false);
+  // Model and plate stay required for every type.
+  assert.equal(canSubmitDispatchOnboarding(completeForm({ vehicleType: 'Bike', vehicleModel: '' })), false);
+  assert.equal(canSubmitDispatchOnboarding(completeForm({ vehicleType: 'Scooter', vehiclePlateNumber: '' })), false);
 });
 
 test('review is never "complete" - it is the submit gate', () => {
