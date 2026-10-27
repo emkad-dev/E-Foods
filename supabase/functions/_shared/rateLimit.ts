@@ -6,6 +6,24 @@ const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export type DispatchRateLimitPolicy = { limit: number; windowSecs: number; lockoutSecs: number };
 
+// `auth_rl_hit` already returns how many seconds are left on a lockout
+// (`retry_after`); this just carries that number out to the client instead of
+// discarding it, so a screen that hits the limit can show a real countdown
+// instead of a static message a rider keeps re-tapping past. Sets
+// `retryAfterSeconds` on the error instance (not just `details`) because
+// `errorResponse` in rpc/respond.ts turns that property into the `Retry-After`
+// HTTP header, and the client's backendRpc.ts already parses that header into
+// `BackendRpcError.retryAfterSeconds` - this needs no new client-side plumbing.
+export class DispatchRateLimitError extends ClientSafeError {
+  readonly retryAfterSeconds: number;
+
+  constructor(message: string, retryAfterSeconds: number) {
+    super(429, message, { code: 'DISPATCH_RATE_LIMITED', details: { retryAfterSeconds } });
+    this.name = 'DispatchRateLimitError';
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 // Wraps the existing `auth_rl_hit` RPC. Keys are stored as `dispatch:<key>`
 // unhashed on purpose: the table is service-role-only, a uid is not a secret,
 // and this avoids depending on the auth-gateway AUTH_HASH_SALT being present
@@ -26,7 +44,11 @@ export const enforceDispatchRateLimit = async (
     return;
   }
   const row = Array.isArray(data) ? data[0] : data;
-  if (row && row.allowed === false) throw new ClientSafeError(429, TOO_MANY);
+  if (row && row.allowed === false) {
+    const retryAfterSeconds =
+      typeof row.retry_after === 'number' && row.retry_after > 0 ? row.retry_after : policy.lockoutSecs;
+    throw new DispatchRateLimitError(TOO_MANY, retryAfterSeconds);
+  }
 };
 
 // base64 length N decodes to roughly N*3/4 bytes.

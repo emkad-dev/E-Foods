@@ -18,6 +18,10 @@ import {
   accountDeletionParagraphs,
 } from '../../../../packages/domain/src/accountDeletion';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
+// The math here is generic cooldown arithmetic (not OTP-specific despite the
+// file's name) and already unit-tested; reused rather than re-derived so a
+// submit-rate-limit cooldown and a resend-code cooldown round the same way.
+import { formatCooldown, remainingCooldownSeconds } from '../../../../packages/auth/src/otpCooldownPolicy';
 import { useAuth } from '../../src/contexts/AuthContext';
 import CompactOptionPicker from '../../src/components/CompactOptionPicker';
 import { getLgaOptionsForState, nigeriaStateOptions } from '../../src/constants/nigeriaLocations';
@@ -81,6 +85,13 @@ export default function CompleteRiderDetailsScreen() {
   const [submissionStatus, setSubmissionStatus] = useState<'pending' | 'rejected' | 'approved' | null>(null);
   const [submissionSubmittedAt, setSubmissionSubmittedAt] = useState<string | null>(null);
   const [stepId, setStepId] = useState<DispatchOnboardingStepId>('area');
+  // Submit is rate-limited server-side (see enforceDispatchRateLimit); without
+  // this, a rider whose submit got 429'd had no reason not to keep tapping
+  // Submit, each tap counting against the same window and extending the wait.
+  // `hitAt`/`seconds` feed remainingCooldownSeconds; `tick` exists only to force
+  // a re-render once a second while the cooldown is live.
+  const [rateLimitCooldown, setRateLimitCooldown] = useState<{ hitAtMs: number; seconds: number } | null>(null);
+  const [, setCooldownTick] = useState(0);
 
   const lgaOptions = useMemo(() => getLgaOptionsForState(region), [region]);
 
@@ -102,6 +113,24 @@ export default function CompleteRiderDetailsScreen() {
   const step = DISPATCH_ONBOARDING_STEPS[stepIndex] ?? DISPATCH_ONBOARDING_STEPS[0];
   const currentStepComplete =
     stepId === 'review' ? canSubmitDispatchOnboarding(onboardingForm) : isStepComplete(stepId, onboardingForm);
+
+  const cooldownSecondsRemaining = rateLimitCooldown
+    ? remainingCooldownSeconds(rateLimitCooldown.hitAtMs, Date.now(), rateLimitCooldown.seconds)
+    : 0;
+
+  // Ticks the countdown once a second and clears the cooldown itself the
+  // instant it reaches zero, so the Submit button re-enables on its own
+  // rather than needing another render to notice.
+  useEffect(() => {
+    if (!rateLimitCooldown) return;
+    const id = setInterval(() => {
+      setCooldownTick((value) => value + 1);
+      if (remainingCooldownSeconds(rateLimitCooldown.hitAtMs, Date.now(), rateLimitCooldown.seconds) <= 0) {
+        setRateLimitCooldown(null);
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [rateLimitCooldown]);
 
   const goNext = () => {
     const next = DISPATCH_ONBOARDING_STEPS[stepIndex + 1];
@@ -187,6 +216,13 @@ export default function CompleteRiderDetailsScreen() {
   }, [showNotice]);
 
   const handleSubmit = async () => {
+    // Backstop matching the disabled button below: the button is the normal
+    // guard, this is what stops a submit that was already in flight when the
+    // cooldown started, or a press that lands between renders.
+    if (cooldownSecondsRemaining > 0) {
+      return;
+    }
+
     if (!user) {
       showNotice({
         tone: 'error',
@@ -262,6 +298,15 @@ export default function CompleteRiderDetailsScreen() {
         message: 'Your courier details are under review.',
       });
     } catch (nextError: any) {
+      // `BackendRpcError.retryAfterSeconds` is only set when the server sent a
+      // `Retry-After` header, which is exactly the submit-rate-limit response
+      // (see enforceDispatchRateLimit) — nothing else this call can throw sets
+      // it, so this doubles as the "was it the rate limit" check.
+      const retryAfterSeconds = (nextError as { retryAfterSeconds?: unknown })?.retryAfterSeconds;
+      if (typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+        setRateLimitCooldown({ hitAtMs: Date.now(), seconds: retryAfterSeconds });
+      }
+
       // The one that mattered most: a failed submit changed nothing on screen,
       // so the rider had no way to tell it from a slow upload of two licence
       // photos and would press Submit again. Sticky, because the status banner
@@ -523,11 +568,20 @@ export default function CompleteRiderDetailsScreen() {
 
         {stepId === 'review' ? (
           <TouchableOpacity
-            style={[styles.primaryButton, loading || !currentStepComplete ? styles.buttonDisabled : null]}
+            style={[
+              styles.primaryButton,
+              loading || !currentStepComplete || cooldownSecondsRemaining > 0 ? styles.buttonDisabled : null,
+            ]}
             onPress={handleSubmit}
-            disabled={loading || !currentStepComplete}
+            disabled={loading || !currentStepComplete || cooldownSecondsRemaining > 0}
           >
-            <Text style={styles.primaryButtonText}>{loading ? 'Submitting...' : 'Submit for review'}</Text>
+            <Text style={styles.primaryButtonText}>
+              {cooldownSecondsRemaining > 0
+                ? `Try again in ${formatCooldown(cooldownSecondsRemaining)}`
+                : loading
+                  ? 'Submitting...'
+                  : 'Submit for review'}
+            </Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
