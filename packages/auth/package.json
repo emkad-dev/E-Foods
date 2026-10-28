@@ -7,7 +7,6 @@
   "types": "src/index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@supabase/auth-js": "2.105.4",
     "@supabase/supabase-js": "^2.105.4",
     "react-native-url-polyfill": "^3.0.0"
   }

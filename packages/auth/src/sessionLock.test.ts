@@ -4,7 +4,60 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { withExecutionTimeout } from './sessionLock.ts';
+import { boundedNavigatorLock, withExecutionTimeout } from './sessionLock.ts';
+
+/**
+ * Minimal fake of the Web Locks API's `navigator.locks.request`, just
+ * enough to exercise `boundedNavigatorLock`'s own control flow (queue while
+ * held, reject the queued wait when its signal aborts, grant immediately on
+ * `steal`) without a real browser. Single lock name, which is all this
+ * module ever uses.
+ */
+const installFakeLockManager = (initiallyHeldForever: boolean) => {
+  let held = initiallyHeldForever;
+  const calls: Array<{ steal?: boolean; ifAvailable?: boolean }> = [];
+
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+    locks: {
+      request: (_name: string, options: { signal?: AbortSignal; steal?: boolean; ifAvailable?: boolean }, cb: (lock: unknown) => Promise<unknown>) => {
+        calls.push({ ifAvailable: options.ifAvailable, steal: options.steal });
+
+        if (options.steal) {
+          held = true;
+          return Promise.resolve(cb({ name: 'fake-lock' })).finally(() => {
+            held = false;
+          });
+        }
+
+        if (options.ifAvailable) {
+          return Promise.resolve(cb(held ? null : { name: 'fake-lock' }));
+        }
+
+        if (held) {
+          // Never grants on its own -- simulates a permanently orphaned holder.
+          // Only settles if the caller's own signal aborts.
+          return new Promise((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => {
+              const err = new Error('The request was aborted.');
+              (err as Error & { name: string }).name = 'AbortError';
+              reject(err);
+            });
+          });
+        }
+
+        held = true;
+        return Promise.resolve(cb({ name: 'fake-lock' })).finally(() => {
+          held = false;
+        });
+      },
+    },
+    },
+  });
+
+  return { calls, isHeld: () => held };
+};
 
 test('resolves with the value when fn finishes before the timeout', async () => {
   const result = await withExecutionTimeout(() => Promise.resolve('ok'), 50, 'test');
@@ -38,3 +91,17 @@ test('a late resolution after the timeout already fired does not crash or reject
   // Give the orphaned promise a tick to settle; nothing should observe or throw.
   await new Promise((resolve) => setTimeout(resolve, 20));
 });
+
+test('boundedNavigatorLock grants immediately when the lock is free', async () => {
+  installFakeLockManager(false);
+  const result = await boundedNavigatorLock('t', 1000, () => Promise.resolve('ok'));
+  assert.equal(result, 'ok');
+});
+
+test('boundedNavigatorLock steals an orphaned lock once the acquire timeout fires, instead of waiting forever', async () => {
+  const fake = installFakeLockManager(true);
+  const result = await boundedNavigatorLock('t', 30, () => Promise.resolve('recovered'));
+  assert.equal(result, 'recovered');
+  assert.ok(fake.calls.some((c) => c.steal), 'expected a steal:true request after the acquire timeout');
+});
+
