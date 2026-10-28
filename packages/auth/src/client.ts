@@ -2,6 +2,7 @@ import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { boundedNavigatorLock } from './sessionLock';
 import type { SupabaseRuntimeEnv } from './types';
 
 let sharedClient: SupabaseClient | null = null;
@@ -14,10 +15,10 @@ const resolveSupabaseEnvValue = (value: string | undefined, label: string) => {
   return value.trim();
 };
 
-const createSessionStorage = () => {
-  const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+const isBrowser = () => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
-  if (!isBrowser) {
+const createSessionStorage = () => {
+  if (!isBrowser()) {
     // Native (iOS/Android): persist the Supabase session in AsyncStorage so the
     // access token survives reloads and is attached to authenticated requests.
     return AsyncStorage;
@@ -44,6 +45,11 @@ export const createEbuySupabaseClient = (env: SupabaseRuntimeEnv) => {
       detectSessionInUrl: false,
       persistSession: true,
       storage: createSessionStorage() as never,
+      // Native has no navigator.locks at all (GoTrueClient already falls
+      // back to its own in-process lock there on its own); only the web
+      // client needs the bounded wrapper. See sessionLock.ts for why the
+      // library's own default lock can hang forever with zero visible error.
+      ...(isBrowser() ? { lock: boundedNavigatorLock } : null),
     },
   });
 };

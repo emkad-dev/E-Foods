@@ -9,6 +9,7 @@ export * from './otpCooldownPolicy';
 export * from './profileApi';
 export * from './realtime';
 export * from './session';
+export * from './sessionLock';
 export * from './signOutHooks';
 export * from './singleDeviceSession';
 export * from './supabaseAuth';
