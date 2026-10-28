@@ -3,6 +3,7 @@
 // and the rider onboarding application.
 
 import { loadUserAccount, loadUserPhoneNumber, syncUserRoleState, upsertUserAccount } from '../accounts.ts';
+import { isVehicleDetailRequired } from '../../../../packages/domain/src/dispatchVehicle.ts';
 import { DISPATCH_APPLICATION_STATUS, loadDispatchApplication } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { constantTimeEqual } from '../crypto.ts';
@@ -1581,14 +1582,16 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   if (!vehicleType) {
     fail(400, 'Select a delivery vehicle before submitting.');
   }
-  if (!vehicleMake) {
-    fail(400, 'Add the vehicle make before submitting.');
-  }
-  if (!vehicleModel) {
-    fail(400, 'Add the vehicle model before submitting.');
-  }
-  if (!vehiclePlateNumber) {
-    fail(400, 'Add the vehicle plate number before submitting.');
+  if (isVehicleDetailRequired(vehicleType)) {
+    if (!vehicleMake) {
+      fail(400, 'Add the vehicle make before submitting.');
+    }
+    if (!vehicleModel) {
+      fail(400, 'Add the vehicle model before submitting.');
+    }
+    if (!vehiclePlateNumber) {
+      fail(400, 'Add the vehicle plate number before submitting.');
+    }
   }
   if (!licenseNumber) {
     fail(400, 'Add the licence number before submitting.');

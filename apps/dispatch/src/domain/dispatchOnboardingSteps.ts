@@ -16,6 +16,10 @@
  * Pure and IO-free so the gating is unit-testable without a device.
  */
 
+import { isVehicleDetailRequired } from '../../../../packages/domain/src/dispatchVehicle.ts';
+
+export { isVehicleDetailRequired, VEHICLE_TYPES_WITH_OPTIONAL_DETAILS } from '../../../../packages/domain/src/dispatchVehicle.ts';
+
 export type DispatchOnboardingStepId = 'area' | 'vehicle' | 'licence' | 'review';
 
 export const DISPATCH_ONBOARDING_STEPS: readonly {
@@ -44,17 +48,6 @@ export type DispatchOnboardingFormState = {
 };
 
 const filled = (value: string | null | undefined) => Boolean((value ?? '').trim());
-
-/**
- * Light two-wheelers (a bike or a scooter) are frequently unbadged and
- * unplated in practice — make, model and plate number rarely get formally
- * registered the way a car's or van's do. All three are optional for them;
- * they stay required for a car or van.
- */
-export const VEHICLE_TYPES_WITH_OPTIONAL_DETAILS: readonly string[] = ['Bike', 'Scooter'];
-
-export const isVehicleDetailRequired = (vehicleType: string | null | undefined): boolean =>
-  !VEHICLE_TYPES_WITH_OPTIONAL_DETAILS.includes((vehicleType ?? '').trim());
 
 export const isStepComplete = (step: DispatchOnboardingStepId, form: DispatchOnboardingFormState): boolean => {
   switch (step) {
