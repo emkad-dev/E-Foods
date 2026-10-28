@@ -1584,7 +1584,7 @@ const submitDispatchApplication: Handler = async ({ context, data }) => {
   }
   if (isVehicleDetailRequired(vehicleType)) {
     if (!vehicleMake) {
-      fail(400, 'Add the vehicle make before submitting.');
+      fail(400, 'Add the vehicle make before submitting. [ISOLATE-CHECK-9f31]');
     }
     if (!vehicleModel) {
       fail(400, 'Add the vehicle model before submitting.');
