@@ -17,7 +17,6 @@
  */
 
 export const DISPATCH_SUCCESS_NOTICES = {
-  'email-confirmed': 'Email confirmed. Sign in to finish your rider setup.',
   'login-ready': 'Your rider login is ready. Complete your rider details below to finish setup.',
   'password-updated': 'Password updated. Sign in with your new password.',
   'reset-code-sent':

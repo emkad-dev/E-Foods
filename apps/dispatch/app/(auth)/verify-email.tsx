@@ -30,7 +30,12 @@ const firstParam = (value: string | string[] | undefined) => (Array.isArray(valu
  * the address off `AuthContext`. The email field is therefore always rendered
  * and always editable, prefilled from the route param register sends it with.
  *
- * Mirrors `apps/customer/app/(auth)/verify-email.tsx`.
+ * DELIBERATELY DIVERGES from `apps/customer/app/(auth)/verify-email.tsx` on
+ * what happens after the code is confirmed: customer signs the session back
+ * out and sends the rider to /login; dispatch keeps it and goes straight into
+ * rider setup (/complete-rider-details), because every freshly-confirmed
+ * rider has to complete that form next regardless -- a forced re-login in
+ * between added a whole extra screen and a password re-entry for no reason.
  */
 export default function DispatchVerifyEmailScreen() {
   const params = useLocalSearchParams<{
@@ -86,11 +91,15 @@ export default function DispatchVerifyEmailScreen() {
         await updateUserDocument(user.id, { emailVerified: true }).catch(() => undefined);
       }
 
-      // That session outlives the confirmation and this flow ends at sign-in.
-      await supabase.auth.signOut().catch(() => undefined);
-
-      const noticeKey: DispatchSuccessNoticeKey = 'email-confirmed';
-      router.replace({ pathname: '/(auth)/login', params: { notice: noticeKey } } as never);
+      // Confirming the code already leaves a real session behind -- ride it
+      // straight into rider setup instead of discarding it and making the
+      // rider type their password again for a session they already have.
+      // AuthContext's own onAuthStateChange listener reconciles this session
+      // the same way it would one from signIn(); `_layout.tsx`'s redirect
+      // (user.role !== 'dispatch' -> /complete-rider-details) is what actually
+      // lands them there, this call is just belt-and-suspenders directness.
+      const noticeKey: DispatchSuccessNoticeKey = 'login-ready';
+      router.replace({ pathname: '/(dispatch)/complete-rider-details', params: { notice: noticeKey } } as never);
     } catch (nextError: any) {
       // `verifyEmailOtp` is a direct Supabase call, not routed through
       // `callBackendRpc`, so nothing else reports this.
@@ -140,7 +149,7 @@ export default function DispatchVerifyEmailScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Confirm your email</Text>
       <Text style={styles.copy}>
-        Enter the 6-digit code we emailed you to confirm this rider account, then sign in to finish your rider setup.
+        Enter the 6-digit code we emailed you to confirm this rider account and continue your rider setup.
       </Text>
 
       {notice && !error && !info ? (
