@@ -4,6 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { NavigatorLockAcquireTimeoutError } from '@supabase/supabase-js';
+
 import { boundedNavigatorLock, withExecutionTimeout } from './sessionLock.ts';
 
 /**
@@ -32,7 +34,7 @@ const installFakeLockManager = (initiallyHeldForever: boolean) => {
         }
 
         if (options.ifAvailable) {
-          return Promise.resolve(cb(held ? null : { name: 'fake-lock' }));
+          return Promise.resolve().then(() => cb(held ? null : { name: 'fake-lock' }));
         }
 
         if (held) {
@@ -120,3 +122,51 @@ test('an undefined acquireTimeout (what GoTrueClient actually passes in this app
   assert.ok(elapsed > 50, `expected a real wait before stealing, got ${elapsed}ms (looks like the undefined bug)`);
 });
 
+
+test('a busy lock with acquireTimeout 0 rejects with the error type GoTrueClient knows to swallow', async () => {
+  // GoTrueClient's auto-refresh tick asks for the lock with acquireTimeout 0
+  // and only silences the failure when `e instanceof LockAcquireTimeoutError`
+  // (NavigatorLockAcquireTimeoutError is its exported subclass).
+  // A plain Error escaped as an uncaught exception every tick whenever a
+  // second tab on the same origin held the lock.
+  installFakeLockManager(true);
+  await assert.rejects(
+    () => boundedNavigatorLock('t', 0, () => Promise.resolve('never')),
+    (error: unknown) => error instanceof NavigatorLockAcquireTimeoutError && (error as { isAcquireTimeout?: boolean }).isAcquireTimeout === true
+  );
+});
+
+test('a holder whose lock gets stolen finishes its own work instead of stealing back', async () => {
+  // Two tabs: this one is granted the lock, runs past the other tab's
+  // acquire timeout, and the other tab steals. Per the Web Locks spec our
+  // request then rejects with AbortError while our callback keeps running.
+  // Stealing back here is the A-steals-B-steals-A cascade that surfaced as
+  // "Lock broken by another request with the 'steal' option" and bounced a
+  // signed-in rider to /login.
+  const calls: Array<{ steal?: boolean }> = [];
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      locks: {
+        request: (_name: string, options: { steal?: boolean }, cb: (lock: unknown) => Promise<unknown>) => {
+          calls.push({ steal: options.steal });
+          if (options.steal) {
+            return Promise.resolve().then(() => cb({ name: 'fake-lock' }));
+          }
+          return new Promise((_resolve, reject) => {
+            void cb({ name: 'fake-lock' });
+            setTimeout(() => {
+              const err = new Error("Lock broken by another request with the 'steal' option.");
+              (err as Error & { name: string }).name = 'AbortError';
+              reject(err);
+            }, 60);
+          });
+        },
+      },
+    },
+  });
+
+  const result = await boundedNavigatorLock('t', 20, () => new Promise((resolve) => setTimeout(() => resolve('own result'), 100)));
+  assert.equal(result, 'own result');
+  assert.ok(!calls.some((c) => c.steal), 'must not steal the lock back after it was stolen from us');
+});

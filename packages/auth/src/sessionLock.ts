@@ -1,3 +1,5 @@
+import { NavigatorLockAcquireTimeoutError } from '@supabase/supabase-js';
+
 /**
  * WHY THIS EXISTS. Supabase's web client serializes every session call
  * (getSession, signIn, refreshSession, ...) behind one browser-wide
@@ -104,13 +106,35 @@ export const boundedNavigatorLock = <R>(name: string, rawAcquireTimeout: number,
   // callback runs at all; tolerating a defensively-null one there too (run
   // `boundedFn` anyway) avoids turning an extremely unlikely edge case into
   // an unhandled rejection some fire-and-forget internal caller never catches.
-  const requestOnce = (options: LockOptions, treatNullAsFailure: boolean) =>
-    navigator.locks.request(name, options, (lock) => {
-      if (!lock && treatNullAsFailure) {
-        throw new Error(`Lock "${name}" was not granted.`);
+  // The failure must be a NavigatorLockAcquireTimeoutError: GoTrueClient's
+  // auto-refresh tick asks with acquireTimeout 0 and only swallows
+  // `instanceof LockAcquireTimeoutError`, so a plain Error surfaced as an
+  // uncaught exception on every tick while another tab held the lock.
+  //
+  // Once granted, a lock can still be stolen from us by another tab's
+  // recovery. The spec then rejects our request with AbortError while our
+  // callback keeps running. We hand back that in-flight work rather than
+  // stealing the lock back: stealing back is the A-steals-B-steals-A cascade
+  // that ended in an uncaught "Lock broken by another request" and bounced a
+  // signed-in rider to /login.
+  const requestOnce = async (options: LockOptions, treatNullAsFailure: boolean, onGranted?: () => void): Promise<R> => {
+    let running: Promise<R> | undefined;
+    try {
+      return (await navigator.locks.request(name, options, (lock) => {
+        if (!lock && treatNullAsFailure) {
+          throw new NavigatorLockAcquireTimeoutError(`Lock "${name}" was not granted.`);
+        }
+        onGranted?.();
+        running = boundedFn();
+        return running;
+      })) as R;
+    } catch (error) {
+      if (running && isAbortError(error)) {
+        return running;
       }
-      return boundedFn();
-    }) as Promise<R>;
+      throw error;
+    }
+  };
 
   if (acquireTimeout <= 0) {
     // 0 (or negative, treated the same here): no waiting -- matches the
@@ -119,15 +143,19 @@ export const boundedNavigatorLock = <R>(name: string, rawAcquireTimeout: number,
   }
 
   const abortController = new AbortController();
+  // Cleared the moment we are granted, so the signal reads "aborted" only
+  // when we timed out while still queued -- never because we held the lock
+  // past the timeout.
   const acquireTimer = setTimeout(() => abortController.abort(), acquireTimeout);
+  const clearAcquireTimer = () => clearTimeout(acquireTimer);
 
-  return requestOnce({ mode: 'exclusive', signal: abortController.signal }, false).then(
+  return requestOnce({ mode: 'exclusive', signal: abortController.signal }, false, clearAcquireTimer).then(
     (value) => {
-      clearTimeout(acquireTimer);
+      clearAcquireTimer();
       return value;
     },
     async (error) => {
-      clearTimeout(acquireTimer);
+      clearAcquireTimer();
 
       if (!isAbortError(error) || !abortController.signal.aborted) {
         throw error;
