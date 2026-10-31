@@ -32,6 +32,16 @@ const COMPACT_MAP_HEIGHT = 200;
 
 type RiderTripMapProps = {
   order: OrderDocument;
+  /**
+   * Dashboard variant: just the map and Navigate button. The host screen
+   * supplies the card, title and address, so none of them are drawn here.
+   */
+  compact?: boolean;
+  /**
+   * Replaces the full-screen map: tapping the map calls this instead. The
+   * dashboard passes a route push so the map opens the delivery itself.
+   */
+  onOpen?: () => void;
 };
 
 type NavigateControlProps = {
@@ -86,7 +96,7 @@ function NavigateControl({ url, label }: NavigateControlProps) {
  * dispatched, or an escalated order whose side of pickup is unknown), or when
  * the order is not the signed-in rider's own.
  */
-export function RiderTripMap({ order }: RiderTripMapProps) {
+export function RiderTripMap({ order, compact = false, onOpen }: RiderTripMapProps) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const riderLocation = useRiderLocation();
@@ -142,9 +152,13 @@ export function RiderTripMap({ order }: RiderTripMapProps) {
   );
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.title}>Next stop</Text>
-      <Text style={styles.stopLabel}>{stopLabel}</Text>
+    <View style={compact ? null : styles.card}>
+      {compact ? null : (
+        <>
+          <Text style={styles.title}>Next stop</Text>
+          <Text style={styles.stopLabel}>{stopLabel}</Text>
+        </>
+      )}
 
       {markers.length > 0 ? (
         <View style={styles.mapFrame}>
@@ -156,12 +170,12 @@ export function RiderTripMap({ order }: RiderTripMapProps) {
           */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Expand trip map"
-            onPress={() => setExpanded(true)}
+            accessibilityLabel={onOpen ? 'Open delivery' : 'Expand trip map'}
+            onPress={onOpen ?? (() => setExpanded(true))}
             style={styles.expandOverlay}
           >
             <View style={styles.expandHint}>
-              <Text style={styles.expandHintText}>Tap to expand</Text>
+              <Text style={styles.expandHintText}>{onOpen ? 'Open delivery' : 'Tap to expand'}</Text>
             </View>
           </Pressable>
         </View>
@@ -169,8 +183,9 @@ export function RiderTripMap({ order }: RiderTripMapProps) {
 
       {target ? <NavigateControl url={target.url} label={navigateLabel} /> : null}
 
+      {/* With onOpen the tap leaves the screen, so the full-screen map is never shown. */}
       <Modal
-        visible={expanded}
+        visible={expanded && !onOpen}
         animationType="slide"
         statusBarTranslucent
         onRequestClose={() => setExpanded(false)}
