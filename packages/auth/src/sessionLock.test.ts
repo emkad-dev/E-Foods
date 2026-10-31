@@ -105,3 +105,18 @@ test('boundedNavigatorLock steals an orphaned lock once the acquire timeout fire
   assert.ok(fake.calls.some((c) => c.steal), 'expected a steal:true request after the acquire timeout');
 });
 
+test('an undefined acquireTimeout (what GoTrueClient actually passes in this app) still waits a sane amount before stealing, not near-instantly', async () => {
+  // Regression test: Object.assign merging an explicitly-undefined
+  // lockAcquireTimeout over the library's own 5000 default means
+  // GoTrueClient's real calls arrive here with acquireTimeout === undefined,
+  // not 5000. `undefined > 0` is false, so a naive `acquireTimeout <= 0`
+  // check never catches it either, and `setTimeout(fn, undefined)` fires at
+  // effectively 0ms -- a storm of near-instant steals instead of one orderly
+  // wait. boundedNavigatorLock must substitute a sane default instead.
+  installFakeLockManager(true);
+  const t0 = Date.now();
+  await boundedNavigatorLock('t', undefined as unknown as number, () => Promise.resolve('recovered'));
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed > 50, `expected a real wait before stealing, got ${elapsed}ms (looks like the undefined bug)`);
+});
+

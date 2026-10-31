@@ -42,6 +42,28 @@
 export const LOCK_EXECUTION_TIMEOUT_MS = 10_000;
 
 /**
+ * GoTrueClient is supposed to pass its own `lockAcquireTimeout` (library
+ * default 5s) as `acquireTimeout` on every call -- but directly observed in
+ * this app's live console, it actually arrives as `undefined`
+ * (`Object.assign` merging an explicitly-`undefined` key over
+ * DEFAULT_OPTIONS' 5000 inside @supabase/supabase-js's own options wiring
+ * when the caller never sets `lockAcquireTimeout` -- which this app never
+ * does). `undefined > 0` is `false`, so the real `acquireTimeout <= 0` check
+ * below never caught it either: it fell through to `setTimeout(fn,
+ * undefined)`, which browsers run at effectively 0ms, firing the abort
+ * almost immediately and producing a storm of near-instant steal attempts
+ * racing each other instead of one orderly wait-then-recover. This is
+ * presumably also why wrapping the library's own `navigatorLock` (the
+ * approach this file used before) never visibly recovered: its own
+ * acquire-timeout arm was never armed for the same reason, the exact same
+ * `undefined` reaching it unguarded.
+ */
+const DEFAULT_ACQUIRE_TIMEOUT_MS = 5_000;
+
+const resolveAcquireTimeout = (acquireTimeout: number): number =>
+  Number.isFinite(acquireTimeout) ? acquireTimeout : DEFAULT_ACQUIRE_TIMEOUT_MS;
+
+/**
  * Races `fn` against a timeout that rejects after `timeoutMs`. Pure and
  * browser-API-free so it is unit-testable without `navigator.locks`.
  */
@@ -72,12 +94,19 @@ const isAbortError = (error: unknown): boolean =>
  * `createClient(url, key, { auth: { lock } })`. See the module doc above for
  * why this exists instead of using the library's own `navigatorLock`.
  */
-export const boundedNavigatorLock = <R>(name: string, acquireTimeout: number, fn: () => Promise<R>): Promise<R> => {
+export const boundedNavigatorLock = <R>(name: string, rawAcquireTimeout: number, fn: () => Promise<R>): Promise<R> => {
+  const acquireTimeout = resolveAcquireTimeout(rawAcquireTimeout);
   const boundedFn = () => withExecutionTimeout(fn, LOCK_EXECUTION_TIMEOUT_MS, `Supabase auth lock "${name}"`);
 
-  const requestOnce = (options: LockOptions) =>
+  // `ifAvailable` is the one mode where a `null` lock is spec'd and expected
+  // (means "wasn't free"), so only that path treats it as a real failure.
+  // Every other mode (plain wait, steal) grants a real lock whenever the
+  // callback runs at all; tolerating a defensively-null one there too (run
+  // `boundedFn` anyway) avoids turning an extremely unlikely edge case into
+  // an unhandled rejection some fire-and-forget internal caller never catches.
+  const requestOnce = (options: LockOptions, treatNullAsFailure: boolean) =>
     navigator.locks.request(name, options, (lock) => {
-      if (!lock) {
+      if (!lock && treatNullAsFailure) {
         throw new Error(`Lock "${name}" was not granted.`);
       }
       return boundedFn();
@@ -86,13 +115,13 @@ export const boundedNavigatorLock = <R>(name: string, acquireTimeout: number, fn
   if (acquireTimeout <= 0) {
     // 0 (or negative, treated the same here): no waiting -- matches the
     // library's own "fail fast if unavailable" contract for 0.
-    return requestOnce({ mode: 'exclusive', ifAvailable: true });
+    return requestOnce({ mode: 'exclusive', ifAvailable: true }, true);
   }
 
   const abortController = new AbortController();
   const acquireTimer = setTimeout(() => abortController.abort(), acquireTimeout);
 
-  return requestOnce({ mode: 'exclusive', signal: abortController.signal }).then(
+  return requestOnce({ mode: 'exclusive', signal: abortController.signal }, false).then(
     (value) => {
       clearTimeout(acquireTimer);
       return value;
@@ -110,7 +139,7 @@ export const boundedNavigatorLock = <R>(name: string, acquireTimeout: number, fn
       console.warn(
         `@ebuy/auth: lock "${name}" was not granted within ${acquireTimeout}ms; stealing it to recover.`
       );
-      return requestOnce({ mode: 'exclusive', steal: true });
+      return requestOnce({ mode: 'exclusive', steal: true }, false);
     }
   );
 };
