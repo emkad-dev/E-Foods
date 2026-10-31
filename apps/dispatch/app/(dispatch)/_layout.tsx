@@ -1,3 +1,5 @@
+import { FontAwesome } from '@expo/vector-icons';
+import type { ComponentProps } from 'react';
 import { useMemo } from 'react';
 import { Redirect, Slot, Tabs, usePathname } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -5,6 +7,11 @@ import { useActiveDeliveryNotification } from '../../src/hooks/useActiveDelivery
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 import { dispatchTheme } from '../../src/theme/palette';
+
+const renderTabIcon = (name: ComponentProps<typeof FontAwesome>['name']) =>
+  function TabIcon({ color }: { color: string }) {
+    return <FontAwesome name={name} size={18} color={color} />;
+  };
 
 export default function DispatchLayout() {
   const pathname = usePathname();
@@ -58,12 +65,14 @@ export default function DispatchLayout() {
         name="index"
         options={{
           title: 'Dashboard',
+          tabBarIcon: renderTabIcon('tachometer'),
         }}
       />
       <Tabs.Screen
         name="deliveries"
         options={{
           title: 'Deliveries',
+          tabBarIcon: renderTabIcon('motorcycle'),
         }}
       />
       {/* Hidden: dispatchGetRiders only ever returns the caller's OWN record
@@ -80,6 +89,7 @@ export default function DispatchLayout() {
         name="profile"
         options={{
           title: 'Rider',
+          tabBarIcon: renderTabIcon('user'),
         }}
       />
       {/* Both of these are detail screens reached by pushing, not tabs. A
