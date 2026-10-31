@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -112,6 +112,8 @@ function KpiCard({
 export default function PartnerHome() {
   const insets = useSafeAreaInsets();
   const { signOut, user } = useAuth();
+  // Not reset on success: the auth redirect unmounts this screen.
+  const [signingOut, setSigningOut] = useState(false);
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isWide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
@@ -197,9 +199,15 @@ export default function PartnerHome() {
           };
 
   const handleSignOut = async () => {
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
     try {
       await signOut();
     } catch (nextError: any) {
+      setSigningOut(false);
       // Was `Alert.alert`, i.e. nothing at all on partner.feasty.com.ng: the tap
       // left the partner signed in with no explanation. `signOut` writes to
       // AuthContext's `error`, which this dashboard never renders.
@@ -253,8 +261,13 @@ export default function PartnerHome() {
             ) : null}
           </View>
           {!isWide ? (
-            <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-              <Text style={styles.signOutLink}>Sign out</Text>
+            <TouchableOpacity
+              style={styles.signOutButton}
+              onPress={handleSignOut}
+              disabled={signingOut}
+              accessibilityState={{ busy: signingOut, disabled: signingOut }}
+            >
+              <BusyLabel busy={signingOut} label="Sign out" busyLabel="Signing out..." textStyle={styles.signOutLink} />
             </TouchableOpacity>
           ) : null}
         </View>

@@ -12,7 +12,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { WebView, type WebViewNavigation } from 'react-native-webview';
 import { FontAwesome } from '@expo/vector-icons';
-import { MIN_TAP_TARGET, radius, space } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, space } from '@feasty/design-system';
 import { customerTheme } from '../../src/theme/palette';
 import { screenTitleTextStyle } from '../../src/theme/screenChrome';
 import { normalizeCustomerPaymentCallbackPath } from '../../src/services/paymentRouting';
@@ -70,6 +70,9 @@ export default function PaymentScreen() {
   const [error, setError] = useState<string | null>(null);
   // Web handoff state. Native never reads this: it keeps the in-app WebView.
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  // Stays true on success on purpose: the window is navigating to Paystack,
+  // and the spinner is what covers the seconds that takes on a slow network.
+  const [openingCheckout, setOpeningCheckout] = useState(false);
 
   const authorizationUrl = useMemo(() => normalizeUrl(firstParam(params.authorizationUrl)), [params.authorizationUrl]);
   const orderId = useMemo(() => firstParam(params.orderId), [params.orderId]);
@@ -129,11 +132,17 @@ export default function PaymentScreen() {
   //
   // On success there is no state to set: the window is already navigating away.
   const handleOpenCheckout = async () => {
+    if (openingCheckout) {
+      return;
+    }
+
     setHandoffError(null);
+    setOpeningCheckout(true);
 
     const result = await openInSameWindow(authorizationUrl);
 
     if (!result.ok) {
+      setOpeningCheckout(false);
       // The URL is also on screen as a real link, so a refused navigation is a
       // detour rather than the end of the order.
       setHandoffError(describeExternalLinkFailure(result.reason, 'the Paystack checkout page'));
@@ -208,8 +217,19 @@ export default function PaymentScreen() {
             ) : null}
           </View>
 
-          <Pressable accessibilityRole="button" onPress={handleOpenCheckout} style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>Continue to Paystack</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ busy: openingCheckout, disabled: openingCheckout }}
+            onPress={handleOpenCheckout}
+            disabled={openingCheckout}
+            style={[styles.primaryButton, openingCheckout ? styles.primaryButtonBusy : null]}
+          >
+            <BusyLabel
+              busy={openingCheckout}
+              label="Continue to Paystack"
+              busyLabel="Opening Paystack..."
+              textStyle={styles.primaryButtonText}
+            />
           </Pressable>
 
           <Text style={styles.stateHint}>
@@ -463,6 +483,9 @@ const styles = StyleSheet.create({
     marginTop: space.xl,
     minHeight: 50,
     justifyContent: 'center',
+  },
+  primaryButtonBusy: {
+    opacity: 0.8,
   },
   primaryButtonText: {
     color: customerTheme.textOnBrand,

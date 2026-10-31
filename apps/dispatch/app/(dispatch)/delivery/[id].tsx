@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // it needs. Customer and partner, which already load the fonts, import it by
 // package name. See the same note in ../profile.tsx.
 import { useNotice } from '../../../../../packages/design-system/src/primitives/Notice';
+import { BusyLabel } from '../../../../../packages/design-system/src/primitives/BusyLabel';
 import { isSafeServerMessage, toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import {
@@ -93,6 +94,26 @@ export default function DispatchDeliveryDetailScreen() {
   const [submittingDelivery, setSubmittingDelivery] = useState(false);
   const [sosConfirming, setSosConfirming] = useState(false);
   const [sosSent, setSosSent] = useState(false);
+  // One in-flight status action at a time. These buttons had no in-flight
+  // state at all, so a double-tap (or tapping "Mark on the way" while
+  // "Confirm pickup" was still landing) fired duplicate or conflicting status
+  // and assignment calls with nothing on screen to say the first one was
+  // already going. Rider rows use `assign:<riderId>` so only the tapped row
+  // shows the spinner.
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const runAction = async (key: string, action: () => Promise<void>) => {
+    if (busyAction) {
+      return;
+    }
+
+    setBusyAction(key);
+    try {
+      await action();
+    } finally {
+      setBusyAction(null);
+    }
+  };
   // Every action on this screen reported failure through `Alert`, which is
   // `class Alert { static alert() {} }` under react-native-web. `error` above
   // belongs to `useDispatchOrder` and carries LOAD failures only (the early
@@ -182,29 +203,31 @@ export default function DispatchDeliveryDetailScreen() {
     [deliveryCoordinates, riders]
   );
 
-  const handleAssignRider = async (courier: { id: string; name: string }) => {
-    if (!order) {
-      return;
-    }
+  const handleAssignRider = (courier: { id: string; name: string }) =>
+    runAction(`assign:${courier.id}`, async () => {
+      if (!order) {
+        return;
+      }
 
-    try {
-      await assignDispatchCourier(order.id, courier, order.assignment ?? null);
-    } catch (nextError: any) {
-      reportFailure('Assignment failed', toUserMessage(nextError, 'Could not assign this rider.'));
-    }
-  };
+      try {
+        await assignDispatchCourier(order.id, courier, order.assignment ?? null);
+      } catch (nextError: any) {
+        reportFailure('Assignment failed', toUserMessage(nextError, 'Could not assign this rider.'));
+      }
+    });
 
-  const handleMarkPickedUp = async () => {
-    if (!order) {
-      return;
-    }
+  const handleMarkPickedUp = () =>
+    runAction('pickup', async () => {
+      if (!order) {
+        return;
+      }
 
-    try {
-      await markDispatchOrderPickedUp(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure('Update failed', toUserMessage(nextError, 'Could not confirm pickup.'));
-    }
-  };
+      try {
+        await markDispatchOrderPickedUp(order.id, order.timeline ?? null);
+      } catch (nextError: any) {
+        reportFailure('Update failed', toUserMessage(nextError, 'Could not confirm pickup.'));
+      }
+    });
 
   const handleMarkDelivered = async () => {
     if (!order || submittingDelivery) {
@@ -232,41 +255,44 @@ export default function DispatchDeliveryDetailScreen() {
     }
   };
 
-  const handleMarkOnTheWay = async () => {
-    if (!order) {
-      return;
-    }
+  const handleMarkOnTheWay = () =>
+    runAction('onTheWay', async () => {
+      if (!order) {
+        return;
+      }
 
-    try {
-      await markDispatchOrderOnTheWay(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this order on the way.'));
-    }
-  };
+      try {
+        await markDispatchOrderOnTheWay(order.id, order.timeline ?? null);
+      } catch (nextError: any) {
+        reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this order on the way.'));
+      }
+    });
 
-  const handleMarkFailed = async () => {
-    if (!order) {
-      return;
-    }
+  const handleMarkFailed = () =>
+    runAction('failed', async () => {
+      if (!order) {
+        return;
+      }
 
-    try {
-      await markDispatchOrderFailed(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this delivery as failed.'));
-    }
-  };
+      try {
+        await markDispatchOrderFailed(order.id, order.timeline ?? null);
+      } catch (nextError: any) {
+        reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this delivery as failed.'));
+      }
+    });
 
-  const handleEscalate = async () => {
-    if (!order) {
-      return;
-    }
+  const handleEscalate = () =>
+    runAction('escalate', async () => {
+      if (!order) {
+        return;
+      }
 
-    try {
-      await escalateDispatchOrder(order.id, order.timeline ?? null);
-    } catch (nextError: any) {
-      reportFailure('Escalation failed', toUserMessage(nextError, 'Could not escalate this delivery.'));
-    }
-  };
+      try {
+        await escalateDispatchOrder(order.id, order.timeline ?? null);
+      } catch (nextError: any) {
+        reportFailure('Escalation failed', toUserMessage(nextError, 'Could not escalate this delivery.'));
+      }
+    });
 
   const handleSOS = async () => {
     if (!order) {
@@ -476,18 +502,28 @@ export default function DispatchDeliveryDetailScreen() {
           <Text style={styles.sectionTitle}>Dispatch actions</Text>
           <Text style={styles.actionHelper}>{pickupHelperCopy}</Text>
           <TouchableOpacity
-            style={[styles.actionButton, !canConfirmPickup ? styles.actionButtonDisabled : null]}
+            style={[styles.actionButton, !canConfirmPickup || busyAction ? styles.actionButtonDisabled : null]}
             onPress={handleMarkPickedUp}
-            disabled={!canConfirmPickup}
+            disabled={!canConfirmPickup || Boolean(busyAction)}
           >
-            <Text style={styles.actionButtonText}>Confirm pickup</Text>
+            <BusyLabel
+              busy={busyAction === 'pickup'}
+              label="Confirm pickup"
+              busyLabel="Confirming pickup..."
+              textStyle={styles.actionButtonText}
+            />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, !canMarkOnTheWay ? styles.actionButtonDisabled : null]}
+            style={[styles.actionButton, !canMarkOnTheWay || busyAction ? styles.actionButtonDisabled : null]}
             onPress={handleMarkOnTheWay}
-            disabled={!canMarkOnTheWay}
+            disabled={!canMarkOnTheWay || Boolean(busyAction)}
           >
-            <Text style={styles.actionButtonText}>Mark on the way</Text>
+            <BusyLabel
+              busy={busyAction === 'onTheWay'}
+              label="Mark on the way"
+              busyLabel="Updating..."
+              textStyle={styles.actionButtonText}
+            />
           </TouchableOpacity>
           <Text style={styles.codeLabel}>Customer delivery code</Text>
           <TextInput
@@ -512,21 +548,44 @@ export default function DispatchDeliveryDetailScreen() {
             onPress={handleMarkDelivered}
             disabled={!canMarkDelivered || deliveryCode.length !== DELIVERY_CODE_LENGTH || submittingDelivery}
           >
-            <Text style={styles.actionButtonText}>{submittingDelivery ? 'Confirming...' : 'Confirm delivery'}</Text>
+            <BusyLabel
+              busy={submittingDelivery}
+              label="Confirm delivery"
+              busyLabel="Confirming..."
+              textStyle={styles.actionButtonText}
+            />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, styles.warningButton, !canMarkFailed ? styles.actionButtonDisabled : null]}
+            style={[
+              styles.actionButton,
+              styles.warningButton,
+              !canMarkFailed || busyAction ? styles.actionButtonDisabled : null,
+            ]}
             onPress={handleMarkFailed}
-            disabled={!canMarkFailed}
+            disabled={!canMarkFailed || Boolean(busyAction)}
           >
-            <Text style={styles.actionButtonText}>Mark failed delivery</Text>
+            <BusyLabel
+              busy={busyAction === 'failed'}
+              label="Mark failed delivery"
+              busyLabel="Updating..."
+              textStyle={styles.actionButtonText}
+            />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, styles.escalateButton, !canEscalate ? styles.actionButtonDisabled : null]}
+            style={[
+              styles.actionButton,
+              styles.escalateButton,
+              !canEscalate || busyAction ? styles.actionButtonDisabled : null,
+            ]}
             onPress={handleEscalate}
-            disabled={!canEscalate}
+            disabled={!canEscalate || Boolean(busyAction)}
           >
-            <Text style={styles.actionButtonText}>Escalate for manual intervention</Text>
+            <BusyLabel
+              busy={busyAction === 'escalate'}
+              label="Escalate for manual intervention"
+              busyLabel="Escalating..."
+              textStyle={styles.actionButtonText}
+            />
           </TouchableOpacity>
           {canSOS ? (
             <View style={styles.sosContainer}>
@@ -576,6 +635,7 @@ export default function DispatchDeliveryDetailScreen() {
           ) : (
             ridersByDistance.map((rider) => {
               const isAssigned = order.assignment?.courierId === rider.id;
+              const isAssigning = busyAction === `assign:${rider.id}`;
 
               return (
                 <TouchableOpacity
@@ -583,10 +643,11 @@ export default function DispatchDeliveryDetailScreen() {
                   style={[
                     styles.riderCard,
                     isAssigned ? styles.riderCardAssigned : null,
-                    !canAssignRider ? styles.riderCardDisabled : null,
+                    !canAssignRider || (busyAction && !isAssigning) ? styles.riderCardDisabled : null,
                   ]}
-                  onPress={() => handleAssignRider({ id: rider.id, name: rider.name })}
-                  disabled={!canAssignRider}
+                  onPress={() => void handleAssignRider({ id: rider.id, name: rider.name })}
+                  disabled={!canAssignRider || Boolean(busyAction)}
+                  accessibilityState={{ busy: isAssigning, disabled: !canAssignRider || Boolean(busyAction) }}
                 >
                   <View>
                     <Text style={styles.riderName}>{rider.name}</Text>
@@ -595,7 +656,12 @@ export default function DispatchDeliveryDetailScreen() {
                       {rider.distanceKm !== null ? ` - ${rider.distanceKm.toFixed(1)} km away` : ''}
                     </Text>
                   </View>
-                  <Text style={styles.riderTrips}>{rider.completedTrips} trips</Text>
+                  <BusyLabel
+                    busy={isAssigning}
+                    label={`${rider.completedTrips} trips`}
+                    busyLabel="Assigning..."
+                    textStyle={styles.riderTrips}
+                  />
                 </TouchableOpacity>
               );
             })

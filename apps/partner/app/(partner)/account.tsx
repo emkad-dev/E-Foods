@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius, useConfirm, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useConfirm, useNotice } from '@feasty/design-system';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -50,6 +50,9 @@ export default function PartnerAccountScreen() {
   // is the control it belongs to.
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [linkPending, setLinkPending] = useState<string | null>(null);
+  // `authLoading` is true for both sign-out and delete, so it can't say which
+  // one to spin; this can.
+  const [signingOut, setSigningOut] = useState(false);
 
   // Derived here rather than taken from the hook: the server's own
   // `claimableRestaurants` keeps the restaurant this login already manages in
@@ -90,9 +93,11 @@ export default function PartnerAccountScreen() {
   };
 
   const handleSignOut = async () => {
+    setSigningOut(true);
     try {
       await signOut();
     } catch (nextError: any) {
+      setSigningOut(false);
       showNotice({
         tone: 'error',
         title: 'Sign out failed',
@@ -199,9 +204,12 @@ export default function PartnerAccountScreen() {
                   onPress={() => handleLinkRestaurant(candidate.id, candidate.name)}
                   disabled={accountBusy}
                 >
-                  <Text style={styles.linkButtonText}>
-                    {linkPending === candidate.id ? 'Linking...' : 'Confirm link'}
-                  </Text>
+                  <BusyLabel
+                    busy={linkPending === candidate.id}
+                    label="Confirm link"
+                    busyLabel="Linking..."
+                    textStyle={styles.linkButtonText}
+                  />
                 </TouchableOpacity>
               </View>
             ))}
@@ -235,9 +243,9 @@ export default function PartnerAccountScreen() {
             accessibilityRole="button"
             style={[styles.secondaryButton, accountBusy ? styles.controlDisabled : null]}
             onPress={handleSignOut}
-            disabled={accountBusy}
+            disabled={accountBusy || signingOut}
           >
-            <Text style={styles.secondaryButtonText}>Sign out</Text>
+            <BusyLabel busy={signingOut} label="Sign out" busyLabel="Signing out..." textStyle={styles.secondaryButtonText} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="button"

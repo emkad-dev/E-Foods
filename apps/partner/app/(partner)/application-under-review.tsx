@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius } from '@feasty/design-system';
+import { BusyLabel, radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { partnerTheme } from '../../src/theme/palette';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../src/theme/screenChrome';
@@ -11,6 +11,20 @@ export default function ApplicationUnderReviewScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signOut, user } = useAuth();
+  // Not reset on success: the auth redirect unmounts this screen.
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch {
+      setSigningOut(false);
+    }
+  };
   const applicationStatus = (user?.partnerApplicationStatus ?? '').trim().toLowerCase();
   const isVerificationFailure =
     applicationStatus === 'rejected' || applicationStatus === 'verification_failed' || applicationStatus === 'verification-failed';
@@ -56,8 +70,13 @@ export default function ApplicationUnderReviewScreen() {
           </TouchableOpacity>
         ) : null}
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => void signOut()}>
-          <Text style={styles.secondaryButtonText}>Sign out</Text>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => void handleSignOut()}
+          disabled={signingOut}
+          accessibilityState={{ busy: signingOut, disabled: signingOut }}
+        >
+          <BusyLabel busy={signingOut} label="Sign out" busyLabel="Signing out..." textStyle={styles.secondaryButtonText} />
         </TouchableOpacity>
       </View>
     </ScrollView>

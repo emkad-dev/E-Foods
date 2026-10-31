@@ -65,7 +65,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { useAuth } from '../../src/contexts/AuthContext';
 import {
@@ -85,6 +85,26 @@ export default function JoinRestaurantScreen() {
   // Inline: this screen is one card with one field, so the notice sits where
   // the person is already looking and there is no list to scroll it away from.
   const { notice, showNotice } = useNotice({ placement: 'inline' });
+
+  // Not reset on success: the auth redirect unmounts this screen.
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    if (signingOut) {
+      return;
+    }
+
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch (nextError) {
+      setSigningOut(false);
+      showNotice({
+        tone: 'error',
+        title: 'Sign out failed',
+        message: toUserMessage(nextError, 'Unable to sign out right now.'),
+      });
+    }
+  };
 
   const [code, setCode] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
@@ -263,8 +283,14 @@ export default function JoinRestaurantScreen() {
           >
             <Text style={styles.secondaryButtonText}>I am setting up my own restaurant instead</Text>
           </TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" onPress={() => void signOut()} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Sign out</Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ busy: signingOut, disabled: signingOut }}
+            onPress={() => void handleSignOut()}
+            disabled={signingOut}
+            style={styles.secondaryButton}
+          >
+            <BusyLabel busy={signingOut} label="Sign out" busyLabel="Signing out..." textStyle={styles.secondaryButtonText} />
           </TouchableOpacity>
         </>
       )}
