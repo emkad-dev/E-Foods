@@ -414,9 +414,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
    * Listen for authentication state changes and sync user profile
    */
   useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+    // Supabase awaits this listener while holding its auth lock (including the
+    // SIGNED_IN it re-fires whenever a browser tab regains focus), and every
+    // RPC below reads the session through that same lock. Awaiting them inside
+    // the listener deadlocked the client: every later auth call queued behind
+    // it forever, so actions spun with no request ever sent. The listener only
+    // schedules the work; the queue keeps events in order, as the lock did.
+    let disposed = false;
+    let reconcileQueue: Promise<void> = Promise.resolve();
+    const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
       // An interactive signIn() owns the SIGNED_IN it triggers: it builds the
       // user, claims the single-device session and reconciles policy itself,
       // and drives the spinner. Doing that work again here would double its
@@ -540,9 +546,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } finally {
         setLoading(false);
       }
+    };
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      setTimeout(() => {
+        reconcileQueue = reconcileQueue
+          .then(() => (disposed ? undefined : reconcileAuthState(event, session)))
+          .catch((error) => console.error('Auth state reconcile failed:', error));
+      }, 0);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      disposed = true;
+      subscription.unsubscribe();
+    };
   }, [
     buildNextUser,
     clearExpiredSession,
