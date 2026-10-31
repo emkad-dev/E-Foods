@@ -9,6 +9,7 @@ import { supabase } from '../../src/services/supabase/config';
 import { resolveDispatchSuccessNotice, type DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
@@ -187,7 +188,7 @@ export default function DispatchResetPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
-        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
+        <BusyLabel busy={submitting} label="Update password" busyLabel="Updating..." textStyle={styles.buttonText} />
       </TouchableOpacity>
 
       {/* `asChild` so each link is a real box instead of a run of inline

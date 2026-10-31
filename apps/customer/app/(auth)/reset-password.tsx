@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { radius } from '@feasty/design-system';
+import { BusyLabel, radius } from '@feasty/design-system';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
 import { supabase } from '../../src/services/supabase/config';
@@ -188,7 +188,7 @@ export default function ResetPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
-        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Update password'}</Text>
+        <BusyLabel busy={submitting} label="Update password" busyLabel="Updating..." textStyle={styles.buttonText} />
       </TouchableOpacity>
 
       <Link

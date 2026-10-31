@@ -11,6 +11,7 @@ import { ACCOUNT_ALREADY_REGISTERED_MESSAGE } from '../../src/services/supabase/
 import type { DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function DispatchRegisterScreen() {
@@ -225,7 +226,7 @@ export default function DispatchRegisterScreen() {
             onPress={handleRegister}
             disabled={loading || !canSubmit}
           >
-            <Text style={styles.buttonText}>{loading ? 'Creating login...' : 'Create login'}</Text>
+            <BusyLabel busy={loading} label="Create login" busyLabel="Creating login..." textStyle={styles.buttonText} />
           </TouchableOpacity>
 
           {/* `asChild` so the link is a real box rather than a run of inline

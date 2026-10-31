@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { MIN_TAP_TARGET, radius, useAuthPrompt } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useAuthPrompt } from '@feasty/design-system';
 import { useFocusEffect } from '@react-navigation/native';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
@@ -963,7 +963,7 @@ export default function CartScreen() {
                   onPress={handleApplyPromo}
                   disabled={promoChecking || !promoCodeInput.trim() || !promoEligible}
                 >
-                  <Text style={styles.promoApplyText}>{promoChecking ? '...' : 'Apply'}</Text>
+                  <BusyLabel busy={promoChecking} label="Apply" textStyle={styles.promoApplyText} />
                 </TouchableOpacity>
               </View>
               {!promoEligible ? <Text style={styles.promoAuto}>Promo codes are unavailable for mixed baskets.</Text> : null}
@@ -990,24 +990,34 @@ export default function CartScreen() {
                 </Text>
               </View>
               <TouchableOpacity
-                style={[styles.checkoutButton, checkoutDisabled ? styles.checkoutButtonDisabled : null]}
+                style={[
+                  styles.checkoutButton,
+                  // Grey reads as "can't"; while submitting the press DID work,
+                  // so keep the brand color and let the spinner say "working".
+                  checkoutDisabled && !submitting ? styles.checkoutButtonDisabled : null,
+                  submitting ? styles.checkoutButtonBusy : null,
+                ]}
                 onPress={handlePlaceOrder}
                 disabled={checkoutDisabled}
+                accessibilityState={{ busy: submitting, disabled: checkoutDisabled }}
               >
                 {/* Ordered exactly like handlePlaceOrder's guards, so the label always
                     names what the next press will actually do. Sign-in is named last:
                     it is the final step of checkout, not the price of using the screen. */}
-                <Text style={styles.checkoutButtonText}>
-                  {checkoutBlockedReason
-                    ? 'Checkout unavailable'
-                    : needsDeliveryLocation
-                      ? 'Choose delivery location'
-                      : !user
-                        ? 'Sign in to place order'
-                        : submitting
-                          ? 'Opening payment...'
-                          : 'Pay and place order'}
-                </Text>
+                <BusyLabel
+                  busy={submitting}
+                  label={
+                    checkoutBlockedReason
+                      ? 'Checkout unavailable'
+                      : needsDeliveryLocation
+                        ? 'Choose delivery location'
+                        : !user
+                          ? 'Sign in to place order'
+                          : 'Pay and place order'
+                  }
+                  busyLabel="Opening payment..."
+                  textStyle={styles.checkoutButtonText}
+                />
               </TouchableOpacity>
               <Text style={styles.paymentHint}>
                 A secure in-app payment screen will open. The order goes live after payment confirms.
@@ -1512,6 +1522,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   promoApplyButton: {
+    justifyContent: 'center',
     backgroundColor: customerTheme.accentStrong,
     borderRadius: radius.md,
     paddingHorizontal: 16,
@@ -1573,6 +1584,9 @@ const styles = StyleSheet.create({
   },
   checkoutButtonDisabled: {
     backgroundColor: '#d1d5db',
+  },
+  checkoutButtonBusy: {
+    opacity: 0.85,
   },
   checkoutButtonText: {
     color: customerTheme.textOnBrand,

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
@@ -255,7 +255,7 @@ export default function PartnerOrderDetailScreen() {
               disabled={busy !== null || normalizedStatus !== 'placed'}
               onPress={handleAccept}
             >
-              <Text style={styles.actionButtonText}>{busy === 'accept' ? 'Accepting...' : 'Accept order'}</Text>
+              <BusyLabel busy={busy === 'accept'} label="Accept order" busyLabel="Accepting..." textStyle={styles.actionButtonText} />
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -266,7 +266,7 @@ export default function PartnerOrderDetailScreen() {
               disabled={busy !== null || !['accepted', 'placed'].includes(normalizedStatus)}
               onPress={handlePreparing}
             >
-              <Text style={styles.actionButtonText}>{busy === 'preparing' ? 'Starting...' : 'Start preparing'}</Text>
+              <BusyLabel busy={busy === 'preparing'} label="Start preparing" busyLabel="Starting..." textStyle={styles.actionButtonText} />
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -277,9 +277,12 @@ export default function PartnerOrderDetailScreen() {
               disabled={busy !== null || !['accepted', 'preparing'].includes(normalizedStatus)}
               onPress={handleReady}
             >
-              <Text style={styles.actionButtonText}>
-                {busy === 'ready' ? 'Marking...' : isPickup ? 'Mark ready for pickup' : 'Mark ready'}
-              </Text>
+              <BusyLabel
+                busy={busy === 'ready'}
+                label={isPickup ? 'Mark ready for pickup' : 'Mark ready'}
+                busyLabel="Marking..."
+                textStyle={styles.actionButtonText}
+              />
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -290,9 +293,12 @@ export default function PartnerOrderDetailScreen() {
               disabled={busy !== null || !canComplete}
               onPress={handleDelivered}
             >
-              <Text style={styles.actionButtonText}>
-                {busy === 'delivered' ? 'Completing...' : isPickup ? 'Mark collected' : 'Mark delivered'}
-              </Text>
+              <BusyLabel
+                busy={busy === 'delivered'}
+                label={isPickup ? 'Mark collected' : 'Mark delivered'}
+                busyLabel="Completing..."
+                textStyle={styles.actionButtonText}
+              />
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -303,7 +309,7 @@ export default function PartnerOrderDetailScreen() {
               disabled={busy !== null || !['placed', 'accepted'].includes(normalizedStatus)}
               onPress={handleReject}
             >
-              <Text style={styles.rejectButtonText}>{busy === 'reject' ? 'Rejecting...' : 'Reject order'}</Text>
+              <BusyLabel busy={busy === 'reject'} label="Reject order" busyLabel="Rejecting..." textStyle={styles.rejectButtonText} />
             </TouchableOpacity>
           </ScrollView>
         </View>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -148,9 +148,12 @@ export default function CompleteProfileScreen() {
                 disabled={busy}
                 accessibilityRole="button"
               >
-                <Text style={styles.saveButtonText}>
-                  {saving ? 'Saving...' : "Yes, that's my number"}
-                </Text>
+                <BusyLabel
+                  busy={saving}
+                  label="Yes, that's my number"
+                  busyLabel="Saving..."
+                  textStyle={styles.saveButtonText}
+                />
               </TouchableOpacity>
 
               <TouchableOpacity

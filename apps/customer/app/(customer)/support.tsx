@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import AuthPromptCard from '../../src/components/AuthPromptCard';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
@@ -135,7 +135,7 @@ export default function SupportScreen() {
             disabled={!draft.trim() || sending}
             onPress={() => void onSend()}
           >
-            <Text style={styles.sendText}>{sending ? '…' : 'Send'}</Text>
+            <BusyLabel busy={sending} label="Send" textStyle={styles.sendText} />
           </TouchableOpacity>
         </ScreenColumn>
       </View>

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
@@ -187,7 +187,7 @@ export default function PartnerResetPasswordScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleResetPassword} disabled={submitting}>
-        <Text style={styles.buttonText}>{submitting ? 'Updating...' : 'Save new password'}</Text>
+        <BusyLabel busy={submitting} label="Save new password" busyLabel="Updating..." textStyle={styles.buttonText} />
       </TouchableOpacity>
 
       {/* `asChild` so each of these is a real box rather than a run of inline

@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 // package name.
 import { useConfirm } from '../../../../packages/design-system/src/primitives/ConfirmDialog';
 import { useNotice } from '../../../../packages/design-system/src/primitives/Notice';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
   ACCOUNT_DELETION_CONFIRM_LABEL,
@@ -429,7 +430,7 @@ export default function ProfileScreen() {
           Offline believed they had stopped receiving work. Status is owned by
           the dispatch system and shown read-only in the header above. */}
       <TouchableOpacity style={styles.primaryAction} onPress={handleSaveRider} disabled={saving || !currentRider}>
-        <Text style={styles.primaryActionText}>{saving ? 'Saving...' : 'Update profile'}</Text>
+        <BusyLabel busy={saving} label="Update profile" busyLabel="Saving..." textStyle={styles.primaryActionText} />
       </TouchableOpacity>
     </View>
   );

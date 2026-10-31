@@ -97,6 +97,7 @@ export default function ForgotPasswordScreen() {
               : 'Send reset email'
         }
         onPress={handleResetPassword}
+        busy={submitting}
         // `isChecking` too: the stored timestamp is read asynchronously, and
         // until it comes back this control must not be pressable, or a reload
         // leaves a brief window where a send goes out mid-cooldown.

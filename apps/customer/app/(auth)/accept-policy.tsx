@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Link, router } from 'expo-router';
-import { radius } from '@feasty/design-system';
+import { BusyLabel, radius } from '@feasty/design-system';
 import { policyCopy } from '../../../../packages/domain/src';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { screenColumn } from '../../src/components/ScreenColumn';
@@ -104,7 +104,7 @@ export default function AcceptPolicyScreen() {
           </Text>
         ) : null}
         <Pressable style={styles.button} onPress={handleAccept} disabled={policyLoading}>
-          <Text style={styles.buttonText}>{policyLoading ? 'Saving...' : 'I agree'}</Text>
+          <BusyLabel busy={policyLoading} label="I agree" busyLabel="Saving..." textStyle={styles.buttonText} />
         </Pressable>
       </View>
     </ScrollView>

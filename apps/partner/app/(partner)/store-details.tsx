@@ -28,7 +28,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import {
@@ -579,9 +579,12 @@ export default function StoreDetailsScreen() {
             onPress={handleSaveProfile}
             disabled={savingProfile}
           >
-            <Text style={styles.primaryButtonText}>
-              {savingProfile ? 'Saving store...' : user?.restaurantId || restaurant?.id ? 'Save store changes' : 'Create store record'}
-            </Text>
+            <BusyLabel
+              busy={savingProfile}
+              label={user?.restaurantId || restaurant?.id ? 'Save store changes' : 'Create store record'}
+              busyLabel="Saving store..."
+              textStyle={styles.primaryButtonText}
+            />
           </TouchableOpacity>
         </View>
       </ScrollView>

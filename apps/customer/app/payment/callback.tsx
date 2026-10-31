@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { radius } from '@feasty/design-system';
+import { BusyLabel, radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
@@ -171,7 +171,7 @@ export default function PaymentCallbackScreen() {
 
         {paymentStatus !== 'paid' ? (
           <Pressable accessibilityRole="button" onPress={handleRetry} style={styles.button} disabled={refreshing}>
-            <Text style={styles.buttonText}>{refreshing ? 'Checking...' : 'Check again'}</Text>
+            <BusyLabel busy={refreshing} label="Check again" busyLabel="Checking..." textStyle={styles.buttonText} />
           </Pressable>
         ) : null}
 

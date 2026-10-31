@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useLocalSearchParams } from 'expo-router';
-import { MIN_TAP_TARGET, radius, useConfirm } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useConfirm } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
 import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn';
@@ -508,9 +508,12 @@ export default function OrderTracking() {
         {order.deliveryLocation?.note ? <Text style={styles.note}>Drop-off note: {order.deliveryLocation.note}</Text> : null}
         {isPendingPrepaidPayment ? (
           <TouchableOpacity style={styles.refreshButton} onPress={handleRefreshPayment} disabled={refreshingPayment}>
-            <Text style={styles.refreshButtonText}>
-              {refreshingPayment ? 'Refreshing payment...' : 'Refresh payment status'}
-            </Text>
+            <BusyLabel
+              busy={refreshingPayment}
+              label="Refresh payment status"
+              busyLabel="Refreshing payment..."
+              textStyle={styles.refreshButtonText}
+            />
           </TouchableOpacity>
         ) : null}
         {paymentNotice ? (
@@ -591,7 +594,7 @@ export default function OrderTracking() {
           disabled={!canCancel || cancelling}
           onPress={handleCancelOrder}
         >
-          <Text style={styles.cancelButtonText}>{cancelling ? 'Cancelling...' : 'Cancel order'}</Text>
+          <BusyLabel busy={cancelling} label="Cancel order" busyLabel="Cancelling..." textStyle={styles.cancelButtonText} />
         </TouchableOpacity>
         {cancelNotice ? (
           <Text accessibilityLiveRegion="polite" role="alert" style={styles.cancelNoticeText}>

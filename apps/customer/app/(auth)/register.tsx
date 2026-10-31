@@ -303,7 +303,7 @@ export default function RegisterScreen() {
       <AuthPrimaryButton
         label={loading ? 'Creating account...' : 'Create account'}
         onPress={handleRegister}
-        disabled={loading}
+        busy={loading}
       />
 
       <View style={styles.switchRow}>

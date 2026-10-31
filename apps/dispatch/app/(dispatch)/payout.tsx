@@ -12,6 +12,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 // The partner app's bank list, shared by path rather than copied: the codes are
 // never trusted (riderSubmitPayoutBank resolves the account with Paystack
@@ -249,7 +250,7 @@ export default function RiderPayoutScreen() {
               onPress={() => void handleSubmit()}
               disabled={!canSubmit}
             >
-              <Text style={styles.primaryButtonText}>{submitting ? 'Verifying...' : 'Verify and save'}</Text>
+              <BusyLabel busy={submitting} label="Verify and save" busyLabel="Verifying..." textStyle={styles.primaryButtonText} />
             </TouchableOpacity>
           </View>
 

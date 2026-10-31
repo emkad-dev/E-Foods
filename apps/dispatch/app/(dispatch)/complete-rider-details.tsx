@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // system and does not declare those dependencies, so it takes the one primitive
 // it needs. See the same note in ./profile.tsx.
 import { useNotice } from '../../../../packages/design-system/src/primitives/Notice';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import { useConfirm } from '../../../../packages/design-system/src/primitives/ConfirmDialog';
 import {
   ACCOUNT_DELETION_CANCEL_LABEL,
@@ -92,6 +93,10 @@ export default function CompleteRiderDetailsScreen() {
   // a re-render once a second while the cooldown is live.
   const [rateLimitCooldown, setRateLimitCooldown] = useState<{ hitAtMs: number; seconds: number } | null>(null);
   const [, setCooldownTick] = useState(0);
+  // Local, not AuthContext's `loading`: handleSubmit never touched that flag,
+  // so the button never showed "Submitting..." during a real submit -- two
+  // licence photos uploading looked exactly like a dead button.
+  const [submitting, setSubmitting] = useState(false);
 
   const lgaOptions = useMemo(() => getLgaOptionsForState(region), [region]);
 
@@ -219,7 +224,7 @@ export default function CompleteRiderDetailsScreen() {
     // Backstop matching the disabled button below: the button is the normal
     // guard, this is what stops a submit that was already in flight when the
     // cooldown started, or a press that lands between renders.
-    if (cooldownSecondsRemaining > 0) {
+    if (cooldownSecondsRemaining > 0 || submitting) {
       return;
     }
 
@@ -271,6 +276,7 @@ export default function CompleteRiderDetailsScreen() {
       return;
     }
 
+    setSubmitting(true);
     try {
       const result = await submitDispatchApplication({
         currentAddress: currentAddress.trim(),
@@ -316,6 +322,8 @@ export default function CompleteRiderDetailsScreen() {
         title: 'Unable to submit',
         message: toUserMessage(nextError, 'Please try again.'),
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -573,15 +581,19 @@ export default function CompleteRiderDetailsScreen() {
               loading || !currentStepComplete || cooldownSecondsRemaining > 0 ? styles.buttonDisabled : null,
             ]}
             onPress={handleSubmit}
-            disabled={loading || !currentStepComplete || cooldownSecondsRemaining > 0}
+            disabled={loading || submitting || !currentStepComplete || cooldownSecondsRemaining > 0}
+            accessibilityState={{ busy: submitting }}
           >
-            <Text style={styles.primaryButtonText}>
-              {cooldownSecondsRemaining > 0
-                ? `Try again in ${formatCooldown(cooldownSecondsRemaining)}`
-                : loading
-                  ? 'Submitting...'
-                  : 'Submit for review'}
-            </Text>
+            <BusyLabel
+              busy={submitting}
+              label={
+                cooldownSecondsRemaining > 0
+                  ? `Try again in ${formatCooldown(cooldownSecondsRemaining)}`
+                  : 'Submit for review'
+              }
+              busyLabel="Submitting..."
+              textStyle={styles.primaryButtonText}
+            />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity

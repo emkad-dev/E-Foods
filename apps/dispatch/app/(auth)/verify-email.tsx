@@ -15,6 +15,7 @@ import { updateUserDocument } from '../../src/services/supabase/profile';
 import { resolveDispatchSuccessNotice, type DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
@@ -211,7 +212,7 @@ export default function DispatchVerifyEmailScreen() {
         onPress={handleConfirmCode}
         disabled={confirming || codeIncomplete}
       >
-        <Text style={styles.buttonText}>{confirming ? 'Confirming...' : 'Confirm email'}</Text>
+        <BusyLabel busy={confirming} label="Confirm email" busyLabel="Confirming..." textStyle={styles.buttonText} />
       </TouchableOpacity>
 
       <TouchableOpacity

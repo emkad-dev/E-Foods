@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { PhoneInput } from '../../../../packages/auth/src/components/PhoneInput';
 import AuthPasswordField from '../../src/components/AuthPasswordField';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -217,7 +217,7 @@ export default function PartnerRegisterScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.button, !canSubmit ? styles.buttonDisabled : null]} onPress={handleRegister} disabled={loading || !canSubmit}>
-            <Text style={styles.buttonText}>{loading ? 'Creating login...' : 'Create login'}</Text>
+            <BusyLabel busy={loading} label="Create login" busyLabel="Creating login..." textStyle={styles.buttonText} />
           </TouchableOpacity>
 
           {/* `asChild` so the link is a real box rather than a run of inline

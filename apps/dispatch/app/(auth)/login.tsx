@@ -9,6 +9,7 @@ import { validateLoginForm } from '../../src/domain/authFormValidation';
 import { resolveDispatchSuccessNotice } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
 import { MIN_TAP_TARGET } from '../../../../packages/design-system/src/tokens/space';
+import { BusyLabel } from '../../../../packages/design-system/src/primitives/BusyLabel';
 import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT } from '../../src/theme/screenChrome';
 
 export default function DispatchLoginScreen() {
@@ -113,7 +114,7 @@ export default function DispatchLoginScreen() {
         />
 
         <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? 'Signing in...' : 'Enter dispatch board'}</Text>
+          <BusyLabel busy={loading} label="Enter dispatch board" busyLabel="Signing in..." textStyle={styles.primaryButtonText} />
         </TouchableOpacity>
 
         {/* `asChild` so each link is a real box instead of a run of inline

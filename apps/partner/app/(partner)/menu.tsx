@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -544,9 +544,12 @@ export default function PartnerMenuScreen() {
               onPress={handleSaveItem}
               disabled={!restaurant || saving || loading}
             >
-              <Text style={styles.primaryButtonText}>
-                {saving ? 'Saving...' : editingItemId ? 'Save meal changes' : 'Add meal'}
-              </Text>
+              <BusyLabel
+                busy={saving}
+                label={editingItemId ? 'Save meal changes' : 'Add meal'}
+                busyLabel="Saving..."
+                textStyle={styles.primaryButtonText}
+              />
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryButton} onPress={resetForm} disabled={saving}>
               <Text style={styles.secondaryButtonText}>{editingItemId ? 'Cancel edit' : 'Reset form'}</Text>
@@ -598,9 +601,12 @@ export default function PartnerMenuScreen() {
                         onPress={() => handleToggleItemAvailability(item)}
                         disabled={isToggling}
                       >
-                        <Text style={[styles.inlineActionText, itemUnavailable ? styles.inlineAvailabilityOnText : styles.inlineAvailabilityOffText]}>
-                          {isToggling ? 'Updating...' : itemUnavailable ? 'Back in stock' : 'Sold out'}
-                        </Text>
+                        <BusyLabel
+                          busy={isToggling}
+                          label={itemUnavailable ? 'Back in stock' : 'Sold out'}
+                          busyLabel="Updating..."
+                          textStyle={[styles.inlineActionText, itemUnavailable ? styles.inlineAvailabilityOnText : styles.inlineAvailabilityOffText]}
+                        />
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.inlineAction} onPress={() => handleEditItem(menuCategory.category, item)}>
                         <Text style={styles.inlineActionText}>Edit</Text>

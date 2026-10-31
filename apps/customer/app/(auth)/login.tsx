@@ -132,7 +132,7 @@ export default function LoginScreen() {
       <AuthPrimaryButton
         label={loading ? 'Signing in...' : 'Sign in'}
         onPress={handleLogin}
-        disabled={loading}
+        busy={loading}
       />
 
       <View style={styles.switchRow}>

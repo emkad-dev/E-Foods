@@ -17,7 +17,7 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import { VERIFIED_LINK_MESSAGE } from '../../src/domain/restaurantLinkCopy';
@@ -210,7 +210,7 @@ export default function PartnerStoreScreen() {
                 onPress={handleResumeStore}
                 disabled={pauseActionPending}
               >
-                <Text style={styles.primaryButtonText}>{pauseActionPending ? 'Updating...' : 'Resume now'}</Text>
+                <BusyLabel busy={pauseActionPending} label="Resume now" busyLabel="Updating..." textStyle={styles.primaryButtonText} />
               </TouchableOpacity>
             </View>
           ) : (

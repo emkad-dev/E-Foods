@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { validateVerifyEmailForm } from '../../src/domain/authFormValidation';
 import { useOtpCooldown } from '../../src/services/supabase/auth';
@@ -229,7 +229,7 @@ export default function VerifyEmailScreen() {
         onPress={handleConfirmCode}
         disabled={confirmingCode || codeIncomplete}
       >
-        <Text style={styles.primaryText}>{confirmingCode ? 'Confirming...' : 'Confirm email'}</Text>
+        <BusyLabel busy={confirmingCode} label="Confirm email" busyLabel="Confirming..." textStyle={styles.primaryText} />
       </TouchableOpacity>
 
       {/* Both of these read the session: `reloadUser` refreshes it and sign-out
@@ -237,9 +237,12 @@ export default function VerifyEmailScreen() {
           so they are replaced by the way back to sign-in. */}
       {sessionEmail ? (
         <TouchableOpacity style={styles.secondaryButton} onPress={handleRefreshStatus} disabled={checking}>
-          <Text style={styles.secondaryText}>
-            {checking ? 'Checking...' : 'Refresh confirmation status'}
-          </Text>
+          <BusyLabel
+            busy={checking}
+            label="Refresh confirmation status"
+            busyLabel="Checking..."
+            textStyle={styles.secondaryText}
+          />
         </TouchableOpacity>
       ) : null}
 
@@ -251,18 +254,17 @@ export default function VerifyEmailScreen() {
         // leaves a brief window where a send goes out mid-cooldown.
         disabled={resending || resendCooldown.isCoolingDown || resendCooldown.isChecking}
       >
-        <Text style={styles.secondaryText}>
-          {resending
-            ? 'Sending...'
-            : resendCooldown.isCoolingDown
-              ? `Send a new code in ${resendCooldown.label}`
-              : 'Send a new code'}
-        </Text>
+        <BusyLabel
+          busy={resending}
+          label={resendCooldown.isCoolingDown ? `Send a new code in ${resendCooldown.label}` : 'Send a new code'}
+          busyLabel="Sending..."
+          textStyle={styles.secondaryText}
+        />
       </TouchableOpacity>
 
       {sessionEmail ? (
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} disabled={signingOut}>
-          <Text style={styles.signOutText}>{signingOut ? 'Signing out...' : 'Sign out'}</Text>
+          <BusyLabel busy={signingOut} label="Sign out" busyLabel="Signing out..." textStyle={styles.signOutText} />
         </TouchableOpacity>
       ) : (
         <Link href="/login" style={styles.backLink}>

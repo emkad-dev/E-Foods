@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { validateEmailCode, validateVerifyEmailForm } from '../../src/domain/authFormValidation';
 import {
@@ -205,7 +205,7 @@ export default function PartnerVerifyEmailScreen() {
         onPress={handleConfirmCode}
         disabled={confirming || codeIncomplete}
       >
-        <Text style={styles.buttonText}>{confirming ? 'Confirming...' : 'Confirm email'}</Text>
+        <BusyLabel busy={confirming} label="Confirm email" busyLabel="Confirming..." textStyle={styles.buttonText} />
       </TouchableOpacity>
 
       <TouchableOpacity
