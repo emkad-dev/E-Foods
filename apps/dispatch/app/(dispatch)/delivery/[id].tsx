@@ -11,6 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotice } from '../../../../../packages/design-system/src/primitives/Notice';
 import { BusyLabel } from '../../../../../packages/design-system/src/primitives/BusyLabel';
 import { isSafeServerMessage, toUserMessage } from '../../../../../packages/observability/src/userMessage';
+import type { OrderDocument } from '../../../src/domain/entities';
+import { RiderTripMap } from '../../../src/components/RiderTripMap';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import {
   formatOrderStatusLabel,
@@ -55,30 +57,6 @@ const toDeliveryCodeMessage = (error: unknown, fallback: string) => {
   }
 
   return toUserMessage(error, fallback);
-};
-
-const formatRelativeAge = (value?: string | null) => {
-  if (!value) {
-    return 'updated recently';
-  }
-
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return 'updated recently';
-  }
-
-  const elapsedMinutes = Math.max(1, Math.round((Date.now() - timestamp) / 60000));
-  if (elapsedMinutes < 60) {
-    return `updated ${elapsedMinutes} min ago`;
-  }
-
-  const elapsedHours = Math.round(elapsedMinutes / 60);
-  if (elapsedHours < 24) {
-    return `updated ${elapsedHours}h ago`;
-  }
-
-  const elapsedDays = Math.round(elapsedHours / 24);
-  return `updated ${elapsedDays}d ago`;
 };
 
 export default function DispatchDeliveryDetailScreen() {
@@ -153,21 +131,6 @@ export default function DispatchDeliveryDetailScreen() {
         : null,
     [rawDeliveryLocation?.latitude, rawDeliveryLocation?.longitude]
   );
-  const courierPhone = order?.assignment?.courierPhone ?? null;
-  const courierLatitude = order?.assignment?.courierLatitude ?? null;
-  const courierLongitude = order?.assignment?.courierLongitude ?? null;
-  const hasCourierCoordinates =
-    typeof courierLatitude === 'number' &&
-    Number.isFinite(courierLatitude) &&
-    typeof courierLongitude === 'number' &&
-    Number.isFinite(courierLongitude);
-  const courierLocationUpdatedAt = formatRelativeAge(order?.assignment?.courierUpdatedAt);
-  const courierLocationStatus = hasCourierCoordinates ? 'Live' : courierPhone ? 'Assigned' : 'Waiting';
-  const courierLocationCopy = hasCourierCoordinates
-    ? 'Live rider coordinates mirror the backend snapshot.'
-    : courierPhone
-      ? 'The rider is assigned. Live coordinates will appear once GPS sync is available.'
-      : 'Assign a rider to see live location data here.';
   const ridersByDistance = useMemo(
     () =>
       [...riders]
@@ -345,22 +308,6 @@ export default function DispatchDeliveryDetailScreen() {
     }
   };
 
-  const handleOpenRiderMap = async () => {
-    if (!hasCourierCoordinates) {
-      return;
-    }
-
-    const result = await openExternalLink(
-      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-        `${courierLatitude},${courierLongitude}`
-      )}`
-    );
-
-    if (!result.ok) {
-      reportFailure('Map unavailable', describeExternalLinkFailure(result.reason, 'the map'));
-    }
-  };
-
   if (loading) {
     return (
       <SkeletonScreen>
@@ -456,34 +403,8 @@ export default function DispatchDeliveryDetailScreen() {
           ) : null}
         </View>
 
-        {order.fulfillmentType !== 'pickup' ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Live rider location</Text>
-            <View style={[styles.liveBadge, hasCourierCoordinates ? styles.liveBadgeActive : null]}>
-              <Text style={styles.liveBadgeText}>{courierLocationStatus}</Text>
-            </View>
-            <Text style={styles.actionHelper}>{courierLocationCopy}</Text>
-
-            {hasCourierCoordinates ? (
-              <>
-                <View style={styles.coordinateGrid}>
-                  <View style={styles.coordinateChip}>
-                    <Text style={styles.coordinateLabel}>Latitude</Text>
-                    <Text style={styles.coordinateValue}>{courierLatitude?.toFixed(5)}</Text>
-                  </View>
-                  <View style={styles.coordinateChip}>
-                    <Text style={styles.coordinateLabel}>Longitude</Text>
-                    <Text style={styles.coordinateValue}>{courierLongitude?.toFixed(5)}</Text>
-                  </View>
-                </View>
-                <Text style={styles.detailLine}>Live position {courierLocationUpdatedAt}</Text>
-                <TouchableOpacity style={styles.mapButton} onPress={handleOpenRiderMap}>
-                  <Text style={styles.mapButtonText}>Open rider on maps</Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
-        </View>
-        ) : null}
+        {/* The hook types only the fields this screen reads; the payload is the full dispatch order snapshot. */}
+        <RiderTripMap order={order as OrderDocument} />
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Items</Text>
@@ -798,62 +719,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     marginTop: 8,
-  },
-  liveBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: dispatchTheme.surfaceMuted,
-    borderRadius: radius.pill,
-    marginBottom: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  liveBadgeActive: {
-    backgroundColor: `${dispatchTheme.accent}20`,
-  },
-  liveBadgeText: {
-    color: dispatchTheme.accentStrong,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-  },
-  coordinateGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
-  },
-  coordinateChip: {
-    backgroundColor: dispatchTheme.cream,
-    borderColor: dispatchTheme.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flex: 1,
-    padding: 12,
-  },
-  coordinateLabel: {
-    color: dispatchTheme.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-  },
-  coordinateValue: {
-    color: dispatchTheme.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginTop: 6,
-  },
-  mapButton: {
-    alignItems: 'center',
-    backgroundColor: dispatchTheme.hero,
-    borderRadius: radius.lg,
-    marginTop: 14,
-    paddingVertical: 13,
-  },
-  mapButtonText: {
-    color: dispatchTheme.textOnBrand,
-    fontSize: 13,
-    fontWeight: '900',
   },
   callButton: {
     alignItems: 'center',
