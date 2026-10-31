@@ -12,6 +12,12 @@
   "peerDependencies": {
     "expo-font": "*",
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-webview": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native-webview": {
+      "optional": true
+    }
   }
 }
