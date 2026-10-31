@@ -53,7 +53,10 @@ export const useDispatchOrders = () => {
           setRefreshing(false);
         }
 
-        if (mode === 'initial' && activeRef.current) {
+        // Any completed load ends the first-load skeleton. Gating this on
+        // mode 'initial' left an approved rider's dashboard skeleton up
+        // forever: useRealtimeResource only ever loads in 'background' mode.
+        if (activeRef.current) {
           setLoading(false);
         }
       }

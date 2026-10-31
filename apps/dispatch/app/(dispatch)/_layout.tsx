@@ -29,6 +29,12 @@ export default function DispatchLayout() {
     return <Slot />;
   }
 
+  // Onboarding is finished once the rider is approved; a stale route (the
+  // screen they submitted from, a cached URL) must not leave them on the form.
+  if (user && pathname === '/complete-rider-details') {
+    return <Redirect href={'/(dispatch)' as never} />;
+  }
+
   return (
     <Tabs
       screenOptions={{
@@ -90,6 +96,14 @@ export default function DispatchLayout() {
       />
       <Tabs.Screen
         name="offer/[id]"
+        options={{
+          href: null,
+        }}
+      />
+      {/* Applicant-only onboarding form, rendered without the tab bar above;
+          an approved rider never needs it, so it gets no tab either. */}
+      <Tabs.Screen
+        name="complete-rider-details"
         options={{
           href: null,
         }}
