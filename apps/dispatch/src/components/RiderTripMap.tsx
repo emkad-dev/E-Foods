@@ -83,7 +83,8 @@ function NavigateControl({ url, label }: NavigateControlProps) {
  * turn-by-turn work to Google Maps.
  *
  * Renders nothing when there is no active leg (terminal, pickup, not yet
- * dispatched, or an escalated order whose side of pickup is unknown).
+ * dispatched, or an escalated order whose side of pickup is unknown), or when
+ * the order is not the signed-in rider's own.
  */
 export function RiderTripMap({ order }: RiderTripMapProps) {
   const insets = useSafeAreaInsets();
@@ -95,11 +96,12 @@ export function RiderTripMap({ order }: RiderTripMapProps) {
   const restaurant = getRestaurantPoint(order);
   const dropoff = getDropoffPoint(order);
   const target = getNavigateTarget(order);
-  // The GPS stream is THIS device's rider. On an order assigned to someone else
-  // (a dispatcher looking at the queue) a "You" pin would be a lie.
+  // Only the rider's own assigned order is mapped: this screen is also where a
+  // dispatcher assigns couriers, and an unowned or someone else's order carries
+  // only a coarsened drop-off that must not be drawn as a pin.
   const isOwnOrder = Boolean(user?.uid) && order.assignment?.courierId === user?.uid;
-  const riderLat = isOwnOrder ? riderLocation?.latitude : undefined;
-  const riderLng = isOwnOrder ? riderLocation?.longitude : undefined;
+  const riderLat = riderLocation?.latitude;
+  const riderLng = riderLocation?.longitude;
   const restaurantLabel = order.restaurantName?.trim() || 'Restaurant';
   const restaurantLat = restaurant?.latitude;
   const restaurantLng = restaurant?.longitude;
@@ -122,7 +124,7 @@ export function RiderTripMap({ order }: RiderTripMapProps) {
     return next;
   }, [restaurantLabel, restaurantLat, restaurantLng, dropoffLat, dropoffLng, riderLat, riderLng]);
 
-  if (!leg) {
+  if (!leg || !isOwnOrder) {
     return null;
   }
 
