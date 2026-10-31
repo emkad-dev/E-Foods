@@ -2,6 +2,7 @@ import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { boundedFetch } from './boundedFetch';
 import { boundedNavigatorLock } from './sessionLock';
 import type { SupabaseRuntimeEnv } from './types';
 
@@ -50,6 +51,13 @@ export const createEbuySupabaseClient = (env: SupabaseRuntimeEnv) => {
       // client needs the bounded wrapper. See sessionLock.ts for why the
       // library's own default lock can hang forever with zero visible error.
       ...(isBrowser() ? { lock: boundedNavigatorLock } : null),
+    },
+    // GoTrueClient's own fetch comes from here, NOT auth.fetch -- see
+    // boundedFetch.ts for why an unbounded fetch is the actual root cause
+    // the lock wrapper alone can't fully protect against. Applies on native
+    // too (RN has AbortController + fetch), not just web.
+    global: {
+      fetch: boundedFetch,
     },
   });
 };

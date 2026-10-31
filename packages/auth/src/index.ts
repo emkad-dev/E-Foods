@@ -1,5 +1,6 @@
 export * from './authLoadingGuard';
 export * from './backendRpc';
+export * from './boundedFetch';
 export * from './claims';
 export * from './client';
 export * from './cacheHydration';
