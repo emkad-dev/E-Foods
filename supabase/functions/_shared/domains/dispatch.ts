@@ -486,6 +486,68 @@ const findNearestRiders = async (
   return (data ?? []) as RankedRiderRow[];
 };
 
+type RestaurantCoordinates = { latitude: number; longitude: number };
+
+/**
+ * Restaurant pins for the rider's trip map, keyed by restaurant id. The caller
+ * passes ONLY the restaurants of orders whose snapshot goes out unredacted to a
+ * rider who owns them: every other dispatcher-facing snapshot (offers, redacted
+ * manual-queue rows) must stay free of kitchen coordinates, so the privacy
+ * decision lives at the call site and this stays a dumb batched read. One
+ * `.in()` query - and none at all for an empty set - because the queue is
+ * polled. Best-effort like loadRestaurantTimingContext: the client already
+ * tolerates null coordinates (it falls back to a search by name), so a failed
+ * read must not take the rider's queue down with it.
+ */
+const loadRestaurantCoordinatesByIds = async (
+  restaurantIds: Iterable<string>
+): Promise<Map<string, RestaurantCoordinates>> => {
+  const ids = [...new Set([...restaurantIds].filter(Boolean))];
+  const coordinatesById = new Map<string, RestaurantCoordinates>();
+  if (ids.length === 0) {
+    return coordinatesById;
+  }
+
+  const { data, error } = await serviceClient
+    .from('RestaurantRecord')
+    .select('id,latitude,longitude')
+    .in('id', ids);
+
+  if (error) {
+    logEdgeEvent('warn', 'Failed to load restaurant coordinates for rider orders', {
+      error: error.message,
+      restaurantCount: ids.length,
+    });
+    return coordinatesById;
+  }
+
+  for (const row of (data ?? []) as Array<{ id: string; latitude?: unknown; longitude?: unknown }>) {
+    if (
+      typeof row.latitude === 'number' &&
+      Number.isFinite(row.latitude) &&
+      typeof row.longitude === 'number' &&
+      Number.isFinite(row.longitude)
+    ) {
+      coordinatesById.set(row.id, { latitude: row.latitude, longitude: row.longitude });
+    }
+  }
+
+  return coordinatesById;
+};
+
+/**
+ * True for the one case where a snapshot may carry the restaurant's pin: the
+ * caller is the order's own rider (NOT merely an admin, who has no trip to
+ * navigate) and the order is still in flight.
+ */
+const riderMayReceiveRestaurantCoordinates = (
+  order: CustomerOrderRow,
+  assignment: DeliveryAssignmentRow | null,
+  uid: string
+) =>
+  getDispatchAssignmentOwnerId(assignment) === uid &&
+  !TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus(order.status));
+
 const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
   ensureRole(context.role, ['dispatch', 'admin']);
   const { data: orders, error } = await serviceClient
@@ -582,6 +644,16 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
     offerRelations = await loadOrderRelations([...offerOrdersById.keys()]);
   }
 
+  // The rider's own in-flight orders get the restaurant pin for the trip map;
+  // offers and redacted manual-queue rows (built below) never do.
+  const restaurantCoordinatesById = await loadRestaurantCoordinatesByIds(
+    scopedOrderList
+      .filter((order) =>
+        riderMayReceiveRestaurantCoordinates(order, assignmentsByOrderId.get(order.id) ?? null, context.uid)
+      )
+      .map((order) => order.restaurantId)
+  );
+
   return json(200, {
     data: {
       offers: pendingOffers
@@ -610,7 +682,13 @@ const dispatchGetDeliveryQueue: Handler = async ({ context }) => {
         .filter((offer) => offer !== null),
       orders: scopedOrderList.map((order) => {
         const assignment = assignmentsByOrderId.get(order.id) ?? null;
-        const snapshot = toOrderSnapshotResponse(order, itemsByOrderId.get(order.id) ?? [], assignment);
+        const restaurantCoordinates = riderMayReceiveRestaurantCoordinates(order, assignment, context.uid)
+          ? restaurantCoordinatesById.get(order.restaurantId)
+          : undefined;
+        const snapshot = toOrderSnapshotResponse(order, itemsByOrderId.get(order.id) ?? [], assignment, [], {
+          restaurantLatitude: restaurantCoordinates?.latitude ?? null,
+          restaurantLongitude: restaurantCoordinates?.longitude ?? null,
+        });
         // Unowned manual-queue work is visible to EVERY dispatcher, so it gets
         // the same redaction as a pending offer: no customer address, id,
         // phone or payment detail until a rider has actually taken the order
@@ -779,11 +857,22 @@ const dispatchGetOrderDetail: Handler = async ({ context, data }) => {
   }
 
   const customerPhone = await loadUserPhoneNumber(bundle.order.customerId);
+  // Only the order's own rider gets the pickup pin (an admin opening the detail
+  // has no trip to navigate), and only while it is still in flight.
+  const restaurantCoordinates = riderMayReceiveRestaurantCoordinates(
+    bundle.order,
+    bundle.assignment ?? null,
+    context.uid
+  )
+    ? (await loadRestaurantCoordinatesByIds([bundle.order.restaurantId])).get(bundle.order.restaurantId)
+    : undefined;
 
   return json(200, {
     data: {
       order: toOrderSnapshotResponse(bundle.order, bundle.items, bundle.assignment, bundle.events, {
         customerPhone,
+        restaurantLatitude: restaurantCoordinates?.latitude ?? null,
+        restaurantLongitude: restaurantCoordinates?.longitude ?? null,
       }),
     },
   });

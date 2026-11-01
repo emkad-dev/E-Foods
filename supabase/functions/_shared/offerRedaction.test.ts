@@ -19,6 +19,16 @@ Deno.test('redaction strips address/phone/customerId, coarsens coords, reduces p
   assertEquals((out.pricing as { total: number }).total, 4300); // kept
 });
 
+Deno.test('redaction strips the restaurant coordinates that only the owning rider may have', () => {
+  const out = redactOfferSnapshot({
+    id: 'o4', restaurantName: 'Mama Put', restaurantLatitude: 6.601, restaurantLongitude: 3.301,
+    restaurantLocation: { latitude: 6.5, longitude: 3.3 },
+  } as never) as Record<string, unknown>;
+  assert(!('restaurantLatitude' in out), 'restaurant latitude must be gone');
+  assert(!('restaurantLongitude' in out), 'restaurant longitude must be gone');
+  assertEquals(out.restaurantName, 'Mama Put');  // the rest of the snapshot is untouched
+});
+
 Deno.test('redaction tolerates missing optional fields', () => {
   const out = redactOfferSnapshot({ id: 'o2', restaurantName: 'X' } as never);
   assertEquals((out as { id: string }).id, 'o2');

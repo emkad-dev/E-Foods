@@ -1,11 +1,14 @@
+import { useMemo } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { radius } from '../../../../packages/design-system/src/tokens/radius';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RiderTripMap } from '../../src/components/RiderTripMap';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { formatOrderStatusLabel, getOrderStatusColor } from '../../src/domain/orders';
+import { pickActiveDeliveries } from '../../src/domain/riderTrip';
 import { useDispatchOrders } from '../../src/hooks/useDispatchOrders';
 import { useDispatchRiders } from '../../src/hooks/useDispatchRiders';
 import { dispatchTheme } from '../../src/theme/palette';
@@ -16,7 +19,7 @@ export default function DispatchDashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { activeDeliveryOrders, awaitingPickupCount, deliveredCount, error, loading, onTheWayCount } =
+  const { activeDeliveryOrders, awaitingPickupCount, deliveredCount, error, loading, onTheWayCount, orders } =
     useDispatchOrders();
   const {
     activeZones,
@@ -26,6 +29,10 @@ export default function DispatchDashboard() {
     onlineRiders,
     riders,
   } = useDispatchRiders();
+  // The rider's own trips, most urgent first. Taken from `orders` (every assigned
+  // order), not `activeDeliveryOrders`, so it does not depend on the board's filters.
+  const myTrips = useMemo(() => pickActiveDeliveries(orders, user?.uid), [orders, user?.uid]);
+  const currentTrip = myTrips[0] ?? null;
   const currentRider = user ? riders.find((rider) => rider.id === user.uid) ?? null : null;
   const delayedRiders = riders.filter((rider) => rider.availabilityLabel.includes('delay'));
   const offlineRiders = riders.filter((rider) => rider.availabilityLabel.includes('offline'));
@@ -78,6 +85,27 @@ export default function DispatchDashboard() {
           HI {greetingName}
         </Text>
       </View>
+
+      {currentTrip ? (
+        <View style={styles.currentTripCard}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Open current delivery, order ${currentTrip.id.slice(-6)}`}
+            activeOpacity={0.92}
+            style={styles.currentTripHeaderTap}
+            onPress={() => router.push(`/delivery/${currentTrip.id}`)}
+          >
+            <View style={styles.currentTripHeader}>
+              <Text style={styles.currentTripTitle}>Current delivery</Text>
+              {myTrips.length > 1 ? <Text style={styles.currentTripCount}>1 of {myTrips.length}</Text> : null}
+            </View>
+            <Text style={styles.currentTripMeta} numberOfLines={1}>
+              {currentTrip.restaurantName ?? 'Restaurant'} · {formatOrderStatusLabel(currentTrip.status)}
+            </Text>
+          </TouchableOpacity>
+          <RiderTripMap order={currentTrip} compact onOpen={() => router.push(`/delivery/${currentTrip.id}`)} />
+        </View>
+      ) : null}
 
       <View style={styles.statsGrid}>
         {dispatchMetrics.map((metric) => (
@@ -203,6 +231,38 @@ const styles = StyleSheet.create({
     color: dispatchTheme.text,
     fontSize: 24,
     fontWeight: '800',
+  },
+  currentTripCard: {
+    backgroundColor: dispatchTheme.surface,
+    borderColor: dispatchTheme.border,
+    borderRadius: radius['2xl'],
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 18,
+  },
+  currentTripHeaderTap: {
+    minHeight: 44,
+  },
+  currentTripHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  currentTripTitle: {
+    color: dispatchTheme.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  currentTripCount: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  currentTripMeta: {
+    color: dispatchTheme.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
   },
   statsGrid: {
     flexDirection: 'row',
