@@ -40,6 +40,13 @@ export type LiveMapPayload = {
 export const LIVE_MAP_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 export const LIVE_MAP_TILE_ATTRIBUTION = '&copy; OpenStreetMap contributors';
 
+/**
+ * Origin the native WebView loads the page under. Without a baseUrl the page
+ * has no origin and OSM's tile servers see no Referer, which their tile usage
+ * policy asks clients to send.
+ */
+export const LIVE_MAP_BASE_URL = 'https://feasty.com.ng/';
+
 export const LIVE_MAP_READY_MESSAGE = 'feasty-map:ready';
 export const LIVE_MAP_FAILED_MESSAGE = 'feasty-map:failed';
 export const LIVE_MAP_APPLY_MESSAGE = 'feasty-map:apply';
@@ -69,6 +76,22 @@ export const buildLiveMapApplyMessage = (payload: LiveMapPayload) => ({
   type: LIVE_MAP_APPLY_MESSAGE,
   payload,
 });
+
+export type LiveMapNavigation = 'allow' | 'external' | 'block';
+
+/**
+ * What the native host does with a top-frame navigation request. The page is a
+ * single document and never legitimately navigates after load, so anything but
+ * the initial load (the baseUrl, about:blank, data:) is a user tapping a link
+ * such as the MapLibre attribution: http(s) goes to the system browser, the
+ * rest is dropped. Either way the map itself must not navigate away.
+ */
+export const classifyLiveMapNavigation = (url: string): LiveMapNavigation => {
+  if (url === LIVE_MAP_BASE_URL || url === 'about:blank' || url.startsWith('data:')) {
+    return 'allow';
+  }
+  return /^https?:\/\//i.test(url) ? 'external' : 'block';
+};
 
 export const buildLiveMapHtml = ({ interactive, theme }: { interactive: boolean; theme: LiveMapTheme }): string => {
   const config = JSON.stringify({
@@ -150,6 +173,10 @@ export const buildLiveMapHtml = ({ interactive, theme }: { interactive: boolean;
           center: [config.centre.longitude, config.centre.latitude],
           zoom: 12,
           interactive: config.interactive,
+          // An interactive map sits inside a scrolling page (customer order
+          // screen on web): without this a mouse wheel or one-finger drag over
+          // the map zooms/pans it instead of scrolling the page.
+          cooperativeGestures: config.interactive,
           attributionControl: { compact: true }
         });
 

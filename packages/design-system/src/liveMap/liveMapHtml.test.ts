@@ -11,12 +11,14 @@ import vm from 'node:vm';
 
 import {
   LIVE_MAP_APPLY_MESSAGE,
+  LIVE_MAP_BASE_URL,
   LIVE_MAP_FAILED_MESSAGE,
   LIVE_MAP_READY_MESSAGE,
   LIVE_MAP_TILE_URL,
   buildLiveMapApplyMessage,
   buildLiveMapApplyScript,
   buildLiveMapHtml,
+  classifyLiveMapNavigation,
   isFiniteCoordinate,
   type LiveMapMarker,
   type LiveMapTheme,
@@ -340,4 +342,21 @@ test('page: only the interactive map gets zoom controls', () => {
   assert.deepEqual(interactive.controls, ['top-right']);
   assert.deepEqual(passive.controls, []);
   assert.equal(passive.mapOptions.interactive, false);
+});
+
+test('page: cooperative gestures follow interactive, so a map in a scrolling page does not eat the scroll', () => {
+  assert.equal(runPage({ interactive: true }).mapOptions.cooperativeGestures, true);
+  assert.equal(runPage({ interactive: false }).mapOptions.cooperativeGestures, false);
+});
+
+test('classifyLiveMapNavigation allows only the initial load, sends http(s) links out, drops the rest', () => {
+  assert.equal(classifyLiveMapNavigation(LIVE_MAP_BASE_URL), 'allow');
+  assert.equal(classifyLiveMapNavigation('about:blank'), 'allow');
+  assert.equal(classifyLiveMapNavigation('data:text/html,<p>x</p>'), 'allow');
+  assert.equal(classifyLiveMapNavigation('https://www.openstreetmap.org/copyright'), 'external');
+  assert.equal(classifyLiveMapNavigation('http://maplibre.org/'), 'external');
+  assert.equal(classifyLiveMapNavigation('https://feasty.com.ng/other'), 'external', 'only the exact baseUrl is the initial load');
+  assert.equal(classifyLiveMapNavigation('javascript:alert(1)'), 'block');
+  assert.equal(classifyLiveMapNavigation('intent://scan#Intent;end'), 'block');
+  assert.equal(classifyLiveMapNavigation('file:///etc/passwd'), 'block');
 });

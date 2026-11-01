@@ -1,16 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useMemo, useRef } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import {
-  LIVE_MAP_FAILED_MESSAGE,
-  LIVE_MAP_READY_MESSAGE,
-  LIVE_MAP_READY_TIMEOUT_MS,
-  buildLiveMapApplyMessage,
-  buildLiveMapHtml,
-} from './liveMapHtml';
+import { buildLiveMapApplyMessage, buildLiveMapHtml } from './liveMapHtml';
 import type { LiveMapProps } from './LiveMap';
-
-type MapStatus = 'loading' | 'ready' | 'failed';
+import { useLiveMapStatus } from './useLiveMapStatus';
 
 /**
  * Web host: the same page in a sandboxed iframe. `allow-scripts` without
@@ -18,10 +11,10 @@ type MapStatus = 'loading' | 'ready' | 'failed';
  * script can never read the app's storage or session. Messages are only
  * accepted from this iframe's own window.
  */
-export function LiveMap({ markers, theme, interactive = false, style, fallback = null }: LiveMapProps) {
+export function LiveMap({ markers, theme, interactive = false, style, fallback = null, onFallbackChange }: LiveMapProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [status, setStatus] = useState<MapStatus>('loading');
   const html = useMemo(() => buildLiveMapHtml({ interactive, theme }), [interactive, theme]);
+  const { status, showFallback, handlePageMessage } = useLiveMapStatus(html, onFallbackChange);
   const markersKey = JSON.stringify(markers);
 
   useEffect(() => {
@@ -29,29 +22,11 @@ export function LiveMap({ markers, theme, interactive = false, style, fallback =
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) {
         return;
       }
-      if (event.data === LIVE_MAP_READY_MESSAGE) {
-        setStatus('ready');
-      } else if (event.data === LIVE_MAP_FAILED_MESSAGE) {
-        setStatus('failed');
-      }
+      handlePageMessage(event.data);
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-  // A rebuilt page (interactive or theme changed) is a fresh document: see the
-  // matching effect in LiveMap.tsx.
-  useEffect(() => {
-    setStatus('loading');
-  }, [html]);
-
-  useEffect(() => {
-    if (status !== 'loading') {
-      return;
-    }
-    const timer = setTimeout(() => setStatus((current) => (current === 'loading' ? 'failed' : current)), LIVE_MAP_READY_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [status]);
+  }, [handlePageMessage]);
 
   useEffect(() => {
     if (status === 'ready') {
@@ -59,12 +34,9 @@ export function LiveMap({ markers, theme, interactive = false, style, fallback =
     }
   }, [status, markersKey]);
 
-  if (status === 'failed') {
-    return <View style={style}>{fallback}</View>;
-  }
-
   return (
     <View style={[style, { pointerEvents: interactive ? 'auto' : 'none' }]}>
+      {/* Stays mounted while the fallback shows: a slow first MapLibre download can report ready after the timeout, and that must bring the map back. */}
       <iframe
         ref={iframeRef}
         title="Live map"
@@ -80,6 +52,7 @@ export function LiveMap({ markers, theme, interactive = false, style, fallback =
           pointerEvents: interactive ? 'auto' : 'none',
         }}
       />
+      {showFallback ? <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background }]}>{fallback}</View> : null}
     </View>
   );
 }
