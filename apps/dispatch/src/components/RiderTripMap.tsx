@@ -101,6 +101,7 @@ export function RiderTripMap({ order, compact = false, onOpen }: RiderTripMapPro
   const { user } = useAuth();
   const riderLocation = useRiderLocation();
   const [expanded, setExpanded] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
 
   const leg = getTripLeg(order);
   const restaurant = getRestaurantPoint(order);
@@ -108,7 +109,10 @@ export function RiderTripMap({ order, compact = false, onOpen }: RiderTripMapPro
   const target = getNavigateTarget(order);
   // Only the rider's own assigned order is mapped: this screen is also where a
   // dispatcher assigns couriers, and an unowned or someone else's order carries
-  // only a coarsened drop-off that must not be drawn as a pin.
+  // only a coarsened drop-off that must not be drawn as a pin. The server's
+  // coordinate gate checks getDispatchAssignmentOwnerId (dispatchOwnerId ??
+  // dispatchId) while this checks courierId; they agree because the owner and
+  // the courier are the same account today.
   const isOwnOrder = Boolean(user?.uid) && order.assignment?.courierId === user?.uid;
   const riderLat = riderLocation?.latitude;
   const riderLng = riderLocation?.longitude;
@@ -143,11 +147,15 @@ export function RiderTripMap({ order, compact = false, onOpen }: RiderTripMapPro
   const stopLabel = leg === 'to_restaurant' ? `Pick up at ${restaurantLabel}` : `Drop-off: ${dropoffAddress}`;
   const navigateLabel = leg === 'to_restaurant' ? 'Navigate to restaurant' : 'Navigate to drop-off';
 
-  // Shown whenever the map cannot load, so the rider still has the address.
+  // Shown whenever the map cannot load, so the rider still has the next stop.
+  // The copy follows the leg (a rider heading to the kitchen needs the kitchen,
+  // not the drop-off); the compact dashboard card has no room for a block of
+  // address text and its host screen already shows the delivery.
+  const fallbackDetail = leg === 'to_restaurant' ? `Pickup: ${restaurantLabel}` : `Drop-off: ${dropoffAddress}`;
   const fallback = (
     <View style={styles.fallback}>
-      <Text style={styles.fallbackTitle}>Map unavailable right now</Text>
-      <Text style={styles.fallbackText}>Drop-off: {dropoffAddress}</Text>
+      <Text style={styles.fallbackTitle}>{compact ? 'Map unavailable' : 'Map unavailable right now'}</Text>
+      {compact ? null : <Text style={styles.fallbackText}>{fallbackDetail}</Text>}
     </View>
   );
 
@@ -162,22 +170,35 @@ export function RiderTripMap({ order, compact = false, onOpen }: RiderTripMapPro
 
       {markers.length > 0 ? (
         <View style={styles.mapFrame}>
-          <LiveMap markers={markers} theme={MAP_THEME} style={styles.compactMap} fallback={fallback} />
+          <LiveMap
+            markers={markers}
+            theme={MAP_THEME}
+            style={styles.compactMap}
+            fallback={fallback}
+            onFallbackChange={setMapFailed}
+          />
           {/*
             A sibling AFTER the map rather than a Pressable around it: on
             Android a native WebView can keep consuming taps even under a
             parent with pointerEvents none, so the overlay has to sit above it.
           */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={onOpen ? 'Open delivery' : 'Expand trip map'}
-            onPress={onOpen ?? (() => setExpanded(true))}
-            style={styles.expandOverlay}
-          >
-            <View style={styles.expandHint}>
-              <Text style={styles.expandHintText}>{onOpen ? 'Open delivery' : 'Tap to expand'}</Text>
-            </View>
-          </Pressable>
+          {/*
+            With the map down, expanding would only open a modal repeating the
+            fallback, so that overlay goes away; the dashboard's still opens the
+            delivery, which is useful whether or not the map loaded.
+          */}
+          {mapFailed && !onOpen ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={onOpen ? 'Open delivery' : 'Expand trip map'}
+              onPress={onOpen ?? (() => setExpanded(true))}
+              style={styles.expandOverlay}
+            >
+              <View style={styles.expandHint}>
+                <Text style={styles.expandHintText}>{onOpen ? 'Open delivery' : 'Tap to expand'}</Text>
+              </View>
+            </Pressable>
+          )}
         </View>
       ) : null}
 
