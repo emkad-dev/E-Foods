@@ -56,6 +56,31 @@ export const LIVE_MAP_READY_TIMEOUT_MS = 8_000;
 
 const MAPLIBRE_VERSION = '5.6.1';
 
+/**
+ * White glyphs drawn for FEASTY on a 24x24 grid, one static string per marker
+ * kind. They are embedded in the page so markers need no icon font and no extra
+ * request, and they are the ONLY markup a marker element ever receives: labels
+ * reach the page as popup text, never inside the marker.
+ */
+const SVG_OPEN =
+  '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+export const LIVE_MAP_MARKER_ICONS: Record<LiveMapMarkerKind, string> = {
+  // Motorbike: two wheels, a frame between them, handlebar and seat.
+  rider:
+    SVG_OPEN +
+    '<circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/>' +
+    '<path d="M5 17l3-6h6l2.5 6"/><path d="M14 11l-1.5-4H16"/><path d="M6.5 8.5h4"/></svg>',
+  // Fork and knife.
+  restaurant:
+    SVG_OPEN +
+    '<path d="M7 3v5a3 3 0 0 0 6 0V3"/><path d="M10 11v10"/>' +
+    '<path d="M17 21V3c-2 1.5-3 4-3 7v4h3"/></svg>',
+  // House.
+  delivery:
+    SVG_OPEN +
+    '<path d="M3 11.5L12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-5h4v5"/></svg>',
+};
+
 const DEFAULT_CENTRE = { latitude: 6.5244, longitude: 3.3792 };
 
 export const isFiniteCoordinate = (latitude: unknown, longitude: unknown): boolean =>
@@ -120,13 +145,19 @@ export const buildLiveMapHtml = ({ interactive, theme }: { interactive: boolean;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       }
       .marker {
-        width: 18px;
-        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        width: 30px;
+        height: 30px;
         border-radius: 999px;
-        border: 3px solid rgba(255, 255, 255, 0.95);
+        border: 3px solid #fff;
         box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
       }
-      .marker.rider { background: ${theme.rider}; width: 22px; height: 22px; }
+      .marker svg { display: block; width: 16px; height: 16px; }
+      .marker.rider { background: ${theme.rider}; width: 34px; height: 34px; }
+      .marker.rider svg { width: 20px; height: 20px; }
       .marker.delivery { background: ${theme.delivery}; }
       .marker.restaurant { background: ${theme.restaurant}; }
       .maplibregl-popup-content {
@@ -145,6 +176,7 @@ export const buildLiveMapHtml = ({ interactive, theme }: { interactive: boolean;
     <script>
       (function () {
         var config = ${config};
+        var icons = ${JSON.stringify(LIVE_MAP_MARKER_ICONS)};
 
         var post = function (message) {
           try {
@@ -250,9 +282,14 @@ export const buildLiveMapHtml = ({ interactive, theme }: { interactive: boolean;
             var to = [m.longitude, m.latitude];
             var entry = entries[m.id];
             if (!entry) {
+              // A static icon per kind, never built from m.label: the label
+              // only ever reaches the popup, as text.
+              var kind = Object.prototype.hasOwnProperty.call(icons, m.kind) ? m.kind : 'delivery';
               var element = document.createElement('div');
-              element.className = 'marker ' + m.kind;
-              var popup = new maplibregl.Popup({ offset: 16 }).setText(m.label);
+              element.className = 'marker ' + kind;
+              element.setAttribute('data-kind', kind);
+              element.innerHTML = icons[kind];
+              var popup = new maplibregl.Popup({ offset: 20 }).setText(m.label);
               entry = { marker: new maplibregl.Marker({ element: element }).setLngLat(to).setPopup(popup).addTo(map), popup: popup, label: m.label, frame: null };
               entries[m.id] = entry;
               return;

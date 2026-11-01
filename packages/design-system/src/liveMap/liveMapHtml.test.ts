@@ -13,6 +13,7 @@ import {
   LIVE_MAP_APPLY_MESSAGE,
   LIVE_MAP_BASE_URL,
   LIVE_MAP_FAILED_MESSAGE,
+  LIVE_MAP_MARKER_ICONS,
   LIVE_MAP_READY_MESSAGE,
   LIVE_MAP_TILE_URL,
   buildLiveMapApplyMessage,
@@ -94,6 +95,7 @@ test('isFiniteCoordinate rejects NaN, strings, null, undefined and infinities', 
 // ---- the page script, run against a fake MapLibre ----
 
 type FakeMarker = { lngLat: { lng: number; lat: number }; removed: boolean };
+type FakeElement = { className: string; innerHTML: string; attributes: Record<string, string>; setAttribute: (name: string, value: string) => void };
 
 const runPage = (options: { withMaplibre?: boolean; interactive?: boolean } = {}) => {
   const { withMaplibre = true, interactive = true } = options;
@@ -103,6 +105,7 @@ const runPage = (options: { withMaplibre?: boolean; interactive?: boolean } = {}
 
   const posted: string[] = [];
   const markers: FakeMarker[] = [];
+  const elements: FakeElement[] = [];
   const mapHandlers: Record<string, () => void> = {};
   const fits: string[] = [];
   const controls: string[] = [];
@@ -145,8 +148,9 @@ const runPage = (options: { withMaplibre?: boolean; interactive?: boolean } = {}
   }
   class FakeMarkerImpl {
     state: FakeMarker = { lngLat: { lng: 0, lat: 0 }, removed: false };
-    constructor() {
+    constructor(opts: { element: FakeElement }) {
       markers.push(this.state);
+      elements.push(opts.element);
     }
     setLngLat(point: number[]) {
       this.state.lngLat = { lng: point[0], lat: point[1] };
@@ -175,7 +179,19 @@ const runPage = (options: { withMaplibre?: boolean; interactive?: boolean } = {}
   };
   const context = vm.createContext({
     window,
-    document: { createElement: () => ({ className: '' }) },
+    document: {
+      createElement: (): FakeElement => {
+        const attributes: Record<string, string> = {};
+        return {
+          className: '',
+          innerHTML: '',
+          attributes,
+          setAttribute: (name: string, value: string) => {
+            attributes[name] = value;
+          },
+        };
+      },
+    },
     maplibregl: withMaplibre
       ? { Map: FakeMap, LngLatBounds: FakeBounds, Popup: FakePopup, Marker: FakeMarkerImpl, NavigationControl: class {} }
       : undefined,
@@ -194,6 +210,7 @@ const runPage = (options: { withMaplibre?: boolean; interactive?: boolean } = {}
   return {
     posted,
     markers,
+    elements,
     fits,
     controls,
     get mapOptions() {
@@ -347,6 +364,45 @@ test('page: only the interactive map gets zoom controls', () => {
 test('page: cooperative gestures follow interactive, so a map in a scrolling page does not eat the scroll', () => {
   assert.equal(runPage({ interactive: true }).mapOptions.cooperativeGestures, true);
   assert.equal(runPage({ interactive: false }).mapOptions.cooperativeGestures, false);
+});
+
+test('page: each marker kind is a pin carrying its own icon, and the label never enters the marker markup', () => {
+  const page = runPage();
+  page.fireLoad();
+  const label = 'Ada <b>Kitchen</b> & "sons"';
+  page.api!.apply({
+    markers: [
+      { ...rider(6.5, 3.3), label },
+      { ...restaurant, label },
+      { ...delivery, label },
+    ],
+  });
+
+  assert.equal(page.elements.length, 3);
+  const [riderEl, restaurantEl, deliveryEl] = page.elements;
+  const kinds = [
+    ['rider', riderEl],
+    ['restaurant', restaurantEl],
+    ['delivery', deliveryEl],
+  ] as const;
+  for (const [kind, element] of kinds) {
+    assert.equal(element.className, `marker ${kind}`);
+    assert.equal(element.attributes['data-kind'], kind);
+    assert.ok(element.innerHTML.startsWith('<svg'), `${kind} marker holds an inline svg`);
+    assert.equal(element.innerHTML, LIVE_MAP_MARKER_ICONS[kind], `${kind} marker holds its own icon`);
+    assert.ok(!element.innerHTML.includes('Kitchen') && !element.innerHTML.includes('Ada'), `${kind} label stays out of the marker`);
+    assert.ok(!element.innerHTML.includes('<b>'), `${kind} marker has no label markup`);
+    assert.ok(!/https?:/.test(element.innerHTML.replace('http://www.w3.org', '')), `${kind} icon makes no network request`);
+  }
+  assert.equal(new Set([riderEl.innerHTML, restaurantEl.innerHTML, deliveryEl.innerHTML]).size, 3, 'three distinct glyphs');
+});
+
+test('page: pins are sized rider 34px, stops 30px, with the themed colour and a white 3px border', () => {
+  const html = buildLiveMapHtml({ interactive: true, theme });
+  assert.match(html, /\.marker \{[^}]*width: 30px;[^}]*height: 30px;[^}]*border: 3px solid #fff;/);
+  assert.ok(html.includes(`.marker.rider { background: ${theme.rider}; width: 34px; height: 34px; }`));
+  assert.ok(html.includes(`.marker.restaurant { background: ${theme.restaurant}; }`));
+  assert.ok(html.includes(`.marker.delivery { background: ${theme.delivery}; }`));
 });
 
 test('classifyLiveMapNavigation allows only the initial load, sends http(s) links out, drops the rest', () => {

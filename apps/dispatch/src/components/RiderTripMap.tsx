@@ -23,7 +23,8 @@ import { dispatchTheme } from '../theme/palette';
 const MAP_THEME: LiveMapTheme = {
   background: dispatchTheme.background,
   text: dispatchTheme.text,
-  rider: dispatchTheme.accent,
+  // Orange like the customer app; the accent is green-ish and would clash with the drop-off.
+  rider: '#f97316',
   delivery: '#16a34a',
   restaurant: '#5D3FD3',
 };
