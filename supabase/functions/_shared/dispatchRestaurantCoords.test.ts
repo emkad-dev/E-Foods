@@ -6,8 +6,8 @@
 //
 // Calls the REAL handlers out of dispatchDomain.handlers. Env stubs must be set
 // before the dynamic import (client.ts throws at module scope without them).
-// Runs in package.json's second, --no-check `deno test` invocation because
-// dispatch.ts carries pre-existing baseline type errors.
+// Type-checks cleanly, so it runs in package.json's first (type-checked)
+// `deno test` invocation.
 
 Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
