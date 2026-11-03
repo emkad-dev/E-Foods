@@ -1,4 +1,4 @@
-const PARTNER_VERIFICATION_BUCKET = 'partner-verification-documents';
+export const PARTNER_VERIFICATION_BUCKET = 'partner-verification-documents';
 
 export type PartnerOnboardingDocumentType = 'nin' | 'tax_id';
 

@@ -22,6 +22,7 @@ import {
   type DispatchApplicationRow,
   type PartnerApplicationRow,
 } from '../applications.ts';
+import { loadPartnerOnboardingReviews } from '../partnerOnboardingReview.ts';
 import {
   buildRestaurantPayoutRow,
   buildRiderRosterRow,
@@ -325,14 +326,20 @@ const adminGetApprovalQueue: Handler = async ({ context }) => {
     ((approvals ?? []) as RestaurantApprovalRow[]).map((approval) => [approval.restaurantId, approval])
   );
 
+  const pendingPartnerApplications = (partnerApplications ?? []) as PartnerApplicationRow[];
+  const onboardingByUid = await loadPartnerOnboardingReviews(
+    pendingPartnerApplications.map((application) => sanitizeText(application.uid))
+  );
+
   return json(200, {
     data: {
       dispatchApplications: ((dispatchApplications ?? []) as DispatchApplicationRow[]).map(
         buildDispatchApplicationResponse
       ),
-      partnerApplications: ((partnerApplications ?? []) as PartnerApplicationRow[]).map(
-        buildPartnerApplicationResponse
-      ),
+      partnerApplications: pendingPartnerApplications.map((application) => ({
+        ...buildPartnerApplicationResponse(application),
+        onboarding: onboardingByUid.get(sanitizeText(application.uid)) ?? null,
+      })),
       restaurants: ((restaurants ?? []) as RestaurantRecordRow[]).map((restaurant) =>
         buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null)
       ),
