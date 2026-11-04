@@ -66,8 +66,8 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
 
       // A failed RELOAD of an order already on screen (flaky connection after
       // confirm/report, a missed poll) must not wipe it into "Order not found".
-      // Only a failed first load, or a different order id, is a real error.
-      if (shouldKeepOrderOnLoadFailure(orderRef.current, orderId)) {
+      // Only a failed first load, or a different order id or account, is a real error.
+      if (shouldKeepOrderOnLoadFailure(orderRef.current, orderId, customerId)) {
         return;
       }
 
