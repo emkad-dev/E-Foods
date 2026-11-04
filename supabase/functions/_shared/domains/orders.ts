@@ -24,6 +24,7 @@ import {
   buildNotificationData,
   customerOrderStatusCopy,
   notifyRestaurantUsers,
+  notifyAdmins,
   notifySafely,
   notifyUsers,
 } from '../notifications.ts';
@@ -53,6 +54,7 @@ import {
   releasePromoRedemption,
   TERMINAL_ORDER_STATUSES,
   toOrderSnapshotResponse,
+  updateDeliveredOrderIfNull,
   updateOrderRecord,
   upsertPaymentTransaction,
   type CustomerOrderRow,
@@ -2273,17 +2275,15 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   });
 };
 
-const customerSendSupportMessage: Handler = async ({ context, data }) => {
-  const body = sanitizeText(data.body);
-  if (!body) {
-    fail(400, 'A message body is required.');
-  }
-
-  // One thread per customer: find, create, or reopen if previously closed.
+// Appends a customer message to their single support thread: find, create, or
+// reopen if previously closed, then notify inbox/thread subscribers. Shared by
+// customerSendSupportMessage and customerReportOrderProblem so a reported
+// order problem lands in exactly the same thread, the same way.
+const postCustomerSupportMessage = async (customerId: string, body: string) => {
   const { data: existing, error: findError } = await serviceClient
     .from('SupportConversation')
     .select('*')
-    .eq('customerId', context.uid)
+    .eq('customerId', customerId)
     .maybeSingle<SupportConversationRow>();
   if (findError) {
     throw new Error(findError.message);
@@ -2293,7 +2293,7 @@ const customerSendSupportMessage: Handler = async ({ context, data }) => {
   if (!existing) {
     const { data: created, error: createError } = await serviceClient
       .from('SupportConversation')
-      .insert({ customerId: context.uid, status: 'open', subject: body.slice(0, 80) })
+      .insert({ customerId, status: 'open', subject: body.slice(0, 80) })
       .select('*')
       .single<SupportConversationRow>();
     if (createError || !created) {
@@ -2318,26 +2318,227 @@ const customerSendSupportMessage: Handler = async ({ context, data }) => {
   const message = await appendSupportMessage({
     conversationId: conversation.id,
     senderType: 'customer',
-    senderId: context.uid,
+    senderId: customerId,
     body,
   });
 
   await broadcastSupportInboxChanged({ conversationId: conversation.id });
   await broadcastSupportThreadChanged(conversation.id, { messageId: message.id });
 
-  return json(200, { data: { conversation, message } });
+  return { conversation, message };
+};
+
+const customerSendSupportMessage: Handler = async ({ context, data }) => {
+  const body = sanitizeText(data.body);
+  if (!body) {
+    fail(400, 'A message body is required.');
+  }
+
+  return json(200, { data: await postCustomerSupportMessage(context.uid, body) });
+};
+
+const MAX_ORDER_PROBLEM_LENGTH = 500;
+
+// Loads the order for a customer-confirmation action and enforces ownership.
+// Owner-only on purpose (no admin override): confirming receipt or reporting a
+// problem is the customer's own statement about their own order.
+const loadOwnedOrderForConfirmation = async (context: AuthenticatedRequestContext, orderId: string) => {
+  const bundle = await loadOrderBundle(orderId);
+  if (!bundle) {
+    fail(404, 'The selected order could not be found.');
+  }
+  if (bundle!.order.customerId !== context.uid) {
+    fail(403, 'You can only update your own orders.');
+  }
+  return bundle!.order;
+};
+
+// The restaurant completed it (status delivered) AND started the confirmation
+// clock. Rider orders closed by delivery code and orders delivered before this
+// feature shipped have no deadline and never enter the flow.
+const isInConfirmationFlow = (order: CustomerOrderRow) =>
+  normalizeOrderStatus(order.status) === ORDER_STATUS.DELIVERED && Boolean(order.customerConfirmDueAt);
+
+const confirmedResponse = (orderId: string, order: CustomerOrderRow) =>
+  json(200, {
+    data: {
+      customerConfirmationSource: order.customerConfirmationSource ?? null,
+      customerConfirmedAt: order.customerConfirmedAt ?? null,
+      orderId,
+      status: ORDER_STATUS.DELIVERED,
+    },
+  });
+
+const customerConfirmOrderReceived: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['customer']);
+  const orderId = sanitizeText(data.orderId);
+  if (!orderId) {
+    fail(400, 'An order id is required.');
+  }
+
+  const order = await loadOwnedOrderForConfirmation(context, orderId);
+
+  // Already confirmed (by this customer, a double tap, or the auto-close):
+  // success with nothing written, so a retry never re-notifies the restaurant.
+  if (order.customerConfirmedAt) {
+    return confirmedResponse(orderId, order);
+  }
+
+  if (!isInConfirmationFlow(order)) {
+    fail(412, 'This order is not waiting for your confirmation.');
+  }
+
+  const confirmedAt = nowIso();
+  const applied = await updateDeliveredOrderIfNull(orderId, ['customerConfirmedAt'], {
+    customerConfirmationSource: 'customer',
+    customerConfirmedAt: confirmedAt,
+    updatedAt: confirmedAt,
+  });
+
+  if (!applied) {
+    // Lost a race. If the winner confirmed, this request's goal is met.
+    const current = await loadOrderBundle(orderId);
+    if (current?.order.customerConfirmedAt) {
+      return confirmedResponse(orderId, current.order);
+    }
+    fail(409, 'This order changed while you were updating it. Reload the order and try again.');
+  }
+
+  const code = orderId.slice(-6).toUpperCase();
+  await notifyRestaurantUsers(order.restaurantId, {
+    title: 'Customer confirmed',
+    body:
+      order.fulfillmentType === 'pickup'
+        ? `The customer confirmed they collected order ${code}.`
+        : `The customer confirmed they received order ${code}.`,
+    data: buildNotificationData({
+      app: 'partner',
+      orderId,
+      routeKey: 'partner_order_detail',
+      status: ORDER_STATUS.DELIVERED,
+      type: 'order_update',
+    }),
+  });
+
+  return json(200, {
+    data: {
+      customerConfirmationSource: 'customer',
+      customerConfirmedAt: confirmedAt,
+      orderId,
+      status: ORDER_STATUS.DELIVERED,
+    },
+  });
+};
+
+const customerReportOrderProblem: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['customer']);
+  const orderId = sanitizeText(data.orderId);
+  if (!orderId) {
+    fail(400, 'An order id is required.');
+  }
+
+  // Strip control characters (keep tab/newline) before measuring, so the cap
+  // applies to what is actually stored and shown to support.
+  // deno-lint-ignore no-control-regex
+  const message = sanitizeText(data.message).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
+  if (!message) {
+    fail(400, 'Please describe the problem.');
+  }
+  if (message.length > MAX_ORDER_PROBLEM_LENGTH) {
+    fail(400, `Please keep the description under ${MAX_ORDER_PROBLEM_LENGTH} characters.`);
+  }
+
+  const order = await loadOwnedOrderForConfirmation(context, orderId);
+
+  if (order.customerConfirmedAt) {
+    fail(412, 'This order is already closed.');
+  }
+  if (!isInConfirmationFlow(order)) {
+    fail(412, 'This order is not waiting for your confirmation.');
+  }
+
+  const reportedResponse = (reportedAt: string) =>
+    json(200, {
+      data: { customerIssueReportedAt: reportedAt, needsAttention: true, orderId, status: ORDER_STATUS.DELIVERED },
+    });
+
+  // A repeat report changes nothing: no second thread message, no second alert.
+  if (order.customerIssueReportedAt) {
+    return reportedResponse(order.customerIssueReportedAt);
+  }
+
+  // The CAS on customerIssueReportedAt is what makes "once" true under
+  // concurrency; the support post and admin alert only follow a winning write.
+  // customerConfirmedAt must still be null so a report cannot land on an order
+  // that closed in the meantime.
+  const reportedAt = nowIso();
+  const applied = await updateDeliveredOrderIfNull(orderId, ['customerIssueReportedAt', 'customerConfirmedAt'], {
+    customerIssueReportedAt: reportedAt,
+    needsAttention: true,
+    updatedAt: reportedAt,
+  });
+
+  if (!applied) {
+    const current = await loadOrderBundle(orderId);
+    if (current?.order.customerConfirmedAt) {
+      fail(412, 'This order is already closed.');
+    }
+    if (current?.order.customerIssueReportedAt) {
+      return reportedResponse(current.order.customerIssueReportedAt);
+    }
+    fail(409, 'This order changed while you were updating it. Reload the order and try again.');
+  }
+
+  const code = orderId.slice(-6).toUpperCase();
+
+  // Best-effort after the flag landed: the order is already flagged for FEASTY
+  // and the admin alert below carries the text, so a failed thread post must not
+  // turn a recorded report into an error the customer would retry against the
+  // "already reported" shortcut (which would never post it).
+  try {
+    await postCustomerSupportMessage(context.uid, `Order ${code}: ${message}`);
+  } catch (error) {
+    logEdgeEvent('error', 'order problem support post failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+
+  await notifyAdmins({
+    title: 'Customer reported an order problem',
+    body: `Order ${code} (${sanitizeText(order.restaurantName, 'restaurant')}): ${message.slice(0, 140)}`,
+    data: buildNotificationData({
+      app: 'admin',
+      orderId,
+      restaurantId: order.restaurantId,
+      routeKey: 'admin_order_detail',
+      status: ORDER_STATUS.DELIVERED,
+      type: 'customer_order_problem',
+    }),
+  });
+
+  return reportedResponse(reportedAt);
 };
 
 // Delivered orders for this customer with no OrderRating row yet — what
 // prompts the "rate your order" nudge. A plain anti-join (two selects + a Set
 // filter) rather than a SQL function: this is an ordinary read, nothing here
 // needs the atomicity ebuy_submit_order_rating exists for.
+//
+// An order the restaurant completed that the customer has not yet confirmed
+// (customerConfirmDueAt set, customerConfirmedAt null - includes a reported
+// one) is left out: the rating prompt is a full-screen overlay whose backdrop
+// counts as a permanent "Not now", so it would bury the confirmation card and
+// burn the nudge. It surfaces on the next launch/foreground after the customer
+// confirms or the order auto-closes. customerSubmitOrderRating is unchanged.
 const customerGetPendingRatings: Handler = async ({ context }) => {
   ensureRole(context.role, ['customer']);
 
   const { data: orders, error: ordersError } = await serviceClient
     .from('CustomerOrder')
-    .select('id,restaurantId,restaurantName,updatedAt,createdAt')
+    .select(
+      'id,restaurantId,restaurantName,updatedAt,createdAt,customerConfirmDueAt,customerConfirmedAt'
+    )
     .eq('customerId', context.uid)
     .eq('status', ORDER_STATUS.DELIVERED)
     .order('updatedAt', { ascending: false });
@@ -2346,13 +2547,15 @@ const customerGetPendingRatings: Handler = async ({ context }) => {
     throw new Error(ordersError.message);
   }
 
-  const deliveredOrders = (orders ?? []) as Array<{
+  const deliveredOrders = ((orders ?? []) as Array<{
     createdAt?: string | null;
+    customerConfirmDueAt?: string | null;
+    customerConfirmedAt?: string | null;
     id: string;
     restaurantId: string;
     restaurantName: string;
     updatedAt?: string | null;
-  }>;
+  }>).filter((order) => !(order.customerConfirmDueAt && !order.customerConfirmedAt));
 
   if (deliveredOrders.length === 0) {
     return json(200, { data: { orders: [] } });
@@ -2624,11 +2827,13 @@ export const ordersDomain = defineRpcDomain<AuthenticatedRequestContext>({
   name: 'orders',
   handlers: {
     cancelCustomerOrder,
+    customerConfirmOrderReceived,
     customerGetOrderDetail,
     customerGetOrders,
     customerGetPendingRatings,
     customerGetSupportThread,
     customerListFavoriteRestaurants,
+    customerReportOrderProblem,
     customerSendSupportMessage,
     customerSubmitOrderRating,
     customerToggleFavoriteRestaurant,

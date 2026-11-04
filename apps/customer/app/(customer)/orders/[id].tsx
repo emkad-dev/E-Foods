@@ -5,6 +5,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { BusyLabel, MIN_TAP_TARGET, radius, useConfirm } from '@feasty/design-system';
 import AuthPromptCard from '../../../src/components/AuthPromptCard';
 import CustomerLiveMap from '../../../src/components/CustomerLiveMap';
+import OrderConfirmationCard from '../../../src/components/OrderConfirmationCard';
 import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
@@ -111,7 +112,7 @@ const formatRelativeAge = (value?: string | null) => {
 export default function OrderTracking() {
   const { id } = useLocalSearchParams();
   const { user } = useAuth();
-  const { order, loading, error } = useCustomerOrder(id as string, user?.uid ?? null);
+  const { order, loading, error, reload } = useCustomerOrder(id as string, user?.uid ?? null);
   const { confirm, confirmDialog } = useConfirm();
   const [cancelling, setCancelling] = useState(false);
   // Rendered inline rather than through Alert: `Alert` is a no-op on the web
@@ -400,6 +401,9 @@ export default function OrderTracking() {
           </TouchableOpacity>
         ) : null}
       </View>
+
+      {/* Renders nothing unless the restaurant completed this order. */}
+      <OrderConfirmationCard order={order} onChanged={reload} />
 
       {groupSummary ? (
         <View style={styles.groupCard}>

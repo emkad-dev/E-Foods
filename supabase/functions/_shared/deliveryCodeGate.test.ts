@@ -260,6 +260,9 @@ Deno.test('delivered with the correct deliveryCode: transitions and stamps deliv
     expectEqual(state.order().status, 'delivered', 'order delivered');
     expectEqual(typeof state.order().deliveryCodeVerifiedAt, 'string', 'verified stamp set');
     expectEqual(state.order().deliveryCodeAttempts, 1, 'the slot was reserved before the compare');
+    // The delivery code IS the customer's confirmation, so the rider path must never
+    // start the restaurant-completion confirmation clock.
+    expectEqual(state.order().customerConfirmDueAt ?? null, null, 'rider delivery sets no confirmation deadline');
     expectEqual(
       state.events().some((event) => event.eventType === 'delivery_code_overridden'),
       false,
@@ -288,6 +291,7 @@ Deno.test('delivered by an admin with no code: succeeds and records delivery_cod
     expectEqual(response.status, 200, 'handler succeeds');
     expectEqual(state.order().status, 'delivered', 'order delivered');
     expectEqual(state.order().deliveryCodeVerifiedAt, null, 'admin override is not a verification');
+    expectEqual(state.order().customerConfirmDueAt ?? null, null, 'admin dispatch override sets no confirmation deadline');
     const override = state.events().find((event) => event.eventType === 'delivery_code_overridden');
     expectEqual(override?.actorUid, ADMIN_ID, 'override event carries the admin uid');
     expectEqual(override?.orderId, ORDER_ID, 'override event carries the order id');

@@ -292,6 +292,18 @@ export interface OrderDocument extends DocumentData {
    * only this declaration was missing, which is why no client read it.
    */
   needsAttention?: boolean;
+  /**
+   * Customer order confirmation. Set only when the RESTAURANT completed the
+   * order (delivery or collection): the instant the order auto-closes if the
+   * customer neither confirms nor reports. Null/absent = not in the flow
+   * (rider orders confirmed by delivery code, and orders delivered before the
+   * feature shipped). `status` stays `delivered` throughout.
+   */
+  customerConfirmDueAt?: string | null;
+  customerConfirmedAt?: string | null;
+  /** Who closed the loop: the customer, or the 3-hour auto-close. */
+  customerConfirmationSource?: 'customer' | 'auto' | null;
+  customerIssueReportedAt?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: AddressRecord | null;
   orderGroupId?: string | null;

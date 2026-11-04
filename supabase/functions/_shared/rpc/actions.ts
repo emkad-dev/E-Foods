@@ -24,6 +24,10 @@ export const ORDER_ACTIONS = [
   // eligible automatic offers, before placing. Advisory — placement
   // re-validates and redeems server-side.
   'customerValidatePromoCode',
+  // Customer order confirmation: after the restaurant completes an order the
+  // customer confirms receipt or reports a problem (stops the auto-close).
+  'customerConfirmOrderReceived',
+  'customerReportOrderProblem',
 ] as const;
 
 export const DISPATCH_ACTIONS = [

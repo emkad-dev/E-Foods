@@ -26,7 +26,8 @@
       "package": "com.feasty.partner",
       "permissions": [
         "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      ],
+      "runtimeVersion": "1.0.0"
     },
     "web": {
       "favicon": "../customer/assets/images/favicon.png"
@@ -81,6 +82,9 @@
         "projectId": "104f4646-ccec-4e99-8137-d1766774df33"
       }
     },
-    "owner": "ghosty_xx"
+    "owner": "ghosty_xx",
+    "updates": {
+      "url": "https://u.expo.dev/104f4646-ccec-4e99-8137-d1766774df33"
+    }
   }
 }

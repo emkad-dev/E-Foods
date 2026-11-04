@@ -6,6 +6,7 @@ import { BusyLabel, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
 import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
+import { getOrderConfirmationStatus } from '../../../src/domain/orderConfirmationStatus';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
 import { usePartnerOrder } from '../../../src/hooks/usePartnerOrder';
 import {
@@ -143,6 +144,8 @@ export default function PartnerOrderDetailScreen() {
   const normalizedStatus = normalizeOrderStatus(order.status);
   const isPickup = (order.fulfillmentType ?? 'delivery') === 'pickup';
   const canComplete = ['preparing', 'ready_for_pickup'].includes(normalizedStatus);
+  // Null for orders outside the customer-confirmation flow, so they render exactly as before.
+  const confirmationStatus = getOrderConfirmationStatus(order);
 
   return (
     // Wrapped rather than used as the root because the floating notice
@@ -183,7 +186,9 @@ export default function PartnerOrderDetailScreen() {
           guessed from createdAt rather than measured. The flag is a fact; the
           remaining seconds are not.
         */}
-        {order.needsAttention === true ? (
+        {/* needsAttention is also raised by a customer problem report on a
+            delivered order; the overdue/cancel warning only fits a placed one. */}
+        {order.needsAttention === true && normalizedStatus === 'placed' ? (
           <View style={styles.overdueCard}>
             <Text style={styles.overdueTitle}>Acceptance overdue</Text>
             <Text style={styles.overdueCopy}>
@@ -230,6 +235,7 @@ export default function PartnerOrderDetailScreen() {
           <Text style={styles.metaLine}>
             Fulfilment: {isPickup ? 'Customer pickup' : 'Restaurant delivery'}
           </Text>
+          {confirmationStatus ? <Text style={styles.metaLine}>{confirmationStatus}</Text> : null}
         </View>
 
         <View style={styles.card}>

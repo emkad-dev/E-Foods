@@ -180,3 +180,44 @@ export const cancelCustomerOrder = async (orderId: string): Promise<CancelCustom
     });
     return result;
   });
+
+type ConfirmCustomerOrderReceivedResult = {
+  customerConfirmationSource: 'customer' | 'auto' | null;
+  customerConfirmedAt: string | null;
+  orderId: string;
+  status: string;
+};
+
+// Clears the read cache like every other order mutation here: the order screen
+// reloads straight after, and a cached pre-confirmation detail would put the
+// prompt back on screen for up to the cache TTL.
+export const confirmCustomerOrderReceived = async (
+  orderId: string
+): Promise<ConfirmCustomerOrderReceivedResult> =>
+  callCustomerBackendRpc<ConfirmCustomerOrderReceivedResult>('customerConfirmOrderReceived', { orderId }).then(
+    (result) => {
+      clearCustomerReadCache();
+      trackAnalyticsEvent('customer_order_confirmed_received', { order_id: orderId });
+      return result;
+    }
+  );
+
+type ReportCustomerOrderProblemResult = {
+  customerIssueReportedAt: string;
+  needsAttention: boolean;
+  orderId: string;
+  status: string;
+};
+
+export const reportCustomerOrderProblem = async (
+  orderId: string,
+  message: string
+): Promise<ReportCustomerOrderProblemResult> =>
+  callCustomerBackendRpc<ReportCustomerOrderProblemResult>('customerReportOrderProblem', { message, orderId }).then(
+    (result) => {
+      clearCustomerReadCache();
+      // The text itself is the customer's words to support; analytics gets only the fact.
+      trackAnalyticsEvent('customer_order_problem_reported', { order_id: orderId });
+      return result;
+    }
+  );

@@ -127,8 +127,24 @@ const createTable = (initialRows: Row[]) => {
 
   return {
     rows,
-    select(_columns?: string) {
-      return query();
+    select(columns?: string) {
+      const builder = query();
+      if (!columns || columns === '*') return builder;
+      // Project to the requested columns like PostgREST does, so a handler that
+      // forgets a column it reads sees undefined instead of a free full row.
+      const wanted = columns.split(',').map((c) => c.trim());
+      const originalThen = builder.then;
+      builder.then = (resolve: (value: { data: Row[]; error: null }) => unknown, reject?: (reason: unknown) => unknown) =>
+        originalThen.call(
+          builder,
+          (value: { data: Row[]; error: null }) =>
+            resolve({
+              data: value.data.map((row) => Object.fromEntries(wanted.filter((c) => c in row).map((c) => [c, row[c]]))),
+              error: null,
+            }),
+          reject
+        );
+      return builder;
     },
     async insert(payload: Row) {
       rows.push({ ...payload });
@@ -505,4 +521,57 @@ Deno.test('customerGetPendingRatings: hasCourier is false for a pickup order wit
   const { orders } = await callPending(CUSTOMER_ID);
   const order = orders.find((entry) => entry.orderId === ORDER_ID);
   expectEqual(order?.hasCourier, false, 'a pickup order (no assignment row) reports hasCourier: false');
+});
+
+// ---------------------------------------------------------------------------
+// 9. Orders awaiting the customer's confirmation are not rating-prompted.
+// ---------------------------------------------------------------------------
+
+const DUE_AT = '2026-11-04T15:00:00.000Z';
+const CONFIRMED_AT = '2026-11-04T13:00:00.000Z';
+
+Deno.test('customerGetPendingRatings: an order awaiting confirmation is excluded', async () => {
+  installMocks({ orders: [buildOrderRow({ customerConfirmDueAt: DUE_AT, customerConfirmedAt: null })] });
+
+  const { orderIds } = await callPending(CUSTOMER_ID);
+  expectEqual(orderIds.includes(ORDER_ID), false, 'the rating overlay must not cover the confirmation card');
+});
+
+Deno.test('customerGetPendingRatings: a reported-but-unconfirmed order stays excluded', async () => {
+  installMocks({
+    orders: [
+      buildOrderRow({
+        customerConfirmDueAt: DUE_AT,
+        customerConfirmedAt: null,
+        customerIssueReportedAt: '2026-11-04T12:30:00.000Z',
+      }),
+    ],
+  });
+
+  const { orderIds } = await callPending(CUSTOMER_ID);
+  expectEqual(orderIds.includes(ORDER_ID), false, 'a reported order is still awaiting confirmation');
+});
+
+Deno.test('customerGetPendingRatings: customer-confirmed, auto-closed and non-flow orders are pending', async () => {
+  installMocks({
+    orders: [
+      buildOrderRow({ id: 'order-confirmed', customerConfirmDueAt: DUE_AT, customerConfirmedAt: CONFIRMED_AT }),
+      buildOrderRow({
+        id: 'order-auto-closed',
+        customerConfirmDueAt: DUE_AT,
+        customerConfirmedAt: DUE_AT,
+        customerConfirmationSource: 'auto',
+      }),
+      // Rider order or delivered before this shipped: no due date, never in the flow.
+      buildOrderRow({ id: 'order-non-flow', customerConfirmDueAt: null, customerConfirmedAt: null }),
+      buildOrderRow({ id: 'order-awaiting', customerConfirmDueAt: DUE_AT, customerConfirmedAt: null }),
+    ],
+  });
+
+  const { orderIds } = await callPending(CUSTOMER_ID);
+  expectEqual(orderIds.includes('order-confirmed'), true, 'a confirmed order is pending');
+  expectEqual(orderIds.includes('order-auto-closed'), true, 'an auto-closed order is pending');
+  expectEqual(orderIds.includes('order-non-flow'), true, 'a non-flow order is pending');
+  expectEqual(orderIds.includes('order-awaiting'), false, 'the awaiting order is excluded');
+  expectEqual(orderIds.length, 3, 'exactly the three eligible orders');
 });

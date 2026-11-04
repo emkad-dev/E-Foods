@@ -21,6 +21,15 @@ export type CustomerOrderRow = {
   cancellation?: JsonObject | null;
   createdAt?: string | null;
   customerId: string;
+  // Customer order confirmation. DueAt is set only by the partner `delivered`
+  // action (completion + 3h); null means the order is not in the flow.
+  // Confirmation never changes `status` - it stays 'delivered'.
+  customerConfirmDueAt?: string | null;
+  customerConfirmedAt?: string | null;
+  customerConfirmationSource?: string | null;
+  // Server-only: how many reminder stages the sweep has consumed.
+  customerConfirmRemindersSent?: number | null;
+  customerIssueReportedAt?: string | null;
   deliveryAddress?: string | null;
   deliveryLocation?: JsonObject | null;
   // SP-2 proof-of-delivery OTP. The code is customer-only: it is read by
@@ -124,7 +133,7 @@ export type OrderSnapshotOptions = {
 };
 
 export const CUSTOMER_ORDER_COLUMNS =
-  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,orderGroupId,deliveryCode,deliveryCodeVerifiedAt,deliveryCodeAttempts,createdAt,updatedAt';
+  'id,customerId,restaurantId,restaurantName,status,fulfillmentType,pricing,payment,deliveryAddress,deliveryLocation,cancellation,timeline,needsAttention,scheduledFor,orderGroupId,deliveryCode,deliveryCodeVerifiedAt,deliveryCodeAttempts,customerConfirmDueAt,customerConfirmedAt,customerConfirmationSource,customerConfirmRemindersSent,customerIssueReportedAt,createdAt,updatedAt';
 
 export const ORDER_GROUP_COLUMNS =
   'id,customerId,primaryOrderId,orderIds,orderCount,pricing,payment,restaurantIds,restaurantCount';
@@ -213,6 +222,12 @@ export const toOrderSnapshotResponse = (
     : null,
   cancellation: order.cancellation ?? null,
   createdAt: order.createdAt ?? null,
+  // The reminder counter is deliberately not exposed: clients only need to know
+  // whether the order awaits confirmation and how it ended.
+  customerConfirmDueAt: order.customerConfirmDueAt ?? null,
+  customerConfirmedAt: order.customerConfirmedAt ?? null,
+  customerConfirmationSource: order.customerConfirmationSource ?? null,
+  customerIssueReportedAt: order.customerIssueReportedAt ?? null,
   customerId: order.customerId,
   customerPhone: sanitizeOptionalText(options.customerPhone),
   deliveryAddress: sanitizeOptionalText(order.deliveryAddress),
@@ -370,6 +385,37 @@ export const updateOrderRecordIfStatus = async (
     .eq('id', orderId)
     .eq('status', expectedStatus)
     .select('id');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const applied = Array.isArray(data) && data.length > 0;
+  if (applied) {
+    await broadcastOrderChanged(orderId);
+  }
+  return applied;
+};
+
+// Compare-and-swap for the customer-confirmation writes. The status guard is
+// not enough on its own: confirming and reporting race each other, the 3-hour
+// auto-close and a double tap, so each write also names the columns that must
+// still be null (e.g. `customerConfirmedAt`) for it to apply. Returns whether a
+// row matched; broadcasts only when it did.
+export const updateDeliveredOrderIfNull = async (
+  orderId: string,
+  nullColumns: string[],
+  updates: JsonObject
+): Promise<boolean> => {
+  let query = serviceClient
+    .from('CustomerOrder')
+    .update(updates)
+    .eq('id', orderId)
+    .eq('status', ORDER_STATUS.DELIVERED);
+  for (const column of nullColumns) {
+    query = query.is(column, null);
+  }
+  const { data, error } = await query.select('id');
 
   if (error) {
     throw new Error(error.message);

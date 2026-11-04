@@ -23,10 +23,12 @@ import { useAuth } from '../../../src/contexts/AuthContext';
 import { useCart } from '../../../src/contexts/CartContext';
 import { useCoverage } from '../../../src/contexts/CoverageContext';
 import DeliveryLocationChip from '../../../src/components/DeliveryLocationChip';
+import OrderConfirmationPrompt from '../../../src/components/OrderConfirmationPrompt';
 import RestaurantDiscoveryRow from '../../../src/components/RestaurantDiscoveryRow';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { screenColumn } from '../../../src/components/ScreenColumn';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
+import { useAwaitingConfirmationOrder } from '../../../src/hooks/useAwaitingConfirmationOrder';
 import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
 import { supabase } from '../../../src/services/supabase/config';
 import { trackAnalyticsEvent } from '../../../../../packages/observability/src/analytics';
@@ -86,6 +88,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  // One read on focus, signed-in only; null (and nothing rendered) otherwise.
+  const awaitingConfirmationOrder = useAwaitingConfirmationOrder(user?.uid ?? null);
   const { deliveryLocation } = useCart();
   const { isCovered, nearestOrderableKm } = useCoverage();
 
@@ -325,6 +329,14 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </Animated.View>
+
+      {awaitingConfirmationOrder?.id ? (
+        <OrderConfirmationPrompt
+          fulfillmentType={awaitingConfirmationOrder.fulfillmentType}
+          orderId={awaitingConfirmationOrder.id}
+          restaurantName={awaitingConfirmationOrder.restaurantName}
+        />
+      ) : null}
 
       {catalogError ? (
         <Animated.View entering={FadeInDown.delay(160).duration(500)} style={styles.catalogStatusCard}>
