@@ -228,6 +228,12 @@ export interface OrderDocument extends DocumentData {
     refundRate?: number | null;
   } | null;
   timeline?: OrderTimeline;
+  // Post-delivery confirmation (see domain/orderConfirmation.ts). Present only
+  // for orders the RESTAURANT completed; `status` stays 'delivered' throughout.
+  customerConfirmDueAt?: string | null;
+  customerConfirmedAt?: string | null;
+  customerConfirmationSource?: 'customer' | 'auto' | null;
+  customerIssueReportedAt?: string | null;
   // Live-tracking extras from customerGetOrderDetail: the restaurant origin
   // pin, the server's prep-aware initial delivery ETA, and the average speed
   // the client uses to recompute the ETA live from each rider-position

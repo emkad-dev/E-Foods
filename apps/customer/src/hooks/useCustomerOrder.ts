@@ -127,5 +127,9 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     enabled,
   });
 
-  return { order, loading, error };
+  // `reload` lets an action that just changed the order (confirm, report) pull
+  // the new snapshot immediately. The Realtime change would arrive anyway, but
+  // on the web build the channel can be down, and the next fallback poll is
+  // two minutes away.
+  return { order, loading, error, reload: loadOrder };
 };
