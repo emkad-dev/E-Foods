@@ -78,7 +78,12 @@ const createOrderTable = (initialRows: Row[], options: MockOptions) => {
 
   return {
     rows,
-    select(_columns?: string) {
+    select(columns?: string) {
+      // Project to the requested columns like PostgREST does, so a sweep that
+      // forgets a column it needs gets undefined here instead of a free full row.
+      const wanted = columns && columns !== '*' ? columns.split(',').map((c) => c.trim()) : null;
+      const project = (row: Row): Row =>
+        wanted ? Object.fromEntries(wanted.filter((c) => c in row).map((c) => [c, row[c]])) : snapshot(row);
       const predicates: Predicate[] = [];
       const filters = addFilters(predicates);
       let orderCol: string | null = null;
@@ -111,7 +116,7 @@ const createOrderTable = (initialRows: Row[], options: MockOptions) => {
             });
           }
           if (limitN !== null) result = result.slice(0, limitN);
-          return Promise.resolve({ data: result.map(snapshot), error: null }).then(resolve, reject);
+          return Promise.resolve({ data: result.map(project), error: null }).then(resolve, reject);
         },
       };
       return builder;

@@ -186,7 +186,9 @@ export default function PartnerOrderDetailScreen() {
           guessed from createdAt rather than measured. The flag is a fact; the
           remaining seconds are not.
         */}
-        {order.needsAttention === true ? (
+        {/* needsAttention is also raised by a customer problem report on a
+            delivered order; the overdue/cancel warning only fits a placed one. */}
+        {order.needsAttention === true && normalizedStatus === 'placed' ? (
           <View style={styles.overdueCard}>
             <Text style={styles.overdueTitle}>Acceptance overdue</Text>
             <Text style={styles.overdueCopy}>
@@ -233,7 +235,7 @@ export default function PartnerOrderDetailScreen() {
           <Text style={styles.metaLine}>
             Fulfilment: {isPickup ? 'Customer pickup' : 'Restaurant delivery'}
           </Text>
-          {confirmationStatus ? <Text style={styles.metaLine}>Customer confirmation: {confirmationStatus}</Text> : null}
+          {confirmationStatus ? <Text style={styles.metaLine}>{confirmationStatus}</Text> : null}
         </View>
 
         <View style={styles.card}>

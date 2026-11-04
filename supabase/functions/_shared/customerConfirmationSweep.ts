@@ -36,7 +36,6 @@ import {
 import { buildNotificationData, notifyUsers } from './notifications.ts';
 import { logEdgeEvent } from './observability.ts';
 import {
-  CUSTOMER_ORDER_COLUMNS,
   type CustomerOrderRow,
   ORDER_STATUS,
   updateDeliveredOrderIfNull,
@@ -56,9 +55,26 @@ export type CustomerConfirmationSweepResult = {
   skipped: number;
 };
 
+/** Only what the sweep reads. This runs every minute, so it must not pull the
+ * full CUSTOMER_ORDER_COLUMNS (payment.paystackResponse, deliveryCode, ...). */
+const CONFIRMATION_SWEEP_COLUMNS =
+  'id,customerId,fulfillmentType,status,customerConfirmDueAt,customerConfirmedAt,customerIssueReportedAt,customerConfirmRemindersSent';
+
+type ConfirmationCandidate = Pick<
+  CustomerOrderRow,
+  | 'customerConfirmDueAt'
+  | 'customerConfirmedAt'
+  | 'customerConfirmRemindersSent'
+  | 'customerId'
+  | 'customerIssueReportedAt'
+  | 'fulfillmentType'
+  | 'id'
+  | 'status'
+>;
+
 const reminderCopy = (
   stage: CustomerConfirmReminderStage,
-  order: CustomerOrderRow
+  order: ConfirmationCandidate
 ): { body: string; title: string } => {
   const code = order.id.slice(-6).toUpperCase();
   const verb = order.fulfillmentType === 'pickup' ? 'collected' : 'received';
@@ -84,7 +100,7 @@ const reminderCopy = (
 
 /** Claims `stage` for the order. True only if THIS call moved the counter, i.e.
  * nobody else claimed it, confirmed it or reported it since the read. */
-const claimReminder = async (order: CustomerOrderRow, stage: CustomerConfirmReminderStage) => {
+const claimReminder = async (order: ConfirmationCandidate, stage: CustomerConfirmReminderStage) => {
   const { data, error } = await serviceClient
     .from('CustomerOrder')
     // updatedAt is left alone: a reminder claim changes nothing a client shows,
@@ -104,7 +120,7 @@ const claimReminder = async (order: CustomerOrderRow, stage: CustomerConfirmRemi
 };
 
 const sendReminder = async (
-  order: CustomerOrderRow,
+  order: ConfirmationCandidate,
   stage: CustomerConfirmReminderStage,
   result: CustomerConfirmationSweepResult
 ) => {
@@ -127,7 +143,7 @@ const sendReminder = async (
   result.reminded += 1;
 };
 
-const autoCloseOrder = async (order: CustomerOrderRow, result: CustomerConfirmationSweepResult) => {
+const autoCloseOrder = async (order: ConfirmationCandidate, result: CustomerConfirmationSweepResult) => {
   const closedAt = new Date().toISOString();
   // Silent on purpose (no push, even outside quiet hours): the last reminder
   // already said it would close, and a notification for something the customer
@@ -156,11 +172,11 @@ export const sweepCustomerConfirmations = async (
 ): Promise<CustomerConfirmationSweepResult> => {
   const result: CustomerConfirmationSweepResult = { autoClosed: 0, reminded: 0, skipped: 0 };
 
-  let candidates: CustomerOrderRow[] = [];
+  let candidates: ConfirmationCandidate[] = [];
   try {
     const { data, error } = await serviceClient
       .from('CustomerOrder')
-      .select(CUSTOMER_ORDER_COLUMNS)
+      .select(CONFIRMATION_SWEEP_COLUMNS)
       .eq('status', ORDER_STATUS.DELIVERED)
       .not('customerConfirmDueAt', 'is', null)
       .is('customerConfirmedAt', null)
@@ -171,7 +187,7 @@ export const sweepCustomerConfirmations = async (
     if (error) {
       throw new Error(error.message);
     }
-    candidates = (data ?? []) as CustomerOrderRow[];
+    candidates = (data ?? []) as ConfirmationCandidate[];
   } catch (error) {
     logEdgeEvent('error', 'customer confirmation candidate lookup failed', {
       error: error instanceof Error ? error.message : String(error),

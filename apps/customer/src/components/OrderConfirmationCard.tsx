@@ -68,6 +68,10 @@ export default function OrderConfirmationCard({ order, onChanged }: OrderConfirm
       void onChanged();
     } catch (nextError) {
       setError(toUserMessage(nextError, 'We could not confirm this order right now.'));
+      // A 412 means the order already closed elsewhere (auto-close, another
+      // device); catch the card up now instead of leaving a stale form until
+      // realtime or the 2-minute poll.
+      void onChanged();
     } finally {
       setConfirming(false);
     }
@@ -95,6 +99,7 @@ export default function OrderConfirmationCard({ order, onChanged }: OrderConfirm
       void onChanged();
     } catch (nextError) {
       setError(toUserMessage(nextError, 'We could not send your report right now.'));
+      void onChanged();
     } finally {
       setSending(false);
     }

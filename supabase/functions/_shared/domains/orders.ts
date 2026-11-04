@@ -2524,12 +2524,21 @@ const customerReportOrderProblem: Handler = async ({ context, data }) => {
 // prompts the "rate your order" nudge. A plain anti-join (two selects + a Set
 // filter) rather than a SQL function: this is an ordinary read, nothing here
 // needs the atomicity ebuy_submit_order_rating exists for.
+//
+// An order the restaurant completed that the customer has not yet confirmed
+// (customerConfirmDueAt set, customerConfirmedAt null - includes a reported
+// one) is left out: the rating prompt is a full-screen overlay whose backdrop
+// counts as a permanent "Not now", so it would bury the confirmation card and
+// burn the nudge. It surfaces on the next launch/foreground after the customer
+// confirms or the order auto-closes. customerSubmitOrderRating is unchanged.
 const customerGetPendingRatings: Handler = async ({ context }) => {
   ensureRole(context.role, ['customer']);
 
   const { data: orders, error: ordersError } = await serviceClient
     .from('CustomerOrder')
-    .select('id,restaurantId,restaurantName,updatedAt,createdAt')
+    .select(
+      'id,restaurantId,restaurantName,updatedAt,createdAt,customerConfirmDueAt,customerConfirmedAt'
+    )
     .eq('customerId', context.uid)
     .eq('status', ORDER_STATUS.DELIVERED)
     .order('updatedAt', { ascending: false });
@@ -2538,13 +2547,15 @@ const customerGetPendingRatings: Handler = async ({ context }) => {
     throw new Error(ordersError.message);
   }
 
-  const deliveredOrders = (orders ?? []) as Array<{
+  const deliveredOrders = ((orders ?? []) as Array<{
     createdAt?: string | null;
+    customerConfirmDueAt?: string | null;
+    customerConfirmedAt?: string | null;
     id: string;
     restaurantId: string;
     restaurantName: string;
     updatedAt?: string | null;
-  }>;
+  }>).filter((order) => !(order.customerConfirmDueAt && !order.customerConfirmedAt));
 
   if (deliveredOrders.length === 0) {
     return json(200, { data: { orders: [] } });
