@@ -6,6 +6,7 @@ import { constantTimeEqual } from '../_shared/crypto.ts';
 import { recordDrainerHeartbeat } from '../_shared/drainerHeartbeat.ts';
 import { recordOperationalAlert } from '../_shared/operationalAlerts.ts';
 import { sweepUnacceptedOrders } from '../_shared/acceptanceDeadlineSweep.ts';
+import { sweepCustomerConfirmations } from '../_shared/customerConfirmationSweep.ts';
 import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
 import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
 import { sweepScheduledOrderReleases } from '../_shared/scheduledOrderReleaseSweep.ts';
@@ -363,12 +364,20 @@ Deno.serve(async (request) => {
     // a successful one into a 500.
     const acceptanceSweep = queueSelection === 'all' ? await sweepUnacceptedOrders() : null;
 
+    // Customer-confirmation sweep: the 30/90/150-minute reminders and the
+    // 3-hour auto-close for orders the restaurant marked delivered/collected.
+    // Same safe side of runWithBackpressure as the sweeps above (a customer's
+    // order must still close during the busy periods that cause shedding),
+    // bounded (CONFIRMATION_SWEEP_LIMIT) and never throws - see
+    // sweepCustomerConfirmations.
+    const customerConfirmationSweep = queueSelection === 'all' ? await sweepCustomerConfirmations() : null;
+
     // Liveness stamp for the watchdogs (broadcast-runner + a pg_cron SQL job,
     // migration 20261021b). Stamped here - after the sweeps, before the
     // backpressure-guarded drain - because the sweeps are what must not stop
     // silently, and a shed drain minute still ran them. Cron ('all') runs only.
     if (queueSelection === 'all') {
-      await recordDrainerHeartbeat({ acceptanceSweep, offerSweep, scheduledReleaseSweep });
+      await recordDrainerHeartbeat({ acceptanceSweep, customerConfirmationSweep, offerSweep, scheduledReleaseSweep });
     }
 
     const results = await runWithBackpressure(
@@ -389,6 +398,7 @@ Deno.serve(async (request) => {
     const response = json(200, {
       data: {
         acceptanceSweep,
+        customerConfirmationSweep,
         offerSweep,
         results,
         riderPingRetention,
