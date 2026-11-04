@@ -7,6 +7,7 @@ import {
   loadPartnerApplication,
 } from '../applications.ts';
 import { createAuditEntry } from '../auditLog.ts';
+import { CUSTOMER_CONFIRM_WINDOW_MS } from '../customerConfirmation.ts';
 import { buildTransactionalEmailHtml, sendTransactionalEmail } from '../email.ts';
 import {
   STAFF_INVITE_TTL_HOURS,
@@ -180,6 +181,11 @@ const buildPartnerStatusUpdate = (currentStatus: string, action: string) => {
 
       return {
         status: ORDER_STATUS.DELIVERED,
+        // The customer closes the loop (confirm or report) before this instant,
+        // else the order auto-closes. Only this restaurant-side completion
+        // starts the clock: a rider finishing with the customer's delivery
+        // code is already confirmed by the code and never gets a deadline.
+        customerConfirmDueAt: new Date(Date.parse(currentTimelineAt) + CUSTOMER_CONFIRM_WINDOW_MS).toISOString(),
         timelinePatch: {
           ...(currentStatus === ORDER_STATUS.PREPARING ? { readyAt: currentTimelineAt } : {}),
           deliveredAt: currentTimelineAt,
@@ -1319,7 +1325,11 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   // the order to `accepted` with the stale paid payment, erasing the refund.
   // Guarding here covers every partner transition (accept/reject/preparing/
   // ready/delivered), which all share this one write and the same stale read.
+  // Same write as the status change, so an order can never be `delivered` by
+  // the restaurant without its confirmation deadline (or the reverse).
+  const customerConfirmDueAt = 'customerConfirmDueAt' in nextState ? nextState.customerConfirmDueAt : null;
   const applied = await updateOrderRecordIfStatus(orderId, observedStatus, {
+    ...(customerConfirmDueAt ? { customerConfirmDueAt } : {}),
     payment,
     status: nextState.status,
     timeline,

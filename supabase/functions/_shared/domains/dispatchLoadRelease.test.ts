@@ -581,6 +581,65 @@ Deno.test('partnerUpdateOrderStatus: marking delivered releases the assigned rid
   expectEqual(state.load[RIDER_ID], 2, 'the self-delivery flow (restaurant marks delivered) still releases the auto-assigned rider');
 });
 
+// Customer order confirmation: the restaurant's `delivered` action is the ONLY
+// thing that starts the customer's 3-hour confirmation clock, and it must land
+// in the same write as the status change (a delivered order without a deadline
+// would never close; a deadline without delivery would close a live order).
+Deno.test('partnerUpdateOrderStatus: marking delivered sets customerConfirmDueAt to completion + 3h in the same write', async () => {
+  const state = installHandlerMocks('ready_for_pickup', 1);
+
+  const response = await partnerUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'delivered', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'handler succeeds');
+  const order = state.tables.CustomerOrder.rows[0];
+  expectEqual(order.status, 'delivered', 'order delivered');
+  const deliveredAt = (order.timeline as { deliveredAt?: string }).deliveredAt;
+  expectEqual(typeof deliveredAt, 'string', 'deliveredAt stamped');
+  expectEqual(
+    order.customerConfirmDueAt,
+    new Date(Date.parse(deliveredAt as string) + 3 * 60 * 60 * 1000).toISOString(),
+    'deadline is exactly deliveredAt + 3h'
+  );
+  expectEqual(order.customerConfirmedAt ?? null, null, 'not confirmed yet');
+});
+
+Deno.test('partnerUpdateOrderStatus: a collected pickup order enters the same confirmation flow', async () => {
+  const state = installHandlerMocks('ready_for_pickup', 0);
+  state.tables.CustomerOrder.rows[0].fulfillmentType = 'pickup';
+
+  await partnerUpdateOrderStatus({
+    context: ADMIN_CONTEXT,
+    data: { action: 'delivered', orderId: ORDER_ID },
+    request: fakeRequest(),
+  });
+
+  const order = state.tables.CustomerOrder.rows[0];
+  expectEqual(order.status, 'delivered', 'order completed');
+  expectEqual(typeof order.customerConfirmDueAt, 'string', 'pickup orders get a deadline too');
+});
+
+Deno.test('partnerUpdateOrderStatus: transitions other than delivered never set the confirmation deadline', async () => {
+  for (const [from, action] of [
+    ['placed', 'accept'],
+    ['accepted', 'preparing'],
+    ['preparing', 'ready'],
+    ['placed', 'reject'],
+  ] as const) {
+    const state = installHandlerMocks(from, 0);
+    const response = await partnerUpdateOrderStatus({
+      context: ADMIN_CONTEXT,
+      data: { action, orderId: ORDER_ID },
+      request: fakeRequest(),
+    });
+    expectEqual(response.status, 200, `${action} succeeds`);
+    expectEqual(state.tables.CustomerOrder.rows[0].customerConfirmDueAt ?? null, null, `${action} sets no deadline`);
+  }
+});
+
 Deno.test('partnerUpdateOrderStatus: rejecting an accepted order releases the assigned rider through releaseDispatchAssignmentLoad', async () => {
   const state = installHandlerMocks('accepted', 1);
 
