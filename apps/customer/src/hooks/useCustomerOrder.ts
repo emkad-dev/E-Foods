@@ -3,6 +3,7 @@ import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src
 import { useRealtimeResource } from '../../../../packages/runtime/src';
 import { useAppStateVisibility } from '../../../../packages/runtime/src/useAppStateVisibility';
 import type { AddressRecord, OrderDocument, OrderPaymentSummary, OrderPriceBreakdown } from '../domain/entities';
+import { shouldKeepOrderOnLoadFailure } from '../domain/orderLoad';
 import type { FulfillmentType } from '../domain/orders';
 import { getCustomerOrderDetail } from '../services/customerReadModel';
 import { supabase } from '../services/supabase/config';
@@ -31,6 +32,12 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
   // subscription effect and the visibility-gated poll, so the guard has to outlive
   // any single effect run.
   const activeRef = useRef(false);
+  // The order currently on screen, readable from inside loadOrder's catch
+  // without making loadOrder re-create (and re-subscribe) on every order change.
+  const orderRef = useRef<Order | null>(null);
+  useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
 
   const loadOrder = useCallback(async () => {
     if (!orderId || !customerId) {
@@ -54,6 +61,13 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
       setError(null);
     } catch (err) {
       if (!activeRef.current) {
+        return;
+      }
+
+      // A failed RELOAD of an order already on screen (flaky connection after
+      // confirm/report, a missed poll) must not wipe it into "Order not found".
+      // Only a failed first load, or a different order id, is a real error.
+      if (shouldKeepOrderOnLoadFailure(orderRef.current, orderId)) {
         return;
       }
 
