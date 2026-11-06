@@ -1,8 +1,8 @@
-import { callBackendRpc } from '../../../../packages/auth/src';
+import { callBackendRpc, type BackendRpcOptions } from '../../../../packages/auth/src';
 import { appEnv, supabaseEnv } from '../config/env';
 import { supabase } from './supabase/config';
 
-export const callPartnerBackendRpc = <T>(action: string, data?: Record<string, unknown>) =>
+export const callPartnerBackendRpc = <T>(action: string, data?: Record<string, unknown>, options?: BackendRpcOptions) =>
   callBackendRpc<T>(supabase, {
     backendRpcUrl: appEnv.backendRpcUrl,
     anonKey: supabaseEnv.anonKey,
@@ -10,4 +10,4 @@ export const callPartnerBackendRpc = <T>(action: string, data?: Record<string, u
     region: appEnv.functionsRegion,
     rpcMode: appEnv.rpcMode,
     supabaseUrl: supabaseEnv.url,
-  }, action, data);
+  }, action, data, options);

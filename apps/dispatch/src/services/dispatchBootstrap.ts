@@ -1,4 +1,4 @@
-import { fetchProfileBootstrap } from '../../../../packages/auth/src';
+import { BOOTSTRAP_READ_DEADLINE_MS, fetchProfileBootstrap } from '../../../../packages/auth/src';
 import { callDispatchBackendRpc } from './backendRpc';
 
 /**
@@ -6,4 +6,8 @@ import { callDispatchBackendRpc } from './backendRpc';
  * `null` means the deployed backend does not have the action yet, so the caller
  * keeps its direct profile read. See packages/auth/src/profileBootstrap.ts.
  */
-export const fetchDispatchBootstrap = () => fetchProfileBootstrap(callDispatchBackendRpc, 'dispatchBootstrap');
+export const fetchDispatchBootstrap = () =>
+  fetchProfileBootstrap(
+    (action) => callDispatchBackendRpc(action, undefined, { deadlineMs: BOOTSTRAP_READ_DEADLINE_MS }),
+    'dispatchBootstrap'
+  );

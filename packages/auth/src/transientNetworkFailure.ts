@@ -42,7 +42,12 @@ const isOfflineSignal = (error: unknown) => {
 
 const isTimeoutSignal = (error: unknown) => {
   const name = readString(error, 'name');
-  if (name === 'AbortError' || name === 'AuthRetryableFetchError') {
+  // 'NetworkError' is what callBackendRpc throws when both its direct call and
+  // its relay could not reach the server ("Backend RPC x failed: Failed to send
+  // a request to the Edge Function"); no message pattern matches that wording.
+  // 'TimeoutError' is its overall-deadline expiry. Browsers also use both names
+  // for dropped and timed-out requests.
+  if (name === 'AbortError' || name === 'AuthRetryableFetchError' || name === 'NetworkError' || name === 'TimeoutError') {
     return true;
   }
 
@@ -72,7 +77,11 @@ export const retryOnceOnTransientFailure = async <T>(operation: () => Promise<T>
   try {
     return await operation();
   } catch (error) {
-    if (!isTransientNetworkFailure(error)) {
+    // A response is an answer. A BackendRpcError means the server replied, and a
+    // server message can contain words ("timeout") the classifier below would
+    // read as a dead connection. Structural check, as isBackendRpcError does:
+    // this module must not import backendRpc.
+    if (readString(error, 'name') === 'BackendRpcError' || !isTransientNetworkFailure(error)) {
       throw error;
     }
 

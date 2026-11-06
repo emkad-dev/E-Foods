@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
@@ -28,11 +28,13 @@ import { fetchDispatchBootstrap } from '../services/dispatchBootstrap';
 import {
   RELEASE_SESSION_TIMEOUT_MS,
   bestEffortWithin,
+  createDeviceClaims,
   isTransientNetworkFailure,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
   resolveSingleDeviceSessionDecision,
   shouldShowSignInLoading,
+  type SignInAttempt,
 } from '../../../../packages/auth/src';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
@@ -93,19 +95,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     hasUserRef.current = Boolean(user);
   }, [user]);
 
-  // True only during an interactive signIn(): the passive onAuthStateChange
-  // reconcile reads it to step aside so signIn's single-device claim is not
-  // raced into a self-eviction on the next refresh.
-  const signInInProgressRef = useRef(false);
-  // Which signIn() call currently owns signInInProgressRef. The ref is released
-  // by the call that set it, possibly seconds later from the background device
-  // claim; without this a slow claim from an earlier sign-in could release the
-  // ref out from under a newer one.
-  const signInAttemptRef = useRef(0);
+  // The interactive sign-in's device claim and its guard (packages/auth
+  // deviceClaim.ts). The passive onAuthStateChange reconcile steps aside while
+  // the guard is held so signIn's single-device claim is not raced into a
+  // self-eviction on the next refresh. The guard outlasts signIn() itself, until
+  // the background claim settles.
+  const deviceClaims = useMemo(
+    () =>
+      createDeviceClaims({
+        createSessionId,
+        writeRemote: (userId, sessionId) =>
+          updateUserDocument(userId, {
+            activeSessionId: sessionId,
+            activeSessionUpdatedAt: new Date().toISOString(),
+          }),
+        storeLocal: storeSessionId,
+        report: (claimError) => reportError('dispatch.auth.claim_device_session', claimError),
+      }),
+    []
+  );
 
   const clearLocalUserState = useCallback(async () => {
+    // Every caller is ending this session (sign-out, eviction, expiry, a refused
+    // role). A claim still in flight belongs to that session and must not write a
+    // device id afterwards; see deviceClaim.ts.
+    deviceClaims.invalidate();
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
-  }, []);
+  }, [deviceClaims]);
 
   const clearExpiredSession = useCallback(async () => {
     await clearLocalUserState();
@@ -113,16 +129,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(null);
     setError(SESSION_EXPIRED_ERROR_MESSAGE);
   }, [clearLocalUserState]);
-
-  const startSingleDeviceSession = useCallback(async (userId: string) => {
-    const sessionId = createSessionId();
-
-    await updateUserDocument(userId, {
-      activeSessionId: sessionId,
-      activeSessionUpdatedAt: new Date().toISOString(),
-    });
-    await storeSessionId(sessionId);
-  }, []);
 
   const releaseSingleDeviceSession = useCallback(async (userId?: string | null) => {
     const localSessionId = await getStoredSessionId();
@@ -286,8 +292,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // An interactive signIn() owns the SIGNED_IN it triggers (it builds the
       // user, claims the single-device session and drives the spinner). Running
       // this reconcile at the same time would race that claim and self-evict on
-      // the next refresh, so step aside.
-      if (event === 'SIGNED_IN' && signInInProgressRef.current) {
+      // the next refresh, so step aside. Any event carrying a session counts, not
+      // just SIGNED_IN: USER_UPDATED or TOKEN_REFRESHED inside the window would
+      // otherwise run the reconcile and store the old device id. A sign-out (null
+      // session) must still get through.
+      if (session && deviceClaims.isGuardHeld()) {
         return;
       }
 
@@ -421,7 +430,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       disposed = true;
       subscription.unsubscribe();
     };
-  }, [buildNextUser, clearExpiredSession, clearLocalUserState, syncSingleDeviceSession]);
+  }, [buildNextUser, clearExpiredSession, clearLocalUserState, deviceClaims, syncSingleDeviceSession]);
 
   const signUp = async (email: string, password: string, userData: DispatchSignUpInput): Promise<SignUpResult> => {
     setLoading(true);
@@ -474,22 +483,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
-    // Held until the device claim has settled (see claimDeviceInBackground) so
-    // the passive reconcile skips the SIGNED_IN this triggers and does not race
-    // the single-device claim. Released on every exit path: here when signIn
-    // fails before the claim starts, by the claim otherwise.
-    const attempt = ++signInAttemptRef.current;
-    const releaseSignInGuard = () => {
-      if (signInAttemptRef.current === attempt) {
-        signInInProgressRef.current = false;
-      }
-    };
-    signInInProgressRef.current = true;
-    let claimStarted = false;
+    // beginSignIn holds the guard (so the passive reconcile skips the SIGNED_IN
+    // this triggers and does not race the single-device claim) until the
+    // background claim settles. It is released on every exit path:
+    // `attempt.release()` below when signIn fails before the claim starts, by the
+    // claim otherwise.
+    let attempt: SignInAttempt | null = null;
     setLoading(true);
     setError(null);
 
     try {
+      // Supersedes any earlier claim and waits (capped) for one that is mid-write,
+      // so the clear below cannot be undone by its local store.
+      attempt = await deviceClaims.beginSignIn();
       // Forget any device id left from an earlier sign-in BEFORE claiming a new
       // one. The claim writes remote first, then stores locally; if the app is
       // force-closed between the two, local-old + remote-new reads as a takeover
@@ -507,8 +513,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const nextUser = await buildNextUser(authUser, bootstrap?.profile);
 
       // Claimed in the background: the rider is in once their profile is ready.
-      claimStarted = true;
-      void claimDeviceInBackground(authUser.id, releaseSignInGuard);
+      attempt.startClaim(authUser.id);
       setUser(nextUser);
       await storeUserProfile(nextUser);
     } catch (nextError: any) {
@@ -525,29 +530,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
-      if (!claimStarted) {
-        releaseSignInGuard();
-      }
+      attempt?.release();
       setLoading(false);
-    }
-  };
-
-  // Claims this device after sign-in without holding the sign-in screen. One
-  // retry, then the failure is reported and left there: it must NOT sign the
-  // rider out. A device whose claim failed has an empty local id, which the next
-  // reconcile adopts rather than evicts. `release` runs whatever happens, or the
-  // single-device check would stay off for the rest of the session.
-  const claimDeviceInBackground = async (userId: string, release: () => void) => {
-    try {
-      try {
-        await startSingleDeviceSession(userId);
-      } catch {
-        await startSingleDeviceSession(userId);
-      }
-    } catch (claimError) {
-      reportError('dispatch.auth.claim_device_session', claimError);
-    } finally {
-      release();
     }
   };
 
@@ -576,6 +560,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
+      // End any background device claim first: it must not write a device id for
+      // a session that is being closed (clearLocalUserState below only runs after
+      // the server work).
+      deviceClaims.invalidate();
       // The in-memory user, not supabase.auth.getUser(): with an expired token
       // getUser() refreshes first, which offline stalls for ~25 s. The server
       // work is time-boxed and signOutUser always ends this device's session

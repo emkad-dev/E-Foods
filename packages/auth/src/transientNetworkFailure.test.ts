@@ -172,3 +172,29 @@ test('retryOnceOnTransientFailure does not retry a real rejection', async () => 
 
   assert.equal(calls, 1);
 });
+
+test("the transport's own NetworkError and TimeoutError are transient, whatever their wording", () => {
+  assert.equal(
+    isTransientNetworkFailure(
+      Object.assign(new Error('Backend RPC x failed: Failed to send a request to the Edge Function'), { name: 'NetworkError' })
+    ),
+    true
+  );
+  assert.equal(
+    isTransientNetworkFailure(Object.assign(new Error('Backend RPC x ran out of time.'), { name: 'TimeoutError' })),
+    true
+  );
+});
+
+test('retryOnceOnTransientFailure never retries a server answer, even one whose message reads like a timeout', async () => {
+  let calls = 0;
+  await assert.rejects(
+    retryOnceOnTransientFailure(async () => {
+      calls += 1;
+      throw Object.assign(new Error('Upstream timeout while reading the profile'), { name: 'BackendRpcError', status: 504 });
+    }),
+    /Upstream timeout/
+  );
+
+  assert.equal(calls, 1);
+});

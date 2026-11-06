@@ -90,6 +90,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
   const hasUserRef = useRef(false);
+  // True only for the duration of an interactive signIn(). The passive
+  // onAuthStateChange reconcile steps aside while it is set: signIn owns the
+  // SIGNED_IN it triggers and reads the profile itself (through partnerBootstrap),
+  // so a concurrent reconcile would add a second, direct profile read and undo the
+  // "password + one call" sign-in. Partner is multi-device and has no device
+  // claim, so unlike customer/dispatch nothing outlives signIn() and the flag is
+  // released in its `finally`.
+  const signInInProgressRef = useRef(false);
 
   useEffect(() => {
     hasUserRef.current = Boolean(user);
@@ -262,6 +270,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let disposed = false;
     let reconcileQueue: Promise<void> = Promise.resolve();
     const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
+      // An interactive signIn() owns the transition it triggers; step aside. Any
+      // event carrying a session counts, not just SIGNED_IN, and a sign-out (null
+      // session) must still get through.
+      if (session && signInInProgressRef.current) {
+        return;
+      }
+
       // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
       // re-block the UI once the first paint has resolved. Only a *fresh*
       // sign-in returns to the full-screen spinner — on web, refocusing the tab
@@ -471,6 +486,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    signInInProgressRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -493,6 +509,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
+      signInInProgressRef.current = false;
       setLoading(false);
     }
   };

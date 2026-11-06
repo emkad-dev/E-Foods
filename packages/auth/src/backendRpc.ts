@@ -226,11 +226,71 @@ export const backendRpcErrorFromResponse = async (
   return new BackendRpcError(`Backend RPC ${action} failed with HTTP ${status}.`, base);
 };
 
+/**
+ * Overall time one sign-in bootstrap read may take, direct call plus relay and
+ * the session lookup. The direct call uses the global fetch, which has no limit
+ * of its own, so without this a stalled read hung sign-in forever: the fallback
+ * to the direct profile read never ran and the spinner never cleared.
+ */
+export const BOOTSTRAP_READ_DEADLINE_MS = 8_000;
+
+export type BackendRpcOptions = {
+  /**
+   * Opt-in overall deadline for this call. Only for READS that are safe to
+   * abandon and repeat (the sign-in bootstraps). Never set it on a write such as
+   * checkout: giving up on a request the server may still complete would leave
+   * the caller guessing. Unset, behaviour is exactly as before.
+   */
+  deadlineMs?: number;
+};
+
+const deadlineError = (action: string, deadlineMs: number) => {
+  const error = new Error(`Backend RPC ${action} timed out after ${deadlineMs}ms.`);
+  error.name = 'TimeoutError';
+  return error;
+};
+
+/**
+ * Runs `run` with an overall deadline. On expiry the abort signal cancels the
+ * direct fetch and, because the deadline wins the race, the relay attempt is not
+ * waited for (a read, so abandoning it is harmless). The deadline error reads as
+ * a transient network failure ("timed out"), so callers retry it like any other.
+ */
+const withDeadline = async <T>(
+  deadlineMs: number | undefined,
+  action: string,
+  run: (signal?: AbortSignal) => Promise<T>
+): Promise<T> => {
+  if (deadlineMs === undefined) {
+    return run();
+  }
+
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(deadlineError(action, deadlineMs));
+    }, deadlineMs);
+  });
+  const work = run(controller.signal);
+  // If the deadline wins, the abandoned work may still reject later; that must
+  // not surface as an unhandled rejection.
+  work.catch(() => undefined);
+
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const callBackendRpcInternal = async <T>(
   supabase: SupabaseClient,
   env: BackendRpcEnv,
   action: string,
-  data?: Record<string, unknown>
+  data?: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<T> => {
   // Resolve the routing target before doing anything else — including
   // before the session dance below. An unknown action must fail
@@ -299,6 +359,7 @@ const callBackendRpcInternal = async <T>(
       body: JSON.stringify(payload),
       headers,
       method: 'POST',
+      ...(signal ? { signal } : null),
     }).catch((error) => {
       throw networkError(error instanceof Error ? error.message : `Backend RPC ${action} failed to send request.`);
     });
@@ -335,6 +396,12 @@ const callBackendRpcInternal = async <T>(
     // A BackendRpcError means the server answered. Retrying cannot change its
     // mind.
     if (isBackendRpcError(error)) {
+      throw error;
+    }
+
+    // The deadline fired and aborted the direct call: stop here instead of
+    // starting a relay attempt nobody is waiting for any more.
+    if (signal?.aborted) {
       throw error;
     }
 
@@ -386,10 +453,13 @@ export const callBackendRpc = async <T>(
   supabase: SupabaseClient,
   env: BackendRpcEnv,
   action: string,
-  data?: Record<string, unknown>
+  data?: Record<string, unknown>,
+  options?: BackendRpcOptions
 ): Promise<T> => {
   try {
-    return await callBackendRpcInternal<T>(supabase, env, action, data);
+    return await withDeadline(options?.deadlineMs, action, (signal) =>
+      callBackendRpcInternal<T>(supabase, env, action, data, signal)
+    );
   } catch (error) {
     if (shouldReportRpcFailure(error)) {
       reportError('backend_rpc', error, {
