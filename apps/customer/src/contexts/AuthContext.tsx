@@ -10,6 +10,8 @@ import {
   sendPasswordResetEmailWithFallback,
   createUserWithEmail,
   isTransientNetworkFailure,
+  RELEASE_SESSION_TIMEOUT_MS,
+  bestEffortWithin,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
   getUserRoleClaim,
@@ -298,8 +300,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release customer session:', releaseError);
       }
-    } finally {
-      await clearStoredSessionId();
     }
   }, []);
 
@@ -429,6 +429,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             return;
           }
           setUser(nextUser);
+          // Reached the server this time: an earlier no-internet notice is stale.
+          setError((current) => (current === NO_INTERNET_ERROR ? null : current));
           await storeUserProfile(nextUser);
           setLoading(false);
 
@@ -454,10 +456,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // device id (so a device evicted meanwhile re-adopted the other
           // device's id when the network came back).
           const nullSession = await resolveNullSessionOutcome(supabase, event);
-
-          if (nullSession === 'recovered') {
-            return;
-          }
 
           if (nullSession === 'offline') {
             const [cachedUser, cachedPolicyAccepted] = await Promise.all([
@@ -523,7 +521,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // /complete-profile to retype it, and storing it would make the next
           // offline launch find that stand-in as a matching cache. Leave the
           // session and storage alone; the next reconcile that reaches the
-          // server loads the real profile.
+          // server loads the real profile. The user is nulled so a saved profile
+          // of ANOTHER account (painted at first paint, before any session is
+          // checked) cannot stay on screen as this one.
+          setUser(null);
           setError(NO_INTERNET_ERROR);
           return;
         }
@@ -729,10 +730,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
-      await releaseSingleDeviceSession(authUser?.id);
+      // The in-memory user, not supabase.auth.getUser(): with an expired token
+      // getUser() refreshes first, which offline stalls for ~25 s. The server
+      // work is time-boxed and signOutUser always ends this device's session
+      // (bounded server attempt, then local removal), so signing out works
+      // offline. The device id is cleared below, only once that has happened.
+      await bestEffortWithin(() => releaseSingleDeviceSession(user?.uid), RELEASE_SESSION_TIMEOUT_MS);
       await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);

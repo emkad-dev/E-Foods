@@ -6,6 +6,7 @@ import type { AuthRole } from './types';
 // extensionless relative ESM specifiers, and every consuming tsconfig sets
 // `allowImportingTsExtensions`.
 import { toUserMessage } from '../../observability/src/userMessage.ts';
+import { signOutThisDevice } from './localSignOut.ts';
 import { runBeforeSignOutHooks } from './signOutHooks.ts';
 
 const NETWORK_ERROR_PATTERNS = [
@@ -139,16 +140,16 @@ export const signInWithEmail = async (
   return data.user;
 };
 
+/**
+ * Ends this device's session and never throws or leaves it signed in: see
+ * localSignOut.ts for the bounded server attempt and the local fallback. Scope
+ * is 'local', not supabase-js's default 'global': global revokes every refresh
+ * token the account has, so signing out (or being evicted) on one device logged
+ * the user out of all the others. Nothing here offers "sign out everywhere".
+ */
 export const signOutUser = async (supabase: SupabaseClient) => {
   await runBeforeSignOutHooks();
-  // 'local', not supabase-js's default 'global': global revokes every refresh
-  // token the account has, so signing out (or being evicted) on one device
-  // logged the user out of all the others. Nothing here offers "sign out
-  // everywhere".
-  const { error } = await supabase.auth.signOut({ scope: 'local' });
-  if (error) {
-    throw error;
-  }
+  await signOutThisDevice(supabase);
 };
 
 export const getUserRoleClaim = async (user: User): Promise<AuthRole | null> => getSupabaseUserRole(user);

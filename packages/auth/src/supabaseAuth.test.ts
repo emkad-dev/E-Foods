@@ -300,12 +300,17 @@ test('signOutUser signs out this device only', async () => {
   assert.deepEqual(calls, [{ scope: 'local' }]);
 });
 
-test('signOutUser still throws the Supabase error', async () => {
-  const supabase = {
-    auth: { signOut: async () => ({ error: new Error('boom') }) },
-  } as any;
+test('signOutUser does not throw when the server refuses: the device ends signed out anyway', async () => {
+  const removed: string[] = [];
+  const auth: any = {
+    storageKey: 'sb-abc-auth-token',
+    storage: { getItem: async () => null, removeItem: async (k: string) => void removed.push(k) },
+    signOut: async () => ({ error: new Error('boom') }),
+  };
 
-  await assert.rejects(() => signOutUser(supabase), /boom/);
+  await signOutUser({ auth } as any);
+
+  assert.ok(removed.includes('sb-abc-auth-token'));
 });
 
 test('clearSupabaseSession clears this device only and swallows failures', async () => {

@@ -10,12 +10,18 @@
 // rider/restaurant was dropped at the login screen just because the signal
 // dipped while the app reloaded their profile.
 
+import { hasStoredSession } from './localSignOut.ts';
 import { isNetworkRequestError } from './supabaseAuth.ts';
 
 // boundedFetch's AbortController abort. The wording differs by runtime
 // (Hermes/Node/browsers) and by who wraps it: supabase-js rewraps it as an
 // AuthRetryableFetchError, PostgREST prefixes the error name ("AbortError: ...").
-const TIMEOUT_MESSAGE_PATTERNS = ['aborted', 'aborterror', 'timed out', 'timeout'];
+//
+// Also the web lock's own execution bound (sessionLock.ts, 10 s): on an offline
+// cold start the session refresh holds the navigator lock past it, and the
+// resulting 'Supabase auth lock "..." did not resolve within 10000ms.' is the
+// same stalled network seen from a different layer.
+const TIMEOUT_MESSAGE_PATTERNS = ['aborted', 'aborterror', 'timed out', 'timeout', 'did not resolve within'];
 
 const readString = (error: unknown, key: 'code' | 'message' | 'name') =>
   typeof error === 'object' && error !== null && key in error
@@ -97,48 +103,31 @@ export type NullSessionOutcome =
   /** Really signed out (or never signed in): clear local state. */
   | 'signed-out'
   /** The session is stored but could not be refreshed (offline/stalled): keep saved state. */
-  | 'offline'
-  /** The session turned out to be readable now: a later event will carry it. */
-  | 'recovered';
-
-type SessionLookupClient = {
-  auth: {
-    getSession: () => Promise<{ data: { session: unknown }; error: unknown }>;
-  };
-};
+  | 'offline';
 
 /**
  * What a null session means. supabase-js delivers INITIAL_SESSION with a null
  * session when it could not refresh the stored session -- including when the
- * phone is merely offline (the fetch fails, `getSession()` returns the error
- * and the stored session is left in place). Treating that as "signed out" wiped
- * the saved profile and the device id on every offline launch with an expired
- * access token, and a device that had been evicted while offline then
- * re-adopted the other device's id once the network came back.
+ * phone is merely offline. Treating that as "signed out" wiped the saved
+ * profile and the device id on every offline launch with an expired access
+ * token, and a device that had been evicted while offline then re-adopted the
+ * other device's id once the network came back.
  *
- * Only a SIGNED_OUT event, or an INITIAL_SESSION whose lookup finds no stored
- * session and no error, is a real sign-out. A dead refresh token is removed by
- * supabase-js itself (SIGNED_OUT), so the lookup reads it as no session / not
- * transient and the existing sign-out path is unchanged.
+ * The signal is the stored session itself: auth-js removes it on any
+ * NON-retryable refresh error (a dead refresh token also emits SIGNED_OUT) and
+ * leaves it in place on a retryable one. So INITIAL_SESSION + null + a stored
+ * session = offline; nothing stored = signed out. It is read from storage, not
+ * via a second `getSession()`: that call waits on the auth lock, which stays
+ * busy for as long as the device is offline (measured 172 s+ with auto refresh
+ * on), and its stale answer then landed after the network was back.
  */
 export const resolveNullSessionOutcome = async (
-  supabase: SessionLookupClient,
+  supabase: unknown,
   event: string
 ): Promise<NullSessionOutcome> => {
   if (event !== 'INITIAL_SESSION') {
     return 'signed-out';
   }
 
-  let lookup: { data: { session: unknown } | null; error: unknown };
-  try {
-    lookup = await supabase.auth.getSession();
-  } catch (error) {
-    lookup = { data: null, error };
-  }
-
-  if (lookup.data?.session) {
-    return 'recovered';
-  }
-
-  return lookup.error && isTransientNetworkFailure(lookup.error) ? 'offline' : 'signed-out';
+  return (await hasStoredSession(supabase)) ? 'offline' : 'signed-out';
 };

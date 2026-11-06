@@ -25,6 +25,8 @@ import {
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import {
+  RELEASE_SESSION_TIMEOUT_MS,
+  bestEffortWithin,
   isTransientNetworkFailure,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
@@ -134,8 +136,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release dispatch session in Supabase:', releaseError);
       }
-    } finally {
-      await clearStoredSessionId();
     }
   }, []);
 
@@ -303,10 +303,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // device's id when the network came back).
           const nullSession = await resolveNullSessionOutcome(supabase, event);
 
-          if (nullSession === 'recovered') {
-            return;
-          }
-
           if (nullSession === 'offline') {
             const cachedUser = await getStoredUserProfile<UserDocument>();
             if (
@@ -337,6 +333,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
 
         setUser(nextUser);
+        // Reached the server this time: an earlier no-internet notice is stale.
+        setError((current) => (current === NO_INTERNET_ERROR ? null : current));
         await storeUserProfile(nextUser);
       } catch (nextError) {
         const authUser = session?.user ?? null;
@@ -530,10 +528,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
-      await releaseSingleDeviceSession(authUser?.id);
+      // The in-memory user, not supabase.auth.getUser(): with an expired token
+      // getUser() refreshes first, which offline stalls for ~25 s. The server
+      // work is time-boxed and signOutUser always ends this device's session
+      // (bounded server attempt, then local removal), so signing out works
+      // offline. The device id is cleared below, only once that has happened.
+      await bestEffortWithin(() => releaseSingleDeviceSession(user?.uid), RELEASE_SESSION_TIMEOUT_MS);
       await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { signOutThisDevice } from './localSignOut.ts';
 
 export const SESSION_EXPIRED_ERROR_MESSAGE = 'Your session expired. Please sign in again.';
 
@@ -24,7 +25,8 @@ export const isStaleSupabaseSessionError = (error: unknown) => {
 };
 
 export const clearSupabaseSession = async (supabase: SupabaseClient) => {
-  // Local scope only: an expired session on this device must not revoke the
-  // account's sessions on its other devices (see signOutUser).
-  await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+  // Local scope only, bounded, with a local fallback: an expired session on this
+  // device must end here without revoking the account's other devices (see
+  // signOutUser and localSignOut.ts).
+  await signOutThisDevice(supabase);
 };

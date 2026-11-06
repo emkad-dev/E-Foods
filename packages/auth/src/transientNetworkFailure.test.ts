@@ -75,62 +75,59 @@ test('anything else, or no auth user, is a genuine failure', () => {
 
 // supabase-js delivers INITIAL_SESSION with a null session when the stored
 // session's refresh fails -- including when the phone is simply offline. The
-// stored session is still there; only a SIGNED_OUT (or a lookup that finds
-// nothing and no error) means the user is really signed out.
-const clientWhoseGetSession = (result: unknown) =>
-  ({ auth: { getSession: async () => result } }) as any;
-
-test('offline INITIAL_SESSION with no session is not a sign-out', async () => {
-  const supabase = clientWhoseGetSession({
-    data: { session: null },
-    error: new TypeError('Network request failed'),
-  });
-  assert.equal(await resolveNullSessionOutcome(supabase, 'INITIAL_SESSION'), 'offline');
-});
-
-test('a timed-out refresh on INITIAL_SESSION is offline too, and a throwing lookup counts as its error', async () => {
-  assert.equal(
-    await resolveNullSessionOutcome(
-      clientWhoseGetSession({ data: { session: null }, error: { name: 'AuthRetryableFetchError', message: 'Aborted' } }),
-      'INITIAL_SESSION'
-    ),
-    'offline'
-  );
-  const throwing = {
+// stored session is still there (auth-js removes it only on a NON-retryable
+// refresh error), so the stored session itself is the signal. Reading storage
+// never blocks: a second getSession() would queue behind the auth lock for as
+// long as the device is offline.
+const clientWithStorage = (stored: boolean) =>
+  ({
     auth: {
-      getSession: async () => {
-        throw new TypeError('Failed to fetch');
+      storageKey: 'sb-abcdefgh-auth-token',
+      storage: {
+        getItem: async () => (stored ? '{"refresh_token":"r"}' : null),
       },
     },
-  } as any;
-  assert.equal(await resolveNullSessionOutcome(throwing, 'INITIAL_SESSION'), 'offline');
+  }) as any;
+
+test('INITIAL_SESSION with no session but a stored one is offline, not a sign-out', async () => {
+  assert.equal(await resolveNullSessionOutcome(clientWithStorage(true), 'INITIAL_SESSION'), 'offline');
 });
 
-test('INITIAL_SESSION with no stored session and no error is a real signed-out state', async () => {
-  const supabase = clientWhoseGetSession({ data: { session: null }, error: null });
-  assert.equal(await resolveNullSessionOutcome(supabase, 'INITIAL_SESSION'), 'signed-out');
+test('INITIAL_SESSION with nothing stored is a real signed-out state (also what a dead refresh token leaves)', async () => {
+  assert.equal(await resolveNullSessionOutcome(clientWithStorage(false), 'INITIAL_SESSION'), 'signed-out');
 });
 
-test('a dead refresh token is signed out, not offline', async () => {
-  const supabase = clientWhoseGetSession({
-    data: { session: null },
-    error: { name: 'AuthApiError', message: 'Invalid Refresh Token: Refresh Token Not Found' },
-  });
-  assert.equal(await resolveNullSessionOutcome(supabase, 'INITIAL_SESSION'), 'signed-out');
-});
-
-test('SIGNED_OUT is always signed out and never asks the client anything', async () => {
+test('SIGNED_OUT is always signed out and never reads storage', async () => {
   const supabase = {
     auth: {
-      getSession: async () => {
-        throw new Error('must not be called');
+      storageKey: 'k',
+      storage: {
+        getItem: async () => {
+          throw new Error('must not be called');
+        },
       },
     },
   } as any;
   assert.equal(await resolveNullSessionOutcome(supabase, 'SIGNED_OUT'), 'signed-out');
 });
 
-test('if the lookup finds a session (network came back) the reconcile has nothing to do', async () => {
-  const supabase = clientWhoseGetSession({ data: { session: { user: { id: 'u1' } } }, error: null });
-  assert.equal(await resolveNullSessionOutcome(supabase, 'INITIAL_SESSION'), 'recovered');
+test('unreadable storage falls back to signed out', async () => {
+  const supabase = {
+    auth: {
+      storageKey: 'k',
+      storage: {
+        getItem: async () => {
+          throw new Error('storage broke');
+        },
+      },
+    },
+  } as any;
+  assert.equal(await resolveNullSessionOutcome(supabase, 'INITIAL_SESSION'), 'signed-out');
+});
+
+test('the web lock execution timeout counts as transient (boundedNavigatorLock, 10s)', () => {
+  assert.equal(
+    isTransientNetworkFailure(new Error('Supabase auth lock "lock:sb-abc-auth-token" did not resolve within 10000ms.')),
+    true
+  );
 });
