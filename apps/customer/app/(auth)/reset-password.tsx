@@ -90,7 +90,7 @@ export default function ResetPasswordScreen() {
       await clearOtpCooldown('recovery', email.trim());
 
       // The recovery session outlives the update, and this flow ends at login.
-      await supabase.auth.signOut().catch(() => undefined);
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
       router.replace({
         pathname: '/login',
         params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },

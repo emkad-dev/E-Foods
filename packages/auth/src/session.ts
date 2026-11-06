@@ -24,5 +24,7 @@ export const isStaleSupabaseSessionError = (error: unknown) => {
 };
 
 export const clearSupabaseSession = async (supabase: SupabaseClient) => {
-  await supabase.auth.signOut().catch(() => undefined);
+  // Local scope only: an expired session on this device must not revoke the
+  // account's sessions on its other devices (see signOutUser).
+  await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
 };

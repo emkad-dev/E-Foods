@@ -9,7 +9,7 @@ import {
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
   createUserWithEmail,
-  isNetworkRequestError,
+  isTransientNetworkFailure,
   getUserRoleClaim,
   isStaleSupabaseSessionError,
   SESSION_EXPIRED_ERROR_MESSAGE,
@@ -96,21 +96,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const CUSTOMER_ACCESS_ERROR = 'This account does not have customer access.';
 const SESSION_CONFLICT_ERROR = 'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const isOfflineError = (error: unknown) => {
-  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
-  const errorMessage =
-    typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
-
-  return (
-    errorCode === 'unavailable' ||
-    errorCode === 'failed-precondition' ||
-    errorMessage.includes('client is offline') ||
-    errorMessage.includes('offline')
-  );
-};
-
-const isTransientNetworkError = (error: unknown) => isOfflineError(error) || isNetworkRequestError(error);
-
 // This app's own friendly, deliberately-thrown outcomes (an existing account,
 // a session takeover, session expiry, no customer access) - not faults, so
 // reportAuthFailure below does not send them to Sentry.
@@ -149,7 +134,7 @@ const reportAuthFailure = (source: string, error: unknown) => {
 // toUserMessage's own Supabase-code rules already cover the common cases
 // (invalid_credentials, email_not_confirmed, user_already_exists, ...).
 const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isTransientNetworkError(error)) {
+  if (isTransientNetworkFailure(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -309,7 +294,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
     } catch (releaseError) {
-      if (!isOfflineError(releaseError)) {
+      if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release customer session:', releaseError);
       }
     } finally {
@@ -469,7 +454,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               await flushPendingCustomerPolicyAcceptance();
               await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
             } catch (reconcileError) {
-              if (!isOfflineError(reconcileError)) {
+              if (!isTransientNetworkFailure(reconcileError)) {
                 reportAuthFailure('customer.authStateChange.reconcile', reconcileError);
               }
             }
@@ -488,11 +473,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         // Offline is expected (tab refocus, a brief drop) and this listener
         // re-fires on every one, so only unexpected failures reach Sentry.
-        if (!isOfflineError(err)) {
+        if (!isTransientNetworkFailure(err)) {
           reportAuthFailure('customer.authStateChange', err);
         }
 
-        if (authUser && isOfflineError(err)) {
+        if (authUser && isTransientNetworkFailure(err)) {
           const cachedUser = await getStoredUserProfile<UserDocument>();
 
           if (cachedUser?.uid === authUser.id) {
@@ -504,13 +489,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               role: cachedUser?.role ?? DEFAULT_APP_ROLE,
             };
 
-            const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
-
-            if (sessionIsValid) {
-              setUser(fallbackUser);
-              setError(NO_INTERNET_ERROR);
-              return;
-            }
+            // No single-device check here on purpose. The saved profile's
+            // activeSessionId is whatever was read BEFORE this device claimed
+            // the session at sign-in, so comparing it with our own stored id
+            // reads as a takeover and would evict a customer whose only fault is
+            // a bad signal. Takeover detection resumes on the first reconcile
+            // that reaches the server.
+            setUser(fallbackUser);
+            setError(NO_INTERNET_ERROR);
+            return;
           }
         }
 
@@ -637,6 +624,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
+      // Forget any device id left from an earlier sign-in BEFORE claiming a new
+      // one. The claim writes remote first, then stores locally; if the app is
+      // force-closed between the two, local-old + remote-new reads as a takeover
+      // and evicts this very device on the next launch. With local empty that
+      // same state is simply adopted. The write order below must not change.
+      await clearStoredSessionId();
       const authUser = await signInWithEmail(supabase, email, password);
       const claimRole = await getUserRoleClaim(authUser);
       if (claimRole && claimRole !== DEFAULT_APP_ROLE) {

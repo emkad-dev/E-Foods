@@ -10,8 +10,10 @@ import {
   isNetworkRequestError,
   sendPasswordResetEmailWithFallback,
   sendVerificationEmailWithFallback,
+  signOutUser,
   verifyPasswordResetOtp,
 } from './supabaseAuth.ts';
+import { clearSupabaseSession } from './session.ts';
 import { toUserMessage } from '../../observability/src/userMessage.ts';
 
 const signUpStub = (user: unknown, session: unknown = null) =>
@@ -276,4 +278,48 @@ test('isNetworkRequestError detects common browser and React Native fetch failur
   assert.equal(isNetworkRequestError(new TypeError('Failed to fetch')), true);
   assert.equal(isNetworkRequestError(new Error('Network request failed')), true);
   assert.equal(isNetworkRequestError(new Error('Something else broke')), false);
+});
+
+// A sign-out must end THIS device's session only. supabase-js defaults to the
+// 'global' scope, which revokes every refresh token the account has -- so a
+// takeover eviction, a session expiry or the user's own sign-out on one phone
+// silently logged out every other device they were using.
+test('signOutUser signs out this device only', async () => {
+  const calls: unknown[] = [];
+  const supabase = {
+    auth: {
+      signOut: async (options?: unknown) => {
+        calls.push(options);
+        return { error: null };
+      },
+    },
+  } as any;
+
+  await signOutUser(supabase);
+
+  assert.deepEqual(calls, [{ scope: 'local' }]);
+});
+
+test('signOutUser still throws the Supabase error', async () => {
+  const supabase = {
+    auth: { signOut: async () => ({ error: new Error('boom') }) },
+  } as any;
+
+  await assert.rejects(() => signOutUser(supabase), /boom/);
+});
+
+test('clearSupabaseSession clears this device only and swallows failures', async () => {
+  const calls: unknown[] = [];
+  const supabase = {
+    auth: {
+      signOut: async (options?: unknown) => {
+        calls.push(options);
+        throw new Error('offline');
+      },
+    },
+  } as any;
+
+  await clearSupabaseSession(supabase);
+
+  assert.deepEqual(calls, [{ scope: 'local' }]);
 });

@@ -5,7 +5,6 @@ import {
   ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   createUserWithEmail,
   getUserRoleClaim,
-  isNetworkRequestError,
   isStaleSupabaseSessionError,
   SESSION_EXPIRED_ERROR_MESSAGE,
   signInWithEmail,
@@ -25,7 +24,12 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
-import { resolveSingleDeviceSessionDecision, shouldShowSignInLoading } from '../../../../packages/auth/src';
+import {
+  isTransientNetworkFailure,
+  resolveProfileLoadFailure,
+  resolveSingleDeviceSessionDecision,
+  shouldShowSignInLoading,
+} from '../../../../packages/auth/src';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { MISSING_PROFILE_ERROR, resolveDispatchAccessState } from './dispatchAuthFlow';
@@ -57,23 +61,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const isProfileOfflineError = (error: unknown) => {
-  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
-  const errorMessage =
-    typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
-
-  return (
-    errorCode === 'unavailable' ||
-    errorCode === 'failed-precondition' ||
-    errorMessage.includes('client is offline') ||
-    errorMessage.includes('offline')
-  );
-};
-
-const isTransientNetworkError = (error: unknown) => isProfileOfflineError(error) || isNetworkRequestError(error);
-
 const getDispatchAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isTransientNetworkError(error)) {
+  if (isTransientNetworkFailure(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -141,7 +130,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
     } catch (releaseError) {
-      if (!isProfileOfflineError(releaseError)) {
+      if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release dispatch session in Supabase:', releaseError);
       }
     } finally {
@@ -335,29 +324,44 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           return;
         }
 
-        if (authUser && isProfileOfflineError(nextError)) {
-          const cachedUser = await getStoredUserProfile<UserDocument>();
-
-          if (
+        const cachedUser = authUser ? await getStoredUserProfile<UserDocument>() : null;
+        const hasUsableCachedProfile = Boolean(
+          authUser &&
             cachedUser?.uid === authUser.id &&
             (cachedUser.role === 'dispatch' || cachedUser.role === 'customer')
-          ) {
-            const fallbackUser: UserDocument = {
-              ...cachedUser,
-              uid: authUser.id,
-              email: authUser.email ?? cachedUser.email,
-              emailVerified: Boolean(authUser.email_confirmed_at),
-              role: cachedUser.role,
-            };
+        );
+        // A network failure while reloading the profile is not a sign-out: the
+        // Supabase session is intact. Keep the saved profile on screen, or, with
+        // none, say there is no internet WITHOUT clearing anything, so the next
+        // reconcile (network back, app foreground) can sign them straight in.
+        const failureOutcome = resolveProfileLoadFailure({
+          error: nextError,
+          hasAuthUser: Boolean(authUser),
+          hasUsableCachedProfile,
+        });
 
-            const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
+        if (authUser && cachedUser && failureOutcome === 'keep-cached-user') {
+          // No single-device check here on purpose. The saved profile's
+          // activeSessionId is whatever was read BEFORE this device claimed the
+          // session at sign-in, so comparing it with our own stored id reads as
+          // a takeover and would evict a rider whose only fault is a bad signal.
+          // Takeover detection resumes on the first reconcile that reaches the
+          // server.
+          setUser({
+            ...cachedUser,
+            uid: authUser.id,
+            email: authUser.email ?? cachedUser.email,
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: cachedUser.role,
+          });
+          setError(NO_INTERNET_ERROR);
+          return;
+        }
 
-            if (sessionIsValid) {
-              setUser(fallbackUser);
-              setError(NO_INTERNET_ERROR);
-              return;
-            }
-          }
+        if (failureOutcome === 'offline-without-profile') {
+          setUser(null);
+          setError(NO_INTERNET_ERROR);
+          return;
         }
 
         const nextMessage = getDispatchAuthErrorMessage(nextError, 'Failed to load dispatch account');
@@ -449,6 +453,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
+      // Forget any device id left from an earlier sign-in BEFORE claiming a new
+      // one. The claim writes remote first, then stores locally; if the app is
+      // force-closed between the two, local-old + remote-new reads as a takeover
+      // and evicts this very device on the next launch. With local empty that
+      // same state is simply adopted. The write order below must not change.
+      await clearStoredSessionId();
       const authUser = await signInWithEmail(supabase, email, password);
       const nextUser = await buildNextUser(authUser);
 

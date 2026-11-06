@@ -14,5 +14,6 @@ export * from './sessionLock';
 export * from './signOutHooks';
 export * from './singleDeviceSession';
 export * from './supabaseAuth';
+export * from './transientNetworkFailure';
 export * from './types';
 export * from './useOtpCooldown';

@@ -6,7 +6,6 @@ import {
   createUserWithEmail,
   formatAuthError,
   getUserRoleClaim,
-  isNetworkRequestError,
   signInWithEmail,
   signOutUser,
   sendPasswordReset,
@@ -24,6 +23,8 @@ import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import {
+  isTransientNetworkFailure,
+  resolveProfileLoadFailure,
   resolveSingleDeviceSessionDecision,
   shouldHydrateCachedUserProfile,
   shouldShowSignInLoading,
@@ -63,23 +64,8 @@ const NO_INTERNET_ERROR = 'No internet connection. Check your network and try ag
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
 
-const isProfileOfflineError = (error: unknown) => {
-  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
-  const errorMessage =
-    typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
-
-  return (
-    errorCode === 'unavailable' ||
-    errorCode === 'failed-precondition' ||
-    errorMessage.includes('client is offline') ||
-    errorMessage.includes('offline')
-  );
-};
-
-const isTransientNetworkError = (error: unknown) => isProfileOfflineError(error) || isNetworkRequestError(error);
-
 const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isTransientNetworkError(error)) {
+  if (isTransientNetworkFailure(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -135,7 +121,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
     } catch (releaseError) {
-      if (!isProfileOfflineError(releaseError)) {
+      if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release partner session in Supabase:', releaseError);
       }
     } finally {
@@ -320,26 +306,38 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await storeUserProfile(nextUser);
       } catch (nextError) {
         const authUser = session?.user ?? null;
-        if (authUser && isProfileOfflineError(nextError)) {
-          const cachedUser = await getStoredUserProfile<UserDocument>();
+        const cachedUser = authUser ? await getStoredUserProfile<UserDocument>() : null;
+        const hasUsableCachedProfile = Boolean(
+          authUser && cachedUser?.uid === authUser.id && cachedUser.role === 'restaurant'
+        );
+        // A network failure while reloading the profile is not a sign-out: the
+        // Supabase session is intact. Keep the saved profile on screen, or, with
+        // none, say there is no internet WITHOUT clearing anything, so the next
+        // reconcile (network back, tab refocus) can sign them straight in.
+        const failureOutcome = resolveProfileLoadFailure({
+          error: nextError,
+          hasAuthUser: Boolean(authUser),
+          hasUsableCachedProfile,
+        });
 
-          if (cachedUser?.uid === authUser.id && cachedUser.role === 'restaurant') {
-            const fallbackUser: UserDocument = {
-              ...cachedUser,
-              uid: authUser.id,
-              email: authUser.email ?? cachedUser.email,
-              emailVerified: Boolean(authUser.email_confirmed_at),
-              role: 'restaurant',
-            };
+        if (authUser && cachedUser && failureOutcome === 'keep-cached-user') {
+          // Partner is multi-device, so there is no single-device check to run
+          // against the saved profile here.
+          setUser({
+            ...cachedUser,
+            uid: authUser.id,
+            email: authUser.email ?? cachedUser.email,
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: 'restaurant',
+          });
+          setError(NO_INTERNET_ERROR);
+          return;
+        }
 
-            const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
-
-            if (sessionIsValid) {
-              setUser(fallbackUser);
-              setError(NO_INTERNET_ERROR);
-              return;
-            }
-          }
+        if (failureOutcome === 'offline-without-profile') {
+          setUser(null);
+          setError(NO_INTERNET_ERROR);
+          return;
         }
 
         const nextMessage = getPartnerAuthErrorMessage(nextError, 'Failed to load partner account');

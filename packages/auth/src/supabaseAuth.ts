@@ -141,7 +141,11 @@ export const signInWithEmail = async (
 
 export const signOutUser = async (supabase: SupabaseClient) => {
   await runBeforeSignOutHooks();
-  const { error } = await supabase.auth.signOut();
+  // 'local', not supabase-js's default 'global': global revokes every refresh
+  // token the account has, so signing out (or being evicted) on one device
+  // logged the user out of all the others. Nothing here offers "sign out
+  // everywhere".
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
   if (error) {
     throw error;
   }
