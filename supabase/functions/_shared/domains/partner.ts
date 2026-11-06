@@ -79,6 +79,7 @@ import {
 import { ensureRole, type AuthenticatedRequestContext } from '../rpc/context.ts';
 import { defineRpcDomain, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
+import { assertRestaurantLocationAllowsPublish } from '../restaurantLocation.ts';
 import { loadOwnBootstrapProfile } from '../bootstrapProfile.ts';
 import { isRateLimitAllowed } from '../rateLimit.ts';
 
@@ -899,6 +900,12 @@ const upsertPartnerRestaurantProfile: Handler = async ({ context, data }) => {
     allowPublish: true,
     existingPublished: currentRestaurant?.isPublished === true,
   });
+
+  // Judged on the row this upsert will leave behind (profile carries the
+  // resulting isPublished and coordinates, whether sent or kept), so a save that
+  // clears the coordinates of a located, published store is refused too, while
+  // unrelated edits on one that was published before this rule still go through.
+  assertRestaurantLocationAllowsPublish(currentRestaurant, profile);
 
   const savedAt = nowIso();
   const { error } = await serviceClient.from('RestaurantRecord').upsert(

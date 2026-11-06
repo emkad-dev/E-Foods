@@ -127,7 +127,8 @@ was built by taking `docs/play/data-safety-customer.csv` (the already-imported,
 working customer CSV) and editing exactly the rows that differ for partner,
 row-by-row, against the same blank Play export template.
 
-**What it declares** (54 `true` rows total, vs. 63 for customer):
+**What it declares** (62 `true` rows total, vs. 63 for customer; was 54 before the
+location change below):
 - Personal info: **Name, Email address, User IDs, Address, Phone number, Other
   info** (NIN / Tax ID, for identity verification)
 - Financial info: **Other financial info only** (bank account number + bank
@@ -138,14 +139,19 @@ row-by-row, against the same blank Play export template.
   optional; partner's onboarding photos are not)
 - App info and performance: **Crash logs, Diagnostics**
 - Messages: **Other in-app messages** (restaurant↔support)
-- **No location data types** (approximate or precise) — partner has no
-  location feature
+- Location: **Approximate location and Precise location**, collected only (not
+  shared), purpose **App functionality**, and **optional** (users can choose
+  whether it is collected). Added 2026-11-06 with Store details' "Use my current
+  location" button, which reads one foreground fix to set the restaurant's map
+  pin. It can be declined: "Find from address" and typing the coordinates do the
+  same job. Foreground only, no background location, no foreground service.
 - **No data shared with third parties** (all `..._ONLY_SHARED` rows are
   blank), no data sold, deletion URL present
   (`https://feasty.com.ng/account-deletion.html`)
 
 This matches `docs/play-console-submission.md` §4's partner table (Personal ×
-Other info, Photos, Financial × Other financial info) with one thing to flag:
+Other info, Photos, Financial × Other financial info), plus the location rows
+above, with one thing to flag:
 
 **Discrepancy to be aware of — not something I changed silently:** §4 says
 crash logs and diagnostics should be declared "collected but not linked... and
@@ -177,12 +183,12 @@ spot-checked afterward; see the verification below. If someone finds the
 original script later, it's worth diffing its output against this CSV.
 
 **Verification performed:**
-- `true` count: **54** (customer: 63)
+- `true` count: **62** (customer: 63; the 54 recorded here originally predate the location rows)
 - `PSL_DATA_TYPES_*` rows set true: Personal/Name, Personal/Email, Personal/User
   IDs, Personal/Address, Personal/Phone, Personal/Other info, Financial/Other
   financial info, Messages/Other in-app messages, Photos/Photos, App
-  performance/Crash logs, App performance/Diagnostics — 11 rows, matching the
-  brief's expected list exactly (no location, no purchase history, no app
+  performance/Crash logs, App performance/Diagnostics, plus Location/Approximate
+  and Location/Precise (added 2026-11-06) — 13 rows (no purchase history, no app
   activity/user-generated content)
 - `grep -c 'ONLY_SHARED,true'` → **0**, confirming "no data shared with third
   parties" across the whole file

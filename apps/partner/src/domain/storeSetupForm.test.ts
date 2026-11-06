@@ -137,6 +137,29 @@ test('making the store visible requires coordinates', () => {
   assert.equal(hasStoreSetupErrors(complete), false);
 });
 
+test('making the store visible refuses coordinates the server would refuse', () => {
+  for (const [latitude, longitude] of [
+    ['0', '0'],
+    ['95', '3.42'],
+    ['6.43', '181'],
+    ['-91', '3.42'],
+  ]) {
+    const errors = validateStoreSetup(validDraft({ isPublished: true, latitude, longitude }));
+    assert.equal(errors.latitude, STORE_SETUP_MESSAGES.locationInvalid, `${latitude}, ${longitude}`);
+  }
+
+  // A zero on one axis is a real place; only the exact pair 0,0 is not.
+  assert.equal(
+    hasStoreSetupErrors(validateStoreSetup(validDraft({ isPublished: true, latitude: '0', longitude: '3.42' }))),
+    false
+  );
+});
+
+test('0,0 is only refused where it matters: a hidden store may keep it until it is made visible', () => {
+  const hidden = validateStoreSetup(validDraft({ isPublished: false, latitude: '0', longitude: '0' }));
+  assert.equal(hidden.latitude, undefined);
+});
+
 test('a store that delivers needs a distance above zero, published or not', () => {
   const missing = validateStoreSetup(validDraft({ supportsDelivery: true }));
   assert.equal(missing.deliveryRadiusKm, STORE_SETUP_MESSAGES.deliveryRadiusKm);
@@ -277,4 +300,12 @@ test('setup gaps describe the saved record, and an unsaved store says so', () =>
   });
   assert.equal(deliveryWithoutRadius.length, 1);
   assert.match(deliveryWithoutRadius[0], /delivery distance/);
+});
+
+test('a saved 0,0 is reported as a missing map location', () => {
+  const gaps = storeSetupGaps({ address: '1 Allen Avenue', openingTime: '08:00', closingTime: '22:00', latitude: 0, longitude: 0 });
+  assert.ok(gaps.some((gap) => gap.startsWith('No map location saved')));
+
+  const located = storeSetupGaps({ address: '1 Allen Avenue', openingTime: '08:00', closingTime: '22:00', latitude: 6.43, longitude: 3.42 });
+  assert.ok(!located.some((gap) => gap.startsWith('No map location saved')));
 });

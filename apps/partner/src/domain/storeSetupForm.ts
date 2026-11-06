@@ -16,7 +16,12 @@
  *    fulfilment modes off, and one coordinate without the other. None of those
  *    were checked here, so each arrived as a bare 400 with no field attached to
  *    it. The server stays the authority; this is the same shape, earlier.
+ *
+ * It imports only packages/domain's restaurantLocation, which itself imports
+ * nothing: the coordinate rule is the one the server publishes against, so it
+ * is shared rather than copied. The entity barrel (React Native) stays out.
  */
+import { isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
 
 const OPERATING_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
@@ -90,6 +95,8 @@ export const STORE_SETUP_MESSAGES = {
   negative: 'Use zero or more.',
   coordinatePair: 'Latitude and longitude go together - add both, or clear both.',
   location: 'Add both latitude and longitude before making this store visible.',
+  locationInvalid:
+    'These coordinates cannot be a restaurant - 0 and 0, or numbers off the map. Use Find from address or Use my current location.',
   deliveryRadiusKm: 'Add a delivery distance above zero, or turn delivery off.',
 } as const;
 
@@ -353,6 +360,19 @@ export const validateStoreSetup = (draft: StoreSetupDraft): StoreSetupErrors => 
     if (!hasLongitude && !errors.longitude) {
       errors.longitude = STORE_SETUP_MESSAGES.location;
     }
+
+    // Both present and readable but not a place the server would accept - 0,0
+    // (what an earlier bug saved for typed addresses) or off the map. Without
+    // this the form would pass and the server would answer 412.
+    if (
+      hasLatitude &&
+      hasLongitude &&
+      !errors.latitude &&
+      !errors.longitude &&
+      !isUsableCoordinatePair(Number.parseFloat(draft.latitude), Number.parseFloat(draft.longitude))
+    ) {
+      errors.latitude = STORE_SETUP_MESSAGES.locationInvalid;
+    }
   }
 
   return errors;
@@ -381,7 +401,11 @@ export const storeSetupGaps = (store: StoreRecordLike | null | undefined): strin
     gaps.push('No trading hours saved.');
   }
 
-  if (isBlank(textOf(store.latitude)) || isBlank(textOf(store.longitude))) {
+  // The same reading the server publishes against, so a saved 0,0 (an earlier
+  // bug put typed addresses there) is reported as the missing location it is.
+  const savedLatitude = toNumberOrNull(textOf(store.latitude));
+  const savedLongitude = toNumberOrNull(textOf(store.longitude));
+  if (!isUsableCoordinatePair(savedLatitude, savedLongitude)) {
     gaps.push('No map location saved, which your store needs before it can be visible.');
   }
 

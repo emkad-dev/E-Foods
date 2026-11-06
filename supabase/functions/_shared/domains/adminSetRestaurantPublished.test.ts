@@ -55,12 +55,23 @@ const ADMIN_CONTEXT = {
   userProfile: { uid: 'admin-uid', email: 'admin@example.test', role: 'admin', accountDisabled: false },
 };
 
-type RestaurantRow = { id: string; name: string; isPublished: boolean };
+type RestaurantRow = {
+  id: string;
+  name: string;
+  isPublished: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+// A restaurant with a usable location. Publishing now requires one, so every
+// fixture that expects a publish to succeed carries these.
+const LAGOS = { latitude: 6.5244, longitude: 3.3792 };
 
 type MockState = {
   auditInserts: Array<Record<string, unknown>>;
   broadcasts: Array<{ url: string; body: unknown }>;
   restaurant: RestaurantRow | null;
+  selectCalls: number;
   updateCalls: Array<Record<string, unknown>>;
 };
 
@@ -74,6 +85,7 @@ const installMocks = (initialRestaurant: RestaurantRow | null): MockState => {
     auditInserts: [],
     broadcasts: [],
     restaurant: initialRestaurant,
+    selectCalls: 0,
     updateCalls: [],
   };
 
@@ -81,6 +93,18 @@ const installMocks = (initialRestaurant: RestaurantRow | null): MockState => {
   (serviceClient as any).from = (table: string) => {
     if (table === 'RestaurantRecord') {
       return {
+        // The pre-publish read of the row the rule is judged against.
+        select: (_columns: string) => ({
+          eq: (_column: string, value: string) => ({
+            maybeSingle: async () => {
+              state.selectCalls += 1;
+              if (!state.restaurant || state.restaurant.id !== value) {
+                return { data: null, error: null };
+              }
+              return { data: state.restaurant, error: null };
+            },
+          }),
+        }),
         update: (payload: Record<string, unknown>) => {
           state.updateCalls.push(payload);
           return {
@@ -129,7 +153,7 @@ const installMocks = (initialRestaurant: RestaurantRow | null): MockState => {
 };
 
 Deno.test('adminSetRestaurantPublished: rejects a non-admin caller with 403 before touching the database', async () => {
-  const state = installMocks({ id: 'restaurant-1', name: 'Test Kitchen', isPublished: false });
+  const state = installMocks({ id: 'restaurant-1', name: 'Test Kitchen', isPublished: false, ...LAGOS });
 
   let thrown: unknown = null;
   try {
@@ -170,7 +194,7 @@ Deno.test('adminSetRestaurantPublished: an unknown restaurant answers 404', asyn
 });
 
 Deno.test('adminSetRestaurantPublished: publishing persists isPublished=true, writes an audit row, and broadcasts', async () => {
-  const state = installMocks({ id: 'restaurant-2', name: 'Jollof Spot', isPublished: false });
+  const state = installMocks({ id: 'restaurant-2', name: 'Jollof Spot', isPublished: false, ...LAGOS });
 
   const response = await handler({
     context: ADMIN_CONTEXT,
@@ -199,7 +223,7 @@ Deno.test('adminSetRestaurantPublished: publishing persists isPublished=true, wr
 });
 
 Deno.test('adminSetRestaurantPublished: unpublishing persists isPublished=false and writes an audit row', async () => {
-  const state = installMocks({ id: 'restaurant-3', name: 'Suya Corner', isPublished: true });
+  const state = installMocks({ id: 'restaurant-3', name: 'Suya Corner', isPublished: true, latitude: null, longitude: null });
 
   const response = await handler({
     context: ADMIN_CONTEXT,
@@ -252,4 +276,114 @@ Deno.test('adminSetRestaurantPublished: rejects a non-boolean isPublished with 4
 
   expectEqual((thrown as { status?: number })?.status, 400, 'non-boolean isPublished status');
   expectEqual(state.updateCalls.length, 0, 'no update attempted with a non-boolean isPublished');
+});
+
+const expectLocationRejection = async (restaurant: RestaurantRow, label: string) => {
+  const state = installMocks(restaurant);
+
+  let thrown: unknown = null;
+  try {
+    await handler({
+      context: ADMIN_CONTEXT,
+      data: { restaurantId: restaurant.id, isPublished: true },
+      request: fakeRequest(),
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  expectEqual((thrown as { status?: number })?.status, 412, `${label}: status`);
+  expectEqual(
+    /location/i.test((thrown as { message?: string })?.message ?? ''),
+    true,
+    `${label}: the message tells the owner to set the location`
+  );
+  expectEqual(state.updateCalls.length, 0, `${label}: nothing written`);
+  expectEqual(state.auditInserts.length, 0, `${label}: no audit row`);
+  expectEqual(state.broadcasts.length, 0, `${label}: no broadcast`);
+};
+
+Deno.test('adminSetRestaurantPublished: publishing a restaurant with no coordinates answers 412', async () => {
+  await expectLocationRejection(
+    { id: 'restaurant-6', name: 'No Pin', isPublished: false, latitude: null, longitude: null },
+    'null coordinates'
+  );
+});
+
+Deno.test('adminSetRestaurantPublished: publishing a restaurant at 0,0 answers 412', async () => {
+  await expectLocationRejection(
+    { id: 'restaurant-7', name: 'Null Island', isPublished: false, latitude: 0, longitude: 0 },
+    '0,0 coordinates'
+  );
+});
+
+Deno.test('adminSetRestaurantPublished: publishing with only one coordinate set answers 412', async () => {
+  await expectLocationRejection(
+    { id: 'restaurant-8', name: 'Half Pin', isPublished: false, latitude: 6.5, longitude: null },
+    'one coordinate'
+  );
+});
+
+Deno.test('adminSetRestaurantPublished: publishing with out-of-range coordinates answers 412', async () => {
+  await expectLocationRejection(
+    { id: 'restaurant-9', name: 'Off Map', isPublished: false, latitude: 95, longitude: 3.4 },
+    'out-of-range coordinates'
+  );
+});
+
+Deno.test('adminSetRestaurantPublished: an unknown restaurant is still 404, not 412, when publishing', async () => {
+  const state = installMocks(null);
+
+  let thrown: unknown = null;
+  try {
+    await handler({
+      context: ADMIN_CONTEXT,
+      data: { restaurantId: 'ghost', isPublished: true },
+      request: fakeRequest(),
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  expectEqual((thrown as { status?: number })?.status, 404, 'unknown restaurant status');
+  expectEqual(state.updateCalls.length, 0, 'nothing written');
+});
+
+Deno.test('adminSetRestaurantPublished: unpublishing a restaurant with no coordinates still works and needs no read', async () => {
+  const state = installMocks({
+    id: 'restaurant-10',
+    name: 'Legacy Kitchen',
+    isPublished: true,
+    latitude: null,
+    longitude: null,
+  });
+
+  const response = await handler({
+    context: ADMIN_CONTEXT,
+    data: { restaurantId: 'restaurant-10', isPublished: false },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'unpublish status');
+  expectEqual(state.restaurant?.isPublished, false, 'persisted unpublished');
+  expectEqual(state.selectCalls, 0, 'the location read is only for going live');
+});
+
+Deno.test('adminSetRestaurantPublished: re-publishing an already-published restaurant that never had coordinates is not newly blocked', async () => {
+  const state = installMocks({
+    id: 'restaurant-11',
+    name: 'Legacy Kitchen',
+    isPublished: true,
+    latitude: null,
+    longitude: null,
+  });
+
+  const response = await handler({
+    context: ADMIN_CONTEXT,
+    data: { restaurantId: 'restaurant-11', isPublished: true },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'status');
+  expectEqual(state.restaurant?.isPublished, true, 'still published');
 });
