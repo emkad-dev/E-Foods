@@ -137,6 +137,39 @@ test('a claim made stale before its retry neither retries nor reports', async ()
   assert.deepEqual(h.stored, []);
 });
 
+test('an attempt invalidated before its claim starts writes nothing remotely and stores nothing', async () => {
+  // A late null-session event can invalidate the attempt between beginSignIn and
+  // startClaim. A remote write now, with no local store, would read as a takeover.
+  const h = harness(['ok']);
+  const attempt = await h.claims.beginSignIn();
+
+  h.claims.invalidate();
+  attempt.startClaim('user-a');
+  await settle();
+
+  assert.equal(h.writeCalls(), 0, 'no remote write');
+  assert.deepEqual(h.stored, [], 'no local store');
+  assert.equal(h.reported.length, 0);
+  assert.equal(h.claims.isGuardHeld(), false);
+});
+
+test('a claim made stale during the pause before its retry does not retry', async () => {
+  const retryPause = deferred();
+  const h = harness(['fail', 'ok'], { [DEVICE_CLAIM_RETRY_DELAY_MS]: retryPause });
+  const attempt = await h.claims.beginSignIn();
+  attempt.startClaim('user-a');
+  await settle();
+
+  assert.equal(h.writeCalls(), 1, 'first try failed, now waiting out the pause');
+  h.claims.invalidate();
+  retryPause.resolve();
+  await settle();
+
+  assert.equal(h.writeCalls(), 1, 'the retry must not write once the claim is stale');
+  assert.deepEqual(h.stored, []);
+  assert.equal(h.reported.length, 0);
+});
+
 test('a claim made stale after its remote write never stores locally', async () => {
   // The hazard: a late write carrying the wrong JWT matches no row and reports
   // success; storing that id locally would evict the next account.

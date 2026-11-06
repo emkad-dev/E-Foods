@@ -4,6 +4,7 @@ import {
   CURRENT_TERMS_VERSION,
   type PolicyAcceptancePayload,
 } from '../../../../packages/domain/src';
+import type { BackendRpcOptions } from '../../../../packages/auth/src';
 import { callCustomerBackendRpc } from './backendRpc';
 
 type PolicyAcceptanceStatus = {
@@ -21,10 +22,17 @@ export const customerPolicyVersions = {
 export const buildCustomerPolicyAcceptance = (source = 'customer_signup'): PolicyAcceptancePayload =>
   buildPolicyAcceptancePayload('customer', source);
 
-export const getCustomerPolicyAcceptance = async () =>
-  callCustomerBackendRpc<PolicyAcceptanceStatus>('getPolicyAcceptance', {
-    app: 'customer',
-  });
+// `options` is for the sign-in fallback's read, which passes an overall deadline
+// so a stalled function cannot hold the sign-in screen. Every other caller omits
+// it. Never pass it to recordCustomerPolicyAcceptance below: that is a write.
+export const getCustomerPolicyAcceptance = async (options?: BackendRpcOptions) =>
+  callCustomerBackendRpc<PolicyAcceptanceStatus>(
+    'getPolicyAcceptance',
+    {
+      app: 'customer',
+    },
+    options
+  );
 
 export const recordCustomerPolicyAcceptance = async (source = 'customer_policy_gate') =>
   callCustomerBackendRpc<PolicyAcceptanceStatus>('recordPolicyAcceptance', buildCustomerPolicyAcceptance(source));

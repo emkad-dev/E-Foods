@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { FunctionsFetchError } from '@supabase/supabase-js';
-import { BackendRpcError, callBackendRpc } from './backendRpc.ts';
+import { BackendRpcError, BOOTSTRAP_READ_DEADLINE_MS, callBackendRpc } from './backendRpc.ts';
 import { fetchProfileBootstrap } from './profileBootstrap.ts';
 import { isTransientNetworkFailure } from './transientNetworkFailure.ts';
 
@@ -236,20 +236,49 @@ test('when the deadline fires the relay is not started for a call nobody is wait
   );
 });
 
-test('without a deadline the transport is exactly as before: no abort signal, no timer', async () => {
+test('the bootstrap deadline is 8 seconds', () => {
+  assert.equal(BOOTSTRAP_READ_DEADLINE_MS, 8_000);
+});
+
+test('without a deadline the transport is exactly as before: no abort signal and no timer is created', async () => {
   let sawSignal: unknown = 'unset';
   const supabase = stubSupabase(async () => relayFetchFailure());
+  const originalSetTimeout = globalThis.setTimeout;
+  let timersCreated = 0;
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    timersCreated += 1;
+    return originalSetTimeout(...args);
+  }) as typeof setTimeout;
 
-  await withTransport(
-    ((_input: unknown, init?: { signal?: AbortSignal }) => {
-      sawSignal = init?.signal;
-      return Promise.resolve(jsonResponse(200, { data: { ok: true } }));
-    }) as typeof fetch,
-    async () => {
-      const result = await realCall(supabase)('placeCustomerOrder');
+  try {
+    await withTransport(
+      ((_input: unknown, init?: { signal?: AbortSignal }) => {
+        sawSignal = init?.signal;
+        return Promise.resolve(jsonResponse(200, { data: { ok: true } }));
+      }) as typeof fetch,
+      async () => {
+        const result = await realCall(supabase)('placeCustomerOrder');
 
-      assert.deepEqual(result, { ok: true });
-      assert.equal(sawSignal, undefined);
-    }
-  );
+        assert.deepEqual(result, { ok: true });
+      }
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+
+  assert.equal(sawSignal, undefined);
+  assert.equal(timersCreated, 0);
+});
+
+test('the customer sign-in policy read (getPolicyAcceptance) cannot hang: a never-settling call times out at its deadline', async () => {
+  const supabase = stubSupabase(() => new Promise(() => undefined));
+
+  await withTransport((() => new Promise(() => undefined)) as typeof fetch, async () => {
+    const started = Date.now();
+    await assert.rejects(
+      () => callBackendRpc(supabase, ENV, 'getPolicyAcceptance', { app: 'customer' }, { deadlineMs: 25 }),
+      /timed out/
+    );
+    assert.ok(Date.now() - started < 1_000);
+  });
 });

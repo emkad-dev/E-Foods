@@ -61,6 +61,15 @@ export const createDeviceClaims = (deps: DeviceClaimDeps) => {
     const isCurrent = () => currentAttempt === attempt;
 
     const claimOnce = async () => {
+      // Checked BEFORE the write too, not only before the local store. An attempt
+      // invalidated between beginSignIn and startClaim (a late null-session event
+      // reaching clearLocalUserState) would otherwise write a new remote id while
+      // the passive reconcile, which the dropped guard let through, adopted the
+      // old one locally: local old + remote new evicts this device. Stale means
+      // write nothing; local stays empty and adopts.
+      if (!isCurrent()) {
+        return;
+      }
       const sessionId = deps.createSessionId();
       await deps.writeRemote(userId, sessionId);
       if (!isCurrent()) {

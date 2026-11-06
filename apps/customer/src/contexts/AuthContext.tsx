@@ -36,6 +36,7 @@ import {
 import { getUserDocument, createUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { supabase } from '../services/supabase/config';
 import {
+  BOOTSTRAP_READ_DEADLINE_MS,
   createDeviceClaims,
   resolveSingleDeviceSessionDecision,
   shouldShowSignInLoading,
@@ -247,7 +248,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     [clearLocalUserState]
   );
 
-  const refreshPolicyAcceptance = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+  const refreshPolicyAcceptance = useCallback(async ({ silent = false, bounded = false }: { silent?: boolean; bounded?: boolean } = {}) => {
     // Silent refresh is used during the background reconcile after a cached
     // first paint: it must not toggle `policyLoading`, which would re-block the
     // UI on the loading spinner we just cleared.
@@ -256,7 +257,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     try {
-      const status = await getCustomerPolicyAcceptance();
+      // `bounded` (the interactive sign-in fallback) gives the read an overall
+      // deadline: that fallback runs exactly when the edge functions are stalled,
+      // and an unbounded read would hold the spinner forever. The catch below
+      // already falls back to the cached value.
+      const status = await getCustomerPolicyAcceptance(
+        bounded ? { deadlineMs: BOOTSTRAP_READ_DEADLINE_MS } : undefined
+      );
       setPolicyAccepted(status.accepted);
       void storePolicyAccepted(status.accepted);
       return status.accepted;
@@ -734,8 +741,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // but it must not block entering the app.
         void flushPendingCustomerPolicyAcceptance();
       } else {
-        await flushPendingCustomerPolicyAcceptance();
-        await refreshPolicyAcceptance();
+        // Same as the bootstrap branch: the flush is a write that must not block
+        // entering the app (and must not get a deadline), and the read is bounded.
+        void flushPendingCustomerPolicyAcceptance();
+        await refreshPolicyAcceptance({ bounded: true });
       }
     } catch (err: any) {
       reportAuthFailure('customer.signIn', err);
