@@ -79,6 +79,7 @@ import {
 import { ensureRole, type AuthenticatedRequestContext } from '../rpc/context.ts';
 import { defineRpcDomain, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
+import { loadOwnBootstrapProfile } from '../bootstrapProfile.ts';
 import { isRateLimitAllowed } from '../rateLimit.ts';
 
 type Handler = RpcHandler<AuthenticatedRequestContext>;
@@ -1901,11 +1902,21 @@ const submitPartnerOnboarding: Handler = async ({ context, data }) => {
   });
 };
 
+// Interactive partner sign-in in one authenticated call: the caller's own
+// profile row, which is what the client's direct user_profiles read returned.
+// Read-only and deliberately NOT role-gated: an invited staff member has no
+// restaurant or application yet and still signs in here, and the client decides
+// access from the profile plus the role claim. Older clients never call this
+// and keep their direct read.
+const partnerBootstrap: Handler = async ({ context }) =>
+  json(200, { data: { profile: await loadOwnBootstrapProfile(context.uid) } });
+
 export const partnerDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: PARTNER_ACTIONS,
   name: 'partner',
   handlers: {
     claimPartnerRestaurantLink,
+    partnerBootstrap,
     partnerGetRestaurantContext,
     partnerGetRestaurantOrder,
     partnerGetRestaurantOrders,

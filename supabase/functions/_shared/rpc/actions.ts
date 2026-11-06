@@ -47,6 +47,12 @@ export const DISPATCH_ACTIONS = [
   'dispatchDeclineOffer',
   'dispatchSetAvailability',
   'dispatchRiderSOS',
+  // One authenticated read of the callers own profile row for interactive
+  // sign-in, in place of a direct PostgREST read. Lives in this domain (not
+  // account) so the call lands on feasty-dispatch, which the warmer keeps warm.
+  // (No apostrophes in comments inside these arrays: the route generator reads
+  // quoted strings with a regex and would take one as an action name.)
+  'dispatchBootstrap',
 ] as const;
 
 export const PARTNER_ACTIONS = [
@@ -73,6 +79,9 @@ export const PARTNER_ACTIONS = [
   'resolvePartnerBankAccount',
   'requestPartnerVerificationUploadUrl',
   'submitPartnerOnboarding',
+  // The partner counterpart of dispatchBootstrap: the signed-in users own
+  // profile row in one call, landing on the warmed feasty-partner.
+  'partnerBootstrap',
 ] as const;
 
 export const ADMIN_ACTIONS = [

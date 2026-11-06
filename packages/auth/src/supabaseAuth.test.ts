@@ -9,6 +9,7 @@ import {
   formatAuthError,
   isNetworkRequestError,
   sendPasswordResetEmailWithFallback,
+  signInWithEmail,
   sendVerificationEmailWithFallback,
   signOutUser,
   verifyPasswordResetOtp,
@@ -327,4 +328,53 @@ test('clearSupabaseSession clears this device only and swallows failures', async
   await clearSupabaseSession(supabase);
 
   assert.deepEqual(calls, [{ scope: 'local' }]);
+});
+
+// supabase-js reports a dropped or stalled request as AuthRetryableFetchError
+// (status 0) and a refused password as AuthApiError (HTTP 400).
+const retryableFetchError = () => Object.assign(new Error('Network request failed'), { name: 'AuthRetryableFetchError', status: 0 });
+const invalidCredentialsError = () =>
+  Object.assign(new Error('Invalid login credentials'), { name: 'AuthApiError', status: 400, code: 'invalid_credentials' });
+
+const passwordClient = (outcomes: Array<{ user?: unknown; error?: unknown }>) => {
+  let calls = 0;
+  const supabase = {
+    auth: {
+      signInWithPassword: async () => {
+        const outcome = outcomes[Math.min(calls, outcomes.length - 1)];
+        calls += 1;
+        return { data: { user: outcome.user ?? null, session: null }, error: outcome.error ?? null };
+      },
+    },
+  } as any;
+
+  return { supabase, calls: () => calls };
+};
+
+test('signInWithEmail sends the password request again after a network failure or timeout, once', async () => {
+  const { supabase, calls } = passwordClient([{ error: retryableFetchError() }, { user: { id: 'u1' } }]);
+
+  assert.deepEqual(await signInWithEmail(supabase, 'a@b.c', 'pw'), { id: 'u1' });
+  assert.equal(calls(), 2);
+});
+
+test('signInWithEmail gives up after the one retry', async () => {
+  const { supabase, calls } = passwordClient([{ error: retryableFetchError() }]);
+
+  await assert.rejects(() => signInWithEmail(supabase, 'a@b.c', 'pw'), /Network request failed/);
+  assert.equal(calls(), 2);
+});
+
+test('signInWithEmail never re-sends a rejected password: the rate limit and the wrong-password message depend on it', async () => {
+  const { supabase, calls } = passwordClient([{ error: invalidCredentialsError() }, { user: { id: 'u1' } }]);
+
+  await assert.rejects(() => signInWithEmail(supabase, 'a@b.c', 'wrong'), /Invalid login credentials/);
+  assert.equal(calls(), 1);
+});
+
+test('signInWithEmail does not retry a success', async () => {
+  const { supabase, calls } = passwordClient([{ user: { id: 'u1' } }]);
+
+  await signInWithEmail(supabase, 'a@b.c', 'pw');
+  assert.equal(calls(), 1);
 });

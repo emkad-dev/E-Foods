@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   isTransientNetworkFailure,
+  retryOnceOnTransientFailure,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
 } from './transientNetworkFailure.ts';
@@ -130,4 +131,44 @@ test('the web lock execution timeout counts as transient (boundedNavigatorLock, 
     isTransientNetworkFailure(new Error('Supabase auth lock "lock:sb-abc-auth-token" did not resolve within 10000ms.')),
     true
   );
+});
+
+test('retryOnceOnTransientFailure runs the operation again after a transient failure and returns the second result', async () => {
+  let calls = 0;
+  const result = await retryOnceOnTransientFailure(async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw new TypeError('Network request failed');
+    }
+    return 'second';
+  });
+
+  assert.equal(result, 'second');
+  assert.equal(calls, 2);
+});
+
+test('retryOnceOnTransientFailure retries at most once', async () => {
+  let calls = 0;
+  await assert.rejects(
+    retryOnceOnTransientFailure(async () => {
+      calls += 1;
+      throw new TypeError('Failed to fetch');
+    }),
+    /Failed to fetch/
+  );
+
+  assert.equal(calls, 2);
+});
+
+test('retryOnceOnTransientFailure does not retry a real rejection', async () => {
+  let calls = 0;
+  await assert.rejects(
+    retryOnceOnTransientFailure(async () => {
+      calls += 1;
+      throw new Error('permission denied');
+    }),
+    /permission denied/
+  );
+
+  assert.equal(calls, 1);
 });

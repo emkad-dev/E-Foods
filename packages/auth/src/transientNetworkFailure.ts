@@ -11,7 +11,7 @@
 // dipped while the app reloaded their profile.
 
 import { hasStoredSession } from './localSignOut.ts';
-import { isNetworkRequestError } from './supabaseAuth.ts';
+import { isNetworkRequestError } from './networkRequestError.ts';
 
 // boundedFetch's AbortController abort. The wording differs by runtime
 // (Hermes/Node/browsers) and by who wraps it: supabase-js rewraps it as an
@@ -58,6 +58,27 @@ const isTimeoutSignal = (error: unknown) => {
  */
 export const isTransientNetworkFailure = (error: unknown) =>
   isOfflineSignal(error) || isNetworkRequestError(error) || isTimeoutSignal(error);
+
+/**
+ * Runs `operation`, and runs it once more if it failed with a transient network
+ * failure (no signal, a dropped or stalled connection). Anything else, including
+ * a server rejection, propagates from the first attempt untouched.
+ *
+ * Only for requests that are safe to send twice. NEVER wrap a refresh-token
+ * request in this: refresh tokens rotate, so a second send after a first that
+ * did reach the server can burn the session.
+ */
+export const retryOnceOnTransientFailure = async <T>(operation: () => Promise<T>): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientNetworkFailure(error)) {
+      throw error;
+    }
+
+    return operation();
+  }
+};
 
 export type ProfileLoadFailureOutcome =
   /** Show the saved profile; the account is fine, only the reload failed. */

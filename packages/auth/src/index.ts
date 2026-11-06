@@ -8,6 +8,7 @@ export * from './localSignOut';
 export * from './otpCooldown';
 export * from './otpCooldownPolicy';
 export * from './profileApi';
+export * from './profileBootstrap';
 export * from './realtime';
 export * from './session';
 export * from './sessionLock';

@@ -24,6 +24,7 @@ import {
   storeUserProfile,
 } from '../services/session';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
+import { fetchDispatchBootstrap } from '../services/dispatchBootstrap';
 import {
   RELEASE_SESSION_TIMEOUT_MS,
   bestEffortWithin,
@@ -96,6 +97,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // reconcile reads it to step aside so signIn's single-device claim is not
   // raced into a self-eviction on the next refresh.
   const signInInProgressRef = useRef(false);
+  // Which signIn() call currently owns signInInProgressRef. The ref is released
+  // by the call that set it, possibly seconds later from the background device
+  // claim; without this a slow claim from an earlier sign-in could release the
+  // ref out from under a newer one.
+  const signInAttemptRef = useRef(0);
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
@@ -168,9 +174,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [clearLocalUserState]);
 
   const buildNextUser = useCallback(
-    async (authUser: SupabaseAuthUser) => {
+    // `prefetchedProfile` is the profile an interactive sign-in already fetched
+    // through dispatchBootstrap; without it (or when it was empty) the profile is
+    // read here exactly as before.
+    async (authUser: SupabaseAuthUser, prefetchedProfile?: UserDocument | null) => {
       const claimRole = await getUserRoleClaim(authUser);
-      let userDocument = await getUserDocument(authUser.id);
+      let userDocument = prefetchedProfile ?? (await getUserDocument(authUser.id));
 
       if (!userDocument && claimRole !== 'dispatch') {
         userDocument = await createUserDocument(authUser.id, {
@@ -465,9 +474,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
-    // Held for the whole call so the passive reconcile skips the SIGNED_IN this
-    // triggers and does not race the single-device claim below.
+    // Held until the device claim has settled (see claimDeviceInBackground) so
+    // the passive reconcile skips the SIGNED_IN this triggers and does not race
+    // the single-device claim. Released on every exit path: here when signIn
+    // fails before the claim starts, by the claim otherwise.
+    const attempt = ++signInAttemptRef.current;
+    const releaseSignInGuard = () => {
+      if (signInAttemptRef.current === attempt) {
+        signInInProgressRef.current = false;
+      }
+    };
     signInInProgressRef.current = true;
+    let claimStarted = false;
     setLoading(true);
     setError(null);
 
@@ -479,9 +497,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // same state is simply adopted. The write order below must not change.
       await clearStoredSessionId();
       const authUser = await signInWithEmail(supabase, email, password);
-      const nextUser = await buildNextUser(authUser);
+      // The profile in one call (landing on the warmed feasty-dispatch). Null
+      // when the backend does not implement the action yet, in which case
+      // buildNextUser reads the profile itself as before.
+      const bootstrap = await fetchDispatchBootstrap().catch((bootstrapError) => {
+        console.warn('dispatchBootstrap unavailable, falling back to the direct profile read:', bootstrapError);
+        return null;
+      });
+      const nextUser = await buildNextUser(authUser, bootstrap?.profile);
 
-      await startSingleDeviceSession(authUser.id);
+      // Claimed in the background: the rider is in once their profile is ready.
+      claimStarted = true;
+      void claimDeviceInBackground(authUser.id, releaseSignInGuard);
       setUser(nextUser);
       await storeUserProfile(nextUser);
     } catch (nextError: any) {
@@ -498,8 +525,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
-      signInInProgressRef.current = false;
+      if (!claimStarted) {
+        releaseSignInGuard();
+      }
       setLoading(false);
+    }
+  };
+
+  // Claims this device after sign-in without holding the sign-in screen. One
+  // retry, then the failure is reported and left there: it must NOT sign the
+  // rider out. A device whose claim failed has an empty local id, which the next
+  // reconcile adopts rather than evicts. `release` runs whatever happens, or the
+  // single-device check would stay off for the rest of the session.
+  const claimDeviceInBackground = async (userId: string, release: () => void) => {
+    try {
+      try {
+        await startSingleDeviceSession(userId);
+      } catch {
+        await startSingleDeviceSession(userId);
+      }
+    } catch (claimError) {
+      reportError('dispatch.auth.claim_device_session', claimError);
+    } finally {
+      release();
     }
   };
 

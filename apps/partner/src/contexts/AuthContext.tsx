@@ -21,6 +21,7 @@ import {
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
+import { fetchPartnerBootstrap } from '../services/partnerBootstrap';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import {
   RELEASE_SESSION_TIMEOUT_MS,
@@ -160,9 +161,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [clearLocalUserState]);
 
   const buildNextUser = useCallback(
-    async (authUser: SupabaseAuthUser) => {
+    // `prefetchedProfile` is the profile an interactive sign-in already fetched
+    // through partnerBootstrap; without it (or when it was empty) the profile is
+    // read here exactly as before.
+    async (authUser: SupabaseAuthUser, prefetchedProfile?: UserDocument | null) => {
       const claimRole = await getUserRoleClaim(authUser);
-      let userDocument = await getUserDocument(authUser.id);
+      let userDocument = prefetchedProfile ?? (await getUserDocument(authUser.id));
 
       if (!userDocument) {
         userDocument = await createUserDocument(authUser.id, {
@@ -451,8 +455,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
    * feature exists for, because an invited staff member has no restaurant and
    * no partner application at the moment they first sign in.
    */
-  const adoptSignedInAuthUser = async (authUser: SupabaseAuthUser) => {
-    const nextUser = await buildNextUser(authUser);
+  const adoptSignedInAuthUser = async (authUser: SupabaseAuthUser, prefetchedProfile?: UserDocument | null) => {
+    const nextUser = await buildNextUser(authUser, prefetchedProfile);
 
     if (!nextUser) {
       // `buildNextUser` returns null only after it has signed the user out and
@@ -472,7 +476,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const authUser = await signInWithEmail(supabase, email, password);
-      await adoptSignedInAuthUser(authUser);
+      // The profile in one call (landing on the warmed feasty-partner). Null
+      // when the backend does not implement the action yet, in which case
+      // buildNextUser reads the profile itself as before.
+      const bootstrap = await fetchPartnerBootstrap().catch((bootstrapError) => {
+        console.warn('partnerBootstrap unavailable, falling back to the direct profile read:', bootstrapError);
+        return null;
+      });
+      await adoptSignedInAuthUser(authUser, bootstrap?.profile);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign in');
       // `signInWithEmail` and `adoptSignedInAuthUser`'s direct-Supabase reads

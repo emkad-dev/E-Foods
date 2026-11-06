@@ -160,6 +160,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // concurrently would duplicate its round trips and race its single-device
   // claim (reading a half-written activeSessionId and self-evicting).
   const signInInProgressRef = useRef(false);
+  // Which signIn() call currently owns signInInProgressRef. The ref is released
+  // by the call that set it, possibly seconds later from the background device
+  // claim; without this a slow claim from an earlier sign-in could release the
+  // ref out from under a newer one.
+  const signInAttemptRef = useRef(0);
 
   useEffect(() => {
     hasUserRef.current = Boolean(user);
@@ -645,9 +650,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string): Promise<void> => {
-    // Held for the whole call so the passive onAuthStateChange reconcile steps
-    // aside (no duplicate cold starts, no racing the single-device claim).
+    // Held until the device claim has settled (see claimDeviceInBackground) so
+    // the passive onAuthStateChange reconcile steps aside (no duplicate cold
+    // starts, no racing the single-device claim). Released on every exit path:
+    // here when signIn fails before the claim starts, by the claim otherwise.
+    const attempt = ++signInAttemptRef.current;
+    const releaseSignInGuard = () => {
+      if (signInAttemptRef.current === attempt) {
+        signInInProgressRef.current = false;
+      }
+    };
     signInInProgressRef.current = true;
+    let claimStarted = false;
     setLoading(true);
     setError(null);
 
@@ -694,8 +708,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // It mints and persists the id uncontended because the passive reconcile
       // skips itself while signInInProgressRef is set, so the device that just
       // signed in always matches remote and never self-evicts on the next
-      // refresh. Takeover detection stays in the passive path.
-      await startSingleDeviceSession(authUser.id);
+      // refresh. Takeover detection stays in the passive path. The claim runs in
+      // the background: the customer is already in once their profile is ready,
+      // and two sequential writes are not worth a spinner.
+      claimStarted = true;
+      void claimDeviceInBackground(authUser.id, releaseSignInGuard);
 
       identifyAnalyticsUser(authUser.id);
       trackAnalyticsEvent('customer_sign_in_completed', {
@@ -720,8 +737,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(formattedError);
       throw new Error(formattedError);
     } finally {
-      signInInProgressRef.current = false;
+      if (!claimStarted) {
+        releaseSignInGuard();
+      }
       setLoading(false);
+    }
+  };
+
+  // Claims this device after sign-in without holding the sign-in screen. One
+  // retry, then the failure is reported and left there: it must NOT sign the
+  // customer out. A device whose claim failed has an empty local id, which the
+  // next reconcile adopts rather than evicts. `release` runs whatever happens,
+  // or the single-device check would stay off for the rest of the session.
+  const claimDeviceInBackground = async (userId: string, release: () => void) => {
+    try {
+      try {
+        await startSingleDeviceSession(userId);
+      } catch {
+        await startSingleDeviceSession(userId);
+      }
+    } catch (claimError) {
+      reportAuthFailure('customer.signIn.claimDevice', claimError);
+    } finally {
+      release();
     }
   };
 
