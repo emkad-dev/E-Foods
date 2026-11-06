@@ -24,9 +24,9 @@ import { createUserDocument, getUserDocument, updateUserDocument } from '../serv
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import {
   isTransientNetworkFailure,
+  resolveNullSessionOutcome,
   resolveProfileLoadFailure,
   resolveSingleDeviceSessionDecision,
-  shouldHydrateCachedUserProfile,
   shouldShowSignInLoading,
 } from '../../../../packages/auth/src';
 import { isStaleSupabaseSessionError } from '../../../../packages/auth/src/session';
@@ -218,42 +218,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }, 10_000);
 
     void (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!active) {
-        return;
-      }
-
-      if (!session) {
-        setLoading(false);
-        return;
-      }
-
+      // Read the saved profile BEFORE (and without) asking Supabase for the
+      // session. getSession() refreshes an expired access token first, and
+      // offline that retries for ~25 s before giving up, which held the first
+      // frame on the skeleton / login screen for a restaurant that was perfectly
+      // able to see its saved state. A cached profile with no live session is
+      // corrected by the listener below (a real SIGNED_OUT clears it).
       const cachedUser = await getStoredUserProfile<UserDocument>();
 
       if (!active) {
         return;
       }
 
-      if (
-        shouldHydrateCachedUserProfile({
-          sessionUserId: session.user.id,
-          cachedUser,
-          expectedRole: 'restaurant',
-        })
-      ) {
+      if (cachedUser?.role === 'restaurant') {
         setUser(cachedUser);
-        setLoading(false);
-      } else {
-        // Session exists but no matching cache (fresh install, cleared storage,
-        // or role mismatch). Don't block on the onAuthStateChange network chain
-        // — release the skeleton now and let the listener reconcile in the
-        // background. Worst case: a ~100 ms flash of the login screen before
-        // the INITIAL_SESSION fires from local storage and sets the user.
-        setLoading(false);
       }
+
+      // Either way the skeleton goes now. With no saved profile (fresh install,
+      // cleared storage, role mismatch) don't block on the onAuthStateChange
+      // network chain: show login and let the listener reconcile in the
+      // background. Worst case: a ~100 ms flash of the login screen before the
+      // INITIAL_SESSION fires from local storage and sets the user.
+      setLoading(false);
     })();
 
     return () => {
@@ -285,6 +271,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const authUser = session?.user ?? null;
 
         if (!authUser) {
+          // A null session is only a sign-out when supabase-js says so. Offline
+          // with an expired access token it delivers INITIAL_SESSION + null
+          // while the stored session is still there; clearing local state then
+          // signed the partner out of the UI and wiped their saved profile.
+          const nullSession = await resolveNullSessionOutcome(supabase, event);
+
+          if (nullSession === 'recovered') {
+            return;
+          }
+
+          if (nullSession === 'offline') {
+            const cachedUser = await getStoredUserProfile<UserDocument>();
+            if (!hasUserRef.current && cachedUser?.role === 'restaurant') {
+              setUser(cachedUser);
+            }
+            setError(NO_INTERNET_ERROR);
+            return;
+          }
+
           setUser(null);
           await clearLocalUserState();
           return;

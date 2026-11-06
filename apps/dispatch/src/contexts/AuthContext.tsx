@@ -26,6 +26,7 @@ import {
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
 import {
   isTransientNetworkFailure,
+  resolveNullSessionOutcome,
   resolveProfileLoadFailure,
   resolveSingleDeviceSessionDecision,
   shouldShowSignInLoading,
@@ -250,15 +251,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      // Always release the skeleton: no session → go to login; session exists
-      // but no matching cache → let onAuthStateChange reconcile in background.
-      if (active) {
-        setLoading(false);
-      }
+      // No saved profile: release the skeleton now. getSession() would refresh
+      // an expired token first, and offline that retries for ~25 s -- a rider
+      // with no saved state just needs the login screen (or the listener's
+      // reconcile) rather than a spinner.
+      setLoading(false);
     })();
 
     return () => {
@@ -298,6 +295,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const authUser = session?.user ?? null;
 
         if (!authUser) {
+          // A null session is only a sign-out when supabase-js says so. Offline
+          // with an expired access token it delivers INITIAL_SESSION + null
+          // while the stored session is still there; clearing local state then
+          // signed the rider out of the UI and wiped their saved profile AND
+          // device id (so a device evicted meanwhile re-adopted the other
+          // device's id when the network came back).
+          const nullSession = await resolveNullSessionOutcome(supabase, event);
+
+          if (nullSession === 'recovered') {
+            return;
+          }
+
+          if (nullSession === 'offline') {
+            const cachedUser = await getStoredUserProfile<UserDocument>();
+            if (
+              !hasUserRef.current &&
+              (cachedUser?.role === 'dispatch' || cachedUser?.role === 'customer')
+            ) {
+              setUser(cachedUser);
+            }
+            setError(NO_INTERNET_ERROR);
+            return;
+          }
+
           setUser(null);
           await clearLocalUserState();
           return;

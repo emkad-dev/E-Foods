@@ -10,6 +10,8 @@ import {
   sendPasswordResetEmailWithFallback,
   createUserWithEmail,
   isTransientNetworkFailure,
+  resolveNullSessionOutcome,
+  resolveProfileLoadFailure,
   getUserRoleClaim,
   isStaleSupabaseSessionError,
   SESSION_EXPIRED_ERROR_MESSAGE,
@@ -33,7 +35,6 @@ import { getUserDocument, createUserDocument, updateUserDocument } from '../serv
 import { supabase } from '../services/supabase/config';
 import {
   resolveSingleDeviceSessionDecision,
-  shouldHydrateCachedUserProfile,
   shouldShowSignInLoading,
 } from '../../../../packages/auth/src';
 import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
@@ -347,19 +348,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }, 10_000);
 
     void (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!active) {
-        return;
-      }
-
-      if (!session) {
-        setLoading(false);
-        return;
-      }
-
+      // Read the saved profile BEFORE (and without) asking Supabase for the
+      // session. getSession() refreshes an expired access token first, and
+      // offline that retries for ~25 s before giving up, which held the first
+      // frame on the skeleton for a customer who could see their saved state. A
+      // cached profile with no live session is corrected by the listener below
+      // (a real SIGNED_OUT clears it).
       const [cachedUser, cachedPolicyAccepted] = await Promise.all([
         getStoredUserProfile<UserDocument>(),
         getStoredPolicyAccepted(),
@@ -369,24 +363,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      if (
-        shouldHydrateCachedUserProfile({
-          sessionUserId: session.user.id,
-          cachedUser,
-          expectedRole: DEFAULT_APP_ROLE,
-        })
-      ) {
+      if (cachedUser?.role === DEFAULT_APP_ROLE) {
         setUser(cachedUser);
         setPolicyAccepted(cachedPolicyAccepted);
-        setLoading(false);
-      } else {
-        // Session exists but no matching cache (fresh install, cleared storage,
-        // or role mismatch). Don't block on the onAuthStateChange network chain
-        // — release the skeleton now and let the listener reconcile in the
-        // background. Worst case: a ~100 ms flash of the login screen before
-        // the INITIAL_SESSION fires from local storage and sets the user.
-        setLoading(false);
       }
+
+      // Either way the skeleton goes now. With no saved profile (fresh install,
+      // cleared storage, role mismatch) don't block on the onAuthStateChange
+      // network chain: browse as a guest and let the listener reconcile in the
+      // background. Worst case: a ~100 ms flash before the INITIAL_SESSION
+      // fires from local storage and sets the user.
+      setLoading(false);
     })();
 
     return () => {
@@ -460,6 +447,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }
           })();
         } else {
+          // A null session is only a sign-out when supabase-js says so. Offline
+          // with an expired access token it delivers INITIAL_SESSION + null
+          // while the stored session is still there; clearing local state then
+          // signed the customer out of the UI and wiped their saved profile AND
+          // device id (so a device evicted meanwhile re-adopted the other
+          // device's id when the network came back).
+          const nullSession = await resolveNullSessionOutcome(supabase, event);
+
+          if (nullSession === 'recovered') {
+            return;
+          }
+
+          if (nullSession === 'offline') {
+            const [cachedUser, cachedPolicyAccepted] = await Promise.all([
+              getStoredUserProfile<UserDocument>(),
+              getStoredPolicyAccepted(),
+            ]);
+            if (!hasUserRef.current && cachedUser?.role === DEFAULT_APP_ROLE) {
+              setUser(cachedUser);
+              setPolicyAccepted(cachedPolicyAccepted);
+            }
+            setError(NO_INTERNET_ERROR);
+            return;
+          }
+
           setUser(null);
           setPolicyAccepted(false);
           await clearLocalUserState();
@@ -477,28 +489,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           reportAuthFailure('customer.authStateChange', err);
         }
 
-        if (authUser && isTransientNetworkFailure(err)) {
-          const cachedUser = await getStoredUserProfile<UserDocument>();
+        const cachedProfile = authUser ? await getStoredUserProfile<UserDocument>() : null;
+        const failureOutcome = resolveProfileLoadFailure({
+          error: err,
+          hasAuthUser: Boolean(authUser),
+          hasUsableCachedProfile: Boolean(authUser && cachedProfile?.uid === authUser.id),
+        });
 
-          if (cachedUser?.uid === authUser.id) {
-            const fallbackUser: UserDocument = {
-              ...cachedUser,
-              uid: authUser.id,
-              email: authUser.email ?? cachedUser?.email ?? '',
-              emailVerified: Boolean(authUser.email_confirmed_at),
-              role: cachedUser?.role ?? DEFAULT_APP_ROLE,
-            };
+        if (authUser && cachedProfile && failureOutcome === 'keep-cached-user') {
+          const fallbackUser: UserDocument = {
+            ...cachedProfile,
+            uid: authUser.id,
+            email: authUser.email ?? cachedProfile.email ?? '',
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: cachedProfile.role ?? DEFAULT_APP_ROLE,
+          };
 
-            // No single-device check here on purpose. The saved profile's
-            // activeSessionId is whatever was read BEFORE this device claimed
-            // the session at sign-in, so comparing it with our own stored id
-            // reads as a takeover and would evict a customer whose only fault is
-            // a bad signal. Takeover detection resumes on the first reconcile
-            // that reaches the server.
-            setUser(fallbackUser);
-            setError(NO_INTERNET_ERROR);
-            return;
-          }
+          // No single-device check here on purpose. The saved profile's
+          // activeSessionId is whatever was read BEFORE this device claimed
+          // the session at sign-in, so comparing it with our own stored id
+          // reads as a takeover and would evict a customer whose only fault is
+          // a bad signal. Takeover detection resumes on the first reconcile
+          // that reaches the server.
+          setUser(fallbackUser);
+          setError(NO_INTERNET_ERROR);
+          return;
+        }
+
+        if (failureOutcome === 'offline-without-profile') {
+          // Nothing saved for this account and no way to reach the server. Do
+          // NOT fall through to the stand-in profile below: it has no phone
+          // number, so the route guard would send the customer to
+          // /complete-profile to retype it, and storing it would make the next
+          // offline launch find that stand-in as a matching cache. Leave the
+          // session and storage alone; the next reconcile that reaches the
+          // server loads the real profile.
+          setError(NO_INTERNET_ERROR);
+          return;
         }
 
         if (authUser) {
