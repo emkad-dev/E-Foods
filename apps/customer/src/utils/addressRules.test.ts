@@ -12,7 +12,7 @@ import {
   shouldShowLaunchAddressPrompt,
 } from './launchAddressPrompt.ts';
 import { type DiscoveryRestaurant } from './restaurantAvailability.ts';
-import { hasSavedAddress } from './savedAddress.ts';
+import { hasSavedAddress, hasTextOnlyAddress } from './savedAddress.ts';
 
 const address = (overrides: Partial<AddressRecord> = {}): AddressRecord => ({
   address: '12 Broad Street, Lagos',
@@ -30,16 +30,30 @@ const restaurantAtKm = (km: number, id = 'r'): DiscoveryRestaurant => ({
   longitude: ORIGIN.longitude,
 });
 
-test('hasSavedAddress: coordinates, typed address, and the empty cases', () => {
+test('hasSavedAddress: only usable coordinates count; text alone is not an address', () => {
   assert.equal(hasSavedAddress(null), false);
   assert.equal(hasSavedAddress(undefined), false);
   assert.equal(hasSavedAddress(address()), true);
-  // A typed address has null coordinates and still counts.
-  assert.equal(hasSavedAddress(address({ latitude: null, longitude: null })), true);
+  // A typed address with no pin no longer counts.
+  assert.equal(hasSavedAddress(address({ latitude: null, longitude: null })), false);
+  assert.equal(hasSavedAddress(address({ latitude: 0, longitude: 0 })), false);
   assert.equal(hasSavedAddress(address({ latitude: 0, longitude: 0, address: '  ' })), false);
   assert.equal(hasSavedAddress(address({ latitude: null, longitude: null, address: '' })), false);
+  assert.equal(hasSavedAddress(address({ latitude: 95, longitude: 3.38 })), false);
+  assert.equal(hasSavedAddress(address({ latitude: 6.45, longitude: 181 })), false);
+  assert.equal(hasSavedAddress(address({ latitude: Number.NaN, longitude: 3.38 })), false);
+  assert.equal(hasSavedAddress(address({ latitude: Number.POSITIVE_INFINITY, longitude: 3.38 })), false);
+  assert.equal(hasSavedAddress(address({ latitude: 6.45, longitude: null })), false);
   // Usable coordinates alone are enough even with no text.
   assert.equal(hasSavedAddress(address({ address: '' })), true);
+});
+
+test('hasTextOnlyAddress: typed text with no usable pin', () => {
+  assert.equal(hasTextOnlyAddress(null), false);
+  assert.equal(hasTextOnlyAddress(address()), false);
+  assert.equal(hasTextOnlyAddress(address({ latitude: null, longitude: null })), true);
+  assert.equal(hasTextOnlyAddress(address({ latitude: 0, longitude: 0 })), true);
+  assert.equal(hasTextOnlyAddress(address({ latitude: null, longitude: null, address: '   ' })), false);
 });
 
 const baseInput = {
@@ -50,12 +64,13 @@ const baseInput = {
   onHome: true,
 };
 
-test('launch prompt: shows only when hydrated, settled, on Home, unshown and no address', () => {
+test('launch prompt: shows only when hydrated, settled, on Home, unshown and no pinned address', () => {
   assert.equal(shouldShowLaunchAddressPrompt(baseInput), true);
   assert.equal(shouldShowLaunchAddressPrompt({ ...baseInput, deliveryLocation: address() }), false);
+  // A text-only address saved by an older build is asked for again.
   assert.equal(
     shouldShowLaunchAddressPrompt({ ...baseInput, deliveryLocation: address({ latitude: null, longitude: null }) }),
-    false
+    true
   );
   assert.equal(shouldShowLaunchAddressPrompt({ ...baseInput, cartHydrated: false }), false);
   assert.equal(shouldShowLaunchAddressPrompt({ ...baseInput, alreadyShownThisLaunch: true }), false);

@@ -1,6 +1,6 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useReducer, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,21 +13,23 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, type AddressPickOrigin, type AddressSuggestion } from '@feasty/design-system';
+import CustomerAddressSearch from '../../src/components/CustomerAddressSearch';
 import ScreenColumn, { screenColumn } from '../../src/components/ScreenColumn';
 import { useCart } from '../../src/contexts/CartContext';
 import { useCoverage } from '../../src/contexts/CoverageContext';
 import {
-  getCurrentCoordinates,
-  reverseGeocode,
-  watchCoordinates,
-  type Coordinates,
-  type LocationWatch,
-} from '../../src/services/deviceLocation';
-import { LOCATION_ERROR_MESSAGES, coordinatesLabel } from '../../src/services/locationResolution';
+  PIN_SOURCE_LABEL,
+  addressEntryReducer,
+  initAddressEntry,
+  pinBesideText,
+  toSavedAddress,
+} from '../../src/domain/addressEntry';
+import { useCurrentLocationPin } from '../../src/hooks/useCurrentLocationPin';
+import { coordinatesLabel } from '../../src/services/locationResolution';
 import { customerTheme } from '../../src/theme/palette';
 import { screenTitleTextStyle } from '../../src/theme/screenChrome';
-import { fallbackAddressFromCoords } from '../../src/utils/deliveryLocation';
+import { hasTextOnlyAddress } from '../../src/utils/savedAddress';
 import {
   COVERAGE_COMING_SOON_COPY,
   COVERAGE_COMING_SOON_TITLE,
@@ -39,7 +41,10 @@ type Status = {
   text: string;
 };
 
-const LIVE_GEOCODE_INTERVAL_MS = 15000;
+const NO_PIN_MESSAGE =
+  'Pick your address from the search results, or use your current location, so the rider knows exactly where to come.';
+
+const TEXT_ONLY_MESSAGE = 'Confirm your address on the map: search for it below or use your current location.';
 
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
@@ -47,131 +52,71 @@ export default function DeliveryLocationScreen() {
   // Same screen for both: only the wording changes for someone collecting.
   const isCollection = fulfillmentType === 'pickup';
   const { checkCoverage, isCovered, nearestOrderableKm } = useCoverage();
-  const [address, setAddress] = useState(deliveryLocation?.address ?? '');
-  const [label, setLabel] = useState(deliveryLocation?.label ?? deliveryLocation?.shortAddress ?? '');
+  // The pin is the address; the text is free. See domain/addressEntry.ts.
+  const [entry, dispatch] = useReducer(addressEntryReducer, deliveryLocation, initAddressEntry);
+  const [label, setLabel] = useState(deliveryLocation?.label ?? '');
   const [note, setNote] = useState(deliveryLocation?.note ?? '');
-  const [latitude, setLatitude] = useState<number | null>(deliveryLocation?.latitude ?? null);
-  const [longitude, setLongitude] = useState<number | null>(deliveryLocation?.longitude ?? null);
-  const [coordinateSource, setCoordinateSource] = useState(deliveryLocation ? 'Saved coordinates' : 'Manual address');
-  const [liveTracking, setLiveTracking] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const [status, setStatus] = useState<Status | null>(null);
-  const locationWatchRef = useRef<LocationWatch | null>(null);
-  const lastGeocodeAtRef = useRef(0);
-  const addressEditedRef = useRef(Boolean(deliveryLocation?.address));
-
-  const stopLiveTracking = useCallback(() => {
-    locationWatchRef.current?.remove();
-    locationWatchRef.current = null;
-    setLiveTracking(false);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      locationWatchRef.current?.remove();
-      locationWatchRef.current = null;
-    };
-  }, []);
-
-  const handleAddressChange = useCallback((value: string) => {
-    addressEditedRef.current = true;
-    setAddress(value);
-  }, []);
-
-  /**
-   * Reverse geocoding is throttled for live updates only — a deliberate tap on
-   * "Use current location" always resolves a fresh address.
-   */
-  const updateAddressFromCoordinates = useCallback(
-    async ({ latitude: nextLatitude, longitude: nextLongitude }: Coordinates, force: boolean) => {
-      if (!force && Date.now() - lastGeocodeAtRef.current < LIVE_GEOCODE_INTERVAL_MS) {
-        return;
-      }
-
-      lastGeocodeAtRef.current = Date.now();
-
-      const resolved = await reverseGeocode(nextLatitude, nextLongitude);
-
-      if (!addressEditedRef.current) {
-        setAddress(resolved?.address ?? fallbackAddressFromCoords(nextLatitude, nextLongitude));
-      }
-
-      if (resolved?.shortAddress) {
-        setLabel((current) => (current.trim() ? current : resolved.shortAddress));
-      }
-
-      if (!resolved) {
-        setStatus({
-          tone: 'info',
-          text: 'We pinned your exact spot but could not name the street. Add a landmark below so the rider finds you.',
-        });
-      }
-    },
-    []
+  // An address an older build saved as text only: keep the words, ask for the pin.
+  const [status, setStatus] = useState<Status | null>(() =>
+    hasTextOnlyAddress(deliveryLocation) ? { tone: 'info', text: TEXT_ONLY_MESSAGE } : null
   );
-
-  const applyCoordinates = useCallback((coordinates: Coordinates, source: string) => {
-    setLatitude(coordinates.latitude);
-    setLongitude(coordinates.longitude);
-    setCoordinateSource(source);
-  }, []);
+  const { locate, locating } = useCurrentLocationPin();
 
   const handleUseCurrentLocation = useCallback(async () => {
-    setLocating(true);
-    setStatus({ tone: 'info', text: 'Searching for your location...' });
-    stopLiveTracking();
-
-    const result = await getCurrentCoordinates();
+    setStatus({ tone: 'info', text: 'Finding your location...' });
+    const result = await locate();
+    if (!result) {
+      return;
+    }
 
     if (!result.ok) {
       setStatus({ tone: 'error', text: result.message });
-      setLocating(false);
       return;
     }
 
-    applyCoordinates(result.coordinates, 'Current location');
-    setStatus(null);
-    await updateAddressFromCoordinates(result.coordinates, true);
-    setLocating(false);
-
-    const watch = await watchCoordinates(
-      (coordinates) => {
-        applyCoordinates(coordinates, 'Live location');
-        void updateAddressFromCoordinates(coordinates, false);
+    dispatch({
+      type: 'pinned',
+      pin: {
+        latitude: result.pin.latitude,
+        longitude: result.pin.longitude,
+        label: result.pin.label,
+        shortLabel: result.pin.shortAddress,
+        source: 'gps',
       },
-      (reason) => {
-        stopLiveTracking();
-        setStatus({ tone: 'error', text: LOCATION_ERROR_MESSAGES[reason] });
-      }
+    });
+    setStatus(
+      result.pin.label
+        ? null
+        : {
+            tone: 'info',
+            text: 'We pinned your exact spot but could not name the street. Add a landmark below so the rider finds you.',
+          }
     );
+  }, [locate]);
 
-    if (watch) {
-      locationWatchRef.current = watch;
-      setLiveTracking(true);
-    }
-  }, [applyCoordinates, stopLiveTracking, updateAddressFromCoordinates]);
+  const handlePick = useCallback((suggestion: AddressSuggestion, origin: AddressPickOrigin) => {
+    dispatch({
+      type: 'pinned',
+      pin: {
+        latitude: suggestion.latitude,
+        longitude: suggestion.longitude,
+        label: suggestion.label,
+        source: origin === 'map-search' ? 'map-search' : 'suggestion',
+      },
+    });
+    setStatus(null);
+  }, []);
 
   const handleSave = () => {
-    const trimmedAddress = address.trim();
-    const trimmedLabel = label.trim();
+    const nextLocation = toSavedAddress(entry, { label, note });
 
-    if (!trimmedAddress) {
-      setStatus({ tone: 'error', text: isCollection ? 'Enter your address before saving.' : 'Enter your delivery address before saving.' });
+    // Text alone is not an address: it cannot be checked for coverage or found by a rider.
+    if (!nextLocation) {
+      setStatus({ tone: 'error', text: NO_PIN_MESSAGE });
       return;
     }
 
-    const nextLocation = {
-      address: trimmedAddress,
-      label: trimmedLabel || null,
-      latitude,
-      longitude,
-      note: note.trim() || null,
-      shortAddress: trimmedLabel || trimmedAddress,
-      coordinateSource,
-    };
-
     setDeliveryLocation(nextLocation);
-    stopLiveTracking();
 
     // Synchronous verdict for the address just saved — isCovered is a render behind.
     if (!checkCoverage(nextLocation).isCovered) {
@@ -181,7 +126,8 @@ export default function DeliveryLocationScreen() {
     router.replace('/cart');
   };
 
-  const hasCoordinates = latitude !== null && longitude !== null;
+  const { pin } = entry;
+  const besideText = pinBesideText(entry);
   const nearestKitchenDescription = describeNearestKitchen(nearestOrderableKm);
 
   return (
@@ -195,7 +141,7 @@ export default function DeliveryLocationScreen() {
         </TouchableOpacity>
         <View>
           <Text style={styles.title}>{isCollection ? 'Your address' : 'Delivery address'}</Text>
-          <Text style={styles.subtitle}>{liveTracking ? 'Live location on' : 'Manual entry'}</Text>
+          <Text style={styles.subtitle}>{pin ? 'Pin set' : 'No pin yet'}</Text>
         </View>
       </View>
 
@@ -216,16 +162,70 @@ export default function DeliveryLocationScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
-          <Text style={styles.label}>Address</Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={locating}
+            onPress={() => void handleUseCurrentLocation()}
+            style={[styles.locationButton, locating ? styles.locationButtonBusy : null]}
+          >
+            {locating ? (
+              <ActivityIndicator color={customerTheme.text} />
+            ) : (
+              <FontAwesome name="location-arrow" size={16} color={customerTheme.text} />
+            )}
+            <Text style={styles.locationButtonText}>{locating ? 'Getting location' : 'Use my current location'}</Text>
+          </TouchableOpacity>
+
+          {status ? (
+            <View style={[styles.statusBanner, status.tone === 'error' ? styles.statusBannerError : null]}>
+              <FontAwesome
+                name={status.tone === 'error' ? 'exclamation-circle' : 'info-circle'}
+                size={14}
+                color={status.tone === 'error' ? customerTheme.dangerText : customerTheme.accentStrong}
+              />
+              <Text style={[styles.statusText, status.tone === 'error' ? styles.statusTextError : null]}>
+                {status.text}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={styles.searchBlock}>
+            <CustomerAddressSearch label="Or search for your address" onSelect={handlePick} />
+          </View>
+
+          <View style={styles.coordinatePill}>
+            <FontAwesome name="map-marker" size={14} color={customerTheme.brandGreen} />
+            <Text style={styles.coordinateText}>
+              {pin
+                ? `${PIN_SOURCE_LABEL[pin.source]} · ${pin.label ?? coordinatesLabel(pin.latitude, pin.longitude)}`
+                : 'No pin yet'}
+            </Text>
+          </View>
+
+          <Text style={styles.label}>Address for the rider</Text>
           <TextInput
             multiline
-            onChangeText={handleAddressChange}
-            placeholder="Street, house number, area"
+            onChangeText={(value) => dispatch({ type: 'typed', text: value })}
+            placeholder="House number, street, area"
             placeholderTextColor={customerTheme.textDisabled}
             style={[styles.input, styles.addressInput]}
             textAlignVertical="top"
-            value={address}
+            value={entry.text}
           />
+          {/* Typed text is kept when the pin moves; the pinned place is shown
+              beside it so the two can never silently disagree. */}
+          {besideText ? (
+            <View style={styles.pinBeside}>
+              <Text style={styles.pinBesideText}>{besideText}</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={() => dispatch({ type: 'use-pin-text' })}
+                style={styles.pinBesideButton}
+              >
+                <Text style={styles.pinBesideButtonText}>Use this as the address</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           <Text style={styles.label}>Label</Text>
           <TextInput
@@ -246,54 +246,6 @@ export default function DeliveryLocationScreen() {
             textAlignVertical="top"
             value={note}
           />
-
-          <TouchableOpacity
-            activeOpacity={0.85}
-            disabled={locating}
-            onPress={handleUseCurrentLocation}
-            style={[styles.locationButton, locating ? styles.locationButtonBusy : null]}
-          >
-            {locating ? (
-              <ActivityIndicator color={customerTheme.text} />
-            ) : (
-              <FontAwesome name="location-arrow" size={16} color={customerTheme.text} />
-            )}
-            <Text style={styles.locationButtonText}>
-              {locating ? 'Getting location' : liveTracking ? 'Refresh my location' : 'Use current location'}
-            </Text>
-          </TouchableOpacity>
-
-          {status ? (
-            <View style={[styles.statusBanner, status.tone === 'error' ? styles.statusBannerError : null]}>
-              <FontAwesome
-                name={status.tone === 'error' ? 'exclamation-circle' : 'info-circle'}
-                size={14}
-                color={status.tone === 'error' ? customerTheme.dangerText : customerTheme.accentStrong}
-              />
-              <Text style={[styles.statusText, status.tone === 'error' ? styles.statusTextError : null]}>
-                {status.text}
-              </Text>
-            </View>
-          ) : null}
-
-          <View style={styles.coordinatePill}>
-            <FontAwesome name="map-marker" size={14} color={customerTheme.brandGreen} />
-            <Text style={styles.coordinateText}>
-              {hasCoordinates ? `${coordinateSource} · ${coordinatesLabel(latitude, longitude)}` : coordinateSource}
-            </Text>
-          </View>
-          {liveTracking ? <Text style={styles.liveHint}>Location keeps updating while this screen is open.</Text> : null}
-
-          {liveTracking ? (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={stopLiveTracking}
-              style={[styles.locationButton, styles.stopButton]}
-            >
-              <FontAwesome name="pause" size={14} color={customerTheme.text} />
-              <Text style={styles.locationButtonText}>Stop live updates</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
 
         <TouchableOpacity activeOpacity={0.9} onPress={handleSave} style={styles.saveButton}>
@@ -376,7 +328,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 18,
     minHeight: 52,
     paddingHorizontal: 16,
   },
@@ -412,6 +363,9 @@ const styles = StyleSheet.create({
   statusTextError: {
     color: customerTheme.dangerText,
   },
+  searchBlock: {
+    marginTop: 18,
+  },
   coordinatePill: {
     alignItems: 'center',
     alignSelf: 'flex-start',
@@ -424,9 +378,34 @@ const styles = StyleSheet.create({
   },
   coordinateText: {
     color: customerTheme.accentStrong,
+    flexShrink: 1,
     fontSize: 12,
     fontWeight: '800',
     marginLeft: 6,
+  },
+  pinBeside: {
+    backgroundColor: customerTheme.accentTint,
+    borderRadius: radius.lg,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  pinBesideText: {
+    color: customerTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  pinBesideButton: {
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    minHeight: MIN_TAP_TARGET,
+  },
+  pinBesideButtonText: {
+    color: customerTheme.brandGreen,
+    fontSize: 13,
+    fontWeight: '900',
+    textDecorationLine: 'underline',
   },
   saveButton: {
     alignItems: 'center',
@@ -439,16 +418,6 @@ const styles = StyleSheet.create({
     color: customerTheme.textOnBrand,
     fontSize: 16,
     fontWeight: '900',
-  },
-  liveHint: {
-    color: customerTheme.accentStrong,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 10,
-  },
-  stopButton: {
-    backgroundColor: customerTheme.accentTint,
-    marginTop: 12,
   },
   comingSoonPanel: {
     backgroundColor: customerTheme.warningSoft,

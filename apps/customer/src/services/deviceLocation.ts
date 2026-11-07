@@ -6,6 +6,7 @@ import {
   buildNominatimAddress,
   joinAddressParts,
   locationFailure,
+  toAccuracyMeters,
   type BrowserPositionOptions,
   type Coordinates,
   type CoordinatesResult,
@@ -16,10 +17,6 @@ import {
 import { reportError } from '../../../../packages/observability/src/sentry';
 
 export type { Coordinates, CoordinatesResult, LocationErrorReason, ResolvedAddress };
-
-export type LocationWatch = {
-  remove: () => void;
-};
 
 const NATIVE_TIMEOUT_MS = 15000;
 const NOMINATIM_BASE_URL = 'https://nominatim.openstreetmap.org';
@@ -49,6 +46,7 @@ const requestBrowserPosition = (options: BrowserPositionOptions) =>
           coordinates: {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
+            accuracyMeters: toAccuracyMeters(position.coords.accuracy),
           },
         }),
       (positionError) => resolve(locationFailure(browserPositionErrorReason(positionError?.code))),
@@ -98,6 +96,7 @@ const getNativeCoordinates = async (): Promise<CoordinatesResult> => {
       coordinates: {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
+        accuracyMeters: toAccuracyMeters(position.coords.accuracy),
       },
     };
   } catch (error) {
@@ -113,63 +112,6 @@ const getNativeCoordinates = async (): Promise<CoordinatesResult> => {
  */
 export const getCurrentCoordinates = async (): Promise<CoordinatesResult> =>
   Platform.OS === 'web' ? acquireBrowserCoordinates(requestBrowserPosition) : getNativeCoordinates();
-
-/**
- * expo-location's web module routes watch events through its own id counter rather than the
- * browser's watch id, which can cancel a watch the moment it emits. Talk to
- * `navigator.geolocation` directly on web and keep expo-location for native.
- */
-export const watchCoordinates = async (
-  onChange: (coordinates: Coordinates) => void,
-  onError?: (reason: LocationErrorReason) => void
-): Promise<LocationWatch | null> => {
-  if (Platform.OS === 'web') {
-    const geolocation = browserGeolocation();
-
-    if (!geolocation) {
-      onError?.('unsupported');
-      return null;
-    }
-
-    const watchId = geolocation.watchPosition(
-      (position) =>
-        onChange({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }),
-      (positionError) => onError?.(browserPositionErrorReason(positionError?.code)),
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
-    );
-
-    return {
-      remove: () => geolocation.clearWatch(watchId),
-    };
-  }
-
-  try {
-    const subscription = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        distanceInterval: 10,
-        timeInterval: 5000,
-      },
-      (position) =>
-        onChange({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        })
-    );
-
-    return {
-      remove: () => subscription.remove(),
-    };
-  } catch (error) {
-    console.error('Failed to watch the current position:', error);
-    reportError('customer.watchCoordinates', error);
-    onError?.('unavailable');
-    return null;
-  }
-};
 
 const reverseGeocodeWithOpenStreetMap = async (
   latitude: number,

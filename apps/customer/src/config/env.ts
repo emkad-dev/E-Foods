@@ -57,6 +57,12 @@ export const appEnv = {
     process.env.EXPO_PUBLIC_RPC_MODE,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_RPC_MODE
   ),
+  // Address-suggestion Worker (cloudflare/geocode). Unset falls back to the
+  // production Worker in packages/runtime/src/addressSearch.ts.
+  geocodeUrl: getEnvValue(
+    process.env.EXPO_PUBLIC_GEOCODE_URL,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_GEOCODE_URL
+  ),
   catalogUrl: getEnvValue(
     process.env.EXPO_PUBLIC_CATALOG_URL,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_CATALOG_URL

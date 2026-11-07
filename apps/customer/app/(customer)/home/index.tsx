@@ -110,7 +110,7 @@ export default function HomeScreen() {
 
   // Once per app launch, only on arriving at Home itself (a deep link to payment, an order,
   // reset-password or verify-email never mounts a focused Home), guests included. The
-  // first-run /onboarding screen is reused: it already offers location, typed address and a
+  // first-run /onboarding screen is reused: it already offers location, address search and a
   // labelled Skip, and marks the launch as asked on exit.
   useFocusEffect(
     useCallback(() => {

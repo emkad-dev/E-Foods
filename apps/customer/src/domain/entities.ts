@@ -14,6 +14,10 @@ export interface AddressRecord extends DocumentData {
   label?: string | null;
   note?: string | null;
   isDefault?: boolean;
+  /** Client-side only (checkout ignores it): the place name the pin came with. See domain/addressEntry.ts. */
+  pinLabel?: string | null;
+  /** Client-side only: whether `address` was filled in from the pin or typed by the customer. */
+  addressTextSource?: 'pin' | 'typed';
 }
 
 export interface UserDocument extends DocumentData {
