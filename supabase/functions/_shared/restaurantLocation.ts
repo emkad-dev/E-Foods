@@ -8,10 +8,14 @@
 
 import {
   RESTAURANT_LOCATION_REQUIRED_MESSAGE,
-  isPublishBlockedByLocation,
+  RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+  restaurantLocationBlock,
   type RestaurantLocationState,
 } from '../../../packages/domain/src/restaurantLocation.ts';
 import { fail } from './rpc/respond.ts';
+
+/** Wording per refusal; the defaults are the owner's, the admin path overrides both. */
+export type RestaurantLocationMessages = { missing?: string; outsideNigeria?: string };
 
 /**
  * Throws a 412 unless the write is allowed.
@@ -19,15 +23,19 @@ import { fail } from './rpc/respond.ts';
  * `current` is the row as it is now (null when the restaurant does not exist yet)
  * and `next` is the row as the write will leave it - judge the resulting state,
  * not the request, so a save that clears the coordinates is caught. See
- * isPublishBlockedByLocation for exactly which transitions are refused and why an
+ * restaurantLocationBlock for exactly which transitions are refused and why an
  * already-published restaurant without coordinates is not one of them.
  */
 export const assertRestaurantLocationAllowsPublish = (
   current: RestaurantLocationState | null | undefined,
   next: RestaurantLocationState,
-  message: string = RESTAURANT_LOCATION_REQUIRED_MESSAGE
+  messages: RestaurantLocationMessages = {}
 ): void => {
-  if (isPublishBlockedByLocation(current, next)) {
-    fail(412, message);
+  const block = restaurantLocationBlock(current, next);
+  if (block === 'outside-nigeria') {
+    fail(412, messages.outsideNigeria ?? RESTAURANT_OUTSIDE_NIGERIA_MESSAGE);
+  }
+  if (block === 'missing') {
+    fail(412, messages.missing ?? RESTAURANT_LOCATION_REQUIRED_MESSAGE);
   }
 };

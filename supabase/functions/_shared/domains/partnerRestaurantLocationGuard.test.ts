@@ -236,3 +236,65 @@ Deno.test('partner save: a published store already at 0,0 still saves unrelated 
   expectEqual(response.status, 200, 'status');
   expectEqual(state.upserts.length, 1, 'saved');
 });
+
+const expectOutsideNigeria = async (overrides: Record<string, unknown>, label: string, state: MockState) => {
+  let thrown: unknown = null;
+  try {
+    await save(overrides);
+  } catch (error) {
+    thrown = error;
+  }
+
+  expectEqual((thrown as { status?: number })?.status, 412, `${label}: status`);
+  expectEqual(
+    (thrown as { message?: string })?.message,
+    'Your pin is outside Nigeria. Check the latitude and longitude, or use your current location.',
+    `${label}: the owner is told the pin is outside Nigeria`
+  );
+  expectEqual(state.upserts.length, 0, `${label}: nothing written`);
+};
+
+// Lagos is 6.52 N, 3.38 E; the swapped pair is the typo this rule exists for.
+const SWAPPED_LAGOS = { latitude: 3.38, longitude: 6.52 };
+
+Deno.test('partner save: publishing with a swapped Lagos pair answers 412 outside Nigeria', async () => {
+  const state = installMocks(stored());
+  await expectOutsideNigeria({ isPublished: true, ...SWAPPED_LAGOS }, 'publish swapped pair', state);
+});
+
+Deno.test('partner save: publishing a pin in another country answers 412 outside Nigeria', async () => {
+  const state = installMocks(stored());
+  await expectOutsideNigeria({ isPublished: true, latitude: 51.5, longitude: -0.12 }, 'publish London', state);
+});
+
+Deno.test('partner save: moving a live, located store to an outside-Nigeria pin is refused', async () => {
+  const state = installMocks(stored({ isPublished: true, ...LAGOS }));
+  await expectOutsideNigeria({ isPublished: true, ...SWAPPED_LAGOS }, 'move live pin out of Nigeria', state);
+});
+
+Deno.test('partner save: a pin on the edge of the Nigeria box is accepted', async () => {
+  const state = installMocks(stored());
+
+  const response = await save({ isPublished: true, latitude: 4.0, longitude: 15.0 });
+
+  expectEqual(response.status, 200, 'status');
+  expectEqual(state.upserts.length, 1, 'saved');
+});
+
+Deno.test('partner save: a live store whose existing pin is outside Nigeria still saves unrelated changes unchanged', async () => {
+  const state = installMocks(stored({ isPublished: true, ...SWAPPED_LAGOS }));
+
+  const response = await save({ name: 'Old Pin Kitchen', isPublished: true, ...SWAPPED_LAGOS });
+
+  expectEqual(response.status, 200, 'status');
+  expectEqual(state.upserts.length, 1, 'saved');
+});
+
+Deno.test('partner save: a hidden store may hold an outside-Nigeria pin', async () => {
+  const state = installMocks(stored());
+
+  const response = await save({ isPublished: false, ...SWAPPED_LAGOS });
+
+  expectEqual(response.status, 200, 'status');
+  expectEqual(state.upserts.length, 1, 'saved');
+});
