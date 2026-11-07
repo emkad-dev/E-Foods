@@ -148,6 +148,13 @@ location change below):
   location" button, which reads one foreground fix to set the restaurant's map
   pin. It can be declined: "Find from address" and typing the coordinates do the
   same job. Foreground only, no background location, no foreground service.
+- **Map and address-search providers (note added 2026-11-07, CSV unchanged):**
+  the partner app sends typed address text, or the device location, to
+  OpenStreetMap Nominatim and to FEASTY's own search service (which forwards
+  only the typed text to Photon by komoot). Under Play's data-safety
+  definitions, data sent to a service provider acting on FEASTY's behalf is
+  processing, not sharing, so the location rows stay "collected, not shared".
+  The privacy policy now names these providers.
 - **No data shared with third parties** (all `..._ONLY_SHARED` rows are
   blank), no data sold, deletion URL present
   (`https://feasty.com.ng/account-deletion.html`)
