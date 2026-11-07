@@ -17,15 +17,10 @@ import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
 import { reportError } from '../../../../packages/observability/src/sentry';
+import { findAddressMatches } from '../../../../packages/runtime/src/nominatimSearch.ts';
 import {
-  ADDRESS_LOOKUP_MIN_INTERVAL_MS,
-  ADDRESS_LOOKUP_TIMEOUT_MS,
   NOMINATIM_USER_AGENT,
   WEB_POSITION_TOTAL_TIMEOUT_MS,
-  buildAddressSearchUrl,
-  normalizeAddressQuery,
-  outcomeFromLookupError,
-  outcomeFromResponse,
   type AddressLookupOutcome,
   type DevicePositionFailure,
   type DevicePositionOutcome,
@@ -161,56 +156,16 @@ const getNativePosition = async (): Promise<DevicePositionOutcome> => {
 export const getDevicePosition = (): Promise<DevicePositionOutcome> =>
   Platform.OS === 'web' ? getBrowserPosition() : getNativePosition();
 
-let lastLookupStartedAt = 0;
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
 /**
- * Forward-geocodes a typed address with OpenStreetMap Nominatim. Never throws:
- * every way it can go wrong is an outcome the screen words for the partner.
+ * Forward-geocodes a typed address with OpenStreetMap Nominatim, one request
+ * per press, through the implementation shared with the customer app. Never
+ * throws: every way it can go wrong is an outcome the screen words for the
+ * partner.
  */
-export const findAddressMatch = async (address: string): Promise<AddressLookupOutcome> => {
-  const query = normalizeAddressQuery(address);
-
-  if (!query) {
-    return { kind: 'no-result' };
-  }
-
-  // Nominatim's policy is at most one request a second. A button cannot be
-  // double-pressed while a lookup is in flight, but two quick lookups in a row
-  // can still land inside a second of each other.
-  const waitMs = lastLookupStartedAt + ADDRESS_LOOKUP_MIN_INTERVAL_MS - Date.now();
-  if (waitMs > 0) {
-    await sleep(waitMs);
-  }
-  lastLookupStartedAt = Date.now();
-
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), ADDRESS_LOOKUP_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(buildAddressSearchUrl(query), {
-      headers: {
-        Accept: 'application/json',
-        // Browsers refuse to let a page set User-Agent and send the page's own
-        // origin as Referer, which identifies the app to Nominatim instead.
-        ...(Platform.OS === 'web' ? {} : { 'User-Agent': NOMINATIM_USER_AGENT }),
-      },
-      signal: controller.signal,
-    });
-
-    // The outcome mapping is pure (domain/addressLookup.ts) so it is tested.
-    return outcomeFromResponse(response.ok, response.ok ? await response.json() : null);
-  } catch (error) {
-    const outcome = outcomeFromLookupError(error, controller.signal.aborted);
-
-    // Timeout and no-network are expected; only a service misbehaving is a fault.
-    if (outcome.kind === 'unavailable') {
-      reportError('partner.findAddressMatch', error);
-    }
-
-    return outcome;
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-};
+export const findAddressMatch = (address: string): Promise<AddressLookupOutcome> =>
+  findAddressMatches(address, {
+    // Browsers refuse to let a page set User-Agent and send the page's own
+    // origin as Referer, which identifies the app to Nominatim instead.
+    userAgent: Platform.OS === 'web' ? undefined : NOMINATIM_USER_AGENT,
+    onUnexpectedError: (error) => reportError('partner.findAddressMatch', error),
+  });

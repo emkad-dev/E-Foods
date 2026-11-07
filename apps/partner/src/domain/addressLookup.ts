@@ -1,9 +1,11 @@
 /**
  * The pure half of the two ways a partner can set the store's map pin: find it
  * from the typed address (OpenStreetMap Nominatim) or read it from the device.
- * Request building, response parsing, the wording of every confirmation and
- * every failure. No React Native, no `fetch`, no `expo-location`, so all of it
- * is testable with `node --test`; the I/O lives in services/deviceLocation.ts.
+ * The wording of every confirmation and every failure, plus (re-exported from
+ * packages/runtime/src/nominatimSearch.ts, shared with the customer app) the
+ * request building and response parsing. No React Native, no `fetch`, no
+ * `expo-location`, so all of it is testable with `node --test`; the I/O lives
+ * in services/deviceLocation.ts.
  *
  * WHY EVERYTHING IS CONFIRMED BEFORE IT FILLS A FIELD. Nominatim often resolves
  * a Nigerian address only to the area (a ward, a suburb) and puts the pin
@@ -12,14 +14,22 @@
  * to restaurants by distance from it. So the matched place name is shown first,
  * with the caveat, and nothing is written until the partner agrees.
  */
-import { isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
+import type { AddressLookupOutcome, AddressMatch } from '../../../../packages/runtime/src/nominatimSearch.ts';
 
-export type AddressMatch = {
-  latitude: number;
-  longitude: number;
-  /** What Nominatim called the place, so the partner can see what was matched. */
-  placeName: string;
-};
+// The search itself (request shape, parsing, outcome mapping, the rate-limited
+// fetch) is shared with the customer app's map-search fallback; this module
+// keeps only what is the partner's own: the wording and the device position.
+export {
+  ADDRESS_LOOKUP_MIN_INTERVAL_MS,
+  ADDRESS_LOOKUP_TIMEOUT_MS,
+  NOMINATIM_SEARCH_URL,
+  buildAddressSearchUrl,
+  normalizeAddressQuery,
+  outcomeFromLookupError,
+  outcomeFromResponse,
+  parseGeocodeResults,
+} from '../../../../packages/runtime/src/nominatimSearch.ts';
+export type { AddressLookupOutcome, AddressMatch } from '../../../../packages/runtime/src/nominatimSearch.ts';
 
 export type DevicePosition = {
   latitude: number;
@@ -28,21 +38,11 @@ export type DevicePosition = {
   accuracyMeters: number | null;
 };
 
-/** How a forward geocode ended. Only 'found' carries a place. */
-export type AddressLookupOutcome =
-  | { kind: 'found'; match: AddressMatch }
-  | { kind: 'no-result' }
-  | { kind: 'offline' }
-  | { kind: 'timeout' }
-  | { kind: 'unavailable' };
-
 export type DevicePositionFailure = 'permission-denied' | 'services-off' | 'timeout' | 'unavailable' | 'unsupported';
 
 export type DevicePositionOutcome =
   | { kind: 'found'; position: DevicePosition }
   | { kind: DevicePositionFailure };
-
-export const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 
 /**
  * Nominatim's usage policy requires the application to identify itself with a
@@ -60,103 +60,12 @@ export const NOMINATIM_USER_AGENT = 'FEASTY-Partner/1.0 (https://feasty.com.ng)'
 export const OSM_ATTRIBUTION = 'Address search by OpenStreetMap. © OpenStreetMap contributors';
 export const ADDRESS_SENT_NOTICE = 'The address you typed is sent to OpenStreetMap when you press Find from address.';
 
-/** A slow geocoder must not leave the button spinning for ever. */
-export const ADDRESS_LOOKUP_TIMEOUT_MS = 8000;
-
 /**
  * Bound on a whole browser position request. The browser's own timeout only
  * starts once the user has answered the permission prompt, so an ignored prompt
  * would otherwise leave the button spinning for ever.
  */
 export const WEB_POSITION_TOTAL_TIMEOUT_MS = 40000;
-
-/** The policy allows at most one request a second; leave a little margin. */
-export const ADDRESS_LOOKUP_MIN_INTERVAL_MS = 1100;
-
-/** Shorter than this is a typo, not an address worth a request. */
-const MIN_ADDRESS_LENGTH = 4;
-
-const MAX_PLACE_NAME_LENGTH = 200;
-
-/**
- * Restaurants on the platform are in Nigeria, and without the restriction a
- * short street name resolves to a namesake on another continent.
- */
-const COUNTRY_CODES = 'ng';
-
-/** `null` when there is nothing worth looking up. */
-export const normalizeAddressQuery = (address: string): string | null => {
-  const collapsed = address.replace(/\s+/g, ' ').trim();
-  return collapsed.length >= MIN_ADDRESS_LENGTH ? collapsed : null;
-};
-
-export const buildAddressSearchUrl = (query: string): string => {
-  const params = new URLSearchParams({
-    format: 'jsonv2',
-    limit: '1',
-    countrycodes: COUNTRY_CODES,
-    'accept-language': 'en',
-    q: query,
-  });
-
-  return `${NOMINATIM_SEARCH_URL}?${params.toString()}`;
-};
-
-/** Nominatim sends coordinates as strings; anything else non-numeric is rejected. */
-const coordinateOf = (value: unknown): number | null => {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
-  }
-
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-};
-
-const placeNameOf = (entry: Record<string, unknown>): string | null => {
-  for (const candidate of [entry.display_name, entry.name]) {
-    if (typeof candidate === 'string' && candidate.trim() !== '') {
-      return candidate.trim().slice(0, MAX_PLACE_NAME_LENGTH);
-    }
-  }
-
-  return null;
-};
-
-/**
- * First usable result of a Nominatim `search` response, or null.
- *
- * Takes `unknown` because it parses a network payload: an HTML error page, a
- * JSON object where an array was expected, or entries missing a field all come
- * back as "no match" rather than as a throw or a pin at 0,0. An entry is usable
- * only when it has a name to show AND a coordinate pair the server would accept,
- * so a match can never be one the Save would then be refused over.
- */
-export const parseGeocodeResults = (payload: unknown): AddressMatch | null => {
-  if (!Array.isArray(payload)) {
-    return null;
-  }
-
-  for (const entry of payload) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-
-    const record = entry as Record<string, unknown>;
-    const latitude = coordinateOf(record.lat);
-    const longitude = coordinateOf(record.lon);
-    const placeName = placeNameOf(record);
-
-    if (placeName && latitude !== null && longitude !== null && isUsableCoordinatePair(latitude, longitude)) {
-      return { latitude, longitude, placeName };
-    }
-  }
-
-  return null;
-};
 
 /** What goes into the text field: six decimals is about a tenth of a metre. */
 export const formatCoordinate = (value: number): string => String(Number(value.toFixed(6)));
@@ -181,33 +90,6 @@ export const DEVICE_POSITION_MESSAGES: Record<DevicePositionFailure, string> = {
   timeout: 'Finding your position took too long. Move somewhere with a clearer signal and try again.',
   unavailable: 'We could not read your position right now. Try again, or use Find from address instead.',
   unsupported: 'This device or browser cannot share its position. Use Find from address instead.',
-};
-
-/**
- * How a finished request maps onto an outcome, kept apart from `fetch` so the
- * mapping can be tested. A non-2xx (429 rate limit, 5xx) is the service not
- * answering usefully; a parsed body with no usable entry is simply no result.
- */
-export const outcomeFromResponse = (ok: boolean, payload: unknown): AddressLookupOutcome => {
-  if (!ok) {
-    return { kind: 'unavailable' };
-  }
-
-  const match = parseGeocodeResults(payload);
-  return match ? { kind: 'found', match } : { kind: 'no-result' };
-};
-
-/**
- * `aborted` is whether our own timeout fired. fetch rejects with a TypeError for a
- * transport failure (no network, DNS, blocked); anything else, such as a
- * malformed body, is the service misbehaving.
- */
-export const outcomeFromLookupError = (error: unknown, aborted: boolean): AddressLookupOutcome => {
-  if (aborted) {
-    return { kind: 'timeout' };
-  }
-
-  return error instanceof TypeError ? { kind: 'offline' } : { kind: 'unavailable' };
 };
 
 export const lookupFailureMessage = (kind: Exclude<AddressLookupOutcome['kind'], 'found'>): string => {
