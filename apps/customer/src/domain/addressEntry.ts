@@ -67,9 +67,9 @@ export const initAddressEntry = (saved: AddressRecord | null | undefined): Addre
     ? {
         ...point,
         label: cleanLabel(saved?.pinLabel),
-        // shortAddress holds the nickname when there was one, so it is only
-        // the place's short name when no nickname was saved.
-        shortLabel: cleanLabel(saved?.label) ? null : cleanLabel(saved?.shortAddress),
+        // Only from the pin's own saved short name, never from shortAddress:
+        // that can be the nickname or the customer's own text.
+        shortLabel: cleanLabel(saved?.pinShortLabel),
         source: 'saved',
       }
     : null;
@@ -138,6 +138,7 @@ export const toSavedAddress = (state: AddressEntryState, extras: SavedAddressExt
   const typed = state.text.trim();
   const address = typed || pinText(state.pin);
   const label = cleanLabel(extras.label);
+  const textFromPin = !typed || state.textOrigin === 'pin';
 
   return {
     address,
@@ -145,9 +146,13 @@ export const toSavedAddress = (state: AddressEntryState, extras: SavedAddressExt
     latitude: state.pin.latitude,
     longitude: state.pin.longitude,
     note: cleanLabel(extras.note),
-    shortAddress: label ?? state.pin.shortLabel ?? state.pin.label ?? address,
+    // Partners and riders read shortAddress first, so it must never disagree
+    // with the text: the nickname if there is one, the pin's short name only
+    // while the text still comes from the pin, otherwise the text itself.
+    shortAddress: label ?? (textFromPin ? state.pin.shortLabel ?? address : address),
     coordinateSource: PIN_SOURCE_LABEL[state.pin.source],
     pinLabel: state.pin.label,
+    pinShortLabel: state.pin.shortLabel ?? null,
     addressTextSource: typed ? state.textOrigin : 'pin',
   };
 };

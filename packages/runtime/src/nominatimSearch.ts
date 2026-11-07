@@ -42,7 +42,7 @@ export const ADDRESS_LOOKUP_MIN_INTERVAL_MS = 1100;
 const MAX_MATCHES = 5;
 
 /** Shorter than this is a typo, not an address worth a request. */
-const MIN_ADDRESS_LENGTH = 4;
+export const NOMINATIM_MIN_QUERY_LENGTH = 4;
 
 const MAX_PLACE_NAME_LENGTH = 200;
 
@@ -55,7 +55,7 @@ const COUNTRY_CODES = 'ng';
 /** `null` when there is nothing worth looking up. */
 export const normalizeAddressQuery = (address: string): string | null => {
   const collapsed = address.replace(/\s+/g, ' ').trim();
-  return collapsed.length >= MIN_ADDRESS_LENGTH ? collapsed : null;
+  return collapsed.length >= NOMINATIM_MIN_QUERY_LENGTH ? collapsed : null;
 };
 
 const clampMatches = (limit: number | undefined): number =>
@@ -174,11 +174,14 @@ export type FindAddressMatchesOptions = {
   /** Called for a fault worth reporting; timeouts and no-network are expected and are not. */
   onUnexpectedError?: (error: unknown) => void;
   fetchImpl?: typeof fetch;
+  /** Injected by tests so the one-second spacing is checked without really waiting. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 };
 
 let lastLookupStartedAt = 0;
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Forward-geocodes a typed address with OpenStreetMap Nominatim. Never throws:
@@ -186,7 +189,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export const findAddressMatches = async (
   address: string,
-  { userAgent, limit = 1, onUnexpectedError, fetchImpl }: FindAddressMatchesOptions = {}
+  { userAgent, limit = 1, onUnexpectedError, fetchImpl, now = Date.now, sleep = realSleep }: FindAddressMatchesOptions = {}
 ): Promise<AddressLookupOutcome> => {
   const query = normalizeAddressQuery(address);
 
@@ -197,11 +200,11 @@ export const findAddressMatches = async (
   // At most one request a second. A button cannot be double-pressed while a
   // lookup is in flight, but two quick lookups in a row can still land inside a
   // second of each other.
-  const waitMs = lastLookupStartedAt + ADDRESS_LOOKUP_MIN_INTERVAL_MS - Date.now();
+  const waitMs = lastLookupStartedAt + ADDRESS_LOOKUP_MIN_INTERVAL_MS - now();
   if (waitMs > 0) {
     await sleep(waitMs);
   }
-  lastLookupStartedAt = Date.now();
+  lastLookupStartedAt = now();
 
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), ADDRESS_LOOKUP_TIMEOUT_MS);

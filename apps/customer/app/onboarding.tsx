@@ -22,6 +22,7 @@ import CustomerAddressSearch from '../src/components/CustomerAddressSearch';
 import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
 import { addressEntryReducer, initAddressEntry, toSavedAddress, type AddressPin } from '../src/domain/addressEntry';
+import { createLatestChoice } from '../src/domain/latestChoice';
 import { useCurrentLocationPin } from '../src/hooks/useCurrentLocationPin';
 import { markLocationStepSeen } from '../src/services/customerOnboardingState';
 import { markLaunchAddressPromptShown } from '../src/utils/launchAddressPrompt';
@@ -39,6 +40,9 @@ export default function OnboardingScreen() {
   const { locate, locating } = useCurrentLocationPin();
   const [error, setError] = useState<string | null>(null);
   const finishingRef = useRef(false);
+  // The customer's last choice wins: a slow fix must not replace a place picked
+  // while it was running. See domain/latestChoice.ts.
+  const choiceRef = useRef(createLatestChoice());
 
   const finish = async () => {
     // A double tap must leave once, not back out twice.
@@ -63,6 +67,10 @@ export default function OnboardingScreen() {
   // The same pin rules as the delivery-address screen (domain/addressEntry.ts):
   // the address text follows the pin, and nothing is saved without one.
   const saveAndFinish = async (pin: AddressPin) => {
+    // Already leaving (saved, or skipped while a fix was running): save nothing more.
+    if (finishingRef.current) {
+      return;
+    }
     const saved = toSavedAddress(addressEntryReducer(initAddressEntry(null), { type: 'pinned', pin }));
     if (!saved) {
       setError('That place could not be pinned. Try another search result, or use your current location.');
@@ -73,12 +81,13 @@ export default function OnboardingScreen() {
   };
 
   const handleUseMyLocation = async () => {
-    if (finishingRef.current) {
+    if (finishingRef.current || locating) {
       return;
     }
+    const ticket = choiceRef.current.next();
     setError(null);
     const result = await locate();
-    if (!result) {
+    if (!result || finishingRef.current || !choiceRef.current.isLatest(ticket)) {
       return;
     }
     if (!result.ok) {
@@ -100,6 +109,7 @@ export default function OnboardingScreen() {
     if (finishingRef.current) {
       return;
     }
+    choiceRef.current.next();
     setError(null);
     void saveAndFinish({
       latitude: suggestion.latitude,

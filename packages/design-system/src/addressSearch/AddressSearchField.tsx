@@ -30,6 +30,7 @@ import { MIN_TAP_TARGET, space } from '../tokens/space';
 import { typeScale } from '../tokens/type';
 import { Text } from '../primitives/Text';
 import {
+  canSearchMapFor,
   createSuggestionController,
   moveHighlight,
   selectableResults,
@@ -63,6 +64,7 @@ export const ADDRESS_SEARCH_COPY = {
   emptyNoFallback: 'No matches yet. Add the area or city.',
   unavailable: 'Suggestions are not available right now.',
   unavailableNoFallback: 'Suggestions are not available right now. Try again in a moment.',
+  unavailableTooShort: 'Suggestions are not available right now. Add more detail, such as the area or city, to search the map.',
   mapResultsHeading: 'Matches from the map. Tap the right one.',
   mapEmpty: 'The map found nothing for that. Check the spelling, add the area or city, or use your current location.',
   mapFailed: 'We could not search the map right now. Try again, or allow location access and use your current location.',
@@ -104,7 +106,9 @@ export function AddressSearchField({
   }, []);
 
   const rows = selectableResults(view);
-  const canSearchMap = Boolean(searchMap);
+  // Offered only for a query the map search will actually run (4+ characters).
+  const hasMapSearch = Boolean(searchMap);
+  const canSearchMap = hasMapSearch && 'query' in view && canSearchMapFor(view.query);
 
   const handleChange = (value: string) => {
     setQuery(value);
@@ -226,7 +230,9 @@ export function AddressSearchField({
                 : ADDRESS_SEARCH_COPY.emptyNoFallback
               : canSearchMap
                 ? ADDRESS_SEARCH_COPY.unavailable
-                : ADDRESS_SEARCH_COPY.unavailableNoFallback}
+                : hasMapSearch
+                  ? ADDRESS_SEARCH_COPY.unavailableTooShort
+                  : ADDRESS_SEARCH_COPY.unavailableNoFallback}
           </Text>
           {searchMapButton}
         </View>

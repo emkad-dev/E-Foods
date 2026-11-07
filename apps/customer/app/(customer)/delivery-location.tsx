@@ -1,6 +1,6 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useReducer, useState } from 'react';
+import { useCallback, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -25,6 +25,7 @@ import {
   pinBesideText,
   toSavedAddress,
 } from '../../src/domain/addressEntry';
+import { createLatestChoice } from '../../src/domain/latestChoice';
 import { useCurrentLocationPin } from '../../src/hooks/useCurrentLocationPin';
 import { coordinatesLabel } from '../../src/services/locationResolution';
 import { customerTheme } from '../../src/theme/palette';
@@ -61,11 +62,18 @@ export default function DeliveryLocationScreen() {
     hasTextOnlyAddress(deliveryLocation) ? { tone: 'info', text: TEXT_ONLY_MESSAGE } : null
   );
   const { locate, locating } = useCurrentLocationPin();
+  // The customer's last choice wins: a slow fix must not replace a place picked
+  // while it was running. See domain/latestChoice.ts.
+  const choiceRef = useRef(createLatestChoice());
 
   const handleUseCurrentLocation = useCallback(async () => {
+    if (locating) {
+      return;
+    }
+    const ticket = choiceRef.current.next();
     setStatus({ tone: 'info', text: 'Finding your location...' });
     const result = await locate();
-    if (!result) {
+    if (!result || !choiceRef.current.isLatest(ticket)) {
       return;
     }
 
@@ -92,9 +100,10 @@ export default function DeliveryLocationScreen() {
             text: 'We pinned your exact spot but could not name the street. Add a landmark below so the rider finds you.',
           }
     );
-  }, [locate]);
+  }, [locate, locating]);
 
   const handlePick = useCallback((suggestion: AddressSuggestion, origin: AddressPickOrigin) => {
+    choiceRef.current.next();
     dispatch({
       type: 'pinned',
       pin: {

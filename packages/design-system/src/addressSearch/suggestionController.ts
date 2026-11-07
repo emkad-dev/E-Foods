@@ -19,10 +19,20 @@ import {
   type AddressSearchResult,
   type AddressSuggestion,
 } from '../../../runtime/src/addressSearch.ts';
+import { NOMINATIM_MIN_QUERY_LENGTH } from '../../../runtime/src/nominatimSearch.ts';
 
 export type { AddressSuggestion };
 
 export const SUGGESTION_DEBOUNCE_MS = 400;
+
+/**
+ * Whether "Search the map" can run for this query. The map search refuses
+ * anything under four characters, so offering the button for "Yab" would end
+ * in "nothing found" for a reason the customer cannot see; the field asks for
+ * more detail instead.
+ */
+export const canSearchMapFor = (query: string | null | undefined): boolean =>
+  typeof query === 'string' && query.trim().length >= NOMINATIM_MIN_QUERY_LENGTH;
 
 export type SuggestionSearch = (query: string, options: { signal: AbortSignal }) => Promise<AddressSearchResult>;
 
@@ -168,7 +178,7 @@ export const createSuggestionController = ({
     },
 
     searchMap: () => {
-      if (disposed || !searchMap || query === null || view.kind === 'map-loading') {
+      if (disposed || !searchMap || !canSearchMapFor(query) || query === null || view.kind === 'map-loading') {
         return;
       }
 

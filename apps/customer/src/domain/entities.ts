@@ -16,6 +16,8 @@ export interface AddressRecord extends DocumentData {
   isDefault?: boolean;
   /** Client-side only (checkout ignores it): the place name the pin came with. See domain/addressEntry.ts. */
   pinLabel?: string | null;
+  /** Client-side only: the pin's own short name, so it is never confused with a nickname or typed text. */
+  pinShortLabel?: string | null;
   /** Client-side only: whether `address` was filled in from the pin or typed by the customer. */
   addressTextSource?: 'pin' | 'typed';
 }

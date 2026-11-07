@@ -10,6 +10,7 @@
 import type { AddressSuggestion } from '../../../../packages/runtime/src/addressSearch.ts';
 import type { AddressLookupOutcome } from '../../../../packages/runtime/src/nominatimSearch.ts';
 import { isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
+import { isInsideServiceArea } from '../../../../packages/domain/src/serviceArea.ts';
 
 export type MapSearchResult = { kind: 'results'; results: AddressSuggestion[] } | { kind: 'failed' };
 
@@ -37,16 +38,23 @@ export const toDeviceGeocodeQuery = (query: string): string => {
 };
 
 /**
- * Device-geocoder points carry no place name, so each is labelled with the text
- * that found it; the screen still shows it as a match to tap, never as a pin
- * set behind the customer's back.
+ * At most one match from the device geocoder: the first point inside the
+ * service area (the same box the suggestion Worker uses). Its points carry no
+ * place name, so several would be indistinguishable rows; and because the name
+ * is only the customer's own text, the label says the pin is approximate. The
+ * screen still shows it as a match to tap, never as a pin set behind the
+ * customer's back.
  */
 export const fromDevicePoints = (query: string, points: DeviceGeocodePoint[]): AddressSuggestion[] => {
-  const label = query.replace(/\s+/g, ' ').trim();
-  return points
-    .filter((point) => isUsableCoordinatePair(point?.latitude, point?.longitude))
-    .slice(0, MAP_SEARCH_MAX_RESULTS)
-    .map((point) => ({ label, latitude: point.latitude, longitude: point.longitude }));
+  const first = points.find(
+    (point) =>
+      isUsableCoordinatePair(point?.latitude, point?.longitude) && isInsideServiceArea(point.latitude, point.longitude)
+  );
+  if (!first) {
+    return [];
+  }
+  const label = `${query.replace(/\s+/g, ' ').trim()} (approximate)`;
+  return [{ label, latitude: first.latitude, longitude: first.longitude }];
 };
 
 /** `no-result` is an answer (nothing there); every other failure is the service not answering. */

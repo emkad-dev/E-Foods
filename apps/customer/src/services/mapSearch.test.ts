@@ -26,14 +26,17 @@ test('toDeviceGeocodeQuery biases the device geocoder to Nigeria once', () => {
   assert.equal(toDeviceGeocodeQuery('Bodija, Ibadan, Nigeria'), 'Bodija, Ibadan, Nigeria');
 });
 
-test('fromDevicePoints labels points with the query and drops unusable ones', () => {
+test('fromDevicePoints keeps the first point inside the service area, labelled approximate', () => {
   assert.deepEqual(
-    fromDevicePoints('Bodija Market', [
+    fromDevicePoints(' Bodija  Market ', [
       { latitude: 0, longitude: 0 },
+      { latitude: 9.0765, longitude: 7.3986 }, // Abuja: outside the service area
       { latitude: 7.4352, longitude: 3.9133 },
+      { latitude: 7.401, longitude: 3.917 },
     ]),
-    [{ label: 'Bodija Market', latitude: 7.4352, longitude: 3.9133 }]
+    [{ label: 'Bodija Market (approximate)', latitude: 7.4352, longitude: 3.9133 }]
   );
+  assert.deepEqual(fromDevicePoints('Bodija Market', [{ latitude: 51.5, longitude: -0.12 }]), []);
 });
 
 test('fromNominatimOutcome: matches, nothing found, and failures', () => {
@@ -71,7 +74,10 @@ test('on Android the device geocoder goes first and, when it finds something, No
     },
   });
   assert.equal(nominatimCalls, 0);
-  assert.deepEqual(result, { kind: 'results', results: [{ label: 'Bodija Market', latitude: 7.4352, longitude: 3.9133 }] });
+  assert.deepEqual(result, {
+    kind: 'results',
+    results: [{ label: 'Bodija Market (approximate)', latitude: 7.4352, longitude: 3.9133 }],
+  });
 });
 
 test('a device geocoder that throws or finds nothing falls through to Nominatim', async () => {
@@ -81,6 +87,7 @@ test('a device geocoder that throws or finds nothing falls through to Nominatim'
     },
     async () => [],
     async () => [{ latitude: 0, longitude: 0 }],
+    async () => [{ latitude: 51.5, longitude: -0.12 }],
   ]) {
     const result = await runMapSearch('Bodija Market', { deviceGeocode, nominatim: async () => found() });
     assert.equal(result.kind === 'results' && result.results[0]?.label, 'Place 0');

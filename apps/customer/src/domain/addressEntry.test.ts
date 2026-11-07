@@ -148,8 +148,11 @@ test('toSavedAddress saves the pin, the free text, and where each came from', ()
     shortAddress: 'Home',
     coordinateSource: 'Search result',
     pinLabel: 'Bodija Market, Ibadan',
+    pinShortLabel: null,
     addressTextSource: 'typed',
   });
+  // Without a nickname, typed text is what heads the address, not the pin name.
+  assert.equal(toSavedAddress(state)?.shortAddress, 'Shop 4, behind the bank');
 });
 
 test('toSavedAddress with blank text saves the pin name as the address', () => {
@@ -171,5 +174,35 @@ test('a short place name heads the saved address unless a nickname was given', (
 
   const restored = initAddressEntry(toSavedAddress(state));
   assert.equal(restored.pin?.shortLabel, 'Mokola Road, Mokola');
-  assert.equal(initAddressEntry(toSavedAddress(state, { label: 'Office' })).pin?.shortLabel, null);
+  // The pin's short name survives a nickname, because it is saved on its own.
+  assert.equal(initAddressEntry(toSavedAddress(state, { label: 'Office' })).pin?.shortLabel, 'Mokola Road, Mokola');
+
+  // Once the customer types, the short name no longer heads the address.
+  const typed = run(state, { type: 'typed', text: 'Blue gate, opposite the school' });
+  assert.equal(toSavedAddress(typed)?.shortAddress, 'Blue gate, opposite the school');
+});
+
+test('shortLabel is restored only from the pin short name, never from shortAddress or a nickname', () => {
+  const legacy = initAddressEntry({
+    address: 'Bodija Market, Ibadan',
+    shortAddress: 'Home',
+    label: null,
+    latitude: 7.4352,
+    longitude: 3.9133,
+    addressTextSource: 'pin',
+  });
+  assert.equal(legacy.pin?.shortLabel, null);
+  const saved = toSavedAddress(legacy);
+  assert.equal(saved?.shortAddress, 'Bodija Market, Ibadan');
+});
+
+test('a legacy record restored, its text edited and saved: shortAddress is the new text', () => {
+  const legacy = initAddressEntry({
+    address: '12 Old Road, Ibadan',
+    shortAddress: 'Old Road, Ibadan',
+    latitude: 7.4352,
+    longitude: 3.9133,
+  });
+  const edited = run(legacy, { type: 'typed', text: '14 New Road, Ibadan' });
+  assert.equal(toSavedAddress(edited)?.shortAddress, '14 New Road, Ibadan');
 });

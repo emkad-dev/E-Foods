@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import type { AddressSearchResult } from '../../../runtime/src/addressSearch.ts';
 import {
   SUGGESTION_DEBOUNCE_MS,
+  canSearchMapFor,
   createSuggestionController,
   moveHighlight,
   selectableResults,
@@ -242,4 +243,24 @@ test('moveHighlight steps through the rows without wrapping', () => {
   assert.equal(moveHighlight(0, 'up', 3), -1);
   assert.equal(moveHighlight(-1, 'up', 3), -1);
   assert.equal(moveHighlight(1, 'down', 0), -1);
+});
+
+test('Search the map is not offered or run below four characters', async () => {
+  assert.equal(canSearchMapFor('Yab'), false);
+  assert.equal(canSearchMapFor(' Yab '), false);
+  assert.equal(canSearchMapFor('Yaba'), true);
+  assert.equal(canSearchMapFor(null), false);
+
+  const mapCalls: string[] = [];
+  const { clock, calls, controller } = setup(async (query) => {
+    mapCalls.push(query);
+    return { kind: 'failed' };
+  });
+  controller.update('Yab');
+  clock.tick(400);
+  calls[0]!.resolve({ kind: 'unavailable', reason: 'http' });
+  await flush();
+  controller.searchMap();
+  assert.deepEqual(mapCalls, []);
+  assert.deepEqual(controller.getView(), { kind: 'unavailable', query: 'Yab' });
 });
