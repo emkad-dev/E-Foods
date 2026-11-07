@@ -20,6 +20,7 @@ import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
 import { getCurrentCoordinates, reverseGeocode } from '../src/services/deviceLocation';
 import { markLocationStepSeen } from '../src/services/customerOnboardingState';
+import { markLaunchAddressPromptShown } from '../src/utils/launchAddressPrompt';
 import { customerTheme } from '../src/theme/palette';
 import { pageTitleTextStyle } from '../src/theme/screenChrome';
 
@@ -33,8 +34,18 @@ export default function OnboardingScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const finish = async () => {
+    // Whichever way the visitor leaves (saved, typed or skipped), this launch has
+    // asked, so Home must not ask again on top of the first-run step.
+    markLaunchAddressPromptShown();
     await markLocationStepSeen();
-    router.replace('/home' as never);
+    // Home pushes this screen on later launches; first run reaches it by redirect.
+    // Go back when there is a Home underneath, otherwise replace, so the stack never
+    // ends up with two Homes.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/home' as never);
+    }
   };
 
   const handleUseMyLocation = async () => {

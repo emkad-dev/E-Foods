@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { MIN_TAP_TARGET, elevation, radius } from '@feasty/design-system';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../../packages/runtime/src';
@@ -27,6 +28,11 @@ import OrderConfirmationPrompt from '../../../src/components/OrderConfirmationPr
 import RestaurantDiscoveryRow from '../../../src/components/RestaurantDiscoveryRow';
 import RestaurantFavoriteButton from '../../../src/components/RestaurantFavoriteButton';
 import { screenColumn } from '../../../src/components/ScreenColumn';
+import {
+  hasLaunchAddressPromptBeenShown,
+  markLaunchAddressPromptShown,
+  shouldShowLaunchAddressPrompt,
+} from '../../../src/utils/launchAddressPrompt';
 import { Skeleton, SkeletonCard, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAwaitingConfirmationOrder } from '../../../src/hooks/useAwaitingConfirmationOrder';
 import { getRestaurantList } from '../../../src/services/publicRestaurantReadModel';
@@ -87,11 +93,41 @@ export default function HomeScreen() {
   const isVisible = useAppStateVisibility();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { loading: authLoading, policyAccepted, policyLoading, user } = useAuth();
+  const pathname = usePathname();
   // One read on focus, signed-in only; null (and nothing rendered) otherwise.
   const awaitingConfirmationOrder = useAwaitingConfirmationOrder(user?.uid ?? null);
-  const { deliveryLocation } = useCart();
+  const { deliveryLocation, isHydrated: cartHydrated } = useCart();
   const { isCovered, nearestOrderableKm } = useCoverage();
+
+  // A signed-in user still owed verify-email / complete-profile / accept-policy is about
+  // to be redirected by the root layout; the address prompt must not stack on that flow.
+  const accountFlowSettled =
+    !authLoading &&
+    !policyLoading &&
+    (!user ||
+      (user.emailVerified && (user.role !== 'customer' || Boolean(user.phoneNumber)) && policyAccepted));
+
+  // Once per app launch, only on arriving at Home itself (a deep link to payment, an order,
+  // reset-password or verify-email never mounts a focused Home), guests included. The
+  // first-run /onboarding screen is reused: it already offers location, typed address and a
+  // labelled Skip, and marks the launch as asked on exit.
+  useFocusEffect(
+    useCallback(() => {
+      if (
+        shouldShowLaunchAddressPrompt({
+          accountFlowSettled,
+          alreadyShownThisLaunch: hasLaunchAddressPromptBeenShown(),
+          cartHydrated,
+          deliveryLocation,
+          onHome: pathname === '/home',
+        })
+      ) {
+        markLaunchAddressPromptShown();
+        router.push('/onboarding' as never);
+      }
+    }, [accountFlowSettled, cartHydrated, deliveryLocation, pathname, router])
+  );
 
   const loadRestaurants = useCallback(
     async (mode: 'initial' | 'manual' | 'background' = 'initial') => {

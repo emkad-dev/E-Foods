@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
-import { BusyLabel, MIN_TAP_TARGET, radius, useAuthPrompt } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useAuthPrompt, useConfirm } from '@feasty/design-system';
 import { useFocusEffect } from '@react-navigation/native';
 import { RESTAURANTS_REALTIME_TOPIC, subscribeToRealtimeChanges } from '../../../../packages/auth/src';
 import type { RealtimeResourceSubscribe } from '../../../../packages/runtime/src';
@@ -34,7 +34,9 @@ import { groupCartItemsByRestaurant } from '../../src/utils/checkoutGrouping';
 import { calculateCheckoutTotal } from '../../src/utils/checkoutPricing';
 import { formatMoney } from '../../src/utils/formatting';
 import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
+import { getCollectionDistanceWarning } from '../../src/utils/collectionDistance';
 import { getRestaurantAvailability } from '../../src/utils/restaurantAvailability';
+import { hasSavedAddress } from '../../src/utils/savedAddress';
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
@@ -129,6 +131,9 @@ export default function CartScreen() {
   // which react-native-web implements as an empty static method - so on
   // app.feasty.com.ng the sign-in demand at the end of checkout was silence.
   const { promptForAuth, authPromptDialog } = useAuthPrompt();
+  // Modal-backed like the auth prompt: Alert is an empty function on web.
+  const { confirm, confirmDialog } = useConfirm();
+  const confirmingRef = useRef(false);
   const isMountedRef = useRef(true);
   const isCheckoutScreenFocusedRef = useRef(false);
   const safeTipAmount = tipOptions.includes(tipAmount as (typeof tipOptions)[number]) ? tipAmount : DEFAULT_TIP_AMOUNT;
@@ -277,9 +282,11 @@ export default function CartScreen() {
   const checkoutSubtitle = isMixedBasket
     ? 'Orders are grouped by restaurant. One payment completes the basket.'
     : 'Review your order before checkout.';
-  const needsDeliveryLocation = fulfillmentType === 'delivery' && !deliveryLocation;
-  // A missing delivery address is deliberately NOT a disable reason: the button
-  // labels itself "Choose delivery location" in that state and `handlePlaceOrder`
+  // Collection needs an address too (it is what the distance check measures from), so this
+  // is no longer delivery-only. A typed address with no coordinates counts as saved.
+  const needsAddress = !hasSavedAddress(deliveryLocation);
+  // A missing address is deliberately NOT a disable reason: the button
+  // labels itself "Add your address" in that state and `handlePlaceOrder`
   // routes to the map, so disabling it made its own label a lie and left the
   // `router.push('/delivery-location')` branch below unreachable. The button is
   // disabled only for reasons that hold for signed-in and signed-out visitors
@@ -508,7 +515,10 @@ export default function CartScreen() {
     // the food goes needs no account (the cart, address included, is device-local),
     // and asking someone to sign in only to bounce them to a map afterwards is the
     // dead end this screen used to be.
-    if (needsDeliveryLocation) {
+    // Precedence: the coverage / restaurant blocks above need an address to be
+    // meaningful and are mutually exclusive with this one in practice; with none saved
+    // the useful next step is always to add it. delivery-location returns to the cart.
+    if (needsAddress) {
       router.push('/delivery-location');
       return;
     }
@@ -536,6 +546,36 @@ export default function CartScreen() {
     if (scheduleMode === 'later' && !selectedSlotIso) {
       setCheckoutError('Pick a delivery time, or switch back to ordering now.');
       return;
+    }
+
+    // Collection only, once per attempt, before anything is charged. Cancel returns to
+    // the cart untouched; it is a warning, not a block.
+    if (fulfillmentType === 'pickup') {
+      const farWarning = getCollectionDistanceWarning({
+        deliveryLocation,
+        fulfillmentType,
+        restaurants: restaurantSummaries.map((summary) => summary.restaurant),
+      });
+      if (farWarning) {
+        if (confirmingRef.current) {
+          return;
+        }
+        confirmingRef.current = true;
+        let confirmed = false;
+        try {
+          confirmed = await confirm({
+            title: 'Collect from far away?',
+            paragraphs: [farWarning.message],
+            confirmLabel: 'Continue',
+            cancelLabel: 'Back to cart',
+          });
+        } finally {
+          confirmingRef.current = false;
+        }
+        if (!confirmed) {
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
@@ -805,6 +845,20 @@ export default function CartScreen() {
                     </Text>
                   </View>
                 </View>
+                {needsAddress ? (
+                  <View style={styles.addressNotice}>
+                    <Text style={styles.warningText}>
+                      Add your address to order for collection. We use it to check how far the restaurant is.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.addressNoticeButton}
+                      onPress={() => router.push('/delivery-location')}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.addressNoticeButtonText}>Add your address</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
               </View>
             )}
 
@@ -1009,8 +1063,10 @@ export default function CartScreen() {
                   label={
                     checkoutBlockedReason
                       ? 'Checkout unavailable'
-                      : needsDeliveryLocation
-                        ? 'Choose delivery location'
+                      : needsAddress
+                        ? fulfillmentType === 'delivery'
+                          ? 'Choose delivery location'
+                          : 'Add your address'
                         : !user
                           ? 'Sign in to place order'
                           : 'Pay and place order'
@@ -1028,6 +1084,7 @@ export default function CartScreen() {
         contentContainerStyle={[styles.listContent, screenColumn.reading]}
       />
       {authPromptDialog}
+      {confirmDialog}
     </View>
   );
 }
@@ -1591,6 +1648,23 @@ const styles = StyleSheet.create({
   checkoutButtonText: {
     color: customerTheme.textOnBrand,
     fontSize: 14,
+    fontWeight: '800',
+  },
+  addressNotice: {
+    marginTop: 4,
+  },
+  addressNoticeButton: {
+    alignItems: 'center',
+    backgroundColor: customerTheme.accentStrong,
+    borderRadius: radius.md,
+    justifyContent: 'center',
+    marginTop: 10,
+    minHeight: MIN_TAP_TARGET,
+    paddingHorizontal: 16,
+  },
+  addressNoticeButtonText: {
+    color: customerTheme.textOnBrand,
+    fontSize: 13,
     fontWeight: '800',
   },
   paymentHint: {
