@@ -59,6 +59,8 @@
       [
         "expo-location",
         {
+          "locationAlwaysPermission": false,
+          "locationAlwaysAndWhenInUsePermission": false,
           "locationWhenInUsePermission": "Allow FEASTY Partner to use your location while you are at your restaurant, to set your store's map pin so customers can find you.",
           "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": false,

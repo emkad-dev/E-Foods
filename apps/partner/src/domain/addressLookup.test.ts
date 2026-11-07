@@ -6,6 +6,10 @@ import { test } from 'node:test';
 
 import {
   ADDRESS_LOOKUP_MESSAGES,
+  ADDRESS_SENT_NOTICE,
+  OSM_ATTRIBUTION,
+  outcomeFromLookupError,
+  outcomeFromResponse,
   APPROXIMATE_PIN_WARNING,
   DEVICE_POSITION_MESSAGES,
   NOMINATIM_USER_AGENT,
@@ -96,7 +100,8 @@ test('buildAddressSearchUrl asks for one Nigerian result and encodes the query',
 
 test('the User-Agent names the app and a contact, as the usage policy asks', () => {
   assert.match(NOMINATIM_USER_AGENT, /^FEASTY-Partner\/\d/);
-  assert.match(NOMINATIM_USER_AGENT, /@feasty\.com\.ng/);
+  assert.match(NOMINATIM_USER_AGENT, /\(https:\/\/feasty\.com\.ng\)/);
+  assert.doesNotMatch(NOMINATIM_USER_AGENT, /@/);
 });
 
 test('formatCoordinate keeps six decimals and drops padding', () => {
@@ -160,4 +165,33 @@ test('the device-position confirmation states the position, the accuracy when kn
 
   const withoutAccuracy = devicePositionConfirmCopy({ latitude: 6.5244, longitude: 3.3792, accuracyMeters: null });
   assert.doesNotMatch(withoutAccuracy.paragraphs.join(' '), /accurate to/);
+});
+
+test('the OpenStreetMap credit and the data-sent notice are pinned', () => {
+  assert.equal(OSM_ATTRIBUTION, 'Address search by OpenStreetMap. © OpenStreetMap contributors');
+  assert.equal(ADDRESS_SENT_NOTICE, 'The address you typed is sent to OpenStreetMap when you press Find from address.');
+
+  const copy = addressMatchConfirmCopy({ latitude: 6.6018, longitude: 3.3515, placeName: 'Ikeja' });
+  assert.ok(copy.paragraphs.includes(OSM_ATTRIBUTION));
+});
+
+test('the services-off failure tells the partner to turn location on', () => {
+  assert.match(DEVICE_POSITION_MESSAGES['services-off'], /turned off/);
+  assert.match(DEVICE_POSITION_MESSAGES['services-off'], /Turn it on/);
+});
+
+test('outcomeFromResponse maps status and body onto an outcome', () => {
+  assert.equal(outcomeFromResponse(false, [IKEJA]).kind, 'unavailable');
+  assert.equal(outcomeFromResponse(true, []).kind, 'no-result');
+  assert.equal(outcomeFromResponse(true, '<html>').kind, 'no-result');
+  const found = outcomeFromResponse(true, [IKEJA]);
+  assert.equal(found.kind, 'found');
+  assert.equal(found.kind === 'found' && found.match.placeName, 'Ikeja, Lagos, Nigeria');
+});
+
+test('outcomeFromLookupError maps abort, transport failure and anything else', () => {
+  assert.equal(outcomeFromLookupError(new Error('aborted'), true).kind, 'timeout');
+  assert.equal(outcomeFromLookupError(new TypeError('Network request failed'), false).kind, 'offline');
+  assert.equal(outcomeFromLookupError(new SyntaxError('bad json'), false).kind, 'unavailable');
+  assert.equal(outcomeFromLookupError('weird', false).kind, 'unavailable');
 });

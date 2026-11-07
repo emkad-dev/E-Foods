@@ -21,7 +21,7 @@
  * nothing: the coordinate rule is the one the server publishes against, so it
  * is shared rather than copied. The entity barrel (React Native) stays out.
  */
-import { isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
+import { isPublishBlockedByLocation, isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
 
 const OPERATING_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
@@ -278,7 +278,14 @@ export const storeTradingState = (
 
 export type StoreSetupErrors = Partial<Record<StoreSetupFieldKey, string>>;
 
-export const validateStoreSetup = (draft: StoreSetupDraft): StoreSetupErrors => {
+/**
+ * `saved` is the record as it is stored now (null for a store not created yet):
+ * the location rule depends on what the row holds, not only on the form.
+ */
+export const validateStoreSetup = (
+  draft: StoreSetupDraft,
+  saved: StoreRecordLike | null | undefined = null
+): StoreSetupErrors => {
   const errors: StoreSetupErrors = {};
 
   if (isBlank(draft.name)) {
@@ -352,26 +359,49 @@ export const validateStoreSetup = (draft: StoreSetupDraft): StoreSetupErrors => 
     errors.deliveryRadiusKm = STORE_SETUP_MESSAGES.deliveryRadiusKm;
   }
 
-  if (draft.isPublished) {
-    if (!hasLatitude && !errors.latitude) {
-      errors.latitude = STORE_SETUP_MESSAGES.location;
-    }
+  // The SAME rule the server publishes against, fed the saved row and the row
+  // this Save would leave. A store that was already visible before the rule
+  // existed, and has no usable pin, can still save unrelated changes (hours,
+  // fees); only going visible without a pin, or taking away or breaking a pin,
+  // is refused here, exactly as the server would refuse it.
+  const nextLatitude = hasLatitude ? Number.parseFloat(draft.latitude) : null;
+  const nextLongitude = hasLongitude ? Number.parseFloat(draft.longitude) : null;
 
-    if (!hasLongitude && !errors.longitude) {
-      errors.longitude = STORE_SETUP_MESSAGES.location;
-    }
+  if (
+    isPublishBlockedByLocation(
+      saved
+        ? {
+            isPublished: saved.isPublished === true,
+            latitude: toNumberOrNull(textOf(saved.latitude)),
+            longitude: toNumberOrNull(textOf(saved.longitude)),
+          }
+        : null,
+      { isPublished: draft.isPublished, latitude: nextLatitude, longitude: nextLongitude }
+    )
+  ) {
+    // The message goes on the field that is actually wrong. A field that already
+    // has its own error (unreadable, or half of a pair) keeps that one.
+    if (nextLatitude === null || nextLongitude === null) {
+      if (nextLatitude === null && !errors.latitude) {
+        errors.latitude = STORE_SETUP_MESSAGES.location;
+      }
 
-    // Both present and readable but not a place the server would accept - 0,0
-    // (what an earlier bug saved for typed addresses) or off the map. Without
-    // this the form would pass and the server would answer 412.
-    if (
-      hasLatitude &&
-      hasLongitude &&
-      !errors.latitude &&
-      !errors.longitude &&
-      !isUsableCoordinatePair(Number.parseFloat(draft.latitude), Number.parseFloat(draft.longitude))
-    ) {
-      errors.latitude = STORE_SETUP_MESSAGES.locationInvalid;
+      if (nextLongitude === null && !errors.longitude) {
+        errors.longitude = STORE_SETUP_MESSAGES.location;
+      }
+    } else {
+      const latitudeOffMap = Math.abs(nextLatitude) > 90;
+      const longitudeOffMap = Math.abs(nextLongitude) > 180;
+
+      // Both in range means the pair is exactly 0,0, which is neither field's
+      // fault alone.
+      if (latitudeOffMap || !longitudeOffMap) {
+        errors.latitude = STORE_SETUP_MESSAGES.locationInvalid;
+      }
+
+      if (longitudeOffMap || !latitudeOffMap) {
+        errors.longitude = STORE_SETUP_MESSAGES.locationInvalid;
+      }
     }
   }
 

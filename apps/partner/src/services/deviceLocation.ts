@@ -21,9 +21,11 @@ import {
   ADDRESS_LOOKUP_MIN_INTERVAL_MS,
   ADDRESS_LOOKUP_TIMEOUT_MS,
   NOMINATIM_USER_AGENT,
+  WEB_POSITION_TOTAL_TIMEOUT_MS,
   buildAddressSearchUrl,
   normalizeAddressQuery,
-  parseGeocodeResults,
+  outcomeFromLookupError,
+  outcomeFromResponse,
   type AddressLookupOutcome,
   type DevicePositionFailure,
   type DevicePositionOutcome,
@@ -81,7 +83,7 @@ const requestBrowserPosition = (options: PositionOptions) =>
  * Desktop browsers regularly stall or fail on a high-accuracy fix, so one retry
  * with a coarse fix is better than giving up. A denial or missing API is final.
  */
-const getBrowserPosition = async (): Promise<DevicePositionOutcome> => {
+const getBrowserPositionUnbounded = async (): Promise<DevicePositionOutcome> => {
   const precise = await requestBrowserPosition(BROWSER_HIGH_ACCURACY);
 
   if (precise.kind === 'found' || precise.kind === 'permission-denied' || precise.kind === 'unsupported') {
@@ -91,8 +93,35 @@ const getBrowserPosition = async (): Promise<DevicePositionOutcome> => {
   return requestBrowserPosition(BROWSER_LOW_ACCURACY);
 };
 
+/**
+ * The browser's own timeouts only start once the permission prompt has been
+ * answered, so a prompt the user ignores would leave the button busy for ever.
+ * The whole call is raced against one overall bound.
+ */
+const getBrowserPosition = async (): Promise<DevicePositionOutcome> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const bound = new Promise<DevicePositionOutcome>((resolve) => {
+    timer = setTimeout(() => resolve(fail('timeout')), WEB_POSITION_TOTAL_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([getBrowserPositionUnbounded(), bound]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+};
+
 const getNativePosition = async (): Promise<DevicePositionOutcome> => {
   try {
+    // Asked first: with the device's location switched off the permission prompt
+    // can succeed and the fix then fail, which reads as a mystery. This is an
+    // expected refusal, not an error, so it is not reported.
+    if (!(await Location.hasServicesEnabledAsync())) {
+      return fail('services-off');
+    }
+
     // Foreground only. The disclosure the screen shows has already been agreed
     // to by the time this runs.
     const permission = await Location.requestForegroundPermissionsAsync();
@@ -170,26 +199,17 @@ export const findAddressMatch = async (address: string): Promise<AddressLookupOu
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      // 429 (rate limited) and 5xx alike: the service is not answering usefully.
-      return { kind: 'unavailable' };
-    }
-
-    const match = parseGeocodeResults(await response.json());
-    return match ? { kind: 'found', match } : { kind: 'no-result' };
+    // The outcome mapping is pure (domain/addressLookup.ts) so it is tested.
+    return outcomeFromResponse(response.ok, response.ok ? await response.json() : null);
   } catch (error) {
-    if (controller.signal.aborted) {
-      return { kind: 'timeout' };
+    const outcome = outcomeFromLookupError(error, controller.signal.aborted);
+
+    // Timeout and no-network are expected; only a service misbehaving is a fault.
+    if (outcome.kind === 'unavailable') {
+      reportError('partner.findAddressMatch', error);
     }
 
-    // fetch rejects with a TypeError for a transport failure (no network, DNS,
-    // blocked). A malformed body rejects with a SyntaxError from json().
-    if (error instanceof TypeError) {
-      return { kind: 'offline' };
-    }
-
-    reportError('partner.findAddressMatch', error);
-    return { kind: 'unavailable' };
+    return outcome;
   } finally {
     clearTimeout(timeoutHandle);
   }

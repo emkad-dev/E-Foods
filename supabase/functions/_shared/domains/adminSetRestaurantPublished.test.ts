@@ -294,9 +294,10 @@ const expectLocationRejection = async (restaurant: RestaurantRow, label: string)
 
   expectEqual((thrown as { status?: number })?.status, 412, `${label}: status`);
   expectEqual(
-    /location/i.test((thrown as { message?: string })?.message ?? ''),
+    /no location/.test((thrown as { message?: string })?.message ?? '') &&
+      /owner must set it/.test((thrown as { message?: string })?.message ?? ''),
     true,
-    `${label}: the message tells the owner to set the location`
+    `${label}: the admin message says the restaurant has no location and the owner must set it`
   );
   expectEqual(state.updateCalls.length, 0, `${label}: nothing written`);
   expectEqual(state.auditInserts.length, 0, `${label}: no audit row`);
@@ -381,6 +382,19 @@ Deno.test('adminSetRestaurantPublished: re-publishing an already-published resta
   const response = await handler({
     context: ADMIN_CONTEXT,
     data: { restaurantId: 'restaurant-11', isPublished: true },
+    request: fakeRequest(),
+  });
+
+  expectEqual(response.status, 200, 'status');
+  expectEqual(state.restaurant?.isPublished, true, 'still published');
+});
+
+Deno.test('adminSetRestaurantPublished: a published row at 0,0 that is simply re-published is not newly blocked', async () => {
+  const state = installMocks({ id: 'restaurant-12', name: 'Zero', isPublished: true, latitude: 0, longitude: 0 });
+
+  const response = await handler({
+    context: ADMIN_CONTEXT,
+    data: { restaurantId: 'restaurant-12', isPublished: true },
     request: fakeRequest(),
   });
 

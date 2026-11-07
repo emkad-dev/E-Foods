@@ -33,7 +33,9 @@ import { toUserMessage } from '../../../../packages/observability/src/userMessag
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import {
   ADDRESS_LOOKUP_MESSAGES,
+  ADDRESS_SENT_NOTICE,
   DEVICE_POSITION_MESSAGES,
+  OSM_ATTRIBUTION,
   addressMatchConfirmCopy,
   devicePositionConfirmCopy,
   formatCoordinate,
@@ -275,17 +277,20 @@ export default function StoreDetailsScreen() {
       return;
     }
 
-    setLocating('device');
     setLocationProblem(null);
 
-    try {
-      // The in-app disclosure comes BEFORE the operating system permission
-      // prompt, so the partner knows what it is for when it appears.
-      const agreed = await confirm(locationDisclosureCopy);
-      if (!agreed) {
-        return;
-      }
+    // The in-app disclosure comes BEFORE the operating system permission
+    // prompt, so the partner knows what it is for when it appears. The buttons
+    // are only held busy once it has been accepted: while the dialog is open
+    // nothing is working, and declining must leave them as they were.
+    const agreed = await confirm(locationDisclosureCopy);
+    if (!agreed) {
+      return;
+    }
 
+    setLocating('device');
+
+    try {
       const outcome = await getDevicePosition();
 
       if (outcome.kind !== 'found') {
@@ -330,7 +335,7 @@ export default function StoreDetailsScreen() {
       return;
     }
 
-    const nextErrors = validateStoreSetup(draft);
+    const nextErrors = validateStoreSetup(draft, restaurant);
     setFieldErrors(nextErrors);
 
     if (hasStoreSetupErrors(nextErrors)) {
@@ -631,6 +636,8 @@ export default function StoreDetailsScreen() {
           <Text style={styles.buttonCaption}>
             Uses the address you typed above. You confirm the match before anything is filled in.
           </Text>
+          <Text style={styles.buttonCaption}>{ADDRESS_SENT_NOTICE}</Text>
+          <Text style={styles.buttonCaption}>{OSM_ATTRIBUTION}</Text>
           <TouchableOpacity
             style={[styles.secondaryButton, locating ? styles.controlDisabled : null]}
             onPress={handleUseCurrentLocation}

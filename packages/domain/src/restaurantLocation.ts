@@ -11,6 +11,10 @@ export const RESTAURANT_LOCATION_REQUIRED_MESSAGE =
   "Set this restaurant's location before it can be published. Open Store details, choose Map location, and use " +
   'Find from address or Use my current location.';
 
+/** The wording for an admin, who cannot set the pin from the admin screen: the owner has to. */
+export const ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE =
+  'This restaurant has no location yet, so it cannot be published. The owner must set it in Store details in the partner app.';
+
 /**
  * A coordinate counts as set only when it is a real, finite number. Strings are
  * NOT coerced: the column is DOUBLE PRECISION, so a string here means something
@@ -54,6 +58,10 @@ export type RestaurantLocationState = {
  *   1. the transition into published without a usable location, and
  *   2. taking the location away from a published restaurant that has one.
  *
+ * A write that puts an unusable non-null coordinate (0,0, out of range) on a
+ * published row is refused when it CHANGES what the row holds, so an older
+ * installed app cannot write a bad pin; an unchanged bad value still saves.
+ *
  * A restaurant that is ALREADY published without coordinates is deliberately let
  * through: those rows pre-date this rule, hiding them is an operator decision,
  * and refusing every unrelated save on them (opening hours, fees) would strand
@@ -69,6 +77,11 @@ export const isPublishBlockedByLocation = (
 
   if (isUsableCoordinatePair(next.latitude, next.longitude)) {
     return false;
+  }
+
+  const sendsCoordinate = next.latitude != null || next.longitude != null;
+  if (sendsCoordinate && (next.latitude !== current?.latitude || next.longitude !== current?.longitude)) {
+    return true;
   }
 
   const wasPublished = current?.isPublished === true;

@@ -73,7 +73,8 @@ Customer requests: `INTERNET`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`,
 `POST_NOTIFICATIONS`, `VIBRATE`, `WAKE_LOCK`, `ACCESS_NETWORK_STATE`,
 `RECEIVE_BOOT_COMPLETED`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`.
 
-Partner requests the same minus both location permissions, plus
+Partner requests the same two location permissions (foreground only, for
+setting the restaurant's map pin; background location is blocked), plus
 `MODIFY_AUDIO_SETTINGS`, `FOREGROUND_SERVICE` and
 `FOREGROUND_SERVICE_MEDIA_PLAYBACK` — the kitchen order alarm.
 
@@ -232,8 +233,9 @@ files, browsing history, installed apps.
 
 ### Partner
 
-Everything in the customer table **except** the two location rows and
-"Purchase history", plus:
+Everything in the customer table **except** "Purchase history", plus (the two
+location rows stay, as optional / App functionality: Store details can read one
+foreground position to set the restaurant's map pin):
 
 | Category | Type | Purpose | Optional? |
 |---|---|---|---|

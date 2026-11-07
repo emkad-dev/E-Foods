@@ -6,6 +6,7 @@ import { test } from 'node:test';
 
 import { isSafeServerMessage } from '../../observability/src/userMessage.ts';
 import {
+  ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE,
   RESTAURANT_LOCATION_REQUIRED_MESSAGE,
   isPublishBlockedByLocation,
   isUsableCoordinatePair,
@@ -104,4 +105,26 @@ test('the message tells the owner what to do', () => {
 
 test('the message survives the 4xx screen, so partners and admins read it instead of a generic fallback', () => {
   assert.equal(isSafeServerMessage(RESTAURANT_LOCATION_REQUIRED_MESSAGE), true);
+});
+
+test('a published row cannot be given a NEW unusable coordinate, but an unchanged one still saves', () => {
+  const zero = { latitude: 0, longitude: 0 };
+  // Legacy published row with nothing: an older app writing 0,0 changes it.
+  assert.equal(isPublishBlockedByLocation({ isPublished: true, ...UNLOCATED }, { isPublished: true, ...zero }), true);
+  // Out of range on a located row.
+  assert.equal(
+    isPublishBlockedByLocation({ isPublished: true, ...LOCATED }, { isPublished: true, latitude: 95, longitude: 3.4 }),
+    true
+  );
+  // Legacy published row already at 0,0 saving unrelated changes unchanged.
+  assert.equal(isPublishBlockedByLocation({ isPublished: true, ...zero }, { isPublished: true, ...zero }), false);
+  // Hidden rows may hold anything.
+  assert.equal(isPublishBlockedByLocation({ isPublished: false, ...UNLOCATED }, { isPublished: false, ...zero }), false);
+});
+
+test('the admin wording is its own, says the owner must act, and passes the client-safe screen', () => {
+  assert.notEqual(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE, RESTAURANT_LOCATION_REQUIRED_MESSAGE);
+  assert.match(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE, /no location/);
+  assert.match(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE, /owner must set it in Store details/);
+  assert.equal(isSafeServerMessage(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE), true);
 });

@@ -24,9 +24,10 @@ import { fail } from './rpc/respond.ts';
  */
 export const assertRestaurantLocationAllowsPublish = (
   current: RestaurantLocationState | null | undefined,
-  next: RestaurantLocationState
+  next: RestaurantLocationState,
+  message: string = RESTAURANT_LOCATION_REQUIRED_MESSAGE
 ): void => {
   if (isPublishBlockedByLocation(current, next)) {
-    fail(412, RESTAURANT_LOCATION_REQUIRED_MESSAGE);
+    fail(412, message);
   }
 };

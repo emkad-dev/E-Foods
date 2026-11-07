@@ -36,7 +36,7 @@ export type AddressLookupOutcome =
   | { kind: 'timeout' }
   | { kind: 'unavailable' };
 
-export type DevicePositionFailure = 'permission-denied' | 'timeout' | 'unavailable' | 'unsupported';
+export type DevicePositionFailure = 'permission-denied' | 'services-off' | 'timeout' | 'unavailable' | 'unsupported';
 
 export type DevicePositionOutcome =
   | { kind: 'found'; position: DevicePosition }
@@ -50,10 +50,25 @@ export const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search'
  * browsers refuse to let a page set User-Agent and send the page's own origin as
  * Referer instead, which identifies the app just as well.
  */
-export const NOMINATIM_USER_AGENT = 'FEASTY-Partner/1.0 (support@feasty.com.ng)';
+export const NOMINATIM_USER_AGENT = 'FEASTY-Partner/1.0 (https://feasty.com.ng)';
+
+/**
+ * OpenStreetMap's data licence asks for visible credit, and the partner should
+ * know a third party receives the address they typed. Shown beside the button and
+ * again in the confirmation.
+ */
+export const OSM_ATTRIBUTION = 'Address search by OpenStreetMap. © OpenStreetMap contributors';
+export const ADDRESS_SENT_NOTICE = 'The address you typed is sent to OpenStreetMap when you press Find from address.';
 
 /** A slow geocoder must not leave the button spinning for ever. */
 export const ADDRESS_LOOKUP_TIMEOUT_MS = 8000;
+
+/**
+ * Bound on a whole browser position request. The browser's own timeout only
+ * starts once the user has answered the permission prompt, so an ignored prompt
+ * would otherwise leave the button spinning for ever.
+ */
+export const WEB_POSITION_TOTAL_TIMEOUT_MS = 40000;
 
 /** The policy allows at most one request a second; leave a little margin. */
 export const ADDRESS_LOOKUP_MIN_INTERVAL_MS = 1100;
@@ -160,11 +175,39 @@ export const ADDRESS_LOOKUP_MESSAGES = {
 } as const;
 
 export const DEVICE_POSITION_MESSAGES: Record<DevicePositionFailure, string> = {
+  'services-off': 'Location is turned off on this device. Turn it on in your settings, then try again.',
   'permission-denied':
     'Location access is blocked. Allow it in your device or browser settings, or use Find from address instead.',
   timeout: 'Finding your position took too long. Move somewhere with a clearer signal and try again.',
   unavailable: 'We could not read your position right now. Try again, or use Find from address instead.',
   unsupported: 'This device or browser cannot share its position. Use Find from address instead.',
+};
+
+/**
+ * How a finished request maps onto an outcome, kept apart from `fetch` so the
+ * mapping can be tested. A non-2xx (429 rate limit, 5xx) is the service not
+ * answering usefully; a parsed body with no usable entry is simply no result.
+ */
+export const outcomeFromResponse = (ok: boolean, payload: unknown): AddressLookupOutcome => {
+  if (!ok) {
+    return { kind: 'unavailable' };
+  }
+
+  const match = parseGeocodeResults(payload);
+  return match ? { kind: 'found', match } : { kind: 'no-result' };
+};
+
+/**
+ * `aborted` is whether our own timeout fired. fetch rejects with a TypeError for a
+ * transport failure (no network, DNS, blocked); anything else, such as a
+ * malformed body, is the service misbehaving.
+ */
+export const outcomeFromLookupError = (error: unknown, aborted: boolean): AddressLookupOutcome => {
+  if (aborted) {
+    return { kind: 'timeout' };
+  }
+
+  return error instanceof TypeError ? { kind: 'offline' } : { kind: 'unavailable' };
 };
 
 export const lookupFailureMessage = (kind: Exclude<AddressLookupOutcome['kind'], 'found'>): string => {
@@ -201,6 +244,7 @@ export const addressMatchConfirmCopy = (match: AddressMatch): ConfirmCopy => ({
     `Best match: ${match.placeName}`,
     `Pin: ${coordinatePairLabel(match.latitude, match.longitude)}`,
     APPROXIMATE_PIN_WARNING,
+    OSM_ATTRIBUTION,
   ],
   confirmLabel: 'Use this pin',
   cancelLabel: 'Not this place',

@@ -217,3 +217,22 @@ Deno.test('partner save: hiding a published store is never blocked', async () =>
   expectEqual(response.status, 200, 'status');
   expectEqual(state.upserts[0]?.isPublished, false, 'hidden');
 });
+
+Deno.test('partner save: an older app writing 0,0 onto a published store with no pin is refused', async () => {
+  const state = installMocks(stored({ isPublished: true }));
+  await expectRejected({ isPublished: true, latitude: 0, longitude: 0 }, 'new 0,0 on published', state);
+});
+
+Deno.test('partner save: an older app writing an out-of-range pin onto a located published store is refused', async () => {
+  const state = installMocks(stored({ isPublished: true, ...LAGOS }));
+  await expectRejected({ isPublished: true, latitude: 123, longitude: 3.4 }, 'new out-of-range on published', state);
+});
+
+Deno.test('partner save: a published store already at 0,0 still saves unrelated changes unchanged', async () => {
+  const state = installMocks(stored({ isPublished: true, latitude: 0, longitude: 0 }));
+
+  const response = await save({ name: 'Zero Kitchen', isPublished: true, latitude: 0, longitude: 0 });
+
+  expectEqual(response.status, 200, 'status');
+  expectEqual(state.upserts.length, 1, 'saved');
+});

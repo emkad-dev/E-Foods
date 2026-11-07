@@ -122,7 +122,10 @@ before submitting, but there's no ambiguity in the source doc for partner.
 ## 6. Data safety
 
 Import `docs/play/data-safety-partner.csv` directly (Play Console → App content
-→ Data safety → Import from CSV). Do not hand-fill the questionnaire — the CSV
+→ Data safety → Import from CSV). Import the committed CSV; do not regenerate it
+with `fill-data-safety.mjs`, because the script would add two purposes
+(`PSL_ADDRESS` fraud prevention and `PSL_OTHER_PERSONAL` account management) that
+the committed CSV deliberately leaves blank. Do not hand-fill the questionnaire — the CSV
 was built by taking `docs/play/data-safety-customer.csv` (the already-imported,
 working customer CSV) and editing exactly the rows that differ for partner,
 row-by-row, against the same blank Play export template.
@@ -192,8 +195,9 @@ original script later, it's worth diffing its output against this CSV.
   activity/user-generated content)
 - `grep -c 'ONLY_SHARED,true'` → **0**, confirming "no data shared with third
   parties" across the whole file
-- `diff` against the customer CSV touches exactly 34 lines (68 diff lines,
-  i.e. 34 changed × 2) — nothing outside the intended edits moved
+- `diff` against the customer CSV touches exactly 25 lines (50 diff lines,
+  i.e. 25 changed × 2) — it was 34 before the location rows were added, which
+  now match the customer's — nothing outside the intended edits moved
 
 ---
 
