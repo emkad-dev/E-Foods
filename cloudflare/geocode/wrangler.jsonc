@@ -1,0 +1,24 @@
+{
+  "name": "feasty-geocode",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "routes": [{ "pattern": "geo.feasty.com.ng", "custom_domain": true }],
+  "vars": {
+    // photon (default, public komoot instance, no key) | locationiq | off.
+    // Changing this is a config deploy, never an app update.
+    "PROVIDER": "photon",
+    // minLon,minLat,maxLon,maxLat. Badagry to Ibadan; widen as restaurants join.
+    "SERVICE_BBOX": "2.6,6.2,4.4,7.9"
+  },
+  // Per-IP limit. `period` may only be 10 or 60 seconds. The namespace_id is
+  // an arbitrary integer that is unique within the account.
+  "ratelimits": [
+    {
+      "name": "RATE_LIMITER",
+      "namespace_id": "4101",
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ]
+  // Secret (set once with `wrangler secret put`, only needed for locationiq):
+  // LOCATIONIQ_KEY
+}

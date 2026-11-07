@@ -104,6 +104,28 @@ jobs:
           wranglerVersion: '4.116.0'
           command: deployments status --name feasty-edge-cache
 
+      - name: Deploy Cloudflare Worker (feasty-geocode)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          # wrangler-action defaults to wrangler 3.90.0, which has no global
+          # --cwd flag and needs --experimental-json-config to read the
+          # wrangler.jsonc files these Workers use. Both are standard in v4.
+          wranglerVersion: '4.116.0'
+          command: deploy --cwd cloudflare/geocode
+
+      - name: Report Cloudflare Worker deployment (geocode)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 04c8ec7606adc0e0b391c2914fc2e429
+          # wrangler-action defaults to wrangler 3.90.0, which has no global
+          # --cwd flag and needs --experimental-json-config to read the
+          # wrangler.jsonc files these Workers use. Both are standard in v4.
+          wranglerVersion: '4.116.0'
+          command: deployments status --name feasty-geocode
+
       - name: Web deploys
         run: echo "Cloudflare Pages handles admin, partner, customer, and public web deploys from GitHub."
 
