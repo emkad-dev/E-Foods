@@ -7,8 +7,11 @@
 // next auth event with a valid token can be about an hour away. So a rider or
 // partner stayed on the login screen after the network was back.
 //
-// On web, auth-js's own visibility listener already emits an event on refocus.
-// That event is noted here, so a refocus still reconciles only once there.
+// On web, auth-js has its own visibility listener, on `window`, while React Native
+// Web's AppState listens on `document`, and their order is not something to rely
+// on. An event that arrives during the check is noted here and suppresses this
+// reconcile, but two reconciles can still run. That happens in the offline state
+// only, and it is harmless: they run in order and both load the same profile.
 //
 // Everything is decided here and the three AuthContexts only wire it to AppState
 // and their reconcile queue; react-native stays out of this file so node can test it.

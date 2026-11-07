@@ -3,7 +3,8 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bestEffortWithin, hasStoredSession, signOutThisDevice } from './localSignOut.ts';
+import { createClient } from '@supabase/supabase-js';
+import { bestEffortWithin, hasStoredSession, isReconcileStillValid, signOutThisDevice } from './localSignOut.ts';
 
 const KEY = 'sb-abcdefgh-auth-token';
 const OLD_SESSION = JSON.stringify({ access_token: 'old-token', refresh_token: 'r' });
@@ -222,6 +223,282 @@ test('a realtime failure can neither throw nor delay the sign-out', async () => 
     assert.equal(await signOutThisDevice(supabase), 'server');
     assert.equal(store.has(KEY), false);
   }
+});
+
+// A settled refresh has already written its session back (`_callRefreshToken`
+// saves, notifies, then resolves the deferred), which is what these fakes model.
+const refreshedSession = (accessToken: string) => ({ data: { access_token: accessToken }, error: null });
+const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+const refreshInFlight = () => {
+  let resolve!: (value: unknown) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
+test('a refresh that writes the session back after the removal is swept and revoked', async () => {
+  const client = fakeClient(async () => ({ data: null, error: null }));
+  const refresh = refreshInFlight();
+  const realtime: unknown[] = [];
+  client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+  client.supabase.realtime = { setAuth: async () => void realtime.push('setAuth') };
+
+  await signOutThisDevice(client.supabase);
+  assert.equal(client.store.has(KEY), false);
+  realtime.length = 0;
+
+  const rewritten = JSON.stringify({ access_token: 'refreshed-token', refresh_token: 'r3' });
+  client.store.set(KEY, rewritten);
+  client.store.set(`${KEY}-user`, '{}');
+  refresh.resolve(refreshedSession('refreshed-token'));
+  await settle();
+
+  assert.equal(client.store.has(KEY), false);
+  assert.equal(client.store.has(`${KEY}-user`), false);
+  assert.deepEqual(client.adminCalls, [
+    ['old-token', 'local'],
+    ['refreshed-token', 'local'],
+  ]);
+  // TOKEN_REFRESHED pinned the swept token on the socket again.
+  assert.deepEqual(realtime, ['setAuth']);
+});
+
+test('the sign-out does not wait for a refresh still in flight', async () => {
+  const client = fakeClient(async () => ({ data: null, error: null }));
+  client.supabase.auth.refreshingDeferred = { promise: new Promise(() => undefined) };
+  assert.equal(await signOutThisDevice(client.supabase), 'server');
+  assert.equal(client.store.has(KEY), false);
+});
+
+test('a newer session stored meanwhile is left alone', async () => {
+  const client = fakeClient(async () => ({ data: null, error: null }));
+  const refresh = refreshInFlight();
+  client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+
+  await signOutThisDevice(client.supabase);
+  client.store.set(KEY, NEW_SESSION);
+  refresh.resolve(refreshedSession('refreshed-token'));
+  await settle();
+
+  assert.equal(client.store.get(KEY), NEW_SESSION);
+  assert.deepEqual(client.adminCalls, [['old-token', 'local']]);
+});
+
+test('a refresh that wrote nothing back leaves nothing to revoke', async () => {
+  const client = fakeClient(async () => ({ data: null, error: null }));
+  const refresh = refreshInFlight();
+  client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+
+  await signOutThisDevice(client.supabase);
+  refresh.resolve(refreshedSession('refreshed-token'));
+  await settle();
+
+  assert.deepEqual(client.adminCalls, [['old-token', 'local']]);
+});
+
+test('with no refresh in flight there is no second pass', async () => {
+  const client = fakeClient(async () => ({ data: null, error: null }));
+  client.supabase.auth.refreshingDeferred = null;
+  await signOutThisDevice(client.supabase);
+  client.store.set(KEY, NEW_SESSION);
+  await settle();
+  assert.equal(client.store.get(KEY), NEW_SESSION);
+  assert.equal(client.storageReads(), 1);
+});
+
+test('a refresh that rejects or answers with no session does nothing and throws nothing', async () => {
+  for (const finish of [
+    (refresh: ReturnType<typeof refreshInFlight>) => refresh.reject(new Error('boom')),
+    (refresh: ReturnType<typeof refreshInFlight>) => refresh.resolve({ data: null, error: new Error('refused') }),
+    (refresh: ReturnType<typeof refreshInFlight>) => refresh.resolve(null),
+  ]) {
+    const client = fakeClient(async () => ({ data: null, error: null }));
+    const refresh = refreshInFlight();
+    client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+
+    await signOutThisDevice(client.supabase);
+    client.store.set(KEY, NEW_SESSION);
+    finish(refresh);
+    await settle();
+
+    assert.equal(client.store.get(KEY), NEW_SESSION);
+    assert.deepEqual(client.adminCalls, [['old-token', 'local']]);
+  }
+});
+
+test('a failing revoke or storage during the sweep throws nothing', async () => {
+  const client = fakeClient(async (jwt) => {
+    if (jwt === 'refreshed-token') {
+      throw new TypeError('Failed to fetch');
+    }
+    return { data: null, error: null };
+  });
+  const refresh = refreshInFlight();
+  client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+
+  await signOutThisDevice(client.supabase);
+  client.store.set(KEY, JSON.stringify({ access_token: 'refreshed-token' }));
+  refresh.resolve(refreshedSession('refreshed-token'));
+  await settle();
+
+  assert.equal(client.store.has(KEY), false);
+});
+
+// Against the real auth-js rather than a fake: `refreshingDeferred` and `storage`
+// are protected fields, so an upgrade could rename them with no type error, and
+// the sweep would silently stop working. This fails if that happens.
+test('the real auth-js client: an in-flight refresh cannot undo the sign-out', async () => {
+  const expiredAt = Math.floor(Date.now() / 1000) - 60;
+  const key = 'sb-test-auth-token';
+  const store = new Map<string, string>([
+    [
+      key,
+      JSON.stringify({
+        access_token: 'expired-token',
+        refresh_token: 'refresh-1',
+        expires_at: expiredAt,
+        expires_in: 3600,
+        token_type: 'bearer',
+        user: { id: 'user-1' },
+      }),
+    ],
+  ]);
+  const logoutTokens: Array<string | null> = [];
+  let answerRefresh!: () => void;
+  const refreshAnswered = new Promise<void>((resolve) => {
+    answerRefresh = resolve;
+  });
+
+  const fetchStub = async (input: unknown, init?: { headers?: unknown }) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes('/logout')) {
+      logoutTokens.push(new Headers(init?.headers as never).get('Authorization'));
+      return new Response(null, { status: 204 });
+    }
+    if (url.includes('grant_type=refresh_token')) {
+      await refreshAnswered;
+      return new Response(
+        JSON.stringify({
+          access_token: 'refreshed-token',
+          refresh_token: 'refresh-2',
+          expires_in: 3600,
+          expires_at: expiredAt + 7200,
+          token_type: 'bearer',
+          user: { id: 'user-1' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  const client = createClient('https://test.supabase.co', 'anon-key', {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: true,
+      storageKey: key,
+      storage: {
+        getItem: async (k: string) => store.get(k) ?? null,
+        setItem: async (k: string, value: string) => void store.set(k, value),
+        removeItem: async (k: string) => void store.delete(k),
+      },
+    },
+    global: { fetch: fetchStub as typeof fetch },
+  });
+
+  await client.auth.initialize();
+  assert.ok('refreshingDeferred' in client.auth, 'auth-js no longer has refreshingDeferred');
+
+  // Starts the refresh, and it is stuck on the network.
+  const startedRefresh = client.auth.getSession();
+  await settle();
+  assert.ok((client.auth as any).refreshingDeferred, 'the refresh should be in flight');
+
+  await signOutThisDevice(client as never);
+  assert.equal(store.has(key), false);
+
+  // The network comes back: auth-js writes the session back and resolves.
+  answerRefresh();
+  await startedRefresh;
+  await settle();
+
+  assert.equal(store.has(key), false, 'the written-back session must be swept');
+  assert.deepEqual(logoutTokens, ['Bearer expired-token', 'Bearer refreshed-token']);
+  await client.realtime.disconnect();
+});
+
+const STORED_USER = (id: string, accessToken = 'token') =>
+  JSON.stringify({ access_token: accessToken, refresh_token: 'r', expires_at: 1, user: { id } });
+
+const reconcileClient = (stored: string | null) => {
+  const store = new Map<string, string>(stored ? [[KEY, stored]] : []);
+  return {
+    auth: {
+      storageKey: KEY,
+      storage: {
+        getItem: async (k: string) => store.get(k) ?? null,
+        removeItem: async (k: string) => void store.delete(k),
+      },
+    },
+  };
+};
+
+const SESSION = { access_token: 'token-before-refresh', user: { id: 'user-a' } };
+
+test('a token rotated mid-reconcile for the same user is still valid', async () => {
+  const supabase = reconcileClient(STORED_USER('user-a', 'token-after-refresh'));
+  assert.equal(await isReconcileStillValid(supabase, SESSION), true);
+});
+
+test('no stored session means the reconcile outlived a sign-out', async () => {
+  assert.equal(await isReconcileStillValid(reconcileClient(null), SESSION), false);
+});
+
+test('a session stored for a different user makes the reconcile stale', async () => {
+  assert.equal(await isReconcileStillValid(reconcileClient(STORED_USER('user-b')), SESSION), false);
+});
+
+test('a storage read failure counts as still valid, so a hiccup drops nobody', async () => {
+  const supabase = {
+    auth: {
+      storageKey: KEY,
+      storage: {
+        getItem: async () => {
+          throw new Error('storage broke');
+        },
+        removeItem: async () => undefined,
+      },
+    },
+  };
+  assert.equal(await isReconcileStillValid(supabase, SESSION), true);
+  assert.equal(await isReconcileStillValid(reconcileClient('not json'), SESSION), true);
+  assert.equal(await isReconcileStillValid({ auth: {} }, SESSION), true);
+});
+
+const jwtFor = (claims: Record<string, unknown>) =>
+  `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
+
+// auth-js strips `user` from the stored record when a userStorage is configured
+// (keeping it under `-user`), so the JWT is the one identity always stored.
+test('a stored session with no user falls back to the JWT subject', async () => {
+  const stored = (sub: string) => JSON.stringify({ access_token: jwtFor({ sub }), refresh_token: 'r' });
+  assert.equal(await isReconcileStillValid(reconcileClient(stored('user-a')), SESSION), true);
+  assert.equal(await isReconcileStillValid(reconcileClient(stored('user-b')), SESSION), false);
+});
+
+test('a stored session with no readable identity counts as still valid', async () => {
+  const stored = JSON.stringify({ access_token: 'not-a-jwt', refresh_token: 'r' });
+  assert.equal(await isReconcileStillValid(reconcileClient(stored), SESSION), true);
+});
+
+test('a reconcile with no session to compare is left alone', async () => {
+  assert.equal(await isReconcileStillValid(reconcileClient(null), null), true);
+  assert.equal(await isReconcileStillValid(reconcileClient(null), { user: null }), true);
 });
 
 test('hasStoredSession reads the stored session from the client own storage', async () => {

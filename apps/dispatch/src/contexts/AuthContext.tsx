@@ -31,6 +31,7 @@ import {
   bestEffortWithin,
   createDeviceClaims,
   createForegroundSessionCheck,
+  isReconcileStillValid,
   isTransientNetworkFailure,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
@@ -210,6 +211,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       if (!userDocument) {
+        // A reconcile that outlived a sign-out read this with no session behind it,
+        // so it is no verdict, and the sign-out below could hit a newer session.
+        // The reconcile's catch discards the throw.
+        if (!(await isReconcileStillValid(supabase, { user: authUser }))) {
+          throw new Error(MISSING_PROFILE_ERROR);
+        }
+
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
@@ -231,6 +239,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (accessState.kind === 'blocked') {
+        // As above: not a verdict if this reconcile outlived a sign-out.
+        if (!(await isReconcileStillValid(supabase, { user: authUser }))) {
+          throw new Error(accessState.message);
+        }
+
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
@@ -298,6 +311,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let disposed = false;
     let reconcileQueue: Promise<void> = Promise.resolve();
     const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
+      // No SIGNED_OUT follows a sign-out, so this can outlive it: a read returning
+      // afterwards must not put the rider back on screen. Stale means no state
+      // change at all. The check that remains in `finally` only undoes this
+      // reconcile's own spinner.
+      let isStale = false;
+      const reconcileIsStale = async () => {
+        isStale = !(await isReconcileStillValid(supabase, session));
+        return isStale;
+      };
+
+      if (await reconcileIsStale()) {
+        return;
+      }
+
       // An interactive signIn() owns the SIGNED_IN it triggers (it builds the
       // user, claims the single-device session and drives the spinner). Running
       // this reconcile at the same time would race that claim and self-evict on
@@ -314,7 +341,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // spinner -- on web, refocusing the tab re-fires SIGNED_IN for an
       // already-signed-in rider, and that must reconcile silently in the
       // background instead of flashing the spinner.
-      if (shouldShowSignInLoading({ event, hasUser: hasUserRef.current })) {
+      const raisedLoading = shouldShowSignInLoading({ event, hasUser: hasUserRef.current });
+
+      if (raisedLoading) {
         setLoading(true);
       }
 
@@ -349,13 +378,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         const nextUser = await buildNextUser(authUser);
 
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         if (!nextUser) {
           return;
         }
 
         const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
-        if (!sessionIsValid) {
+        if (!sessionIsValid || (await reconcileIsStale())) {
           return;
         }
 
@@ -365,12 +398,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await storeUserProfile(nextUser);
       } catch (nextError) {
         const authUser = session?.user ?? null;
+
+        // After a sign-out this failure means nothing: the read went out with no
+        // session behind it, and every branch below would change state over it.
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         if (isStaleSupabaseSessionError(nextError)) {
           await clearExpiredSession();
           return;
         }
 
         const cachedUser = authUser ? await getStoredUserProfile<UserDocument>() : null;
+
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         const hasUsableCachedProfile = Boolean(
           authUser &&
             cachedUser?.uid === authUser.id &&
@@ -422,7 +467,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setError(nextMessage);
         await clearStoredUserProfile();
       } finally {
-        setLoading(false);
+        if (!isStale || raisedLoading) {
+          setLoading(false);
+        }
       }
     };
 

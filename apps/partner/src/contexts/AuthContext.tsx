@@ -28,6 +28,7 @@ import {
   RELEASE_SESSION_TIMEOUT_MS,
   bestEffortWithin,
   createForegroundSessionCheck,
+  isReconcileStillValid,
   isTransientNetworkFailure,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
@@ -204,6 +205,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (accessState.kind === 'blocked') {
+        // A reconcile that outlived a sign-out read this with no session behind it,
+        // so it is no verdict, and the sign-out below could hit a newer session.
+        if (!(await isReconcileStillValid(supabase, { user: authUser }))) {
+          return null;
+        }
+
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
@@ -279,6 +286,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let disposed = false;
     let reconcileQueue: Promise<void> = Promise.resolve();
     const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
+      // No SIGNED_OUT follows a sign-out, so this can outlive it: a read returning
+      // afterwards must not put the partner back on screen. Stale means no state
+      // change at all. The check that remains in `finally` only undoes this
+      // reconcile's own spinner.
+      let isStale = false;
+      const reconcileIsStale = async () => {
+        isStale = !(await isReconcileStillValid(supabase, session));
+        return isStale;
+      };
+
+      if (await reconcileIsStale()) {
+        return;
+      }
+
       // An interactive signIn() owns the transition it triggers; step aside. Any
       // event carrying a session counts, not just SIGNED_IN, and a sign-out (null
       // session) must still get through.
@@ -291,7 +312,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // sign-in returns to the full-screen spinner — on web, refocusing the tab
       // re-fires SIGNED_IN for an already-signed-in partner, and that must
       // reconcile silently in the background instead of flashing the spinner.
-      if (shouldShowSignInLoading({ event, hasUser: hasUserRef.current })) {
+      const raisedLoading = shouldShowSignInLoading({ event, hasUser: hasUserRef.current });
+
+      if (raisedLoading) {
         setLoading(true);
       }
 
@@ -321,13 +344,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         const nextUser = await buildNextUser(authUser);
 
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         if (!nextUser) {
           return;
         }
 
         const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
-        if (!sessionIsValid) {
+        if (!sessionIsValid || (await reconcileIsStale())) {
           return;
         }
 
@@ -338,6 +365,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } catch (nextError) {
         const authUser = session?.user ?? null;
         const cachedUser = authUser ? await getStoredUserProfile<UserDocument>() : null;
+
+        // After a sign-out this failure means nothing: the read went out with no
+        // session behind it, and every branch below would change state over it.
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         const hasUsableCachedProfile = Boolean(
           authUser && cachedUser?.uid === authUser.id && cachedUser.role === 'restaurant'
         );
@@ -387,7 +421,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setError(nextMessage);
         await clearStoredUserProfile();
       } finally {
-        setLoading(false);
+        if (!isStale || raisedLoading) {
+          setLoading(false);
+        }
       }
     };
 

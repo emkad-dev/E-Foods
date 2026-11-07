@@ -40,6 +40,7 @@ import {
   BOOTSTRAP_READ_DEADLINE_MS,
   createDeviceClaims,
   createForegroundSessionCheck,
+  isReconcileStillValid,
   resolveSingleDeviceSessionDecision,
   shouldShowSignInLoading,
   type SignInAttempt,
@@ -242,6 +243,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const claimRole = await getUserRoleClaim(authUser);
 
       if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+        // A reconcile that outlived a sign-out must change nothing, and the
+        // sign-out below could hit a newer session.
+        if (!(await isReconcileStillValid(supabase, { user: authUser }))) {
+          return null;
+        }
+
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
@@ -249,8 +256,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setError(CUSTOMER_ACCESS_ERROR);
         return null;
       }
-
-      identifyAnalyticsUser(authUser.id);
 
       return {
         ...userData,
@@ -429,6 +434,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let disposed = false;
     let reconcileQueue: Promise<void> = Promise.resolve();
     const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
+      // No SIGNED_OUT follows a sign-out, so this can outlive it: a read returning
+      // afterwards must not put the customer back on screen. Stale means no state
+      // change at all. The check that remains in `finally` only undoes this
+      // reconcile's own spinner.
+      let isStale = false;
+      const reconcileIsStale = async () => {
+        isStale = !(await isReconcileStillValid(supabase, session));
+        return isStale;
+      };
+
+      if (await reconcileIsStale()) {
+        return;
+      }
+
       // An interactive signIn() owns the SIGNED_IN it triggers: it builds the
       // user, claims the single-device session and reconciles policy itself,
       // and drives the spinner. Doing that work again here would double its
@@ -462,9 +481,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // arrives, instead of chaining four serial round trips ahead of
           // first paint.
           const nextUser = await buildNextUser(authUser);
-          if (!nextUser) {
+          if ((await reconcileIsStale()) || !nextUser) {
             return;
           }
+          // After the check, or a stale reconcile would undo the sign-out's
+          // clearAnalyticsUser. signIn identifies the user itself.
+          identifyAnalyticsUser(authUser.id);
           setUser(nextUser);
           offlineWithoutProfileRef.current = false;
           // Reached the server this time: an earlier no-internet notice is stale.
@@ -474,6 +496,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
           void (async () => {
             try {
+              // Evicting or adopting a device id is state too.
+              if (await reconcileIsStale()) {
+                return;
+              }
               const sessionIsValid = await syncSingleDeviceSession(nextUser);
               if (!sessionIsValid) {
                 return;
@@ -516,6 +542,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       } catch (err) {
         const authUser = session?.user ?? null;
+
+        // After a sign-out this failure means nothing: the read went out with the
+        // anon key, and every branch below would change state over it.
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         if (isStaleSupabaseSessionError(err)) {
           await clearExpiredSession();
           return;
@@ -528,6 +561,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
 
         const cachedProfile = authUser ? await getStoredUserProfile<UserDocument>() : null;
+
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         const failureOutcome = resolveProfileLoadFailure({
           error: err,
           hasAuthUser: Boolean(authUser),
@@ -573,6 +611,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (authUser) {
           const fallbackCachedUser = await getStoredUserProfile<UserDocument>();
+
+          // This stand-in has no phone number, so storing it for a signed-out
+          // customer would send them to /complete-profile.
+          if (await reconcileIsStale()) {
+            return;
+          }
+
           const fallbackUser: UserDocument = {
             uid: authUser.id,
             email: authUser.email ?? fallbackCachedUser?.email ?? '',
@@ -601,7 +646,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(null);
         await clearStoredUserProfile();
       } finally {
-        setLoading(false);
+        if (!isStale || isInteractiveSignIn) {
+          setLoading(false);
+        }
       }
     };
 

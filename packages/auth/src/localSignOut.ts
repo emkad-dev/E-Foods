@@ -20,11 +20,17 @@
 // stored session ourselves whatever the answer. No lock and no refresh. A late
 // answer has nothing waiting on it, and the request can only ever name the old
 // session. If the server was not reached, or the token had already expired, the
-// server-side session simply expires on its own.
+// sign-out does not revoke on the server: only this device's copy is deleted, and
+// refresh tokens do not expire by default, so that server session stays usable by
+// anyone already holding a copy of its refresh token.
 //
 // COST: no SIGNED_OUT fires on this path. Every caller clears its own state
-// directly, and the realtime socket is handled below. Other tabs of the web apps
-// are not told; they find out on their next auth call.
+// directly, a reconcile already running is stopped by isReconcileStillValid, and
+// the realtime socket is handled below. Other tabs of the web apps are not told;
+// they find out on their next auth call.
+//
+// COST: not waiting on the lock means a refresh already running keeps going, and
+// its result would write the session back. See sweepRefreshWriteBack.
 //
 // The storage and key are read from the client's own GoTrueClient (`storage`,
 // `storageKey`) instead of re-deriving `sb-<project-ref>-auth-token` here, so
@@ -84,6 +90,58 @@ export const hasStoredSession = async (supabase: unknown): Promise<boolean> => {
     return Boolean(await store.storage.getItem(store.key));
   } catch {
     return false;
+  }
+};
+
+const readJwtSubject = (token: unknown): string | null => {
+  const payload = typeof token === 'string' ? token.split('.')[1] : null;
+  if (!payload) {
+    return null;
+  }
+
+  const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+  const { sub } = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))) as { sub?: unknown };
+  return typeof sub === 'string' && sub ? sub : null;
+};
+
+/**
+ * Whether a reconcile for `session` may still touch app state. No SIGNED_OUT
+ * follows a sign-out any more, so nothing queues behind a reconcile that is
+ * already running: without this, a profile read returning after the sign-out puts
+ * the user back on screen with no stored session.
+ *
+ * Reads storage directly, because the auth lock can be busy for as long as the
+ * device is offline. Compares user ids, never access tokens: a refresh rotates the
+ * token mid-reconcile, and that must not discard a good result.
+ *
+ * auth-js stores `user` in the main record unless a userStorage is configured (this
+ * repo configures none), in which case it lives under `-user`. The access token is
+ * always in the main record, so its `sub` covers that case without a second read.
+ *
+ * Only a stored session that is missing or names someone else is stale. Anything
+ * that cannot be read counts as valid, so a storage hiccup never drops a user.
+ */
+export const isReconcileStillValid = async (
+  supabase: unknown,
+  session: { user?: { id?: string } | null } | null | undefined
+): Promise<boolean> => {
+  const userId = session?.user?.id;
+  const store = readSessionStore(supabase);
+  if (!userId || !store) {
+    return true;
+  }
+
+  try {
+    const stored = await store.storage.getItem(store.key);
+    if (!stored) {
+      return false;
+    }
+
+    const parsed = JSON.parse(stored) as { user?: { id?: unknown } | null; access_token?: unknown };
+    const storedUserId = typeof parsed.user?.id === 'string' ? parsed.user.id : readJwtSubject(parsed.access_token);
+    return storedUserId === null || storedUserId === userId;
+  } catch {
+    return true;
   }
 };
 
@@ -154,10 +212,46 @@ const releaseRealtimeToken = (supabase: SignOutClient) => {
 };
 
 /**
+ * Undoes a refresh that outlives the sign-out. The usual case: expired token,
+ * offline, and the steps before the sign-out start or join a refresh and are
+ * abandoned. If the network returns inside the retry window, auth-js writes the
+ * session back and emits TOKEN_REFRESHED, signing the user in again with a live
+ * server session, which matters on a shared phone.
+ *
+ * `refreshingDeferred` is `protected` in auth-js's types, like `storage`; the
+ * localSignOut test runs this against the real client so a rename cannot go
+ * unnoticed. Its promise settles only after the write and the event, so whatever
+ * is stored by then is final for that refresh. The token comparison leaves a newer
+ * sign-in alone. Not awaited: this can take as long as the refresh does.
+ */
+const sweepRefreshWriteBack = (supabase: SignOutClient) => {
+  const inFlight = (supabase.auth as { refreshingDeferred?: { promise?: PromiseLike<unknown> } | null })
+    .refreshingDeferred?.promise;
+  if (!inFlight) {
+    return;
+  }
+
+  void Promise.resolve(inFlight)
+    .then(async (result) => {
+      const accessToken = (result as { data?: { access_token?: unknown } | null } | null)?.data?.access_token;
+      if (typeof accessToken !== 'string' || (await readStoredAccessToken(supabase)) !== accessToken) {
+        return;
+      }
+
+      await removeStoredSession(supabase);
+      // TOKEN_REFRESHED pinned this token on the socket again.
+      releaseRealtimeToken(supabase);
+      await supabase.auth.admin.signOut(accessToken, 'local');
+    })
+    .catch(() => undefined);
+};
+
+/**
  * Ends this device's session. Never throws and never leaves the user signed in.
  * 'server' when the server confirmed the session is over, 'local-only' when it
  * could not be asked or did not answer in time. The stored session is removed
- * either way, and only once, before this returns.
+ * either way before this returns, and again only if a refresh still running
+ * writes it back.
  */
 export const signOutThisDevice = async (
   supabase: SignOutClient,
@@ -171,7 +265,8 @@ export const signOutThisDevice = async (
     : undefined;
 
   await removeStoredSession(supabase);
+  sweepRefreshWriteBack(supabase);
   releaseRealtimeToken(supabase);
 
-  return result && (!result.error || isSessionAlreadyGone(result.error)) ? 'server' : 'local-only';
+  return result &&(!result.error || isSessionAlreadyGone(result.error)) ? 'server' : 'local-only';
 };
