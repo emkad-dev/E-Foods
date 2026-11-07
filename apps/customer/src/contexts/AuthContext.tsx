@@ -4,6 +4,7 @@ import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supaba
 import { router } from 'expo-router';
 import { resolveSignupPhoneNumber } from '../domain/authFormValidation';
 import type { UserDocument } from '../domain/entities';
+import { flushPendingPolicyAcceptance } from '../domain/pendingPolicyAcceptance';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
 import {
   ACCOUNT_ALREADY_REGISTERED_MESSAGE,
@@ -26,10 +27,13 @@ import {
   clearStoredUserProfile,
   clearStoredSessionId,
   clearStoredPolicyAccepted,
+  clearPendingPolicyAcceptance,
   createSessionId,
+  getPendingPolicyAcceptanceUserId,
   getStoredUserProfile,
   getStoredPolicyAccepted,
   getStoredSessionId,
+  storePendingPolicyAcceptance,
   storePolicyAccepted,
   storeSessionId,
   storeUserProfile,
@@ -268,7 +272,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     [clearLocalUserState]
   );
 
-  const refreshPolicyAcceptance = useCallback(async ({ silent = false, bounded = false }: { silent?: boolean; bounded?: boolean } = {}) => {
+  const refreshPolicyAcceptance = useCallback(async (
+    { userId, silent = false, bounded = false }: { userId: string; silent?: boolean; bounded?: boolean }
+  ) => {
+    // An answer about one account must not land on the next: a read can outlast a
+    // sign-out, and it would restore the flag that sign-out cleared.
+    const stillCurrent = () => isReconcileStillValid(supabase, { user: { id: userId } });
+
     // Silent refresh is used during the background reconcile after a cached
     // first paint: it must not toggle `policyLoading`, which would re-block the
     // UI on the loading spinner we just cleared.
@@ -284,6 +294,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const status = await getCustomerPolicyAcceptance(
         bounded ? { deadlineMs: BOOTSTRAP_READ_DEADLINE_MS } : undefined
       );
+      if (!(await stillCurrent())) {
+        return false;
+      }
       setPolicyAccepted(status.accepted);
       void storePolicyAccepted(status.accepted);
       return status.accepted;
@@ -294,7 +307,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Preserve the locally accepted state when the refresh itself is
       // unavailable. That keeps a freshly signed-up user from being forced
       // back through the policy gate because a network call failed.
-      if (!silent) {
+      if (!silent && (await stillCurrent())) {
         setPolicyAccepted(cachedPolicyAccepted);
       }
 
@@ -306,15 +319,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  const flushPendingCustomerPolicyAcceptance = useCallback(async () => {
-    const pendingPolicyAccepted = await getStoredPolicyAccepted();
-
-    if (!pendingPolicyAccepted) {
-      return;
-    }
-
+  const flushPendingCustomerPolicyAcceptance = useCallback(async (userId: string) => {
     try {
-      await recordCustomerPolicyAcceptance('customer_signup');
+      await flushPendingPolicyAcceptance({
+        userId,
+        readPendingUserId: getPendingPolicyAcceptanceUserId,
+        isStillCurrent: () => isReconcileStillValid(supabase, { user: { id: userId } }),
+        record: () => recordCustomerPolicyAcceptance('customer_signup'),
+        clearPending: clearPendingPolicyAcceptance,
+      });
     } catch (policyError) {
       console.warn('Unable to flush pending customer policy acceptance:', policyError);
     }
@@ -504,8 +517,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               if (!sessionIsValid) {
                 return;
               }
-              await flushPendingCustomerPolicyAcceptance();
-              await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
+              await flushPendingCustomerPolicyAcceptance(nextUser.uid);
+              await refreshPolicyAcceptance({ userId: nextUser.uid, silent: !isInteractiveSignIn });
             } catch (reconcileError) {
               if (!isTransientNetworkFailure(reconcileError)) {
                 reportAuthFailure('customer.authStateChange.reconcile', reconcileError);
@@ -717,7 +730,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // would only trip Supabase's 60s cooldown. No redirect is passed:
       // confirmation is OTP-only, so the email carries a 6-digit code the
       // customer types on /verify-email and there is no link to steer.
-      const { alreadyRegistered } = await createUserWithEmail(supabase, email, password, {
+      const { user: createdUser, alreadyRegistered } = await createUserWithEmail(supabase, email, password, {
         display_name: userData?.displayName,
         phone: userData?.phoneNumber,
         role: DEFAULT_APP_ROLE,
@@ -737,6 +750,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const policyAcceptance = userData.policyAcceptance;
       setPolicyAccepted(true);
       void storePolicyAccepted(true);
+      void storePendingPolicyAcceptance(createdUser.id);
 
       trackAnalyticsEvent('customer_sign_up_completed', {
         auth_method: 'email',
@@ -829,12 +843,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         void storePolicyAccepted(bootstrap.policyAccepted);
         // Any acceptance captured locally during signup still needs flushing,
         // but it must not block entering the app.
-        void flushPendingCustomerPolicyAcceptance();
+        void flushPendingCustomerPolicyAcceptance(authUser.id);
       } else {
         // Same as the bootstrap branch: the flush is a write that must not block
         // entering the app (and must not get a deadline), and the read is bounded.
-        void flushPendingCustomerPolicyAcceptance();
-        await refreshPolicyAcceptance({ bounded: true });
+        void flushPendingCustomerPolicyAcceptance(authUser.id);
+        await refreshPolicyAcceptance({ userId: authUser.id, bounded: true });
       }
     } catch (err: any) {
       reportAuthFailure('customer.signIn', err);
@@ -1011,8 +1025,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       await recordCustomerPolicyAcceptance(source);
-      setPolicyAccepted(true);
-      void storePolicyAccepted(true);
+      // The write can outlast a sign-out, and this flag belongs to whoever accepted.
+      if (await isReconcileStillValid(supabase, { user: user ? { id: user.uid } : null })) {
+        setPolicyAccepted(true);
+        void storePolicyAccepted(true);
+      }
       trackAnalyticsEvent('customer_policy_accepted', {
         source,
       });
