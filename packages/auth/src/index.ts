@@ -4,6 +4,7 @@ export * from './boundedFetch';
 export * from './claims';
 export * from './client';
 export * from './deviceClaim';
+export * from './foregroundSessionCheck';
 export * from './gatewayAuth';
 export * from './localSignOut';
 export * from './otpCooldown';

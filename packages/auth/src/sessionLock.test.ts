@@ -6,7 +6,16 @@ import assert from 'node:assert/strict';
 
 import { NavigatorLockAcquireTimeoutError } from '@supabase/supabase-js';
 
-import { boundedNavigatorLock, withExecutionTimeout } from './sessionLock.ts';
+import { LOCK_EXECUTION_TIMEOUT_MS, boundedNavigatorLock, withExecutionTimeout } from './sessionLock.ts';
+
+// A refresh attempt can start just under 30s in and each fetch is capped at 15s.
+// A limit below that rejects auth-js's initializePromise, which is never reset, so
+// every later auth call throws until a reload.
+test('the execution limit outlasts the longest refresh auth-js can run inside the lock', () => {
+  const longestRefreshHoldMs = 30_000 + 15_000;
+  assert.equal(LOCK_EXECUTION_TIMEOUT_MS, 50_000);
+  assert.ok(LOCK_EXECUTION_TIMEOUT_MS > longestRefreshHoldMs);
+});
 
 /**
  * Minimal fake of the Web Locks API's `navigator.locks.request`, just

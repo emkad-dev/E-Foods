@@ -285,49 +285,50 @@ test('isNetworkRequestError detects common browser and React Native fetch failur
 // 'global' scope, which revokes every refresh token the account has -- so a
 // takeover eviction, a session expiry or the user's own sign-out on one phone
 // silently logged out every other device they were using.
-test('signOutUser signs out this device only', async () => {
-  const calls: unknown[] = [];
-  const supabase = {
-    auth: {
-      signOut: async (options?: unknown) => {
-        calls.push(options);
-        return { error: null };
-      },
-    },
-  } as any;
-
-  await signOutUser(supabase);
-
-  assert.deepEqual(calls, [{ scope: 'local' }]);
-});
-
-test('signOutUser does not throw when the server refuses: the device ends signed out anyway', async () => {
+const signOutClient = (adminSignOut: () => Promise<{ error: unknown }>) => {
+  const scopes: unknown[] = [];
   const removed: string[] = [];
   const auth: any = {
     storageKey: 'sb-abc-auth-token',
-    storage: { getItem: async () => null, removeItem: async (k: string) => void removed.push(k) },
-    signOut: async () => ({ error: new Error('boom') }),
+    storage: {
+      getItem: async () => JSON.stringify({ access_token: 'token' }),
+      removeItem: async (k: string) => void removed.push(k),
+    },
+    admin: {
+      signOut: (_jwt: string, scope: unknown) => {
+        scopes.push(scope);
+        return adminSignOut();
+      },
+    },
   };
+  return { supabase: { auth } as any, scopes, removed };
+};
 
-  await signOutUser({ auth } as any);
+test('signOutUser signs out this device only', async () => {
+  const { supabase, scopes } = signOutClient(async () => ({ error: null }));
+
+  await signOutUser(supabase);
+
+  assert.deepEqual(scopes, ['local']);
+});
+
+test('signOutUser does not throw when the server refuses: the device ends signed out anyway', async () => {
+  const { supabase, removed } = signOutClient(async () => ({ error: new Error('boom') }));
+
+  await signOutUser(supabase);
 
   assert.ok(removed.includes('sb-abc-auth-token'));
 });
 
 test('clearSupabaseSession clears this device only and swallows failures', async () => {
-  const calls: unknown[] = [];
-  const supabase = {
-    auth: {
-      signOut: async (options?: unknown) => {
-        calls.push(options);
-        throw new Error('offline');
-      },
-    },
-  } as any;
+  const { supabase, scopes, removed } = signOutClient(async () => {
+    throw new Error('offline');
+  });
 
   await clearSupabaseSession(supabase);
 
-  assert.deepEqual(calls, [{ scope: 'local' }]);
+  assert.deepEqual(scopes, ['local']);
+  assert.ok(removed.includes('sb-abc-auth-token'));
 });
 
 // supabase-js reports a dropped or stalled request as AuthRetryableFetchError

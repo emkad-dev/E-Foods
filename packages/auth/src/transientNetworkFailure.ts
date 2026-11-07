@@ -17,10 +17,10 @@ import { isNetworkRequestError } from './networkRequestError.ts';
 // (Hermes/Node/browsers) and by who wraps it: supabase-js rewraps it as an
 // AuthRetryableFetchError, PostgREST prefixes the error name ("AbortError: ...").
 //
-// Also the web lock's own execution bound (sessionLock.ts, 10 s): on an offline
-// cold start the session refresh holds the navigator lock past it, and the
-// resulting 'Supabase auth lock "..." did not resolve within 10000ms.' is the
-// same stalled network seen from a different layer.
+// Also the web lock's own execution bound (sessionLock.ts, 50 s): calls queued
+// inside one holder while offline can each wait out a refresh, and the resulting
+// 'Supabase auth lock "..." did not resolve within 50000ms.' is the same stalled
+// network seen from a different layer.
 const TIMEOUT_MESSAGE_PATTERNS = ['aborted', 'aborterror', 'timed out', 'timeout', 'did not resolve within'];
 
 const readString = (error: unknown, key: 'code' | 'message' | 'name') =>

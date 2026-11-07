@@ -39,9 +39,16 @@ import { NavigatorLockAcquireTimeoutError } from '@supabase/supabase-js';
  * `acquireTimeout + LOCK_EXECUTION_TIMEOUT_MS`, never forever, regardless of
  * what state a previous call left the lock in -- which is what turns "the
  * Submit button does nothing, forever, with zero error" into "it fails
- * within a bounded, short time with a real error the UI can show."
+ * within a bounded time with a real error the UI can show."
+ *
+ * The execution limit must outlast the longest legitimate hold, about 45s: a
+ * token refresh retries with backoff, an attempt can start just under 30s in,
+ * and each fetch is capped at 15s. It used to be 10s, which on a cold start with
+ * an expired token rejected auth-js's `initializePromise`. That promise is never
+ * reset, so every later getSession, signOut and onAuthStateChange startup threw
+ * until the page was reloaded.
  */
-export const LOCK_EXECUTION_TIMEOUT_MS = 10_000;
+export const LOCK_EXECUTION_TIMEOUT_MS = 50_000;
 
 /**
  * GoTrueClient is supposed to pass its own `lockAcquireTimeout` (library

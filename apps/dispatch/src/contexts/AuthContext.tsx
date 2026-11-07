@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
@@ -29,6 +30,7 @@ import {
   RELEASE_SESSION_TIMEOUT_MS,
   bestEffortWithin,
   createDeviceClaims,
+  createForegroundSessionCheck,
   isTransientNetworkFailure,
   resolveNullSessionOutcome,
   resolveProfileLoadFailure,
@@ -91,9 +93,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // browser re-fires SIGNED_IN on tab/app refocus.
   const hasUserRef = useRef(false);
 
+  // The same for the error, so the foreground check below reads the current one.
+  const errorRef = useRef<string | null>(null);
+
   useEffect(() => {
     hasUserRef.current = Boolean(user);
   }, [user]);
+
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
 
   // The interactive sign-in's device claim and its guard (packages/auth
   // deviceClaim.ts). The passive onAuthStateChange reconcile steps aside while
@@ -370,7 +379,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // A network failure while reloading the profile is not a sign-out: the
         // Supabase session is intact. Keep the saved profile on screen, or, with
         // none, say there is no internet WITHOUT clearing anything, so the next
-        // reconcile (network back, app foreground) can sign them straight in.
+        // reconcile can sign them straight in. On native only the foreground check
+        // below starts one soon: auth-js does not notice the network coming back.
         const failureOutcome = resolveProfileLoadFailure({
           error: nextError,
           hasAuthUser: Boolean(authUser),
@@ -416,19 +426,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+    const queueReconcile = (event: AuthChangeEvent, session: Session | null) => {
       setTimeout(() => {
         reconcileQueue = reconcileQueue
           .then(() => (disposed ? undefined : reconcileAuthState(event, session)))
           .catch((error) => console.error('Auth state reconcile failed:', error));
       }, 0);
+    };
+
+    // After a network failure, returning to the foreground retries the reconcile;
+    // see foregroundSessionCheck.ts. Labelled TOKEN_REFRESHED because that is the
+    // same session being re-checked: a background pass with no spinner.
+    const foregroundCheck = createForegroundSessionCheck<Session>({
+      initialState: AppState.currentState,
+      getSession: () => supabase.auth.getSession(),
+      isOffline: () => errorRef.current === NO_INTERNET_ERROR,
+      isSignInInProgress: () => deviceClaims.isGuardHeld(),
+      queueReconcile: (session) => queueReconcile('TOKEN_REFRESHED', session),
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      foregroundCheck.noteAuthEvent();
+      queueReconcile(event, session);
+    });
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      void foregroundCheck.onAppStateChange(nextState);
     });
 
     return () => {
       disposed = true;
       subscription.unsubscribe();
+      appStateSubscription.remove();
     };
   }, [buildNextUser, clearExpiredSession, clearLocalUserState, deviceClaims, syncSingleDeviceSession]);
 

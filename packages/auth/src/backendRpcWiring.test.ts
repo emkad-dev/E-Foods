@@ -26,7 +26,9 @@ import { test } from 'node:test';
 import { FunctionsFetchError } from '@supabase/supabase-js';
 
 import { createSentryInitializer, resetSentryStateForTest } from '../../observability/src/sentry.ts';
+import { toUserMessage } from '../../observability/src/userMessage.ts';
 import { callBackendRpc, isBackendRpcError } from './backendRpc.ts';
+import { SESSION_EXPIRED_ERROR_MESSAGE } from './session.ts';
 
 const ENV = {
   backendRpcUrl: 'https://example.supabase.co/functions/v1/app-rpc',
@@ -63,6 +65,127 @@ const jsonResponse = (status: number, body: unknown) =>
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+
+// The session gate at the top of the call. supabase-js reports a dropped or
+// stalled refresh as AuthRetryableFetchError (status 0) and a dead refresh token
+// as AuthApiError.
+const retryableRefreshError = () =>
+  Object.assign(new Error('Network request failed'), { name: 'AuthRetryableFetchError', status: 0 });
+const revokedRefreshError = () =>
+  Object.assign(new Error('Invalid Refresh Token: Refresh Token Not Found'), { name: 'AuthApiError', status: 400 });
+
+const sessionGateClient = ({
+  getSessionError,
+  refreshError,
+}: {
+  getSessionError: unknown;
+  refreshError: unknown;
+}) => {
+  const counts = { refreshSession: 0, removed: 0 };
+  const supabase = {
+    auth: {
+      storageKey: 'sb-abc-auth-token',
+      storage: {
+        getItem: async () => null,
+        removeItem: async () => {
+          counts.removed += 1;
+        },
+      },
+      getSession: async () => ({ data: { session: null }, error: getSessionError }),
+      refreshSession: async () => {
+        counts.refreshSession += 1;
+        return { data: { session: null, user: null }, error: refreshError };
+      },
+    },
+  } as never;
+  return { supabase, counts };
+};
+
+const failureOf = (supabase: never) =>
+  callBackendRpc(supabase, ENV, 'customerSubmitOrderRating', {})
+    .then(() => null)
+    .catch((error: unknown) => error as Error);
+
+test('offline with an expired token is a network error, and does not wait out a refresh', async () => {
+  const { supabase, counts } = sessionGateClient({
+    getSessionError: retryableRefreshError(),
+    refreshError: retryableRefreshError(),
+  });
+
+  const failure = await failureOf(supabase);
+
+  assert.equal(failure?.name, 'NetworkError');
+  assert.notEqual(failure?.message, SESSION_EXPIRED_ERROR_MESSAGE);
+  assert.notEqual(toUserMessage(failure), SESSION_EXPIRED_ERROR_MESSAGE);
+  assert.equal(counts.refreshSession, 0);
+  assert.equal(counts.removed, 0);
+});
+
+test('a transient failure from the refresh itself is a network error, sent once', async () => {
+  const { supabase, counts } = sessionGateClient({
+    getSessionError: null,
+    refreshError: retryableRefreshError(),
+  });
+
+  const failure = await failureOf(supabase);
+
+  assert.equal(failure?.name, 'NetworkError');
+  assert.equal(counts.refreshSession, 1);
+  assert.equal(counts.removed, 0);
+});
+
+test('a refresh that rejects outright with a network failure is a network error too', async () => {
+  const counts = { refreshSession: 0 };
+  const supabase = {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      refreshSession: async () => {
+        counts.refreshSession += 1;
+        throw new TypeError('Failed to fetch');
+      },
+    },
+  } as never;
+
+  const failure = await failureOf(supabase);
+
+  assert.equal(failure?.name, 'NetworkError');
+  assert.equal(counts.refreshSession, 1);
+});
+
+test('a revoked refresh token is still session expired, and the session is cleared', async () => {
+  const { supabase, counts } = sessionGateClient({
+    getSessionError: null,
+    refreshError: revokedRefreshError(),
+  });
+
+  const failure = await failureOf(supabase);
+
+  assert.equal(failure?.message, SESSION_EXPIRED_ERROR_MESSAGE);
+  assert.ok((counts.removed ?? 0) > 0);
+});
+
+// What auth-js really does with a dead token: getSession's own refresh is refused
+// and removes the session, so the follow-up refreshSession finds nothing to refresh.
+test('a token getSession found to be revoked is session expired, not a network error', async () => {
+  const { supabase, counts } = sessionGateClient({
+    getSessionError: revokedRefreshError(),
+    refreshError: Object.assign(new Error('Auth session missing!'), { name: 'AuthSessionMissingError', status: 400 }),
+  });
+
+  const failure = await failureOf(supabase);
+
+  assert.equal(failure?.message, SESSION_EXPIRED_ERROR_MESSAGE);
+  assert.equal(counts.refreshSession, 1);
+});
+
+test('no session at all is still session expired', async () => {
+  const { supabase } = sessionGateClient({
+    getSessionError: null,
+    refreshError: Object.assign(new Error('Auth session missing!'), { name: 'AuthSessionMissingError', status: 400 }),
+  });
+
+  assert.equal((await failureOf(supabase))?.message, SESSION_EXPIRED_ERROR_MESSAGE);
+});
 
 test('the canonical envelope reaches the caller as a sentence, not as JSON', async () => {
   await withFetch(

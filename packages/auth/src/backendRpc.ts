@@ -18,6 +18,7 @@ import { deriveRpcFunctionUrl } from '../../domain/src/rpcUrl.ts';
 import { reportError } from '../../observability/src/sentry.ts';
 import { shouldReportRpcFailure } from '../../observability/src/userMessage.ts';
 import { clearSupabaseSession, isStaleSupabaseSessionError, SESSION_EXPIRED_ERROR_MESSAGE } from './session.ts';
+import { isTransientNetworkFailure } from './transientNetworkFailure.ts';
 
 export interface BackendRpcEnv {
   anonKey?: string;
@@ -301,10 +302,19 @@ const callBackendRpcInternal = async <T>(
   const resolveSession = async () => {
     const {
       data: { session },
+      error: sessionError,
     } = await supabase.auth.getSession();
 
     if (session?.access_token) {
       return session;
+    }
+
+    // Offline with an expired token, getSession answers "no session" plus a
+    // retryable error, and the session is still stored. Refreshing again would
+    // only wait out the same failure, and the "no session" below would then tell
+    // a user who is still signed in that their session expired.
+    if (isTransientNetworkFailure(sessionError)) {
+      throw networkError(`Backend RPC ${action} could not refresh the session: ${sessionError?.message}`);
     }
 
     const refreshResult = await supabase.auth.refreshSession().catch((error) => ({ error, data: null }));
@@ -317,6 +327,10 @@ const callBackendRpcInternal = async <T>(
     if (isStaleSupabaseSessionError(refreshResult?.error)) {
       await clearSupabaseSession(supabase);
       throw new Error(SESSION_EXPIRED_ERROR_MESSAGE);
+    }
+
+    if (isTransientNetworkFailure(refreshResult?.error)) {
+      throw networkError(`Backend RPC ${action} could not refresh the session: ${refreshResult?.error?.message}`);
     }
 
     return session;

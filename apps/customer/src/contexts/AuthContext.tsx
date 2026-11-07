@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 import { resolveSignupPhoneNumber } from '../domain/authFormValidation';
@@ -38,6 +39,7 @@ import { supabase } from '../services/supabase/config';
 import {
   BOOTSTRAP_READ_DEADLINE_MS,
   createDeviceClaims,
+  createForegroundSessionCheck,
   resolveSingleDeviceSessionDecision,
   shouldShowSignInLoading,
   type SignInAttempt,
@@ -157,6 +159,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
   const hasUserRef = useRef(false);
+  // The same for the error, so the foreground check below reads the current one.
+  const errorRef = useRef<string | null>(null);
+  // Has a session but nothing to show for it because the profile could not load:
+  // a guest on screen. Kept apart from `error` because screens clear that one (the
+  // verify-email screen on mount, the auth forms on typing), and that does not
+  // bring the network or the profile back.
+  const offlineWithoutProfileRef = useRef(false);
   // The interactive sign-in's device claim and its guard (packages/auth
   // deviceClaim.ts). The passive onAuthStateChange reconcile below steps out of
   // signIn's way while the guard is held: signIn owns the SIGNED_IN transition it
@@ -183,11 +192,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     hasUserRef.current = Boolean(user);
   }, [user]);
 
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+
   const clearLocalUserState = useCallback(async () => {
     // Every caller is ending this session (sign-out, eviction, expiry, a refused
     // role). A claim still in flight belongs to that session and must not write a
     // device id afterwards; see deviceClaim.ts.
     deviceClaims.invalidate();
+    offlineWithoutProfileRef.current = false;
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile(), clearStoredPolicyAccepted()]);
   }, [deviceClaims]);
 
@@ -231,6 +245,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
+        setPolicyAccepted(false);
         setError(CUSTOMER_ACCESS_ERROR);
         return null;
       }
@@ -339,6 +354,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
+      setPolicyAccepted(false);
       setError(SESSION_CONFLICT_ERROR);
       return false;
     }
@@ -450,6 +466,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             return;
           }
           setUser(nextUser);
+          offlineWithoutProfileRef.current = false;
           // Reached the server this time: an earlier no-internet notice is stale.
           setError((current) => (current === NO_INTERNET_ERROR ? null : current));
           await storeUserProfile(nextUser);
@@ -486,6 +503,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             if (!hasUserRef.current && cachedUser?.role === DEFAULT_APP_ROLE) {
               setUser(cachedUser);
               setPolicyAccepted(cachedPolicyAccepted);
+            } else if (!hasUserRef.current) {
+              offlineWithoutProfileRef.current = true;
             }
             setError(NO_INTERNET_ERROR);
             return;
@@ -542,9 +561,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // /complete-profile to retype it, and storing it would make the next
           // offline launch find that stand-in as a matching cache. Leave the
           // session and storage alone; the next reconcile that reaches the
-          // server loads the real profile. The user is nulled so a saved profile
-          // of ANOTHER account (painted at first paint, before any session is
-          // checked) cannot stay on screen as this one.
+          // server loads the real profile (on native, usually the foreground
+          // check below). The user is nulled so a saved profile of ANOTHER account
+          // (painted at first paint, before any session is checked) cannot stay
+          // on screen as this one.
+          offlineWithoutProfileRef.current = true;
           setUser(null);
           setError(NO_INTERNET_ERROR);
           return;
@@ -584,19 +605,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+    const queueReconcile = (event: AuthChangeEvent, session: Session | null) => {
       setTimeout(() => {
         reconcileQueue = reconcileQueue
           .then(() => (disposed ? undefined : reconcileAuthState(event, session)))
           .catch((error) => console.error('Auth state reconcile failed:', error));
       }, 0);
+    };
+
+    // After a network failure, returning to the foreground retries the reconcile;
+    // see foregroundSessionCheck.ts. Labelled TOKEN_REFRESHED because that is the
+    // same session being re-checked: a background pass with no spinner or policy gate.
+    const foregroundCheck = createForegroundSessionCheck<Session>({
+      initialState: AppState.currentState,
+      getSession: () => supabase.auth.getSession(),
+      isOffline: () => errorRef.current === NO_INTERNET_ERROR || offlineWithoutProfileRef.current,
+      isSignInInProgress: () => deviceClaims.isGuardHeld(),
+      queueReconcile: (session) => queueReconcile('TOKEN_REFRESHED', session),
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      foregroundCheck.noteAuthEvent();
+      queueReconcile(event, session);
+    });
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      void foregroundCheck.onAppStateChange(nextState);
     });
 
     return () => {
       disposed = true;
       subscription.unsubscribe();
+      appStateSubscription.remove();
     };
   }, [
     buildNextUser,
@@ -673,6 +714,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // `attempt.release()` below when signIn fails before the claim starts, by the
     // claim otherwise.
     let attempt: SignInAttempt | null = null;
+    offlineWithoutProfileRef.current = false;
     setLoading(true);
     setError(null);
 
@@ -692,6 +734,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
+        setPolicyAccepted(false);
         setError(CUSTOMER_ACCESS_ERROR);
         throw new Error(CUSTOMER_ACCESS_ERROR);
       }
@@ -808,6 +851,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
+      setPolicyAccepted(false);
       trackAnalyticsEvent('customer_account_deleted');
       clearAnalyticsUser();
       router.replace('/login');

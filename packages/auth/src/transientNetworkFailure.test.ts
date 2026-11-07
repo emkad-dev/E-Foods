@@ -126,9 +126,9 @@ test('unreadable storage falls back to signed out', async () => {
   assert.equal(await resolveNullSessionOutcome(supabase, 'INITIAL_SESSION'), 'signed-out');
 });
 
-test('the web lock execution timeout counts as transient (boundedNavigatorLock, 10s)', () => {
+test('the web lock execution timeout counts as transient (boundedNavigatorLock, 50s)', () => {
   assert.equal(
-    isTransientNetworkFailure(new Error('Supabase auth lock "lock:sb-abc-auth-token" did not resolve within 10000ms.')),
+    isTransientNetworkFailure(new Error('Supabase auth lock "lock:sb-abc-auth-token" did not resolve within 50000ms.')),
     true
   );
 });
