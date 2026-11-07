@@ -22,7 +22,7 @@ Our service is currently intended for users in Nigeria only.
 
 ## Maps, Address Search and Your Location
 
-FEASTY shows maps and helps you find addresses. To do this we use map and address-search providers, who act for us.
+FEASTY shows maps and helps you find addresses. To do this we use third-party map and address-search services, described below.
 
 - **Maps.** Maps in the apps are drawn with MapLibre using OpenStreetMap map tiles. Your device requests the tiles it needs to show the map.
 - **Searching for an address as you type.** The text you type is sent to FEASTY's own address-search service. It forwards only that text to Photon, run by komoot, which uses OpenStreetMap data. We may use LocationIQ instead. We do not send your IP address or other identifiers to these providers through this service, and the service does not store your search text.
