@@ -137,6 +137,112 @@ test('making the store visible requires coordinates', () => {
   assert.equal(hasStoreSetupErrors(complete), false);
 });
 
+test('making the store visible refuses coordinates the server would refuse, on the field that is bad', () => {
+  const cases: [string, string, ('latitude' | 'longitude')[]][] = [
+    ['0', '0', ['latitude', 'longitude']],
+    ['95', '3.42', ['latitude']],
+    ['6.43', '181', ['longitude']],
+    ['-91', '3.42', ['latitude']],
+  ];
+
+  for (const [latitude, longitude, badFields] of cases) {
+    const errors = validateStoreSetup(validDraft({ isPublished: true, latitude, longitude }));
+
+    for (const field of ['latitude', 'longitude'] as const) {
+      assert.equal(
+        errors[field],
+        badFields.includes(field) ? STORE_SETUP_MESSAGES.locationInvalid : undefined,
+        `${latitude}, ${longitude} on ${field}`
+      );
+    }
+  }
+
+  // A zero on one axis is a real place; only the exact pair 0,0 is not.
+  assert.equal(
+    hasStoreSetupErrors(validateStoreSetup(validDraft({ isPublished: true, latitude: '0', longitude: '3.42' }))),
+    false
+  );
+});
+
+test('a store already visible with no pin still saves unrelated changes', () => {
+  const legacy = { isPublished: true, latitude: null, longitude: null };
+  const errors = validateStoreSetup(validDraft({ isPublished: true, openingTime: '09:00' }), legacy);
+
+  assert.equal(hasStoreSetupErrors(errors), false);
+});
+
+test('a store already visible at 0,0 or off the map still saves while the value is unchanged', () => {
+  assert.equal(
+    hasStoreSetupErrors(
+      validateStoreSetup(validDraft({ isPublished: true, latitude: '0', longitude: '0' }), {
+        isPublished: true,
+        latitude: 0,
+        longitude: 0,
+      })
+    ),
+    false
+  );
+  assert.equal(
+    hasStoreSetupErrors(
+      validateStoreSetup(validDraft({ isPublished: true, latitude: '95', longitude: '3.42' }), {
+        isPublished: true,
+        latitude: 95,
+        longitude: 3.42,
+      })
+    ),
+    false
+  );
+});
+
+test('changing a visible store pin to something unusable is refused', () => {
+  const errors = validateStoreSetup(validDraft({ isPublished: true, latitude: '0', longitude: '0' }), {
+    isPublished: true,
+    latitude: null,
+    longitude: null,
+  });
+
+  assert.equal(errors.latitude, STORE_SETUP_MESSAGES.locationInvalid);
+});
+
+test('making a hidden store visible without a pin is refused, with or without a saved record', () => {
+  const hidden = { isPublished: false, latitude: null, longitude: null };
+
+  assert.equal(
+    validateStoreSetup(validDraft({ isPublished: true }), hidden).latitude,
+    STORE_SETUP_MESSAGES.location
+  );
+  assert.equal(
+    validateStoreSetup(validDraft({ isPublished: true }), hidden).longitude,
+    STORE_SETUP_MESSAGES.location
+  );
+});
+
+test('clearing the pin of a visible, located store is refused', () => {
+  const errors = validateStoreSetup(validDraft({ isPublished: true, latitude: '', longitude: '' }), {
+    isPublished: true,
+    latitude: 6.43,
+    longitude: 3.42,
+  });
+
+  assert.equal(errors.latitude, STORE_SETUP_MESSAGES.location);
+  assert.equal(errors.longitude, STORE_SETUP_MESSAGES.location);
+});
+
+test('a malformed raw field still shows its own error on a legacy visible store', () => {
+  const errors = validateStoreSetup(validDraft({ isPublished: true, latitude: 'abc', longitude: '3.42' }), {
+    isPublished: true,
+    latitude: null,
+    longitude: null,
+  });
+
+  assert.equal(errors.latitude, STORE_SETUP_MESSAGES.number);
+});
+
+test('0,0 is only refused where it matters: a hidden store may keep it until it is made visible', () => {
+  const hidden = validateStoreSetup(validDraft({ isPublished: false, latitude: '0', longitude: '0' }));
+  assert.equal(hidden.latitude, undefined);
+});
+
 test('a store that delivers needs a distance above zero, published or not', () => {
   const missing = validateStoreSetup(validDraft({ supportsDelivery: true }));
   assert.equal(missing.deliveryRadiusKm, STORE_SETUP_MESSAGES.deliveryRadiusKm);
@@ -277,4 +383,12 @@ test('setup gaps describe the saved record, and an unsaved store says so', () =>
   });
   assert.equal(deliveryWithoutRadius.length, 1);
   assert.match(deliveryWithoutRadius[0], /delivery distance/);
+});
+
+test('a saved 0,0 is reported as a missing map location', () => {
+  const gaps = storeSetupGaps({ address: '1 Allen Avenue', openingTime: '08:00', closingTime: '22:00', latitude: 0, longitude: 0 });
+  assert.ok(gaps.some((gap) => gap.startsWith('No map location saved')));
+
+  const located = storeSetupGaps({ address: '1 Allen Avenue', openingTime: '08:00', closingTime: '22:00', latitude: 6.43, longitude: 3.42 });
+  assert.ok(!located.some((gap) => gap.startsWith('No map location saved')));
 });

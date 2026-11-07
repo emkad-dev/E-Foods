@@ -28,9 +28,21 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-system';
+import { BusyLabel, MIN_TAP_TARGET, radius, useConfirm, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
+import {
+  ADDRESS_LOOKUP_MESSAGES,
+  ADDRESS_SENT_NOTICE,
+  DEVICE_POSITION_MESSAGES,
+  OSM_ATTRIBUTION,
+  addressMatchConfirmCopy,
+  devicePositionConfirmCopy,
+  formatCoordinate,
+  locationDisclosureCopy,
+  lookupFailureMessage,
+  normalizeAddressQuery,
+} from '../../src/domain/addressLookup';
 import {
   draftFromStore,
   hasStoreSetupErrors,
@@ -42,6 +54,7 @@ import {
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { useSeededField } from '../../src/hooks/useSeededField';
+import { findAddressMatch, getDevicePosition } from '../../src/services/deviceLocation';
 import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaurantActions';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
@@ -84,6 +97,10 @@ export default function StoreDetailsScreen() {
     placement: 'floating',
     offsetBottom: width >= 1024 ? insets.bottom + 16 : insets.bottom + 86,
   });
+  // `Alert` is an empty function on the web build, so the location disclosure and
+  // the confirmations go through the design-system dialog, which works on all
+  // three platforms.
+  const { confirm, confirmDialog } = useConfirm();
 
   // The SAVED values, with nothing invented for a field the record does not
   // hold - see storeSetupForm.ts. Each one seeds its own draft field, and only
@@ -111,6 +128,12 @@ export default function StoreDetailsScreen() {
   const [isOpen, setIsOpen] = useSeededField(saved.isOpen);
 
   const [savingProfile, setSavingProfile] = useState(false);
+  // Which of the two pin buttons is working, so the other is held off and a
+  // second tap cannot start a second lookup (Nominatim allows one a second).
+  const [locating, setLocating] = useState<'address' | 'device' | null>(null);
+  // Inline, beside the buttons: the floating notice sits at the bottom of a long
+  // scroll and a failure here would otherwise be easy to miss.
+  const [locationProblem, setLocationProblem] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<StoreSetupErrors>({});
 
   const draft = {
@@ -204,6 +227,86 @@ export default function StoreDetailsScreen() {
     }
   };
 
+  /** Fills both fields from a pin the partner has just confirmed. */
+  const applyConfirmedPin = (pinLatitude: number, pinLongitude: number) => {
+    clearFieldError('latitude');
+    clearFieldError('longitude');
+    setLatitude(formatCoordinate(pinLatitude));
+    setLongitude(formatCoordinate(pinLongitude));
+    showNotice({
+      tone: 'success',
+      title: 'Pin filled in',
+      message: 'Latitude and longitude are set. Save the store to keep them.',
+    });
+  };
+
+  const handleFindFromAddress = async () => {
+    if (locating) {
+      return;
+    }
+
+    if (!normalizeAddressQuery(address)) {
+      setLocationProblem(ADDRESS_LOOKUP_MESSAGES.needAddress);
+      return;
+    }
+
+    setLocating('address');
+    setLocationProblem(null);
+
+    try {
+      const outcome = await findAddressMatch(address);
+
+      if (outcome.kind !== 'found') {
+        setLocationProblem(lookupFailureMessage(outcome.kind));
+        return;
+      }
+
+      // Nothing is written until the partner has seen the matched place and the
+      // approximate-pin caveat and agreed.
+      const accepted = await confirm(addressMatchConfirmCopy(outcome.match));
+      if (accepted) {
+        applyConfirmedPin(outcome.match.latitude, outcome.match.longitude);
+      }
+    } finally {
+      setLocating(null);
+    }
+  };
+
+  const handleUseCurrentLocation = async () => {
+    if (locating) {
+      return;
+    }
+
+    setLocationProblem(null);
+
+    // The in-app disclosure comes BEFORE the operating system permission
+    // prompt, so the partner knows what it is for when it appears. The buttons
+    // are only held busy once it has been accepted: while the dialog is open
+    // nothing is working, and declining must leave them as they were.
+    const agreed = await confirm(locationDisclosureCopy);
+    if (!agreed) {
+      return;
+    }
+
+    setLocating('device');
+
+    try {
+      const outcome = await getDevicePosition();
+
+      if (outcome.kind !== 'found') {
+        setLocationProblem(DEVICE_POSITION_MESSAGES[outcome.kind]);
+        return;
+      }
+
+      const accepted = await confirm(devicePositionConfirmCopy(outcome.position));
+      if (accepted) {
+        applyConfirmedPin(outcome.position.latitude, outcome.position.longitude);
+      }
+    } finally {
+      setLocating(null);
+    }
+  };
+
   const handlePublishToggle = (value: boolean) => {
     setIsPublished(value);
 
@@ -232,7 +335,7 @@ export default function StoreDetailsScreen() {
       return;
     }
 
-    const nextErrors = validateStoreSetup(draft);
+    const nextErrors = validateStoreSetup(draft, restaurant);
     setFieldErrors(nextErrors);
 
     if (hasStoreSetupErrors(nextErrors)) {
@@ -517,6 +620,44 @@ export default function StoreDetailsScreen() {
             Customers are matched to you by distance, so these are what put you in their search results. Both are needed
             before your store can be visible.
           </Text>
+          <TouchableOpacity
+            style={[styles.secondaryButton, locating ? styles.controlDisabled : null]}
+            onPress={handleFindFromAddress}
+            disabled={locating !== null}
+            accessibilityRole="button"
+          >
+            <BusyLabel
+              busy={locating === 'address'}
+              label="Find from address"
+              busyLabel="Searching..."
+              textStyle={styles.secondaryButtonText}
+            />
+          </TouchableOpacity>
+          <Text style={styles.buttonCaption}>
+            Uses the address you typed above. You confirm the match before anything is filled in.
+          </Text>
+          <Text style={styles.buttonCaption}>{ADDRESS_SENT_NOTICE}</Text>
+          <Text style={styles.buttonCaption}>{OSM_ATTRIBUTION}</Text>
+          <TouchableOpacity
+            style={[styles.secondaryButton, locating ? styles.controlDisabled : null]}
+            onPress={handleUseCurrentLocation}
+            disabled={locating !== null}
+            accessibilityRole="button"
+          >
+            <BusyLabel
+              busy={locating === 'device'}
+              label="Use my current location"
+              busyLabel="Finding your position..."
+              textStyle={styles.secondaryButtonText}
+            />
+          </TouchableOpacity>
+          <Text style={styles.buttonCaption}>Most exact: do this while you are at the restaurant.</Text>
+          {locationProblem ? (
+            <Text accessibilityLiveRegion="polite" role="alert" style={styles.fieldErrorText}>
+              {locationProblem}
+            </Text>
+          ) : null}
+          <Text style={styles.manualLabel}>Or type the coordinates yourself</Text>
           <View style={styles.row}>
             <View style={styles.fieldColumn}>
               <Text style={styles.fieldLabel}>Latitude</Text>
@@ -589,6 +730,7 @@ export default function StoreDetailsScreen() {
         </View>
       </ScrollView>
       {notice}
+      {confirmDialog}
     </View>
   );
 }
@@ -729,6 +871,35 @@ const styles = StyleSheet.create({
     color: partnerTheme.textOnBrand,
     fontSize: 15,
     fontWeight: '800',
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    backgroundColor: partnerTheme.surface,
+    borderColor: partnerTheme.accent,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginTop: 14,
+    minHeight: MIN_TAP_TARGET,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  secondaryButtonText: {
+    color: partnerTheme.accentStrong,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  buttonCaption: {
+    color: partnerTheme.textSoft,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  manualLabel: {
+    color: partnerTheme.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 18,
   },
   // One shared dim for every control that can go disabled on this screen.
   controlDisabled: {

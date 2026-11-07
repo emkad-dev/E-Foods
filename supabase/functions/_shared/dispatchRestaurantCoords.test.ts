@@ -95,13 +95,16 @@ const ASSIGNMENTS = [
   assignmentFor('others', 'rider-b'),
 ];
 
+// Fixed timestamps, not Date.now(): a live clock could print "...6.805Z" and
+// false-fail the latitude check below, and a stalled run could outlast a short
+// deadline. respondsBy only has to stay in the future of the handler's clock.
 const OFFER = {
   id: 'offer-1',
   orderId: 'offered',
   courierId: 'rider-a',
   status: 'pending',
-  offeredAt: new Date().toISOString(),
-  respondsBy: new Date(Date.now() + 45_000).toISOString(),
+  offeredAt: '2026-10-15T10:05:00Z',
+  respondsBy: '2099-01-01T00:00:00Z',
   respondedAt: null,
   sequence: 1,
 };

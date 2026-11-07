@@ -88,7 +88,7 @@ export default function PartnerVerifyEmailScreen() {
       }
 
       // That session outlives the confirmation and this flow ends at sign-in.
-      await supabase.auth.signOut().catch(() => undefined);
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
 
       const noticeKey: PartnerSuccessNoticeKey = 'email-confirmed';
       router.replace({

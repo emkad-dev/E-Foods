@@ -1,5 +1,5 @@
 import type { UserDocument } from '../domain/entities';
-import { isBackendRpcError } from '../../../../packages/auth/src';
+import { BOOTSTRAP_READ_DEADLINE_MS, isBackendRpcError, retryOnceOnTransientFailure } from '../../../../packages/auth/src';
 import { callCustomerBackendRpc } from './backendRpc';
 import { mapProfile } from './supabase/profile';
 
@@ -33,7 +33,13 @@ export const fetchCustomerBootstrap = async (): Promise<CustomerBootstrap | null
   let response: CustomerBootstrapResponse;
 
   try {
-    response = await callCustomerBackendRpc<CustomerBootstrapResponse>('customerBootstrap');
+    // Retried once on a transient network failure (a dropped or stalled read):
+    // the read is safe to repeat, and the alternative is the slower chain.
+    response = await retryOnceOnTransientFailure(() =>
+      callCustomerBackendRpc<CustomerBootstrapResponse>('customerBootstrap', undefined, {
+        deadlineMs: BOOTSTRAP_READ_DEADLINE_MS,
+      })
+    );
   } catch (error) {
     // 501 = action not implemented in the deployed backend; 404 = older
     // function that never registered it. Either means "fall back to the old

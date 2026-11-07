@@ -88,6 +88,7 @@ const EXPECTED_DISPATCH_ACTIONS = [
   'dispatchDeclineOffer',
   'dispatchSetAvailability',
   'dispatchRiderSOS',
+  'dispatchBootstrap',
 ];
 
 const EXPECTED_PARTNER_ACTIONS = [
@@ -109,6 +110,7 @@ const EXPECTED_PARTNER_ACTIONS = [
   'resolvePartnerBankAccount',
   'requestPartnerVerificationUploadUrl',
   'submitPartnerOnboarding',
+  'partnerBootstrap',
 ];
 
 const EXPECTED_ADMIN_ACTIONS = [
@@ -209,8 +211,8 @@ const stubDomain = (name: string, actions: readonly string[]): RpcDomain<TestCon
 
 const DOMAIN_ACTION_LISTS: Array<[string, readonly string[], number]> = [
   ['orders', ORDER_ACTIONS, 15],
-  ['dispatch', DISPATCH_ACTIONS, 16],
-  ['partner', PARTNER_ACTIONS, 18],
+  ['dispatch', DISPATCH_ACTIONS, 17],
+  ['partner', PARTNER_ACTIONS, 19],
   ['admin', ADMIN_ACTIONS, 35],
   ['account', ACCOUNT_ACTIONS, 20],
 ];
@@ -243,7 +245,7 @@ for (const [name, actions, expectedCount] of DOMAIN_ACTION_LISTS) {
   });
 }
 
-Deno.test('the five domains together cover exactly the 104-action surface', () => {
+Deno.test('the five domains together cover exactly the 106-action surface', () => {
   const union = [
     ...ORDER_ACTIONS,
     ...DISPATCH_ACTIONS,
@@ -252,14 +254,14 @@ Deno.test('the five domains together cover exactly the 104-action surface', () =
     ...ACCOUNT_ACTIONS,
   ];
 
-  expectEqual(union.length, 104, 'total action count');
-  expectEqual(new Set(union).size, 104, 'unique action count');
-  expectEqual(ALL_RPC_ACTIONS.length, 104, 'ALL_RPC_ACTIONS length');
+  expectEqual(union.length, 106, 'total action count');
+  expectEqual(new Set(union).size, 106, 'unique action count');
+  expectEqual(ALL_RPC_ACTIONS.length, 106, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(
     DOMAIN_ACTION_LISTS.map(([name, actions]) => stubDomain(name, actions))
   );
-  expectEqual(dispatcher.actions.length, 104, 'dispatcher action count');
+  expectEqual(dispatcher.actions.length, 106, 'dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     if (!dispatcher.actions.includes(action)) {

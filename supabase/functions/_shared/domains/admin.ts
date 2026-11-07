@@ -92,6 +92,8 @@ import {
 } from '../rpc/context.ts';
 import { defineRpcDomain, type AnonymousRpcHandler, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
+import { assertRestaurantLocationAllowsPublish } from '../restaurantLocation.ts';
+import { ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE } from '../../../../packages/domain/src/restaurantLocation.ts';
 import { appendSupportMessage, isSupportStatus, type SupportConversationRow, type SupportMessageRow } from '../support.ts';
 
 type Handler = RpcHandler<AuthenticatedRequestContext>;
@@ -1853,6 +1855,34 @@ const adminSetRestaurantPublished: Handler = async ({ context, data }) => {
   }
   const isPublished = data.isPublished === true;
   const updatedAt = nowIso();
+
+  // Only going live is gated; unpublishing must always work. The row is read
+  // first because the rule is about what it will hold, and the coordinates are
+  // not part of this request - this write leaves them as they are.
+  if (isPublished) {
+    const { data: currentRestaurant, error: currentError } = await serviceClient
+      .from('RestaurantRecord')
+      .select('id,isPublished,latitude,longitude')
+      .eq('id', restaurantId)
+      .maybeSingle<{ id: string; isPublished: boolean | null; latitude: number | null; longitude: number | null }>();
+
+    if (currentError) {
+      throw new Error(currentError.message);
+    }
+    if (!currentRestaurant) {
+      fail(404, 'The selected restaurant could not be found.');
+    }
+
+    assertRestaurantLocationAllowsPublish(
+      currentRestaurant,
+      {
+        isPublished: true,
+        latitude: currentRestaurant.latitude,
+        longitude: currentRestaurant.longitude,
+      },
+      ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE
+    );
+  }
 
   const { data: updatedRestaurant, error } = await serviceClient
     .from('RestaurantRecord')

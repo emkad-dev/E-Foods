@@ -20,6 +20,10 @@ interface CartContextType {
   setDeliveryLocation: (location: DeliveryLocation | null) => void;
   setFulfillmentType: (fulfillmentType: FulfillmentType) => void;
   total: number;
+  // False until the persisted cart (address included) has been read back. Anything that
+  // decides on `deliveryLocation === null` must wait for this, or it mistakes "not loaded
+  // yet" for "no address".
+  isHydrated: boolean;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -32,6 +36,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const [restaurantName, setRestaurantName] = useState<string | null>(null);
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation | null>(null);
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>('delivery');
+  const [isHydrated, setIsHydrated] = useState(false);
 
   // Load cart from AsyncStorage on mount
   useEffect(() => {
@@ -79,6 +84,8 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         }
       } catch (error) {
         console.error('Failed to load cart', error);
+      } finally {
+        setIsHydrated(true);
       }
     };
     loadCart();
@@ -163,6 +170,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         setDeliveryLocation,
         setFulfillmentType,
         total,
+        isHydrated,
       }}
     >
       {children}

@@ -1,5 +1,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <!--
+    Location is FOREGROUND ONLY in this app: the store-details screen reads one
+    position (getCurrentPositionAsync) when the partner taps "Use my current
+    location", after an in-app disclosure. Nothing calls watchPositionAsync,
+    startLocationUpdatesAsync or geofencing, and no background permission is
+    ever requested. ACCESS_BACKGROUND_LOCATION is removed defensively so no
+    future plugin or library can add it without a Play background-location
+    declaration. FOREGROUND_SERVICE_LOCATION is removed for the same reason
+    (see the LocationTaskService removal below).
+
+    This has to live here rather than in app.json's plugin config: android/ is
+    a committed prebuild, so EAS Build ignores app.json's android block
+    entirely. Keep app.json's blockedPermissions in step for iOS/prebuild.
+  -->
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
   <!--
     CAMERA is removed, not merely absent. It arrives through manifest merging
     from expo-image-picker, which reads the photo LIBRARY in this app and
@@ -86,6 +104,13 @@
     -->
     <service android:name="expo.modules.audio.service.AudioControlsService" tools:node="remove"/>
     <service android:name="expo.modules.audio.service.AudioRecordingService" tools:node="remove"/>
+    <!--
+      expo-location ships a foregroundServiceType="location" service for
+      background location tasks. This app only reads a single foreground fix, so
+      the service is never started; removing it keeps a location FGS out of the
+      merged manifest and out of Play's foreground-service review.
+    -->
+    <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>

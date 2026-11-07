@@ -1,15 +1,21 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 import { resolveSignupPhoneNumber } from '../domain/authFormValidation';
 import type { UserDocument } from '../domain/entities';
+import { flushPendingPolicyAcceptance } from '../domain/pendingPolicyAcceptance';
 import { DEFAULT_APP_ROLE } from '../domain/roles';
 import {
   ACCOUNT_ALREADY_REGISTERED_MESSAGE,
   sendVerificationEmailWithFallback,
   sendPasswordResetEmailWithFallback,
   createUserWithEmail,
-  isNetworkRequestError,
+  isTransientNetworkFailure,
+  RELEASE_SESSION_TIMEOUT_MS,
+  bestEffortWithin,
+  resolveNullSessionOutcome,
+  resolveProfileLoadFailure,
   getUserRoleClaim,
   isStaleSupabaseSessionError,
   SESSION_EXPIRED_ERROR_MESSAGE,
@@ -21,10 +27,13 @@ import {
   clearStoredUserProfile,
   clearStoredSessionId,
   clearStoredPolicyAccepted,
+  clearPendingPolicyAcceptance,
   createSessionId,
+  getPendingPolicyAcceptanceUserId,
   getStoredUserProfile,
   getStoredPolicyAccepted,
   getStoredSessionId,
+  storePendingPolicyAcceptance,
   storePolicyAccepted,
   storeSessionId,
   storeUserProfile,
@@ -32,9 +41,13 @@ import {
 import { getUserDocument, createUserDocument, updateUserDocument } from '../services/supabase/profile';
 import { supabase } from '../services/supabase/config';
 import {
+  BOOTSTRAP_READ_DEADLINE_MS,
+  createDeviceClaims,
+  createForegroundSessionCheck,
+  isReconcileStillValid,
   resolveSingleDeviceSessionDecision,
-  shouldHydrateCachedUserProfile,
   shouldShowSignInLoading,
+  type SignInAttempt,
 } from '../../../../packages/auth/src';
 import { deleteOwnAccount as deleteOwnCustomerAccount } from '../services/accountManagement';
 import { fetchCustomerBootstrap } from '../services/customerBootstrap';
@@ -96,21 +109,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const NO_INTERNET_ERROR = 'No internet connection. Check your network and try again.';
 const CUSTOMER_ACCESS_ERROR = 'This account does not have customer access.';
 const SESSION_CONFLICT_ERROR = 'This account was signed in on another device. Sign in again here if you want to continue on this device.';
-const isOfflineError = (error: unknown) => {
-  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
-  const errorMessage =
-    typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
-
-  return (
-    errorCode === 'unavailable' ||
-    errorCode === 'failed-precondition' ||
-    errorMessage.includes('client is offline') ||
-    errorMessage.includes('offline')
-  );
-};
-
-const isTransientNetworkError = (error: unknown) => isOfflineError(error) || isNetworkRequestError(error);
-
 // This app's own friendly, deliberately-thrown outcomes (an existing account,
 // a session takeover, session expiry, no customer access) - not faults, so
 // reportAuthFailure below does not send them to Sentry.
@@ -149,7 +147,7 @@ const reportAuthFailure = (source: string, error: unknown) => {
 // toUserMessage's own Supabase-code rules already cover the common cases
 // (invalid_credentials, email_not_confirmed, user_already_exists, ...).
 const getCustomerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isTransientNetworkError(error)) {
+  if (isTransientNetworkFailure(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -166,20 +164,51 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
   const hasUserRef = useRef(false);
-  // True only for the duration of an interactive signIn() call. The passive
-  // onAuthStateChange reconcile below reads it to step out of signIn's way:
-  // signIn owns the SIGNED_IN transition it triggers, so running the reconcile
-  // concurrently would duplicate its round trips and race its single-device
-  // claim (reading a half-written activeSessionId and self-evicting).
-  const signInInProgressRef = useRef(false);
+  // The same for the error, so the foreground check below reads the current one.
+  const errorRef = useRef<string | null>(null);
+  // Has a session but nothing to show for it because the profile could not load:
+  // a guest on screen. Kept apart from `error` because screens clear that one (the
+  // verify-email screen on mount, the auth forms on typing), and that does not
+  // bring the network or the profile back.
+  const offlineWithoutProfileRef = useRef(false);
+  // The interactive sign-in's device claim and its guard (packages/auth
+  // deviceClaim.ts). The passive onAuthStateChange reconcile below steps out of
+  // signIn's way while the guard is held: signIn owns the SIGNED_IN transition it
+  // triggers, so running the reconcile concurrently would duplicate its round
+  // trips and race its single-device claim (reading a half-written
+  // activeSessionId and self-evicting). The guard outlasts signIn() itself, until
+  // the background claim settles.
+  const deviceClaims = useMemo(
+    () =>
+      createDeviceClaims({
+        createSessionId,
+        writeRemote: (userId, sessionId) =>
+          updateUserDocument(userId, {
+            activeSessionId: sessionId,
+            activeSessionUpdatedAt: new Date().toISOString(),
+          }),
+        storeLocal: storeSessionId,
+        report: (claimError) => reportAuthFailure('customer.signIn.claimDevice', claimError),
+      }),
+    []
+  );
 
   useEffect(() => {
     hasUserRef.current = Boolean(user);
   }, [user]);
 
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+
   const clearLocalUserState = useCallback(async () => {
+    // Every caller is ending this session (sign-out, eviction, expiry, a refused
+    // role). A claim still in flight belongs to that session and must not write a
+    // device id afterwards; see deviceClaim.ts.
+    deviceClaims.invalidate();
+    offlineWithoutProfileRef.current = false;
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile(), clearStoredPolicyAccepted()]);
-  }, []);
+  }, [deviceClaims]);
 
   const clearExpiredSession = useCallback(async () => {
     await clearLocalUserState();
@@ -218,14 +247,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const claimRole = await getUserRoleClaim(authUser);
 
       if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
+        // A reconcile that outlived a sign-out must change nothing, and the
+        // sign-out below could hit a newer session.
+        if (!(await isReconcileStillValid(supabase, { user: authUser }))) {
+          return null;
+        }
+
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
+        setPolicyAccepted(false);
         setError(CUSTOMER_ACCESS_ERROR);
         return null;
       }
-
-      identifyAnalyticsUser(authUser.id);
 
       return {
         ...userData,
@@ -238,17 +272,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     [clearLocalUserState]
   );
 
-  const startSingleDeviceSession = useCallback(async (userId: string) => {
-    const sessionId = createSessionId();
+  const refreshPolicyAcceptance = useCallback(async (
+    { userId, silent = false, bounded = false }: { userId: string; silent?: boolean; bounded?: boolean }
+  ) => {
+    // An answer about one account must not land on the next: a read can outlast a
+    // sign-out, and it would restore the flag that sign-out cleared.
+    const stillCurrent = () => isReconcileStillValid(supabase, { user: { id: userId } });
 
-    await updateUserDocument(userId, {
-      activeSessionId: sessionId,
-      activeSessionUpdatedAt: new Date().toISOString(),
-    });
-    await storeSessionId(sessionId);
-  }, []);
-
-  const refreshPolicyAcceptance = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     // Silent refresh is used during the background reconcile after a cached
     // first paint: it must not toggle `policyLoading`, which would re-block the
     // UI on the loading spinner we just cleared.
@@ -257,7 +287,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     try {
-      const status = await getCustomerPolicyAcceptance();
+      // `bounded` (the interactive sign-in fallback) gives the read an overall
+      // deadline: that fallback runs exactly when the edge functions are stalled,
+      // and an unbounded read would hold the spinner forever. The catch below
+      // already falls back to the cached value.
+      const status = await getCustomerPolicyAcceptance(
+        bounded ? { deadlineMs: BOOTSTRAP_READ_DEADLINE_MS } : undefined
+      );
+      if (!(await stillCurrent())) {
+        return false;
+      }
       setPolicyAccepted(status.accepted);
       void storePolicyAccepted(status.accepted);
       return status.accepted;
@@ -268,7 +307,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Preserve the locally accepted state when the refresh itself is
       // unavailable. That keeps a freshly signed-up user from being forced
       // back through the policy gate because a network call failed.
-      if (!silent) {
+      if (!silent && (await stillCurrent())) {
         setPolicyAccepted(cachedPolicyAccepted);
       }
 
@@ -280,15 +319,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  const flushPendingCustomerPolicyAcceptance = useCallback(async () => {
-    const pendingPolicyAccepted = await getStoredPolicyAccepted();
-
-    if (!pendingPolicyAccepted) {
-      return;
-    }
-
+  const flushPendingCustomerPolicyAcceptance = useCallback(async (userId: string) => {
     try {
-      await recordCustomerPolicyAcceptance('customer_signup');
+      await flushPendingPolicyAcceptance({
+        userId,
+        readPendingUserId: getPendingPolicyAcceptanceUserId,
+        isStillCurrent: () => isReconcileStillValid(supabase, { user: { id: userId } }),
+        record: () => recordCustomerPolicyAcceptance('customer_signup'),
+        clearPending: clearPendingPolicyAcceptance,
+      });
     } catch (policyError) {
       console.warn('Unable to flush pending customer policy acceptance:', policyError);
     }
@@ -309,11 +348,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
     } catch (releaseError) {
-      if (!isOfflineError(releaseError)) {
+      if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release customer session:', releaseError);
       }
-    } finally {
-      await clearStoredSessionId();
     }
   }, []);
 
@@ -335,6 +372,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await clearLocalUserState();
       await signOutUser(supabase);
       setUser(null);
+      setPolicyAccepted(false);
       setError(SESSION_CONFLICT_ERROR);
       return false;
     }
@@ -362,19 +400,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }, 10_000);
 
     void (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!active) {
-        return;
-      }
-
-      if (!session) {
-        setLoading(false);
-        return;
-      }
-
+      // Read the saved profile BEFORE (and without) asking Supabase for the
+      // session. getSession() refreshes an expired access token first, and
+      // offline that retries for ~25 s before giving up, which held the first
+      // frame on the skeleton for a customer who could see their saved state. A
+      // cached profile with no live session is corrected by the listener below
+      // (a real SIGNED_OUT clears it).
       const [cachedUser, cachedPolicyAccepted] = await Promise.all([
         getStoredUserProfile<UserDocument>(),
         getStoredPolicyAccepted(),
@@ -384,24 +415,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      if (
-        shouldHydrateCachedUserProfile({
-          sessionUserId: session.user.id,
-          cachedUser,
-          expectedRole: DEFAULT_APP_ROLE,
-        })
-      ) {
+      if (cachedUser?.role === DEFAULT_APP_ROLE) {
         setUser(cachedUser);
         setPolicyAccepted(cachedPolicyAccepted);
-        setLoading(false);
-      } else {
-        // Session exists but no matching cache (fresh install, cleared storage,
-        // or role mismatch). Don't block on the onAuthStateChange network chain
-        // — release the skeleton now and let the listener reconcile in the
-        // background. Worst case: a ~100 ms flash of the login screen before
-        // the INITIAL_SESSION fires from local storage and sets the user.
-        setLoading(false);
       }
+
+      // Either way the skeleton goes now. With no saved profile (fresh install,
+      // cleared storage, role mismatch) don't block on the onAuthStateChange
+      // network chain: browse as a guest and let the listener reconcile in the
+      // background. Worst case: a ~100 ms flash before the INITIAL_SESSION
+      // fires from local storage and sets the user.
+      setLoading(false);
     })();
 
     return () => {
@@ -423,11 +447,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let disposed = false;
     let reconcileQueue: Promise<void> = Promise.resolve();
     const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
+      // No SIGNED_OUT follows a sign-out, so this can outlive it: a read returning
+      // afterwards must not put the customer back on screen. Stale means no state
+      // change at all. The check that remains in `finally` only undoes this
+      // reconcile's own spinner.
+      let isStale = false;
+      const reconcileIsStale = async () => {
+        isStale = !(await isReconcileStillValid(supabase, session));
+        return isStale;
+      };
+
+      if (await reconcileIsStale()) {
+        return;
+      }
+
       // An interactive signIn() owns the SIGNED_IN it triggers: it builds the
       // user, claims the single-device session and reconciles policy itself,
       // and drives the spinner. Doing that work again here would double its
       // cold starts and race its session claim (self-eviction), so step aside.
-      if (event === 'SIGNED_IN' && signInInProgressRef.current) {
+      // Any event carrying a session counts, not just SIGNED_IN: USER_UPDATED or
+      // TOKEN_REFRESHED inside the window would otherwise run the reconcile and
+      // store the old device id. A sign-out (null session) must still get through.
+      if (session && deviceClaims.isGuardHeld()) {
         return;
       }
 
@@ -453,34 +494,74 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           // arrives, instead of chaining four serial round trips ahead of
           // first paint.
           const nextUser = await buildNextUser(authUser);
-          if (!nextUser) {
+          if ((await reconcileIsStale()) || !nextUser) {
             return;
           }
+          // After the check, or a stale reconcile would undo the sign-out's
+          // clearAnalyticsUser. signIn identifies the user itself.
+          identifyAnalyticsUser(authUser.id);
           setUser(nextUser);
+          offlineWithoutProfileRef.current = false;
+          // Reached the server this time: an earlier no-internet notice is stale.
+          setError((current) => (current === NO_INTERNET_ERROR ? null : current));
           await storeUserProfile(nextUser);
           setLoading(false);
 
           void (async () => {
             try {
+              // Evicting or adopting a device id is state too.
+              if (await reconcileIsStale()) {
+                return;
+              }
               const sessionIsValid = await syncSingleDeviceSession(nextUser);
               if (!sessionIsValid) {
                 return;
               }
-              await flushPendingCustomerPolicyAcceptance();
-              await refreshPolicyAcceptance({ silent: !isInteractiveSignIn });
+              await flushPendingCustomerPolicyAcceptance(nextUser.uid);
+              await refreshPolicyAcceptance({ userId: nextUser.uid, silent: !isInteractiveSignIn });
             } catch (reconcileError) {
-              if (!isOfflineError(reconcileError)) {
+              if (!isTransientNetworkFailure(reconcileError)) {
                 reportAuthFailure('customer.authStateChange.reconcile', reconcileError);
               }
             }
           })();
         } else {
+          // A null session is only a sign-out when supabase-js says so. Offline
+          // with an expired access token it delivers INITIAL_SESSION + null
+          // while the stored session is still there; clearing local state then
+          // signed the customer out of the UI and wiped their saved profile AND
+          // device id (so a device evicted meanwhile re-adopted the other
+          // device's id when the network came back).
+          const nullSession = await resolveNullSessionOutcome(supabase, event);
+
+          if (nullSession === 'offline') {
+            const [cachedUser, cachedPolicyAccepted] = await Promise.all([
+              getStoredUserProfile<UserDocument>(),
+              getStoredPolicyAccepted(),
+            ]);
+            if (!hasUserRef.current && cachedUser?.role === DEFAULT_APP_ROLE) {
+              setUser(cachedUser);
+              setPolicyAccepted(cachedPolicyAccepted);
+            } else if (!hasUserRef.current) {
+              offlineWithoutProfileRef.current = true;
+            }
+            setError(NO_INTERNET_ERROR);
+            return;
+          }
+
           setUser(null);
           setPolicyAccepted(false);
           await clearLocalUserState();
         }
       } catch (err) {
         const authUser = session?.user ?? null;
+
+        // After a sign-out this failure means nothing: the read went out with the
+        // anon key, and every branch below would change state over it.
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         if (isStaleSupabaseSessionError(err)) {
           await clearExpiredSession();
           return;
@@ -488,34 +569,68 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         // Offline is expected (tab refocus, a brief drop) and this listener
         // re-fires on every one, so only unexpected failures reach Sentry.
-        if (!isOfflineError(err)) {
+        if (!isTransientNetworkFailure(err)) {
           reportAuthFailure('customer.authStateChange', err);
         }
 
-        if (authUser && isOfflineError(err)) {
-          const cachedUser = await getStoredUserProfile<UserDocument>();
+        const cachedProfile = authUser ? await getStoredUserProfile<UserDocument>() : null;
 
-          if (cachedUser?.uid === authUser.id) {
-            const fallbackUser: UserDocument = {
-              ...cachedUser,
-              uid: authUser.id,
-              email: authUser.email ?? cachedUser?.email ?? '',
-              emailVerified: Boolean(authUser.email_confirmed_at),
-              role: cachedUser?.role ?? DEFAULT_APP_ROLE,
-            };
+        if (await reconcileIsStale()) {
+          return;
+        }
 
-            const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
+        const failureOutcome = resolveProfileLoadFailure({
+          error: err,
+          hasAuthUser: Boolean(authUser),
+          hasUsableCachedProfile: Boolean(authUser && cachedProfile?.uid === authUser.id),
+        });
 
-            if (sessionIsValid) {
-              setUser(fallbackUser);
-              setError(NO_INTERNET_ERROR);
-              return;
-            }
-          }
+        if (authUser && cachedProfile && failureOutcome === 'keep-cached-user') {
+          const fallbackUser: UserDocument = {
+            ...cachedProfile,
+            uid: authUser.id,
+            email: authUser.email ?? cachedProfile.email ?? '',
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: cachedProfile.role ?? DEFAULT_APP_ROLE,
+          };
+
+          // No single-device check here on purpose. The saved profile's
+          // activeSessionId is whatever was read BEFORE this device claimed
+          // the session at sign-in, so comparing it with our own stored id
+          // reads as a takeover and would evict a customer whose only fault is
+          // a bad signal. Takeover detection resumes on the first reconcile
+          // that reaches the server.
+          setUser(fallbackUser);
+          setError(NO_INTERNET_ERROR);
+          return;
+        }
+
+        if (failureOutcome === 'offline-without-profile') {
+          // Nothing saved for this account and no way to reach the server. Do
+          // NOT fall through to the stand-in profile below: it has no phone
+          // number, so the route guard would send the customer to
+          // /complete-profile to retype it, and storing it would make the next
+          // offline launch find that stand-in as a matching cache. Leave the
+          // session and storage alone; the next reconcile that reaches the
+          // server loads the real profile (on native, usually the foreground
+          // check below). The user is nulled so a saved profile of ANOTHER account
+          // (painted at first paint, before any session is checked) cannot stay
+          // on screen as this one.
+          offlineWithoutProfileRef.current = true;
+          setUser(null);
+          setError(NO_INTERNET_ERROR);
+          return;
         }
 
         if (authUser) {
           const fallbackCachedUser = await getStoredUserProfile<UserDocument>();
+
+          // This stand-in has no phone number, so storing it for a signed-out
+          // customer would send them to /complete-profile.
+          if (await reconcileIsStale()) {
+            return;
+          }
+
           const fallbackUser: UserDocument = {
             uid: authUser.id,
             email: authUser.email ?? fallbackCachedUser?.email ?? '',
@@ -544,27 +659,50 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(null);
         await clearStoredUserProfile();
       } finally {
-        setLoading(false);
+        if (!isStale || isInteractiveSignIn) {
+          setLoading(false);
+        }
       }
     };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+    const queueReconcile = (event: AuthChangeEvent, session: Session | null) => {
       setTimeout(() => {
         reconcileQueue = reconcileQueue
           .then(() => (disposed ? undefined : reconcileAuthState(event, session)))
           .catch((error) => console.error('Auth state reconcile failed:', error));
       }, 0);
+    };
+
+    // After a network failure, returning to the foreground retries the reconcile;
+    // see foregroundSessionCheck.ts. Labelled TOKEN_REFRESHED because that is the
+    // same session being re-checked: a background pass with no spinner or policy gate.
+    const foregroundCheck = createForegroundSessionCheck<Session>({
+      initialState: AppState.currentState,
+      getSession: () => supabase.auth.getSession(),
+      isOffline: () => errorRef.current === NO_INTERNET_ERROR || offlineWithoutProfileRef.current,
+      isSignInInProgress: () => deviceClaims.isGuardHeld(),
+      queueReconcile: (session) => queueReconcile('TOKEN_REFRESHED', session),
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      foregroundCheck.noteAuthEvent();
+      queueReconcile(event, session);
+    });
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      void foregroundCheck.onAppStateChange(nextState);
     });
 
     return () => {
       disposed = true;
       subscription.unsubscribe();
+      appStateSubscription.remove();
     };
   }, [
     buildNextUser,
     clearExpiredSession,
+    deviceClaims,
     clearLocalUserState,
     flushPendingCustomerPolicyAcceptance,
     refreshPolicyAcceptance,
@@ -592,7 +730,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // would only trip Supabase's 60s cooldown. No redirect is passed:
       // confirmation is OTP-only, so the email carries a 6-digit code the
       // customer types on /verify-email and there is no link to steer.
-      const { alreadyRegistered } = await createUserWithEmail(supabase, email, password, {
+      const { user: createdUser, alreadyRegistered } = await createUserWithEmail(supabase, email, password, {
         display_name: userData?.displayName,
         phone: userData?.phoneNumber,
         role: DEFAULT_APP_ROLE,
@@ -612,6 +750,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const policyAcceptance = userData.policyAcceptance;
       setPolicyAccepted(true);
       void storePolicyAccepted(true);
+      void storePendingPolicyAcceptance(createdUser.id);
 
       trackAnalyticsEvent('customer_sign_up_completed', {
         auth_method: 'email',
@@ -630,19 +769,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string): Promise<void> => {
-    // Held for the whole call so the passive onAuthStateChange reconcile steps
-    // aside (no duplicate cold starts, no racing the single-device claim).
-    signInInProgressRef.current = true;
+    // beginSignIn holds the guard (so the passive onAuthStateChange reconcile
+    // steps aside: no duplicate cold starts, no racing the single-device claim)
+    // until the background claim settles. It is released on every exit path:
+    // `attempt.release()` below when signIn fails before the claim starts, by the
+    // claim otherwise.
+    let attempt: SignInAttempt | null = null;
+    offlineWithoutProfileRef.current = false;
     setLoading(true);
     setError(null);
 
     try {
+      // Supersedes any earlier claim and waits (capped) for one that is mid-write,
+      // so the clear below cannot be undone by its local store.
+      attempt = await deviceClaims.beginSignIn();
+      // Forget any device id left from an earlier sign-in BEFORE claiming a new
+      // one. The claim writes remote first, then stores locally; if the app is
+      // force-closed between the two, local-old + remote-new reads as a takeover
+      // and evicts this very device on the next launch. With local empty that
+      // same state is simply adopted. The write order below must not change.
+      await clearStoredSessionId();
       const authUser = await signInWithEmail(supabase, email, password);
       const claimRole = await getUserRoleClaim(authUser);
       if (claimRole && claimRole !== DEFAULT_APP_ROLE) {
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
+        setPolicyAccepted(false);
         setError(CUSTOMER_ACCESS_ERROR);
         throw new Error(CUSTOMER_ACCESS_ERROR);
       }
@@ -671,10 +824,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       // Explicit sign-in deliberately claims this device as the active session.
       // It mints and persists the id uncontended because the passive reconcile
-      // skips itself while signInInProgressRef is set, so the device that just
+      // skips itself while the guard is held, so the device that just
       // signed in always matches remote and never self-evicts on the next
-      // refresh. Takeover detection stays in the passive path.
-      await startSingleDeviceSession(authUser.id);
+      // refresh. Takeover detection stays in the passive path. The claim runs in
+      // the background: the customer is already in once their profile is ready,
+      // and two sequential writes are not worth a spinner.
+      attempt.startClaim(authUser.id);
 
       identifyAnalyticsUser(authUser.id);
       trackAnalyticsEvent('customer_sign_in_completed', {
@@ -688,10 +843,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         void storePolicyAccepted(bootstrap.policyAccepted);
         // Any acceptance captured locally during signup still needs flushing,
         // but it must not block entering the app.
-        void flushPendingCustomerPolicyAcceptance();
+        void flushPendingCustomerPolicyAcceptance(authUser.id);
       } else {
-        await flushPendingCustomerPolicyAcceptance();
-        await refreshPolicyAcceptance();
+        // Same as the bootstrap branch: the flush is a write that must not block
+        // entering the app (and must not get a deadline), and the read is bounded.
+        void flushPendingCustomerPolicyAcceptance(authUser.id);
+        await refreshPolicyAcceptance({ userId: authUser.id, bounded: true });
       }
     } catch (err: any) {
       reportAuthFailure('customer.signIn', err);
@@ -699,7 +856,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(formattedError);
       throw new Error(formattedError);
     } finally {
-      signInInProgressRef.current = false;
+      attempt?.release();
       setLoading(false);
     }
   };
@@ -709,10 +866,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
-      await releaseSingleDeviceSession(authUser?.id);
+      // End any background device claim first: it must not write a device id for
+      // a session that is being closed (clearLocalUserState below only runs after
+      // the server work).
+      deviceClaims.invalidate();
+      // The in-memory user, not supabase.auth.getUser(): with an expired token
+      // getUser() refreshes first, which offline stalls for ~25 s. The server
+      // work is time-boxed and signOutUser always ends this device's session
+      // (bounded server attempt, then local removal), so signing out works
+      // offline. The device id is cleared below, only once that has happened.
+      await bestEffortWithin(() => releaseSingleDeviceSession(user?.uid), RELEASE_SESSION_TIMEOUT_MS);
       await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);
@@ -749,6 +912,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await signOutUser(supabase).catch(() => undefined);
       await clearLocalUserState();
       setUser(null);
+      setPolicyAccepted(false);
       trackAnalyticsEvent('customer_account_deleted');
       clearAnalyticsUser();
       router.replace('/login');
@@ -861,8 +1025,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       await recordCustomerPolicyAcceptance(source);
-      setPolicyAccepted(true);
-      void storePolicyAccepted(true);
+      // The write can outlast a sign-out, and this flag belongs to whoever accepted.
+      if (await isReconcileStillValid(supabase, { user: user ? { id: user.uid } : null })) {
+        setPolicyAccepted(true);
+        void storePolicyAccepted(true);
+      }
       trackAnalyticsEvent('customer_policy_accepted', {
         source,
       });

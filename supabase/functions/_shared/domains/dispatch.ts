@@ -18,6 +18,7 @@ import {
   upsertCourierShiftSlots,
   uploadDispatchDocument,
 } from '../courierSupply.ts';
+import { loadOwnBootstrapProfile } from '../bootstrapProfile.ts';
 import { assertUploadAllowed, enforceDispatchRateLimit } from '../rateLimit.ts';
 import { recordDispatchRiderPing } from '../dispatchRiderPings.ts';
 import {
@@ -2176,12 +2177,23 @@ const dispatchRiderSOS: Handler = async ({ context, data }) => {
   return json(200, { data: { confirmedAt: nowIso() } });
 };
 
+// Interactive dispatch sign-in in one authenticated call: the rider's own
+// profile row, which is what the client's direct user_profiles read returned.
+// Read-only and deliberately NOT role-gated: a customer with a pending or
+// rejected rider application signs in here too, and the client decides access
+// from the profile plus the role claim. The single-device claim write stays on
+// the client, which mints the device id. Older clients never call this and keep
+// their direct read.
+const dispatchBootstrap: Handler = async ({ context }) =>
+  json(200, { data: { profile: await loadOwnBootstrapProfile(context.uid) } });
+
 export const dispatchDomain = defineRpcDomain<AuthenticatedRequestContext>({
   actions: DISPATCH_ACTIONS,
   name: 'dispatch',
   handlers: {
     dispatchAcceptOffer,
     dispatchAssignOrderCourier,
+    dispatchBootstrap,
     dispatchDeclineOffer,
     dispatchGetDeliveryQueue,
     dispatchGetNearestRiders,

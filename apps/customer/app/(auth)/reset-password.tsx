@@ -4,6 +4,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { BusyLabel, radius } from '@feasty/design-system';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
+import { clearStoredSessionId } from '../../src/services/session';
 import { supabase } from '../../src/services/supabase/config';
 import { screenColumn } from '../../src/components/ScreenColumn';
 import SuccessBanner from '../../src/components/SuccessBanner';
@@ -75,6 +76,10 @@ export default function ResetPasswordScreen() {
     setSubmitting(true);
     setError(null);
     try {
+      // Forget any stored device id before a session exists, like signIn does. A
+      // stale id from an earlier account plus the single-device id of this one
+      // would read as a takeover; with local empty the reconcile adopts instead.
+      await clearStoredSessionId();
       // Step 1: the code buys a session.
       await verifyPasswordResetOtp(supabase, email.trim(), code);
       // Step 2: that session authorises the password write.
@@ -90,7 +95,7 @@ export default function ResetPasswordScreen() {
       await clearOtpCooldown('recovery', email.trim());
 
       // The recovery session outlives the update, and this flow ends at login.
-      await supabase.auth.signOut().catch(() => undefined);
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
       router.replace({
         pathname: '/login',
         params: { notice: 'password-updated', ...(redirectTo ? { redirectTo } : null) },

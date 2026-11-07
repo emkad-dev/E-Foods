@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { AuthChangeEvent, Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import type { UserDocument } from '../domain/entities';
 import {
@@ -6,7 +7,6 @@ import {
   createUserWithEmail,
   formatAuthError,
   getUserRoleClaim,
-  isNetworkRequestError,
   signInWithEmail,
   signOutUser,
   sendPasswordReset,
@@ -22,10 +22,17 @@ import {
 } from '../services/session';
 import { linkPartnerRestaurant } from '../services/partnerRestaurantActions';
 import { createUserDocument, getUserDocument, updateUserDocument } from '../services/supabase/profile';
+import { fetchPartnerBootstrap } from '../services/partnerBootstrap';
 import { deleteOwnAccount as deleteOwnPartnerAccount } from '../services/accountManagement';
 import {
+  RELEASE_SESSION_TIMEOUT_MS,
+  bestEffortWithin,
+  createForegroundSessionCheck,
+  isReconcileStillValid,
+  isTransientNetworkFailure,
+  resolveNullSessionOutcome,
+  resolveProfileLoadFailure,
   resolveSingleDeviceSessionDecision,
-  shouldHydrateCachedUserProfile,
   shouldShowSignInLoading,
 } from '../../../../packages/auth/src';
 import { isStaleSupabaseSessionError } from '../../../../packages/auth/src/session';
@@ -63,23 +70,8 @@ const NO_INTERNET_ERROR = 'No internet connection. Check your network and try ag
 const SESSION_CONFLICT_ERROR =
   'This account was signed in on another device. Sign in again here if you want to continue on this device.';
 
-const isProfileOfflineError = (error: unknown) => {
-  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as any).code) : '';
-  const errorMessage =
-    typeof error === 'object' && error !== null && 'message' in error ? String((error as any).message).toLowerCase() : '';
-
-  return (
-    errorCode === 'unavailable' ||
-    errorCode === 'failed-precondition' ||
-    errorMessage.includes('client is offline') ||
-    errorMessage.includes('offline')
-  );
-};
-
-const isTransientNetworkError = (error: unknown) => isProfileOfflineError(error) || isNetworkRequestError(error);
-
 const getPartnerAuthErrorMessage = (error: unknown, fallbackMessage: string) => {
-  if (isTransientNetworkError(error)) {
+  if (isTransientNetworkFailure(error)) {
     return NO_INTERNET_ERROR;
   }
 
@@ -101,10 +93,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // auth listener. Used to avoid re-showing the full-screen spinner when the
   // browser re-fires SIGNED_IN on tab/app refocus.
   const hasUserRef = useRef(false);
+  // True only for the duration of an interactive signIn(). The passive
+  // onAuthStateChange reconcile steps aside while it is set: signIn owns the
+  // SIGNED_IN it triggers and reads the profile itself (through partnerBootstrap),
+  // so a concurrent reconcile would add a second, direct profile read and undo the
+  // "password + one call" sign-in. Partner is multi-device and has no device
+  // claim, so unlike customer/dispatch nothing outlives signIn() and the flag is
+  // released in its `finally`.
+  const signInInProgressRef = useRef(false);
+  // Tracks the error for the same reason as hasUserRef, so the foreground check
+  // below reads the current one.
+  const errorRef = useRef<string | null>(null);
 
   useEffect(() => {
     hasUserRef.current = Boolean(user);
   }, [user]);
+
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
 
   const clearLocalUserState = useCallback(async () => {
     await Promise.all([clearStoredSessionId(), clearStoredUserProfile()]);
@@ -135,11 +142,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
     } catch (releaseError) {
-      if (!isProfileOfflineError(releaseError)) {
+      if (!isTransientNetworkFailure(releaseError)) {
         console.warn('Unable to release partner session in Supabase:', releaseError);
       }
-    } finally {
-      await clearStoredSessionId();
     }
   }, []);
 
@@ -174,9 +179,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [clearLocalUserState]);
 
   const buildNextUser = useCallback(
-    async (authUser: SupabaseAuthUser) => {
+    // `prefetchedProfile` is the profile an interactive sign-in already fetched
+    // through partnerBootstrap; without it (or when it was empty) the profile is
+    // read here exactly as before.
+    async (authUser: SupabaseAuthUser, prefetchedProfile?: UserDocument | null) => {
       const claimRole = await getUserRoleClaim(authUser);
-      let userDocument = await getUserDocument(authUser.id);
+      let userDocument = prefetchedProfile ?? (await getUserDocument(authUser.id));
 
       if (!userDocument) {
         userDocument = await createUserDocument(authUser.id, {
@@ -197,6 +205,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (accessState.kind === 'blocked') {
+        // A reconcile that outlived a sign-out read this with no session behind it,
+        // so it is no verdict, and the sign-out below could hit a newer session.
+        if (!(await isReconcileStillValid(supabase, { user: authUser }))) {
+          return null;
+        }
+
         await clearLocalUserState();
         await signOutUser(supabase);
         setUser(null);
@@ -232,42 +246,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }, 10_000);
 
     void (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!active) {
-        return;
-      }
-
-      if (!session) {
-        setLoading(false);
-        return;
-      }
-
+      // Read the saved profile BEFORE (and without) asking Supabase for the
+      // session. getSession() refreshes an expired access token first, and
+      // offline that retries for ~25 s before giving up, which held the first
+      // frame on the skeleton / login screen for a restaurant that was perfectly
+      // able to see its saved state. A cached profile with no live session is
+      // corrected by the listener below (a real SIGNED_OUT clears it).
       const cachedUser = await getStoredUserProfile<UserDocument>();
 
       if (!active) {
         return;
       }
 
-      if (
-        shouldHydrateCachedUserProfile({
-          sessionUserId: session.user.id,
-          cachedUser,
-          expectedRole: 'restaurant',
-        })
-      ) {
+      if (cachedUser?.role === 'restaurant') {
         setUser(cachedUser);
-        setLoading(false);
-      } else {
-        // Session exists but no matching cache (fresh install, cleared storage,
-        // or role mismatch). Don't block on the onAuthStateChange network chain
-        // — release the skeleton now and let the listener reconcile in the
-        // background. Worst case: a ~100 ms flash of the login screen before
-        // the INITIAL_SESSION fires from local storage and sets the user.
-        setLoading(false);
       }
+
+      // Either way the skeleton goes now. With no saved profile (fresh install,
+      // cleared storage, role mismatch) don't block on the onAuthStateChange
+      // network chain: show login and let the listener reconcile in the
+      // background. Worst case: a ~100 ms flash of the login screen before the
+      // INITIAL_SESSION fires from local storage and sets the user.
+      setLoading(false);
     })();
 
     return () => {
@@ -286,12 +286,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let disposed = false;
     let reconcileQueue: Promise<void> = Promise.resolve();
     const reconcileAuthState = async (event: AuthChangeEvent, session: Session | null) => {
+      // No SIGNED_OUT follows a sign-out, so this can outlive it: a read returning
+      // afterwards must not put the partner back on screen. Stale means no state
+      // change at all. The check that remains in `finally` only undoes this
+      // reconcile's own spinner.
+      let isStale = false;
+      const reconcileIsStale = async () => {
+        isStale = !(await isReconcileStillValid(supabase, session));
+        return isStale;
+      };
+
+      if (await reconcileIsStale()) {
+        return;
+      }
+
+      // An interactive signIn() owns the transition it triggers; step aside. Any
+      // event carrying a session counts, not just SIGNED_IN, and a sign-out (null
+      // session) must still get through.
+      if (session && signInInProgressRef.current) {
+        return;
+      }
+
       // Background reconciliation (INITIAL_SESSION, TOKEN_REFRESHED, …) must not
       // re-block the UI once the first paint has resolved. Only a *fresh*
       // sign-in returns to the full-screen spinner — on web, refocusing the tab
       // re-fires SIGNED_IN for an already-signed-in partner, and that must
       // reconcile silently in the background instead of flashing the spinner.
-      if (shouldShowSignInLoading({ event, hasUser: hasUserRef.current })) {
+      const raisedLoading = shouldShowSignInLoading({ event, hasUser: hasUserRef.current });
+
+      if (raisedLoading) {
         setLoading(true);
       }
 
@@ -299,6 +322,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const authUser = session?.user ?? null;
 
         if (!authUser) {
+          // A null session is only a sign-out when supabase-js says so. Offline
+          // with an expired access token it delivers INITIAL_SESSION + null
+          // while the stored session is still there; clearing local state then
+          // signed the partner out of the UI and wiped their saved profile.
+          const nullSession = await resolveNullSessionOutcome(supabase, event);
+
+          if (nullSession === 'offline') {
+            const cachedUser = await getStoredUserProfile<UserDocument>();
+            if (!hasUserRef.current && cachedUser?.role === 'restaurant') {
+              setUser(cachedUser);
+            }
+            setError(NO_INTERNET_ERROR);
+            return;
+          }
+
           setUser(null);
           await clearLocalUserState();
           return;
@@ -306,40 +344,66 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         const nextUser = await buildNextUser(authUser);
 
+        if (await reconcileIsStale()) {
+          return;
+        }
+
         if (!nextUser) {
           return;
         }
 
         const sessionIsValid = await syncSingleDeviceSession(nextUser);
 
-        if (!sessionIsValid) {
+        if (!sessionIsValid || (await reconcileIsStale())) {
           return;
         }
 
         setUser(nextUser);
+        // Reached the server this time: an earlier no-internet notice is stale.
+        setError((current) => (current === NO_INTERNET_ERROR ? null : current));
         await storeUserProfile(nextUser);
       } catch (nextError) {
         const authUser = session?.user ?? null;
-        if (authUser && isProfileOfflineError(nextError)) {
-          const cachedUser = await getStoredUserProfile<UserDocument>();
+        const cachedUser = authUser ? await getStoredUserProfile<UserDocument>() : null;
 
-          if (cachedUser?.uid === authUser.id && cachedUser.role === 'restaurant') {
-            const fallbackUser: UserDocument = {
-              ...cachedUser,
-              uid: authUser.id,
-              email: authUser.email ?? cachedUser.email,
-              emailVerified: Boolean(authUser.email_confirmed_at),
-              role: 'restaurant',
-            };
+        // After a sign-out this failure means nothing: the read went out with no
+        // session behind it, and every branch below would change state over it.
+        if (await reconcileIsStale()) {
+          return;
+        }
 
-            const sessionIsValid = await syncSingleDeviceSession(fallbackUser);
+        const hasUsableCachedProfile = Boolean(
+          authUser && cachedUser?.uid === authUser.id && cachedUser.role === 'restaurant'
+        );
+        // A network failure while reloading the profile is not a sign-out: the
+        // Supabase session is intact. Keep the saved profile on screen, or, with
+        // none, say there is no internet WITHOUT clearing anything, so the next
+        // reconcile can sign them straight in. On native only the foreground check
+        // below starts one soon: auth-js does not notice the network coming back.
+        const failureOutcome = resolveProfileLoadFailure({
+          error: nextError,
+          hasAuthUser: Boolean(authUser),
+          hasUsableCachedProfile,
+        });
 
-            if (sessionIsValid) {
-              setUser(fallbackUser);
-              setError(NO_INTERNET_ERROR);
-              return;
-            }
-          }
+        if (authUser && cachedUser && failureOutcome === 'keep-cached-user') {
+          // Partner is multi-device, so there is no single-device check to run
+          // against the saved profile here.
+          setUser({
+            ...cachedUser,
+            uid: authUser.id,
+            email: authUser.email ?? cachedUser.email,
+            emailVerified: Boolean(authUser.email_confirmed_at),
+            role: 'restaurant',
+          });
+          setError(NO_INTERNET_ERROR);
+          return;
+        }
+
+        if (failureOutcome === 'offline-without-profile') {
+          setUser(null);
+          setError(NO_INTERNET_ERROR);
+          return;
         }
 
         const nextMessage = getPartnerAuthErrorMessage(nextError, 'Failed to load partner account');
@@ -357,23 +421,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setError(nextMessage);
         await clearStoredUserProfile();
       } finally {
-        setLoading(false);
+        if (!isStale || raisedLoading) {
+          setLoading(false);
+        }
       }
     };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+    const queueReconcile = (event: AuthChangeEvent, session: Session | null) => {
       setTimeout(() => {
         reconcileQueue = reconcileQueue
           .then(() => (disposed ? undefined : reconcileAuthState(event, session)))
           .catch((error) => console.error('Auth state reconcile failed:', error));
       }, 0);
+    };
+
+    // After a network failure, returning to the foreground retries the reconcile;
+    // see foregroundSessionCheck.ts. Labelled TOKEN_REFRESHED because that is the
+    // same session being re-checked: a background pass with no spinner.
+    const foregroundCheck = createForegroundSessionCheck<Session>({
+      initialState: AppState.currentState,
+      getSession: () => supabase.auth.getSession(),
+      isOffline: () => errorRef.current === NO_INTERNET_ERROR,
+      isSignInInProgress: () => signInInProgressRef.current,
+      queueReconcile: (session) => queueReconcile('TOKEN_REFRESHED', session),
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      foregroundCheck.noteAuthEvent();
+      queueReconcile(event, session);
+    });
+    const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+      void foregroundCheck.onAppStateChange(nextState);
     });
 
     return () => {
       disposed = true;
       subscription.unsubscribe();
+      appStateSubscription.remove();
     };
   }, [buildNextUser, clearLocalUserState, syncSingleDeviceSession]);
 
@@ -450,8 +536,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
    * feature exists for, because an invited staff member has no restaurant and
    * no partner application at the moment they first sign in.
    */
-  const adoptSignedInAuthUser = async (authUser: SupabaseAuthUser) => {
-    const nextUser = await buildNextUser(authUser);
+  const adoptSignedInAuthUser = async (authUser: SupabaseAuthUser, prefetchedProfile?: UserDocument | null) => {
+    const nextUser = await buildNextUser(authUser, prefetchedProfile);
 
     if (!nextUser) {
       // `buildNextUser` returns null only after it has signed the user out and
@@ -466,12 +552,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    signInInProgressRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
       const authUser = await signInWithEmail(supabase, email, password);
-      await adoptSignedInAuthUser(authUser);
+      // The profile in one call (landing on the warmed feasty-partner). Null
+      // when the backend does not implement the action yet, in which case
+      // buildNextUser reads the profile itself as before.
+      const bootstrap = await fetchPartnerBootstrap().catch((bootstrapError) => {
+        console.warn('partnerBootstrap unavailable, falling back to the direct profile read:', bootstrapError);
+        return null;
+      });
+      await adoptSignedInAuthUser(authUser, bootstrap?.profile);
     } catch (nextError: any) {
       const nextMessage = getPartnerAuthErrorMessage(nextError, 'Unable to sign in');
       // `signInWithEmail` and `adoptSignedInAuthUser`'s direct-Supabase reads
@@ -481,6 +575,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(nextMessage);
       throw new Error(nextMessage);
     } finally {
+      signInInProgressRef.current = false;
       setLoading(false);
     }
   };
@@ -547,10 +642,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setError(null);
 
     try {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
-      await releaseSingleDeviceSession(authUser?.id);
+      // The in-memory user, not supabase.auth.getUser(): with an expired token
+      // getUser() refreshes first, which offline stalls for ~25 s. The server
+      // work is time-boxed and signOutUser always ends this device's session
+      // (bounded server attempt, then local removal), so signing out works
+      // offline. The device id is cleared below, only once that has happened.
+      await bestEffortWithin(() => releaseSingleDeviceSession(user?.uid), RELEASE_SESSION_TIMEOUT_MS);
       await signOutUser(supabase);
       await clearLocalUserState();
       setUser(null);

@@ -9,9 +9,12 @@ import {
   formatAuthError,
   isNetworkRequestError,
   sendPasswordResetEmailWithFallback,
+  signInWithEmail,
   sendVerificationEmailWithFallback,
+  signOutUser,
   verifyPasswordResetOtp,
 } from './supabaseAuth.ts';
+import { clearSupabaseSession } from './session.ts';
 import { toUserMessage } from '../../observability/src/userMessage.ts';
 
 const signUpStub = (user: unknown, session: unknown = null) =>
@@ -276,4 +279,103 @@ test('isNetworkRequestError detects common browser and React Native fetch failur
   assert.equal(isNetworkRequestError(new TypeError('Failed to fetch')), true);
   assert.equal(isNetworkRequestError(new Error('Network request failed')), true);
   assert.equal(isNetworkRequestError(new Error('Something else broke')), false);
+});
+
+// A sign-out must end THIS device's session only. supabase-js defaults to the
+// 'global' scope, which revokes every refresh token the account has -- so a
+// takeover eviction, a session expiry or the user's own sign-out on one phone
+// silently logged out every other device they were using.
+const signOutClient = (adminSignOut: () => Promise<{ error: unknown }>) => {
+  const scopes: unknown[] = [];
+  const removed: string[] = [];
+  const auth: any = {
+    storageKey: 'sb-abc-auth-token',
+    storage: {
+      getItem: async () => JSON.stringify({ access_token: 'token' }),
+      removeItem: async (k: string) => void removed.push(k),
+    },
+    admin: {
+      signOut: (_jwt: string, scope: unknown) => {
+        scopes.push(scope);
+        return adminSignOut();
+      },
+    },
+  };
+  return { supabase: { auth } as any, scopes, removed };
+};
+
+test('signOutUser signs out this device only', async () => {
+  const { supabase, scopes } = signOutClient(async () => ({ error: null }));
+
+  await signOutUser(supabase);
+
+  assert.deepEqual(scopes, ['local']);
+});
+
+test('signOutUser does not throw when the server refuses: the device ends signed out anyway', async () => {
+  const { supabase, removed } = signOutClient(async () => ({ error: new Error('boom') }));
+
+  await signOutUser(supabase);
+
+  assert.ok(removed.includes('sb-abc-auth-token'));
+});
+
+test('clearSupabaseSession clears this device only and swallows failures', async () => {
+  const { supabase, scopes, removed } = signOutClient(async () => {
+    throw new Error('offline');
+  });
+
+  await clearSupabaseSession(supabase);
+
+  assert.deepEqual(scopes, ['local']);
+  assert.ok(removed.includes('sb-abc-auth-token'));
+});
+
+// supabase-js reports a dropped or stalled request as AuthRetryableFetchError
+// (status 0) and a refused password as AuthApiError (HTTP 400).
+const retryableFetchError = () => Object.assign(new Error('Network request failed'), { name: 'AuthRetryableFetchError', status: 0 });
+const invalidCredentialsError = () =>
+  Object.assign(new Error('Invalid login credentials'), { name: 'AuthApiError', status: 400, code: 'invalid_credentials' });
+
+const passwordClient = (outcomes: Array<{ user?: unknown; error?: unknown }>) => {
+  let calls = 0;
+  const supabase = {
+    auth: {
+      signInWithPassword: async () => {
+        const outcome = outcomes[Math.min(calls, outcomes.length - 1)];
+        calls += 1;
+        return { data: { user: outcome.user ?? null, session: null }, error: outcome.error ?? null };
+      },
+    },
+  } as any;
+
+  return { supabase, calls: () => calls };
+};
+
+test('signInWithEmail sends the password request again after a network failure or timeout, once', async () => {
+  const { supabase, calls } = passwordClient([{ error: retryableFetchError() }, { user: { id: 'u1' } }]);
+
+  assert.deepEqual(await signInWithEmail(supabase, 'a@b.c', 'pw'), { id: 'u1' });
+  assert.equal(calls(), 2);
+});
+
+test('signInWithEmail gives up after the one retry', async () => {
+  const { supabase, calls } = passwordClient([{ error: retryableFetchError() }]);
+
+  await assert.rejects(() => signInWithEmail(supabase, 'a@b.c', 'pw'), /Network request failed/);
+  assert.equal(calls(), 2);
+});
+
+test('signInWithEmail never re-sends a rejected password: the rate limit and the wrong-password message depend on it', async () => {
+  const { supabase, calls } = passwordClient([{ error: invalidCredentialsError() }, { user: { id: 'u1' } }]);
+
+  await assert.rejects(() => signInWithEmail(supabase, 'a@b.c', 'wrong'), /Invalid login credentials/);
+  assert.equal(calls(), 1);
+});
+
+test('signInWithEmail does not retry a success', async () => {
+  const { supabase, calls } = passwordClient([{ user: { id: 'u1' } }]);
+
+  await signInWithEmail(supabase, 'a@b.c', 'pw');
+  assert.equal(calls(), 1);
 });

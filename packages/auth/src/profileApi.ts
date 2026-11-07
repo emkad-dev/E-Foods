@@ -4,7 +4,9 @@ import type { UserDocument } from '../../domain/src/entities';
 const USER_PROFILE_COLUMNS =
   'uid,email,displayName,phoneNumber,photoURL,emailVerified,role,partnerApplicationStatus,partnerApplicationReviewedAt,partnerApplicationRejectionReason,dispatchApplicationStatus,dispatchApplicationReviewedAt,dispatchApplicationRejectionReason,expoPushToken,pushTokenUpdatedAt,activeSessionId,activeSessionUpdatedAt,accountDisabled,disabledAt,disabledByUid,lastPrivilegedRole,restaurantId,restaurantName,restaurantLinkedAt,restaurantLinkSource,createdAt,updatedAt';
 
-const mapProfile = (record: Record<string, any>): UserDocument => ({
+// Exported so the bootstrap read (profileBootstrap.ts) maps its row exactly like
+// the direct read does.
+export const mapUserProfileRecord = (record: Record<string, any>): UserDocument => ({
   uid: record.uid,
   email: record.email,
   role: record.role,
@@ -45,7 +47,7 @@ export const getUserProfile = async (supabase: SupabaseClient, userId: string): 
     throw error;
   }
 
-  return data ? mapProfile(data) : null;
+  return data ? mapUserProfileRecord(data) : null;
 };
 
 export const createUserProfile = async (

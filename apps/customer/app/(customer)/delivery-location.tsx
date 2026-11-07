@@ -43,7 +43,9 @@ const LIVE_GEOCODE_INTERVAL_MS = 15000;
 
 export default function DeliveryLocationScreen() {
   const insets = useSafeAreaInsets();
-  const { deliveryLocation, setDeliveryLocation } = useCart();
+  const { deliveryLocation, fulfillmentType, setDeliveryLocation } = useCart();
+  // Same screen for both: only the wording changes for someone collecting.
+  const isCollection = fulfillmentType === 'pickup';
   const { checkCoverage, isCovered, nearestOrderableKm } = useCoverage();
   const [address, setAddress] = useState(deliveryLocation?.address ?? '');
   const [label, setLabel] = useState(deliveryLocation?.label ?? deliveryLocation?.shortAddress ?? '');
@@ -154,7 +156,7 @@ export default function DeliveryLocationScreen() {
     const trimmedLabel = label.trim();
 
     if (!trimmedAddress) {
-      setStatus({ tone: 'error', text: 'Enter your delivery address before saving.' });
+      setStatus({ tone: 'error', text: isCollection ? 'Enter your address before saving.' : 'Enter your delivery address before saving.' });
       return;
     }
 
@@ -192,7 +194,7 @@ export default function DeliveryLocationScreen() {
           <FontAwesome name="arrow-left" size={18} color={customerTheme.text} />
         </TouchableOpacity>
         <View>
-          <Text style={styles.title}>Delivery address</Text>
+          <Text style={styles.title}>{isCollection ? 'Your address' : 'Delivery address'}</Text>
           <Text style={styles.subtitle}>{liveTracking ? 'Live location on' : 'Manual entry'}</Text>
         </View>
       </View>

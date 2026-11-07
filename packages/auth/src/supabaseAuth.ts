@@ -6,29 +6,11 @@ import type { AuthRole } from './types';
 // extensionless relative ESM specifiers, and every consuming tsconfig sets
 // `allowImportingTsExtensions`.
 import { toUserMessage } from '../../observability/src/userMessage.ts';
+import { signOutThisDevice } from './localSignOut.ts';
 import { runBeforeSignOutHooks } from './signOutHooks.ts';
+import { retryOnceOnTransientFailure } from './transientNetworkFailure.ts';
 
-const NETWORK_ERROR_PATTERNS = [
-  'failed to fetch',
-  'fetch failed',
-  'network request failed',
-  'networkerror',
-  'load failed',
-  'request failed',
-];
-
-export const isNetworkRequestError = (error: unknown) => {
-  const message =
-    typeof error === 'object' && error !== null && 'message' in error
-      ? String((error as any).message ?? '').toLowerCase()
-      : '';
-
-  if (!message) {
-    return false;
-  }
-
-  return NETWORK_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
-};
+export { isNetworkRequestError } from './networkRequestError.ts';
 
 /**
  * The one message every app shows when a sign-up hits an address that already
@@ -122,29 +104,38 @@ export const signInWithEmail = async (
   supabase: SupabaseClient,
   email: string,
   password: string
-): Promise<User> => {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
+): Promise<User> =>
+  // The password request alone fails fast (boundedFetch gives it 7s) and is
+  // sent a second time on a network failure or timeout. A credentials rejection
+  // is an answer, not a transport failure, so it is never re-sent: that would
+  // double-count against the auth rate limit and delay the wrong-password message.
+  retryOnceOnTransientFailure(async () => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data.user) {
+      throw new Error('Supabase did not return a user for this sign-in attempt.');
+    }
+
+    return data.user;
   });
 
-  if (error) {
-    throw error;
-  }
-
-  if (!data.user) {
-    throw new Error('Supabase did not return a user for this sign-in attempt.');
-  }
-
-  return data.user;
-};
-
+/**
+ * Ends this device's session and never throws or leaves it signed in: see
+ * localSignOut.ts for the bounded server attempt and the local fallback. Scope
+ * is 'local', not supabase-js's default 'global': global revokes every refresh
+ * token the account has, so signing out (or being evicted) on one device logged
+ * the user out of all the others. Nothing here offers "sign out everywhere".
+ */
 export const signOutUser = async (supabase: SupabaseClient) => {
   await runBeforeSignOutHooks();
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    throw error;
-  }
+  await signOutThisDevice(supabase);
 };
 
 export const getUserRoleClaim = async (user: User): Promise<AuthRole | null> => getSupabaseUserRole(user);

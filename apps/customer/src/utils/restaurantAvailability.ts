@@ -61,7 +61,7 @@ const toNumber = (value: unknown): number | null => {
   return null;
 };
 
-const extractCoordinatePoint = (value: unknown): CoordinatePoint | null => {
+export const extractCoordinatePoint = (value: unknown): CoordinatePoint | null => {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -120,7 +120,7 @@ const isInsideOperatingWindow = (restaurant: DiscoveryRestaurant, now = new Date
   return currentMinutes >= openingMinutes || currentMinutes < closingMinutes;
 };
 
-const calculateDistanceKm = (origin: CoordinatePoint, destination: CoordinatePoint) => {
+export const calculateDistanceKm = (origin: CoordinatePoint, destination: CoordinatePoint) => {
   const earthRadiusKm = 6371;
   const deltaLatitude = toRadians(destination.latitude - origin.latitude);
   const deltaLongitude = toRadians(destination.longitude - origin.longitude);

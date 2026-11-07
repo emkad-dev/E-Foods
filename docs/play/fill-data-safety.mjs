@@ -49,6 +49,11 @@ const perApp = {
   partner: {
     ...common,
     PSL_ADDRESS: [REQ, ['PSL_APP_FUNCTIONALITY', 'PSL_FRAUD_PREVENTION_SECURITY']],
+    // Store details can read one foreground fix to set the restaurant's map pin
+    // ("Use my current location"). Optional: the pin can be typed or found from
+    // the address instead, so a partner can decline the permission.
+    PSL_APPROX_LOCATION: [OPT, ['PSL_APP_FUNCTIONALITY']],
+    PSL_PRECISE_LOCATION: [OPT, ['PSL_APP_FUNCTIONALITY']],
     PSL_OTHER_PERSONAL: [REQ, ['PSL_FRAUD_PREVENTION_SECURITY', 'PSL_ACCOUNT_MANAGEMENT']],
     PSL_PHOTOS: [REQ, ['PSL_APP_FUNCTIONALITY', 'PSL_FRAUD_PREVENTION_SECURITY']],
     PSL_OTHER: [REQ, ['PSL_APP_FUNCTIONALITY']],

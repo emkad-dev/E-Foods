@@ -5,6 +5,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { reportError } from '../../../../packages/observability/src/sentry';
 import { validateResetPasswordForm } from '../../src/domain/authFormValidation';
 import { clearOtpCooldown, formatAuthError, verifyPasswordResetOtp } from '../../src/services/supabase/auth';
+import { clearStoredSessionId } from '../../src/services/session';
 import { supabase } from '../../src/services/supabase/config';
 import { resolveDispatchSuccessNotice, type DispatchSuccessNoticeKey } from '../../src/utils/routeNotices';
 import { dispatchTheme } from '../../src/theme/palette';
@@ -75,6 +76,10 @@ export default function DispatchResetPasswordScreen() {
     setError(null);
 
     try {
+      // Forget any stored device id before a session exists, like signIn does. A
+      // stale id from an earlier account plus the single-device id of this one
+      // would read as a takeover; with local empty the reconcile adopts instead.
+      await clearStoredSessionId();
       // Step 1: the code buys a session.
       await verifyPasswordResetOtp(supabase, email.trim(), code);
       // Step 2: that session authorises the password write.
@@ -90,7 +95,7 @@ export default function DispatchResetPasswordScreen() {
       await clearOtpCooldown('recovery', email.trim());
 
       // The recovery session outlives the update, and this flow ends at login.
-      await supabase.auth.signOut().catch(() => undefined);
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
       const noticeKey: DispatchSuccessNoticeKey = 'password-updated';
       router.replace({
         pathname: '/(auth)/login',
