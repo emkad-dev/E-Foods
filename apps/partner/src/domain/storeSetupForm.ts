@@ -21,7 +21,11 @@
  * nothing: the coordinate rule is the one the server publishes against, so it
  * is shared rather than copied. The entity barrel (React Native) stays out.
  */
-import { isPublishBlockedByLocation, isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
+import {
+  RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+  isUsableCoordinatePair,
+  restaurantLocationBlock,
+} from '../../../../packages/domain/src/restaurantLocation.ts';
 
 const OPERATING_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
@@ -96,7 +100,9 @@ export const STORE_SETUP_MESSAGES = {
   coordinatePair: 'Latitude and longitude go together - add both, or clear both.',
   location: 'Add both latitude and longitude before making this store visible.',
   locationInvalid:
-    'These coordinates cannot be a restaurant - 0 and 0, or numbers off the map. Use Find from address or Use my current location.',
+    'These coordinates cannot be a restaurant - 0 and 0, or numbers off the map. Use my current location or search for your address.',
+  // Same words the server answers with, so the form and a refused save agree.
+  outsideNigeria: RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
   deliveryRadiusKm: 'Add a delivery distance above zero, or turn delivery off.',
 } as const;
 
@@ -367,18 +373,23 @@ export const validateStoreSetup = (
   const nextLatitude = hasLatitude ? Number.parseFloat(draft.latitude) : null;
   const nextLongitude = hasLongitude ? Number.parseFloat(draft.longitude) : null;
 
-  if (
-    isPublishBlockedByLocation(
-      saved
-        ? {
-            isPublished: saved.isPublished === true,
-            latitude: toNumberOrNull(textOf(saved.latitude)),
-            longitude: toNumberOrNull(textOf(saved.longitude)),
-          }
-        : null,
-      { isPublished: draft.isPublished, latitude: nextLatitude, longitude: nextLongitude }
-    )
-  ) {
+  const locationBlock = restaurantLocationBlock(
+    saved
+      ? {
+          isPublished: saved.isPublished === true,
+          latitude: toNumberOrNull(textOf(saved.latitude)),
+          longitude: toNumberOrNull(textOf(saved.longitude)),
+        }
+      : null,
+    { isPublished: draft.isPublished, latitude: nextLatitude, longitude: nextLongitude }
+  );
+
+  if (locationBlock === 'outside-nigeria') {
+    // A real pair that is not in Nigeria is the pair's fault, not one field's
+    // (the usual cause is the two typed the wrong way round), so both say so.
+    errors.latitude = STORE_SETUP_MESSAGES.outsideNigeria;
+    errors.longitude = STORE_SETUP_MESSAGES.outsideNigeria;
+  } else if (locationBlock === 'missing') {
     // The message goes on the field that is actually wrong. A field that already
     // has its own error (unreadable, or half of a pair) keeps that one.
     if (nextLatitude === null || nextLongitude === null) {

@@ -157,11 +157,10 @@ test('making the store visible refuses coordinates the server would refuse, on t
     }
   }
 
-  // A zero on one axis is a real place; only the exact pair 0,0 is not.
-  assert.equal(
-    hasStoreSetupErrors(validateStoreSetup(validDraft({ isPublished: true, latitude: '0', longitude: '3.42' }))),
-    false
-  );
+  // A zero on one axis is a real coordinate (so it is not "off the map") but it
+  // is not Nigeria, so a store cannot be made visible there.
+  const equator = validateStoreSetup(validDraft({ isPublished: true, latitude: '0', longitude: '3.42' }));
+  assert.equal(equator.latitude, STORE_SETUP_MESSAGES.outsideNigeria);
 });
 
 test('a store already visible with no pin still saves unrelated changes', () => {
@@ -391,4 +390,42 @@ test('a saved 0,0 is reported as a missing map location', () => {
 
   const located = storeSetupGaps({ address: '1 Allen Avenue', openingTime: '08:00', closingTime: '22:00', latitude: 6.43, longitude: 3.42 });
   assert.ok(!located.some((gap) => gap.startsWith('No map location saved')));
+});
+
+test('a swapped Lagos pair cannot be made visible, and both fields say it is outside Nigeria', () => {
+  const errors = validateStoreSetup(validDraft({ isPublished: true, latitude: '3.38', longitude: '6.52' }));
+
+  assert.equal(errors.latitude, STORE_SETUP_MESSAGES.outsideNigeria);
+  assert.equal(errors.longitude, STORE_SETUP_MESSAGES.outsideNigeria);
+  assert.equal(
+    STORE_SETUP_MESSAGES.outsideNigeria,
+    'Your pin is outside Nigeria. Check the latitude and longitude, or use your current location.'
+  );
+});
+
+test('a hidden store may hold a pin outside Nigeria', () => {
+  const errors = validateStoreSetup(validDraft({ isPublished: false, latitude: '3.38', longitude: '6.52' }));
+
+  assert.equal(errors.latitude, undefined);
+  assert.equal(errors.longitude, undefined);
+});
+
+test('a live store with an old outside-Nigeria pin saves unchanged, but moving it elsewhere outside is refused', () => {
+  const saved = { isPublished: true, latitude: 3.38, longitude: 6.52 };
+
+  assert.equal(
+    hasStoreSetupErrors(validateStoreSetup(validDraft({ isPublished: true, latitude: '3.38', longitude: '6.52' }), saved)),
+    false
+  );
+  assert.equal(
+    hasStoreSetupErrors(validateStoreSetup(validDraft({ isPublished: true, latitude: '51.5', longitude: '-0.12' }), saved)),
+    true
+  );
+});
+
+test('the edge of the Nigeria box is accepted', () => {
+  assert.equal(
+    hasStoreSetupErrors(validateStoreSetup(validDraft({ isPublished: true, latitude: '4', longitude: '15' }))),
+    false
+  );
 });
