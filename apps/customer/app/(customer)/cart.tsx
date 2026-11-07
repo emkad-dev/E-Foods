@@ -515,9 +515,9 @@ export default function CartScreen() {
     // the food goes needs no account (the cart, address included, is device-local),
     // and asking someone to sign in only to bounce them to a map afterwards is the
     // dead end this screen used to be.
-    // Precedence: the coverage / restaurant blocks above need an address to be
-    // meaningful and are mutually exclusive with this one in practice; with none saved
-    // the useful next step is always to add it. delivery-location returns to the cart.
+    // Precedence: the coverage / out-of-range blocks above need coordinates to fire, so a
+    // basket with no address at all reaches here; with none saved the useful next step is
+    // always to add it. delivery-location returns to the cart.
     if (needsAddress) {
       router.push('/delivery-location');
       return;
@@ -531,17 +531,6 @@ export default function CartScreen() {
       });
       return;
     }
-
-    trackAnalyticsEvent('customer_checkout_started', {
-      fulfillment_type: fulfillmentType,
-      items_count: items.length,
-      mixed_basket: isMixedBasket,
-      payment_method: paymentMethod,
-      restaurant_count: restaurantSummaries.length,
-      restaurant_id: primaryRestaurantId,
-      tip_amount: safeTipAmount,
-      has_delivery_location: Boolean(deliveryLocation),
-    });
 
     if (scheduleMode === 'later' && !selectedSlotIso) {
       setCheckoutError('Pick a delivery time, or switch back to ordering now.');
@@ -577,6 +566,18 @@ export default function CartScreen() {
         }
       }
     }
+
+    // After the far-collection confirm, so a cancelled warning is not counted as started.
+    trackAnalyticsEvent('customer_checkout_started', {
+      fulfillment_type: fulfillmentType,
+      items_count: items.length,
+      mixed_basket: isMixedBasket,
+      payment_method: paymentMethod,
+      restaurant_count: restaurantSummaries.length,
+      restaurant_id: primaryRestaurantId,
+      tip_amount: safeTipAmount,
+      has_delivery_location: Boolean(deliveryLocation),
+    });
 
     setSubmitting(true);
     try {
@@ -785,7 +786,7 @@ export default function CartScreen() {
                   ? 'Each restaurant is checked on its own rules. Delivery only stays available when every restaurant supports it.'
                   : fulfillmentType === 'delivery'
                     ? 'We will deliver to the pinned map location you choose below.'
-                    : 'Skip the map step and collect your order directly from the restaurant.'}
+                    : 'Collect your order directly from the restaurant. We use your address to check how far it is.'}
               </Text>
               {checkoutBlockedReason ? <Text style={styles.warningText}>{checkoutBlockedReason}</Text> : null}
             </View>

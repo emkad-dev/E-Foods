@@ -9,7 +9,7 @@ import { customerTheme } from '../src/theme/palette';
 
 export default function Index() {
   const { loading, policyLoading, policyAccepted, user } = useAuth();
-  const { deliveryLocation } = useCart();
+  const { deliveryLocation, isHydrated: cartHydrated } = useCart();
   // null while the flag is still being read — routing must not flash the feed
   // and then bounce to onboarding.
   const [seenLocationStep, setSeenLocationStep] = useState<boolean | null>(null);
@@ -34,7 +34,9 @@ export default function Index() {
     };
   }, []);
 
-  if (loading || policyLoading || seenLocationStep === null) {
+  // The cart is waited for too: a slow read would otherwise look like "no address" and
+  // send someone who has one to the location step.
+  if (loading || policyLoading || seenLocationStep === null || !cartHydrated) {
     return (
       <View
         style={{

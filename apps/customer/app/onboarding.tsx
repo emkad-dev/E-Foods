@@ -7,11 +7,12 @@
  * whether anyone delivers to them. This asks first.
  *
  * It is skippable on purpose. Skipping lands on the feed exactly as before this
- * screen existed, and is remembered so it never nags again — see
- * domain/customerOnboarding.ts for why the flag records "shown", not
- * "satisfied".
+ * screen existed. The persisted flag stops the first-run REDIRECT from repeating;
+ * Home also asks once per app launch while no address is saved (in memory, see
+ * utils/launchAddressPrompt.ts), reusing this screen. See
+ * domain/customerOnboarding.ts for why the flag records "shown", not "satisfied".
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,8 +33,14 @@ export default function OnboardingScreen() {
   const [locating, setLocating] = useState(false);
   const [manualAddress, setManualAddress] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const finishingRef = useRef(false);
 
   const finish = async () => {
+    // A double tap must leave once, not back out twice.
+    if (finishingRef.current) {
+      return;
+    }
+    finishingRef.current = true;
     // Whichever way the visitor leaves (saved, typed or skipped), this launch has
     // asked, so Home must not ask again on top of the first-run step.
     markLaunchAddressPromptShown();
@@ -49,7 +56,7 @@ export default function OnboardingScreen() {
   };
 
   const handleUseMyLocation = async () => {
-    if (locating) {
+    if (locating || finishingRef.current) {
       return;
     }
     setError(null);

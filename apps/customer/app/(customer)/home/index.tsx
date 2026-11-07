@@ -115,7 +115,7 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       if (
-        shouldShowLaunchAddressPrompt({
+        !shouldShowLaunchAddressPrompt({
           accountFlowSettled,
           alreadyShownThisLaunch: hasLaunchAddressPromptBeenShown(),
           cartHydrated,
@@ -123,9 +123,24 @@ export default function HomeScreen() {
           onHome: pathname === '/home',
         })
       ) {
-        markLaunchAddressPromptShown();
-        router.push('/onboarding' as never);
+        return undefined;
       }
+
+      // Deferred out of this commit: on a web reload of /home this effect runs in the
+      // navigator's first commit, before the root navigator is ready, and router.push
+      // then throws "Attempted to navigate before mounting the Root Layout" (the app has
+      // no ErrorBoundary). The launch is only marked once the push succeeded, so a failed
+      // push is retried on the next focus. Leaving focus cancels the timer.
+      const timer = setTimeout(() => {
+        try {
+          router.push('/onboarding' as never);
+          markLaunchAddressPromptShown();
+        } catch {
+          // Not ready yet; the next focus or dependency change tries again.
+        }
+      }, 0);
+
+      return () => clearTimeout(timer);
     }, [accountFlowSettled, cartHydrated, deliveryLocation, pathname, router])
   );
 

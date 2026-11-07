@@ -12,8 +12,12 @@ export type CollectionDistanceWarning = {
   message: string;
 };
 
+/** The one place the threshold is applied: strictly more than 50 km. */
+export const exceedsCollectionLimit = (distanceKm: number) => distanceKm > COLLECTION_WARNING_KM;
+
+// Rounded UP: anything over 50 km can then never read "50 km away".
 export const formatCollectionDistanceMessage = (distanceKm: number) =>
-  `This restaurant is ${Math.round(distanceKm)} km away. Are you sure?`;
+  `This restaurant is ${Math.ceil(distanceKm)} km away. Are you sure?`;
 
 /**
  * Warns before paying for COLLECTION when the restaurant is far from the saved
@@ -25,8 +29,7 @@ export const formatCollectionDistanceMessage = (distanceKm: number) =>
  * coordinates are ignored; with none usable, or an address that has none (a
  * typed address), there is nothing to measure and no warning.
  *
- * Note the display rounds to a whole km while the threshold does not: 50.4 km
- * warns and reads "50 km away".
+ * The display rounds UP to a whole km, so a warning never reads "50 km away".
  */
 export const getCollectionDistanceWarning = (params: {
   fulfillmentType: 'delivery' | 'pickup';
@@ -57,13 +60,13 @@ export const getCollectionDistanceWarning = (params: {
     }
   }
 
-  if (farthestKm === null || farthestKm <= COLLECTION_WARNING_KM) {
+  if (farthestKm === null || !exceedsCollectionLimit(farthestKm)) {
     return null;
   }
 
   return {
     distanceKm: farthestKm,
-    displayKm: Math.round(farthestKm),
+    displayKm: Math.ceil(farthestKm),
     message: formatCollectionDistanceMessage(farthestKm),
   };
 };

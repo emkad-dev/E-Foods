@@ -5,13 +5,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AddressRecord } from '../domain/entities.ts';
-import { getCollectionDistanceWarning, COLLECTION_WARNING_KM } from './collectionDistance.ts';
+import { COLLECTION_WARNING_KM, exceedsCollectionLimit, getCollectionDistanceWarning } from './collectionDistance.ts';
 import {
   hasLaunchAddressPromptBeenShown,
   markLaunchAddressPromptShown,
   shouldShowLaunchAddressPrompt,
 } from './launchAddressPrompt.ts';
-import { calculateDistanceKm, type DiscoveryRestaurant } from './restaurantAvailability.ts';
+import { type DiscoveryRestaurant } from './restaurantAvailability.ts';
 import { hasSavedAddress } from './savedAddress.ts';
 
 const address = (overrides: Partial<AddressRecord> = {}): AddressRecord => ({
@@ -84,22 +84,21 @@ test('collection warning: boundary at 50 km is strict', () => {
   assert.equal(COLLECTION_WARNING_KM, 50);
   assert.equal(warn([restaurantAtKm(0)]), null);
   assert.equal(warn([restaurantAtKm(49.9)]), null);
-  const exactly = restaurantAtKm(50);
-  // Nudge below 50 if floating point put the fixture a hair over.
-  if (calculateDistanceKm(ORIGIN, { latitude: exactly.latitude as number, longitude: ORIGIN.longitude }) <= 50) {
-    assert.equal(warn([exactly]), null);
-  }
+  // The comparison itself, free of floating-point fixtures: a >= mutation fails here.
+  assert.equal(exceedsCollectionLimit(50), false);
+  assert.equal(exceedsCollectionLimit(50.000001), true);
+  assert.equal(exceedsCollectionLimit(49.999999), false);
   assert.equal(warn([restaurantAtKm(50 - 1e-6)]), null);
   const just = warn([restaurantAtKm(50.6)]);
   assert.ok(just);
   assert.equal(just.message, 'This restaurant is 51 km away. Are you sure?');
 });
 
-test('collection warning: rounds for display only (50.4 warns and reads 50)', () => {
+test('collection warning: rounds UP so an over-limit distance never reads 50', () => {
   const result = warn([restaurantAtKm(50.4)]);
   assert.ok(result);
-  assert.equal(result.displayKm, 50);
-  assert.equal(result.message, 'This restaurant is 50 km away. Are you sure?');
+  assert.equal(result.displayKm, 51);
+  assert.equal(result.message, 'This restaurant is 51 km away. Are you sure?');
 });
 
 test('collection warning: mixed basket uses the farthest restaurant', () => {

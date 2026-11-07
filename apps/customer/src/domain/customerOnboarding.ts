@@ -11,8 +11,9 @@
  * WHY IT IS SKIPPABLE. It is a convenience, not a wall. A visitor who skips
  * still browses; they simply get the unfiltered feed, exactly as before this
  * existed. The gate therefore records that it was SHOWN, not that it was
- * satisfied — otherwise skipping would re-prompt on every launch, which is a
- * nag, not onboarding.
+ * satisfied — otherwise skipping would redirect here on every launch. (Home
+ * separately asks once per app launch while no address is saved; that state
+ * is in memory, see utils/launchAddressPrompt.ts.)
  *
  * Pure and IO-free: the AsyncStorage read lives in
  * services/customerOnboardingState.ts so this decision is unit-testable.
