@@ -33,6 +33,13 @@ describe('parseSearchParams', () => {
       assert.equal(parseSearchParams(qs(`q=Lekki&limit=${bad}`)).ok, false, `limit=${bad}`);
     }
   });
+  it('requires at least one letter or digit', () => {
+    for (const bad of ['...', '---', ' ?!? ', '+++']) {
+      assert.equal(parseSearchParams(new URLSearchParams({ q: bad })).ok, false, bad);
+    }
+    assert.equal(parseSearchParams(new URLSearchParams({ q: 'N1.' })).ok, true);
+    assert.equal(parseSearchParams(new URLSearchParams({ q: 'Ibadan Ọọ́' })).ok, true);
+  });
   it('rejects control characters', () => {
     assert.equal(parseSearchParams(new URLSearchParams({ q: 'Lekki\u0000Phase' })).ok, false);
   });
@@ -82,6 +89,7 @@ describe('cors', () => {
       'https://evilfeasty.com.ng',
       'http://feasty.com.ng',
       'https://localhost:8081',
+      'http://localhost',
       'http://localhost.evil.example',
       'http://localhost:8081.evil.example',
     ]) {
@@ -197,9 +205,19 @@ describe('worker', () => {
     console.error = realError;
   });
 
-  const baseEnv: Env = { PROVIDER: 'photon', SERVICE_BBOX: '2.6,6.2,4.4,7.9' };
-  const call = (path: string, env: Env = baseEnv, headers: Record<string, string> = {}, method = 'GET') =>
-    worker.fetch(new Request(`https://geo.feasty.com.ng${path}`, { method, headers }), env);
+  const allow = { limit: async () => ({ success: true }) };
+  const baseEnv: Env = { PROVIDER: 'photon', SERVICE_BBOX: '2.6,6.2,4.4,7.9', RATE_LIMITER: allow };
+  const call = (
+    path: string,
+    env: Env = baseEnv,
+    headers: Record<string, string> = { 'cf-connecting-ip': '203.0.113.9' },
+    method = 'GET',
+  ) => worker.fetch(new Request(`https://geo.feasty.com.ng${path}`, { method, headers }), env);
+  const noUpstream = () => {
+    globalThis.fetch = (async () => {
+      throw new Error('provider must not be called');
+    }) as typeof fetch;
+  };
 
   it('answers a preflight for an allowed origin and none for a bad one', async () => {
     const ok = await call('/search', baseEnv, { origin: 'https://app.feasty.com.ng' }, 'OPTIONS');
@@ -275,6 +293,60 @@ describe('worker', () => {
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { results: [] });
     assert.equal(new URL(calledUrl).searchParams.get('key'), 'k123');
+  });
+
+  it('fails closed with 503 and a log when the rate limiter binding is missing', async () => {
+    const logs: unknown[][] = [];
+    console.error = (...args: unknown[]) => void logs.push(args);
+    noUpstream();
+    const { RATE_LIMITER: _omit, ...env } = baseEnv;
+    const headers = { origin: 'https://feasty.com.ng', 'cf-connecting-ip': '203.0.113.9' };
+    const response = await call('/search?q=Lekki', env, headers);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'https://feasty.com.ng');
+    assert.equal(logs.length, 1);
+  });
+
+  it('fails open when the rate limiter throws, with CORS headers and a log', async () => {
+    const logs: unknown[][] = [];
+    console.error = (...args: unknown[]) => void logs.push(args);
+    globalThis.fetch = (async () => Response.json(photonBody)) as typeof fetch;
+    const limiter = {
+      limit: async () => {
+        throw new Error('limiter down');
+      },
+    };
+    const headers = { origin: 'https://feasty.com.ng', 'cf-connecting-ip': '203.0.113.9' };
+    const response = await call('/search?q=Lekki', { ...baseEnv, RATE_LIMITER: limiter }, headers);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'https://feasty.com.ng');
+    assert.equal(logs.length, 1);
+  });
+
+  it('returns 400 when CF-Connecting-IP is absent, without calling the limiter or provider', async () => {
+    noUpstream();
+    let limiterCalls = 0;
+    const limiter = { limit: async () => (limiterCalls++, { success: true }) };
+    assert.equal((await call('/search?q=Lekki', { ...baseEnv, RATE_LIMITER: limiter }, {})).status, 400);
+    assert.equal(limiterCalls, 0);
+  });
+
+  it('returns 400 for a punctuation-only query with no upstream call', async () => {
+    noUpstream();
+    assert.equal((await call('/search?q=...')).status, 400);
+  });
+
+  it('returns 503 for an unknown PROVIDER, and for locationiq without a key', async () => {
+    console.error = () => {};
+    noUpstream();
+    assert.equal((await call('/search?q=Lekki', { ...baseEnv, PROVIDER: 'mapbox' })).status, 503);
+    assert.equal((await call('/search?q=Lekki', { ...baseEnv, PROVIDER: 'locationiq' })).status, 503);
+  });
+
+  it('returns 503 when the provider answers 200 with malformed JSON', async () => {
+    console.error = () => {};
+    globalThis.fetch = (async () => new Response('<html>oops', { status: 200 })) as typeof fetch;
+    assert.equal((await call('/search?q=Lekki')).status, 503);
   });
 
   it('does not leak the LocationIQ key when it fails', async () => {

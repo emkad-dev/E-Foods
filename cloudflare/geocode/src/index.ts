@@ -48,10 +48,22 @@ export default {
     const parsed = parseSearchParams(url.searchParams);
     if (!parsed.ok) return json(400, { error: 'bad_query' }, cors);
 
-    if (env.RATE_LIMITER) {
-      const key = request.headers.get('cf-connecting-ip') ?? 'unknown';
-      const { success } = await env.RATE_LIMITER.limit({ key });
+    // Cloudflare always sets CF-Connecting-IP in production; without it there
+    // is nothing to key the limit on, so the request is refused.
+    const clientIp = request.headers.get('cf-connecting-ip');
+    if (!clientIp) return json(400, { error: 'bad_request' }, cors);
+
+    // The binding is mandatory in the shipped config: fail closed if it is gone.
+    if (!env.RATE_LIMITER) {
+      console.error('geocode: RATE_LIMITER binding is missing');
+      return json(503, { error: 'unavailable' }, cors);
+    }
+    try {
+      const { success } = await env.RATE_LIMITER.limit({ key: clientIp });
       if (!success) return json(429, { error: 'rate_limited' }, { 'retry-after': '60', ...cors });
+    } catch (error) {
+      // A limiter outage must not take address search down with it: fail open.
+      console.error('geocode: rate limiter failed', error instanceof Error ? error.name : 'unknown');
     }
 
     const box = parseBBox(env.SERVICE_BBOX);

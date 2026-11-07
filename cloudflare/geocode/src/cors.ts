@@ -6,7 +6,7 @@ const ALLOWED_ORIGINS = new Set([
   'https://admin.feasty.com.ng',
 ]);
 
-const LOCALHOST = /^http:\/\/localhost(:\d{1,5})?$/;
+const LOCALHOST = /^http:\/\/localhost:\d{1,5}$/;
 
 export const isAllowedOrigin = (origin: string): boolean =>
   ALLOWED_ORIGINS.has(origin) || LOCALHOST.test(origin);

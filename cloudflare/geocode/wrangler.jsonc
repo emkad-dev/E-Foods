@@ -2,6 +2,8 @@
   "name": "feasty-geocode",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
+  // The only entry point is geo.feasty.com.ng (no *.workers.dev bypass).
+  "workers_dev": false,
   "routes": [{ "pattern": "geo.feasty.com.ng", "custom_domain": true }],
   "vars": {
     // photon (default, public komoot instance, no key) | locationiq | off.
