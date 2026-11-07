@@ -243,13 +243,14 @@ const refreshInFlight = () => {
 test('a refresh that writes the session back after the removal is swept and revoked', async () => {
   const client = fakeClient(async () => ({ data: null, error: null }));
   const refresh = refreshInFlight();
-  const realtime: unknown[] = [];
+  const notified: unknown[][] = [];
   client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
-  client.supabase.realtime = { setAuth: async () => void realtime.push('setAuth') };
+  client.supabase.auth._notifyAllSubscribers = async (...args: unknown[]) => void notified.push(args);
 
   await signOutThisDevice(client.supabase);
   assert.equal(client.store.has(KEY), false);
-  realtime.length = 0;
+  // The ordinary removal stays silent: its callers clear their own state.
+  assert.deepEqual(notified, []);
 
   const rewritten = JSON.stringify({ access_token: 'refreshed-token', refresh_token: 'r3' });
   client.store.set(KEY, rewritten);
@@ -263,8 +264,7 @@ test('a refresh that writes the session back after the removal is swept and revo
     ['old-token', 'local'],
     ['refreshed-token', 'local'],
   ]);
-  // TOKEN_REFRESHED pinned the swept token on the socket again.
-  assert.deepEqual(realtime, ['setAuth']);
+  assert.deepEqual(notified, [['SIGNED_OUT', null]]);
 });
 
 test('the sign-out does not wait for a refresh still in flight', async () => {
@@ -277,7 +277,9 @@ test('the sign-out does not wait for a refresh still in flight', async () => {
 test('a newer session stored meanwhile is left alone', async () => {
   const client = fakeClient(async () => ({ data: null, error: null }));
   const refresh = refreshInFlight();
+  const notified: unknown[][] = [];
   client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+  client.supabase.auth._notifyAllSubscribers = async (...args: unknown[]) => void notified.push(args);
 
   await signOutThisDevice(client.supabase);
   client.store.set(KEY, NEW_SESSION);
@@ -286,6 +288,7 @@ test('a newer session stored meanwhile is left alone', async () => {
 
   assert.equal(client.store.get(KEY), NEW_SESSION);
   assert.deepEqual(client.adminCalls, [['old-token', 'local']]);
+  assert.deepEqual(notified, []);
 });
 
 test('a refresh that wrote nothing back leaves nothing to revoke', async () => {
@@ -330,7 +333,24 @@ test('a refresh that rejects or answers with no session does nothing and throws 
   }
 });
 
-test('a failing revoke or storage during the sweep throws nothing', async () => {
+test('a listener that throws during the sweep still lets the revoke go out', async () => {
+  const client = fakeClient(async () => ({ data: null, error: null }));
+  const refresh = refreshInFlight();
+  client.supabase.auth.refreshingDeferred = { promise: refresh.promise };
+  client.supabase.auth._notifyAllSubscribers = async () => {
+    throw new Error('listener broke');
+  };
+
+  await signOutThisDevice(client.supabase);
+  client.store.set(KEY, JSON.stringify({ access_token: 'refreshed-token' }));
+  refresh.resolve(refreshedSession('refreshed-token'));
+  await settle();
+
+  assert.equal(client.store.has(KEY), false);
+  assert.deepEqual(client.adminCalls.at(-1), ['refreshed-token', 'local']);
+});
+
+test('a failing revoke during the sweep still removes the session and throws nothing', async () => {
   const client = fakeClient(async (jwt) => {
     if (jwt === 'refreshed-token') {
       throw new TypeError('Failed to fetch');
@@ -348,9 +368,9 @@ test('a failing revoke or storage during the sweep throws nothing', async () => 
   assert.equal(client.store.has(KEY), false);
 });
 
-// Against the real auth-js rather than a fake: `refreshingDeferred` and `storage`
-// are protected fields, so an upgrade could rename them with no type error, and
-// the sweep would silently stop working. This fails if that happens.
+// Against the real auth-js rather than a fake: `refreshingDeferred`, `storage` and
+// `_notifyAllSubscribers` are not public, so an upgrade could rename them with no
+// type error, and the sweep would silently stop working. This fails if that happens.
 test('the real auth-js client: an in-flight refresh cannot undo the sign-out', async () => {
   const expiredAt = Math.floor(Date.now() / 1000) - 60;
   const key = 'sb-test-auth-token';
@@ -393,6 +413,19 @@ test('the real auth-js client: an in-flight refresh cannot undo the sign-out', a
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
     }
+    if (url.includes('grant_type=password')) {
+      return new Response(
+        JSON.stringify({
+          access_token: 'password-token',
+          refresh_token: 'refresh-3',
+          expires_in: 3600,
+          expires_at: expiredAt + 7200,
+          token_type: 'bearer',
+          user: { id: 'user-1' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
 
@@ -404,7 +437,12 @@ test('the real auth-js client: an in-flight refresh cannot undo the sign-out', a
       storageKey: key,
       storage: {
         getItem: async (k: string) => store.get(k) ?? null,
-        setItem: async (k: string, value: string) => void store.set(k, value),
+        // Really asynchronous, like AsyncStorage, so a save that is not awaited
+        // before the event would be caught below.
+        setItem: async (k: string, value: string) => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          store.set(k, value);
+        },
         removeItem: async (k: string) => void store.delete(k),
       },
     },
@@ -422,6 +460,20 @@ test('the real auth-js client: an in-flight refresh cannot undo the sign-out', a
   await signOutThisDevice(client as never);
   assert.equal(store.has(key), false);
 
+  const events: string[] = [];
+  const validityAtListenerTime: Array<Promise<boolean>> = [];
+  const {
+    data: { subscription },
+  } = client.auth.onAuthStateChange((event, session) => {
+    events.push(event);
+    if (event === 'SIGNED_IN') {
+      validityAtListenerTime.push(
+        isReconcileStillValid(client, session),
+        isReconcileStillValid(client, { user: { id: 'someone-else' } })
+      );
+    }
+  });
+
   // The network comes back: auth-js writes the session back and resolves.
   answerRefresh();
   await startedRefresh;
@@ -429,6 +481,15 @@ test('the real auth-js client: an in-flight refresh cannot undo the sign-out', a
 
   assert.equal(store.has(key), false, 'the written-back session must be swept');
   assert.deepEqual(logoutTokens, ['Bearer expired-token', 'Bearer refreshed-token']);
+  assert.ok(events.includes('SIGNED_OUT'), 'a listener must hear that the session was swept');
+
+  // A real sign-in: when the listener hears about it, the session must already be
+  // stored in the shape the reconcile check reads. The second answer proves the
+  // check really compared an identity rather than finding none and allowing it.
+  await client.auth.signInWithPassword({ email: 'a@example.com', password: 'password' });
+  assert.deepEqual(await Promise.all(validityAtListenerTime), [true, false]);
+
+  subscription.unsubscribe();
   await client.realtime.disconnect();
 });
 

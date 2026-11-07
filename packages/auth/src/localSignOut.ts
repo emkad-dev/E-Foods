@@ -223,10 +223,18 @@ const releaseRealtimeToken = (supabase: SignOutClient) => {
  * unnoticed. Its promise settles only after the write and the event, so whatever
  * is stored by then is final for that refresh. The token comparison leaves a newer
  * sign-in alone. Not awaited: this can take as long as the refresh does.
+ *
+ * A removal here emits SIGNED_OUT, also private and also pinned by that test. The
+ * write-back may have replaced a sign-in made after the sign-out, and that user is
+ * still on screen with every action failing. The event takes them through the
+ * app's null-session path, and supabase-js's own handler resets the realtime socket.
  */
 const sweepRefreshWriteBack = (supabase: SignOutClient) => {
-  const inFlight = (supabase.auth as { refreshingDeferred?: { promise?: PromiseLike<unknown> } | null })
-    .refreshingDeferred?.promise;
+  const auth = supabase.auth as {
+    refreshingDeferred?: { promise?: PromiseLike<unknown> } | null;
+    _notifyAllSubscribers?: (event: 'SIGNED_OUT', session: null) => Promise<void>;
+  };
+  const inFlight = auth.refreshingDeferred?.promise;
   if (!inFlight) {
     return;
   }
@@ -239,8 +247,13 @@ const sweepRefreshWriteBack = (supabase: SignOutClient) => {
       }
 
       await removeStoredSession(supabase);
-      // TOKEN_REFRESHED pinned this token on the socket again.
-      releaseRealtimeToken(supabase);
+
+      try {
+        await auth._notifyAllSubscribers?.('SIGNED_OUT', null);
+      } catch {
+        // auth-js rethrows a listener's error. The revoke below must still go out.
+      }
+
       await supabase.auth.admin.signOut(accessToken, 'local');
     })
     .catch(() => undefined);
@@ -268,5 +281,5 @@ export const signOutThisDevice = async (
   sweepRefreshWriteBack(supabase);
   releaseRealtimeToken(supabase);
 
-  return result &&(!result.error || isSessionAlreadyGone(result.error)) ? 'server' : 'local-only';
+  return result && (!result.error || isSessionAlreadyGone(result.error)) ? 'server' : 'local-only';
 };
