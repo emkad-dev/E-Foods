@@ -17,13 +17,21 @@ import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { isUsableCoordinatePair } from '../../../../packages/domain/src/restaurantLocation.ts';
 import { reportError } from '../../../../packages/observability/src/sentry';
+import {
+  resolveGeocodeBaseUrl,
+  searchAddresses as searchWorker,
+  type AddressSearchResult,
+} from '../../../../packages/runtime/src/addressSearch.ts';
 import { findAddressMatches } from '../../../../packages/runtime/src/nominatimSearch.ts';
+import { appEnv } from '../config/env';
 import {
   NOMINATIM_USER_AGENT,
   WEB_POSITION_TOTAL_TIMEOUT_MS,
   type AddressLookupOutcome,
   type DevicePositionFailure,
   type DevicePositionOutcome,
+  type MapSearchOutcome,
+  mapSearchFromOutcome,
 } from '../domain/addressLookup';
 
 const NATIVE_POSITION_TIMEOUT_MS = 15000;
@@ -156,11 +164,18 @@ const getNativePosition = async (): Promise<DevicePositionOutcome> => {
 export const getDevicePosition = (): Promise<DevicePositionOutcome> =>
   Platform.OS === 'web' ? getBrowserPosition() : getNativePosition();
 
+const geocodeBaseUrl = resolveGeocodeBaseUrl(appEnv.geocodeUrl);
+
+/** Suggestions while the partner types, from the Worker. Resolves to `unavailable` on any failure. */
+export const searchAddresses = (query: string, options: { signal: AbortSignal }): Promise<AddressSearchResult> =>
+  searchWorker(query, { signal: options.signal, baseUrl: geocodeBaseUrl });
+
 /**
  * Forward-geocodes a typed address with OpenStreetMap Nominatim, one request
- * per press, through the implementation shared with the customer app. Never
- * throws: every way it can go wrong is an outcome the screen words for the
- * partner.
+ * per press, through the implementation shared with the customer app. This is
+ * the address field's fallback ("Search the map"), used when the Worker is
+ * unavailable. Never throws: every way it can go wrong is an outcome the
+ * caller words for the partner.
  */
 export const findAddressMatch = (address: string): Promise<AddressLookupOutcome> =>
   findAddressMatches(address, {
@@ -169,3 +184,7 @@ export const findAddressMatch = (address: string): Promise<AddressLookupOutcome>
     userAgent: Platform.OS === 'web' ? undefined : NOMINATIM_USER_AGENT,
     onUnexpectedError: (error) => reportError('partner.findAddressMatch', error),
   });
+
+/** One press of the field's "Search the map": Nominatim, the Worker's fallback. */
+export const searchTheMap = async (query: string): Promise<MapSearchOutcome> =>
+  mapSearchFromOutcome(await findAddressMatch(query));

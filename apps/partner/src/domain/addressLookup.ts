@@ -58,7 +58,8 @@ export const NOMINATIM_USER_AGENT = 'FEASTY-Partner/1.0 (https://feasty.com.ng)'
  * again in the confirmation.
  */
 export const OSM_ATTRIBUTION = 'Address search by OpenStreetMap. © OpenStreetMap contributors';
-export const ADDRESS_SENT_NOTICE = 'The address you typed is sent to OpenStreetMap when you press Find from address.';
+export const ADDRESS_SENT_NOTICE =
+  'What you type in the address search is sent to our map search service, and to OpenStreetMap if you press Search the map.';
 
 /**
  * Bound on a whole browser position request. The browser's own timeout only
@@ -86,10 +87,73 @@ export const ADDRESS_LOOKUP_MESSAGES = {
 export const DEVICE_POSITION_MESSAGES: Record<DevicePositionFailure, string> = {
   'services-off': 'Location is turned off on this device. Turn it on in your settings, then try again.',
   'permission-denied':
-    'Location access is blocked. Allow it in your device or browser settings, or use Find from address instead.',
+    'Location access is blocked. Allow it in your device or browser settings, or search for your address instead.',
   timeout: 'Finding your position took too long. Move somewhere with a clearer signal and try again.',
-  unavailable: 'We could not read your position right now. Try again, or use Find from address instead.',
-  unsupported: 'This device or browser cannot share its position. Use Find from address instead.',
+  unavailable: 'We could not read your position right now. Try again, or search for your address instead.',
+  unsupported: 'This device or browser cannot share its position. Search for your address instead.',
+};
+
+/**
+ * How close a fix has to be before it may set the restaurant's pin. Customers
+ * are matched to restaurants by distance from it, and a laptop's Wi-Fi fix is
+ * typically hundreds of metres to kilometres out, so a coarse reading is
+ * refused rather than saved as if it were surveyed.
+ */
+export const MAX_PIN_ACCURACY_METERS = 150;
+
+export type PinPositionDecision =
+  | { kind: 'use'; position: DevicePosition }
+  | { kind: 'retry'; reason: 'too-coarse' | 'no-accuracy'; message: string };
+
+export const PIN_ACCURACY_MESSAGES = {
+  tooCoarse:
+    'Your location is not accurate enough yet. Move near a window or outside, wait a few seconds, and try again.',
+  noAccuracy:
+    'Your device did not say how accurate its location is, so we cannot trust it. Move near a window or outside and try again.',
+} as const;
+
+/**
+ * Decides whether a device fix may be offered as the restaurant's pin. Never
+ * fills anything itself: a fix that is worse than the limit, or that reports no
+ * accuracy at all, is turned into a "move and try again" message. The limit is
+ * inclusive, and NaN or a negative accuracy counts as not reported.
+ */
+export const decidePinPosition = (position: DevicePosition): PinPositionDecision => {
+  const accuracy = position.accuracyMeters;
+
+  if (accuracy === null || !Number.isFinite(accuracy) || accuracy < 0) {
+    return { kind: 'retry', reason: 'no-accuracy', message: PIN_ACCURACY_MESSAGES.noAccuracy };
+  }
+
+  if (accuracy > MAX_PIN_ACCURACY_METERS) {
+    return { kind: 'retry', reason: 'too-coarse', message: PIN_ACCURACY_MESSAGES.tooCoarse };
+  }
+
+  return { kind: 'use', position };
+};
+
+export type MapSearchOutcome =
+  | { kind: 'results'; results: { label: string; latitude: number; longitude: number }[] }
+  | { kind: 'failed' };
+
+/**
+ * Shapes the one-shot Nominatim answer for the shared search field's "Search the
+ * map" button. `no-result` is an answer (nothing there); every other failure is
+ * the service not answering, which is what makes the field say so.
+ */
+export const mapSearchFromOutcome = (outcome: AddressLookupOutcome): MapSearchOutcome => {
+  if (outcome.kind === 'found') {
+    return {
+      kind: 'results',
+      results: outcome.matches.map((match) => ({
+        label: match.placeName,
+        latitude: match.latitude,
+        longitude: match.longitude,
+      })),
+    };
+  }
+
+  return outcome.kind === 'no-result' ? { kind: 'results', results: [] } : { kind: 'failed' };
 };
 
 export const lookupFailureMessage = (kind: Exclude<AddressLookupOutcome['kind'], 'found'>): string => {

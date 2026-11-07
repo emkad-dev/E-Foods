@@ -7,6 +7,10 @@ import { test } from 'node:test';
 import {
   ADDRESS_LOOKUP_MESSAGES,
   ADDRESS_SENT_NOTICE,
+  MAX_PIN_ACCURACY_METERS,
+  PIN_ACCURACY_MESSAGES,
+  decidePinPosition,
+  mapSearchFromOutcome,
   OSM_ATTRIBUTION,
   outcomeFromLookupError,
   outcomeFromResponse,
@@ -169,7 +173,8 @@ test('the device-position confirmation states the position, the accuracy when kn
 
 test('the OpenStreetMap credit and the data-sent notice are pinned', () => {
   assert.equal(OSM_ATTRIBUTION, 'Address search by OpenStreetMap. © OpenStreetMap contributors');
-  assert.equal(ADDRESS_SENT_NOTICE, 'The address you typed is sent to OpenStreetMap when you press Find from address.');
+  assert.match(ADDRESS_SENT_NOTICE, /sent to our map search service/);
+  assert.match(ADDRESS_SENT_NOTICE, /OpenStreetMap/);
 
   const copy = addressMatchConfirmCopy({ latitude: 6.6018, longitude: 3.3515, placeName: 'Ikeja' });
   assert.ok(copy.paragraphs.includes(OSM_ATTRIBUTION));
@@ -194,4 +199,49 @@ test('outcomeFromLookupError maps abort, transport failure and anything else', (
   assert.equal(outcomeFromLookupError(new TypeError('Network request failed'), false).kind, 'offline');
   assert.equal(outcomeFromLookupError(new SyntaxError('bad json'), false).kind, 'unavailable');
   assert.equal(outcomeFromLookupError('weird', false).kind, 'unavailable');
+});
+
+const at = (accuracyMeters: number | null) => ({ latitude: 6.5244, longitude: 3.3792, accuracyMeters });
+
+test('a fix at 150 m or better may set the pin, and the limit is inclusive', () => {
+  assert.equal(MAX_PIN_ACCURACY_METERS, 150);
+  assert.deepEqual(decidePinPosition(at(12)), { kind: 'use', position: at(12) });
+  assert.deepEqual(decidePinPosition(at(150)), { kind: 'use', position: at(150) });
+  assert.equal(decidePinPosition(at(0)).kind, 'use');
+});
+
+test('a fix worse than 150 m asks the partner to move and try again, and carries no position', () => {
+  for (const accuracy of [150.01, 151, 800, 12000]) {
+    const decision = decidePinPosition(at(accuracy));
+    assert.equal(decision.kind, 'retry');
+    assert.equal('position' in decision, false);
+    assert.equal(decision.kind === 'retry' && decision.reason, 'too-coarse');
+    assert.equal(decision.kind === 'retry' && decision.message, PIN_ACCURACY_MESSAGES.tooCoarse);
+  }
+  assert.match(PIN_ACCURACY_MESSAGES.tooCoarse, /near a window or outside/);
+});
+
+test('a fix that reports no usable accuracy is not trusted', () => {
+  for (const accuracy of [null, Number.NaN, Number.POSITIVE_INFINITY, -5]) {
+    const decision = decidePinPosition(at(accuracy));
+    assert.equal(decision.kind, 'retry');
+    assert.equal(decision.kind === 'retry' && decision.reason, 'no-accuracy');
+  }
+  assert.match(PIN_ACCURACY_MESSAGES.noAccuracy, /near a window or outside/);
+});
+
+test('the map-search fallback turns a found outcome into tappable results, and no-result into an empty answer', () => {
+  const match = { latitude: 6.6018, longitude: 3.3515, placeName: 'Ikeja, Lagos, Nigeria' };
+
+  assert.deepEqual(mapSearchFromOutcome({ kind: 'found', match, matches: [match] }), {
+    kind: 'results',
+    results: [{ label: 'Ikeja, Lagos, Nigeria', latitude: 6.6018, longitude: 3.3515 }],
+  });
+  assert.deepEqual(mapSearchFromOutcome({ kind: 'no-result' }), { kind: 'results', results: [] });
+});
+
+test('the map-search fallback reports every other failure as the service not answering', () => {
+  for (const kind of ['offline', 'timeout', 'unavailable'] as const) {
+    assert.deepEqual(mapSearchFromOutcome({ kind }), { kind: 'failed' });
+  }
 });
