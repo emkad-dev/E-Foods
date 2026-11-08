@@ -18,7 +18,7 @@
     {
       "name": "RATE_LIMITER",
       "namespace_id": "4101",
-      "simple": { "limit": 60, "period": 60 }
+      "simple": { "limit": 20, "period": 60 }
     }
   ]
   // Secret (set once with `wrangler secret put`, only needed for locationiq):

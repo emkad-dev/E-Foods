@@ -156,3 +156,14 @@ export const toSavedAddress = (state: AddressEntryState, extras: SavedAddressExt
     addressTextSource: typed ? state.textOrigin : 'pin',
   };
 };
+
+/**
+ * Saving a pick from a screen with no form (the launch prompt): start from what
+ * is already saved so the customer's typed directions, nickname and note survive
+ * the pick, exactly as they do on the delivery-address screen.
+ */
+export const savedAddressFromPick = (saved: AddressRecord | null | undefined, pin: AddressPin): AddressRecord | null =>
+  toSavedAddress(addressEntryReducer(initAddressEntry(saved), { type: 'pinned', pin }), {
+    label: saved?.label,
+    note: saved?.note,
+  });

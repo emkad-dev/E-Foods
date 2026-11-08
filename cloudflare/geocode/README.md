@@ -10,7 +10,7 @@ a fixed FEASTY User-Agent, never the client's IP or headers.
 
 - `200 { "results": [{ "label": string, "latitude": number, "longitude": number }] }` (may be empty)
 - `400` bad query or limit
-- `429` rate limited (about 60 per minute per IP)
+- `429` rate limited (about 20 per minute per IP)
 - `503` provider off, failing, or slower than 3 seconds
 
 Clients treat any non-200 as "use the fallback". Responses are `cache-control: no-store`.

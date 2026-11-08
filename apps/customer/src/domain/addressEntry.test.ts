@@ -8,6 +8,7 @@ import {
   addressEntryReducer,
   initAddressEntry,
   pinBesideText,
+  savedAddressFromPick,
   toSavedAddress,
   type AddressEntryAction,
   type AddressEntryState,
@@ -205,4 +206,21 @@ test('a legacy record restored, its text edited and saved: shortAddress is the n
   });
   const edited = run(legacy, { type: 'typed', text: '14 New Road, Ibadan' });
   assert.equal(toSavedAddress(edited)?.shortAddress, '14 New Road, Ibadan');
+});
+
+test('a pick with no form keeps the typed text, nickname and note of a text-only saved address', () => {
+  const saved = { address: 'Opposite the blue gate, Bodija', label: 'Home', note: 'Call at the gate' } as never;
+  const result = savedAddressFromPick(saved, MARKET);
+  assert.equal(result?.address, 'Opposite the blue gate, Bodija');
+  assert.equal(result?.label, 'Home');
+  assert.equal(result?.note, 'Call at the gate');
+  assert.equal(result?.latitude, MARKET.latitude);
+  assert.equal(result?.pinLabel, 'Bodija Market, Ibadan');
+  assert.equal(result?.addressTextSource, 'typed');
+});
+
+test('a pick with nothing saved fills the text from the pin', () => {
+  const result = savedAddressFromPick(null, MARKET);
+  assert.equal(result?.address, 'Bodija Market, Ibadan');
+  assert.equal(result?.addressTextSource, 'pin');
 });

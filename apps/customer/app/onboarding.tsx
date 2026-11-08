@@ -21,7 +21,7 @@ import { MIN_TAP_TARGET, radius, type AddressPickOrigin, type AddressSuggestion 
 import CustomerAddressSearch from '../src/components/CustomerAddressSearch';
 import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
-import { addressEntryReducer, initAddressEntry, toSavedAddress, type AddressPin } from '../src/domain/addressEntry';
+import { savedAddressFromPick, type AddressPin } from '../src/domain/addressEntry';
 import { createLatestChoice } from '../src/domain/latestChoice';
 import { useCurrentLocationPin } from '../src/hooks/useCurrentLocationPin';
 import { markLocationStepSeen } from '../src/services/customerOnboardingState';
@@ -71,7 +71,8 @@ export default function OnboardingScreen() {
     if (finishingRef.current) {
       return;
     }
-    const saved = toSavedAddress(addressEntryReducer(initAddressEntry(null), { type: 'pinned', pin }));
+    // From the saved address, not empty: a text-only customer's own words must survive the pick.
+    const saved = savedAddressFromPick(deliveryLocation, pin);
     if (!saved) {
       setError('That place could not be pinned. Try another search result, or use your current location.');
       return;
