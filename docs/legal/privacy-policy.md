@@ -26,7 +26,7 @@ FEASTY shows maps and helps you find addresses. To do this we use third-party ma
 
 - **Maps.** Maps in the apps are drawn with MapLibre using OpenStreetMap map tiles. Your device requests the tiles it needs to show the map.
 - **Searching for an address as you type.** The text you type is sent to FEASTY's own address-search service. It forwards only that text to Photon, run by komoot, which uses OpenStreetMap data. We may use LocationIQ instead. We do not send your IP address or other identifiers to these providers through this service, and the service does not store your search text.
-- **One-tap address search and turning a location into an address.** When you use these, the app sends the text you typed, or your location, directly to OpenStreetMap Nominatim. On Android, the built-in geocoder on your device may be used instead.
+- **One-tap address search and turning a location into an address.** When you use these, the app sends the text you typed, or your location, directly to OpenStreetMap Nominatim. On Android, the built-in geocoder on your device may be used instead. That geocoder is provided by the device's operating system, which may send the text or location to Google.
 - **Customers.** We use your device location only when you choose "Use my current location". It is used to set your delivery or collection address and to check that you are within delivery range.
 
 ## FEASTY Partner (restaurants)
