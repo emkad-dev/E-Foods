@@ -1,6 +1,6 @@
 /**
  * The one-shot OpenStreetMap Nominatim forward search, shared by the partner
- * app (Find from address) and the customer app (Search the map, the fallback
+ * app (the fallback in its address search) and the customer app (Search the map, the fallback
  * when the suggestion Worker is unavailable). Moved here from
  * apps/partner/src/domain/addressLookup.ts so the two apps run one
  * implementation; the partner module re-exports what its screen and tests use.

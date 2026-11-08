@@ -8,8 +8,8 @@
  */
 
 export const RESTAURANT_LOCATION_REQUIRED_MESSAGE =
-  "Set this restaurant's location before it can be published. Open Store details, choose Map location, and use " +
-  'Use my current location or search for your address.';
+  "Set this restaurant's location before it can be published. Open Store details, choose Map location, and tap " +
+  'Use my current location, or search for your address.';
 
 /**
  * Said when the pin is a real coordinate but not in Nigeria. The usual cause is

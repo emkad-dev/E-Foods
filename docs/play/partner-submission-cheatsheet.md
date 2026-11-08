@@ -146,7 +146,7 @@ location change below):
   shared), purpose **App functionality**, and **optional** (users can choose
   whether it is collected). Added 2026-11-06 with Store details' "Use my current
   location" button, which reads one foreground fix to set the restaurant's map
-  pin. It can be declined: "Find from address" and typing the coordinates do the
+  pin. It can be declined: address search and typing the coordinates do the
   same job. Foreground only, no background location, no foreground service.
 - **Map and address-search providers (note added 2026-11-07, CSV unchanged):**
   the partner app sends typed address text, or the device location, to
