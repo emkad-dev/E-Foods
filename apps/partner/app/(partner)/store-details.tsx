@@ -690,6 +690,10 @@ export default function StoreDetailsScreen() {
           <View style={styles.searchBlock}>
             <AddressSearchField
               label="Restaurant address"
+              // The Address field above already holds the street for most partners; start from it.
+              initialQuery={address.trim()}
+              // A GPS reading is running: editing now would be ignored when a match is tapped.
+              disabled={locating}
               onSelect={handleAddressPicked}
               search={searchAddresses}
               searchMap={searchTheMap}

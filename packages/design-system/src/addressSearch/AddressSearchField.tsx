@@ -50,6 +50,10 @@ export type AddressSearchFieldProps = {
   onSelect: (suggestion: AddressSuggestion, origin: AddressPickOrigin) => void;
   label?: string;
   placeholder?: string;
+  /** Text to start the field with (not searched until the person edits it). */
+  initialQuery?: string;
+  /** Not editable while something else is busy (a GPS reading), so a tap is never silently ignored. */
+  disabled?: boolean;
   /** Shown when every service behind "Search the map" failed. */
   mapFailedMessage?: string;
   testID?: string;
@@ -77,10 +81,12 @@ export function AddressSearchField({
   onSelect,
   label = ADDRESS_SEARCH_COPY.label,
   placeholder = ADDRESS_SEARCH_COPY.placeholder,
+  initialQuery = '',
+  disabled = false,
   mapFailedMessage = ADDRESS_SEARCH_COPY.mapFailed,
   testID,
 }: AddressSearchFieldProps) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [view, setView] = useState<SuggestionView>({ kind: 'idle' });
   const [highlight, setHighlight] = useState(-1);
   const controllerRef = useRef<SuggestionController | null>(null);
@@ -169,6 +175,7 @@ export function AddressSearchField({
         accessibilityLabel={label}
         autoComplete="off"
         autoCorrect={false}
+        editable={!disabled}
         blurOnSubmit={Platform.OS === 'web' ? false : undefined}
         onChangeText={handleChange}
         onKeyPress={handleKeyPress}
@@ -176,7 +183,7 @@ export function AddressSearchField({
         placeholder={placeholder}
         placeholderTextColor={textColor.disabled}
         returnKeyType="search"
-        style={styles.input}
+        style={[styles.input, disabled ? styles.inputDisabled : null]}
         value={query}
       />
 
@@ -264,6 +271,9 @@ const styles = StyleSheet.create({
     minHeight: MIN_TAP_TARGET + 4,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
+  },
+  inputDisabled: {
+    opacity: 0.5,
   },
   statusRow: {
     alignItems: 'center',

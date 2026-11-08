@@ -179,6 +179,8 @@ export const searchAddresses = (query: string, options: { signal: AbortSignal })
  */
 export const findAddressMatch = (address: string): Promise<AddressLookupOutcome> =>
   findAddressMatches(address, {
+    // Several matches to choose from, like the customer's map search; one would hide the right place.
+    limit: 5,
     // Browsers refuse to let a page set User-Agent and send the page's own
     // origin as Referer, which identifies the app to Nominatim instead.
     userAgent: Platform.OS === 'web' ? undefined : NOMINATIM_USER_AGENT,
