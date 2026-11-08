@@ -28,20 +28,26 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BusyLabel, MIN_TAP_TARGET, radius, useConfirm, useNotice } from '@feasty/design-system';
+import {
+  AddressSearchField,
+  BusyLabel,
+  MIN_TAP_TARGET,
+  radius,
+  useConfirm,
+  useNotice,
+  type AddressSuggestion,
+} from '@feasty/design-system';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import LoadingSkeleton from '../../src/components/LoadingSkeleton';
 import {
-  ADDRESS_LOOKUP_MESSAGES,
   ADDRESS_SENT_NOTICE,
   DEVICE_POSITION_MESSAGES,
   OSM_ATTRIBUTION,
   addressMatchConfirmCopy,
+  decidePinPosition,
   devicePositionConfirmCopy,
   formatCoordinate,
   locationDisclosureCopy,
-  lookupFailureMessage,
-  normalizeAddressQuery,
 } from '../../src/domain/addressLookup';
 import {
   draftFromStore,
@@ -54,7 +60,7 @@ import {
 import { useAuth } from '../../src/contexts/AuthContext';
 import { usePartnerRestaurant } from '../../src/hooks/usePartnerRestaurant';
 import { useSeededField } from '../../src/hooks/useSeededField';
-import { findAddressMatch, getDevicePosition } from '../../src/services/deviceLocation';
+import { getDevicePosition, searchAddresses, searchTheMap } from '../../src/services/deviceLocation';
 import { savePartnerRestaurantProfile } from '../../src/services/partnerRestaurantActions';
 import { uploadRestaurantAsset } from '../../src/services/restaurantAssetUpload';
 import { partnerTheme } from '../../src/theme/palette';
@@ -128,12 +134,15 @@ export default function StoreDetailsScreen() {
   const [isOpen, setIsOpen] = useSeededField(saved.isOpen);
 
   const [savingProfile, setSavingProfile] = useState(false);
-  // Which of the two pin buttons is working, so the other is held off and a
-  // second tap cannot start a second lookup (Nominatim allows one a second).
-  const [locating, setLocating] = useState<'address' | 'device' | null>(null);
+  // True while a position is being read or a confirm dialog is open, so a second
+  // tap cannot start a second fix and a search pick cannot stack a second dialog.
+  const [locating, setLocating] = useState(false);
   // Inline, beside the buttons: the floating notice sits at the bottom of a long
   // scroll and a failure here would otherwise be easy to miss.
   const [locationProblem, setLocationProblem] = useState<string | null>(null);
+  // Set when the last fix was too coarse to use, which is the one failure that
+  // a second attempt (nearer a window, outdoors) is likely to cure.
+  const [canTryAgain, setCanTryAgain] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<StoreSetupErrors>({});
 
   const draft = {
@@ -240,35 +249,67 @@ export default function StoreDetailsScreen() {
     });
   };
 
-  const handleFindFromAddress = async () => {
+  /** A suggestion or map-search match was tapped: confirm it before it fills the fields. */
+  const handleAddressPicked = async (suggestion: AddressSuggestion) => {
     if (locating) {
       return;
     }
 
-    if (!normalizeAddressQuery(address)) {
-      setLocationProblem(ADDRESS_LOOKUP_MESSAGES.needAddress);
-      return;
-    }
-
-    setLocating('address');
+    setLocating(true);
     setLocationProblem(null);
+    setCanTryAgain(false);
 
     try {
-      const outcome = await findAddressMatch(address);
+      // Nothing is written until the partner has seen the matched place and the
+      // approximate-pin caveat and agreed.
+      const accepted = await confirm(
+        addressMatchConfirmCopy({
+          latitude: suggestion.latitude,
+          longitude: suggestion.longitude,
+          placeName: suggestion.label,
+        })
+      );
+      if (accepted) {
+        applyConfirmedPin(suggestion.latitude, suggestion.longitude);
+      }
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  /**
+   * Reads one fix and offers it, only if it is accurate enough. A coarse or
+   * unreported accuracy never fills the fields: it asks the partner to move and
+   * try again, because a pin hundreds of metres out sends customers to the wrong
+   * street.
+   */
+  const readDevicePosition = async () => {
+    setLocating(true);
+    setLocationProblem(null);
+    setCanTryAgain(false);
+
+    try {
+      const outcome = await getDevicePosition();
 
       if (outcome.kind !== 'found') {
-        setLocationProblem(lookupFailureMessage(outcome.kind));
+        setLocationProblem(DEVICE_POSITION_MESSAGES[outcome.kind]);
         return;
       }
 
-      // Nothing is written until the partner has seen the matched place and the
-      // approximate-pin caveat and agreed.
-      const accepted = await confirm(addressMatchConfirmCopy(outcome.match));
+      const decision = decidePinPosition(outcome.position);
+
+      if (decision.kind === 'retry') {
+        setLocationProblem(decision.message);
+        setCanTryAgain(true);
+        return;
+      }
+
+      const accepted = await confirm(devicePositionConfirmCopy(decision.position));
       if (accepted) {
-        applyConfirmedPin(outcome.match.latitude, outcome.match.longitude);
+        applyConfirmedPin(decision.position.latitude, decision.position.longitude);
       }
     } finally {
-      setLocating(null);
+      setLocating(false);
     }
   };
 
@@ -278,6 +319,7 @@ export default function StoreDetailsScreen() {
     }
 
     setLocationProblem(null);
+    setCanTryAgain(false);
 
     // The in-app disclosure comes BEFORE the operating system permission
     // prompt, so the partner knows what it is for when it appears. The buttons
@@ -288,22 +330,14 @@ export default function StoreDetailsScreen() {
       return;
     }
 
-    setLocating('device');
+    await readDevicePosition();
+  };
 
-    try {
-      const outcome = await getDevicePosition();
-
-      if (outcome.kind !== 'found') {
-        setLocationProblem(DEVICE_POSITION_MESSAGES[outcome.kind]);
-        return;
-      }
-
-      const accepted = await confirm(devicePositionConfirmCopy(outcome.position));
-      if (accepted) {
-        applyConfirmedPin(outcome.position.latitude, outcome.position.longitude);
-      }
-    } finally {
-      setLocating(null);
+  // The disclosure was already accepted for this attempt, and the operating
+  // system has its answer, so a retry goes straight to a new fix.
+  const handleTryAgain = () => {
+    if (!locating) {
+      void readDevicePosition();
     }
   };
 
@@ -621,42 +655,55 @@ export default function StoreDetailsScreen() {
             before your store can be visible.
           </Text>
           <TouchableOpacity
-            style={[styles.secondaryButton, locating ? styles.controlDisabled : null]}
-            onPress={handleFindFromAddress}
-            disabled={locating !== null}
+            style={[styles.primaryButton, locating ? styles.controlDisabled : null]}
+            onPress={handleUseCurrentLocation}
+            disabled={locating}
             accessibilityRole="button"
           >
             <BusyLabel
-              busy={locating === 'address'}
-              label="Find from address"
-              busyLabel="Searching..."
-              textStyle={styles.secondaryButtonText}
+              busy={locating}
+              label="Use my current location"
+              busyLabel="Finding your position..."
+              textStyle={styles.primaryButtonText}
             />
           </TouchableOpacity>
           <Text style={styles.buttonCaption}>
-            Uses the address you typed above. You confirm the match before anything is filled in.
+            Most exact: do this while you are standing at the restaurant. We only use a reading that is accurate to 150
+            m or better.
           </Text>
-          <Text style={styles.buttonCaption}>{ADDRESS_SENT_NOTICE}</Text>
-          <Text style={styles.buttonCaption}>{OSM_ATTRIBUTION}</Text>
-          <TouchableOpacity
-            style={[styles.secondaryButton, locating ? styles.controlDisabled : null]}
-            onPress={handleUseCurrentLocation}
-            disabled={locating !== null}
-            accessibilityRole="button"
-          >
-            <BusyLabel
-              busy={locating === 'device'}
-              label="Use my current location"
-              busyLabel="Finding your position..."
-              textStyle={styles.secondaryButtonText}
-            />
-          </TouchableOpacity>
-          <Text style={styles.buttonCaption}>Most exact: do this while you are at the restaurant.</Text>
           {locationProblem ? (
             <Text accessibilityLiveRegion="polite" role="alert" style={styles.fieldErrorText}>
               {locationProblem}
             </Text>
           ) : null}
+          {canTryAgain ? (
+            <TouchableOpacity
+              style={[styles.secondaryButton, locating ? styles.controlDisabled : null]}
+              onPress={handleTryAgain}
+              disabled={locating}
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryButtonText}>Try again</Text>
+            </TouchableOpacity>
+          ) : null}
+          <Text style={styles.manualLabel}>Or search for the address</Text>
+          <View style={styles.searchBlock}>
+            <AddressSearchField
+              label="Restaurant address"
+              // The Address field above already holds the street for most partners; start from it.
+              initialQuery={address.trim()}
+              // A GPS reading is running: editing now would be ignored when a match is tapped.
+              disabled={locating}
+              onSelect={handleAddressPicked}
+              search={searchAddresses}
+              searchMap={searchTheMap}
+            />
+          </View>
+          <Text style={styles.buttonCaption}>
+            You confirm the match before anything is filled in. Search is approximate, so check the pin.
+          </Text>
+          <Text style={styles.buttonCaption}>{ADDRESS_SENT_NOTICE}</Text>
+          <Text style={styles.buttonCaption}>{OSM_ATTRIBUTION}</Text>
           <Text style={styles.manualLabel}>Or type the coordinates yourself</Text>
           <View style={styles.row}>
             <View style={styles.fieldColumn}>
@@ -894,6 +941,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 6,
+  },
+  searchBlock: {
+    marginTop: 8,
   },
   manualLabel: {
     color: partnerTheme.text,

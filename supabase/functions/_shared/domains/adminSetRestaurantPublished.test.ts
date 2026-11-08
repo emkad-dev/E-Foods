@@ -332,6 +332,35 @@ Deno.test('adminSetRestaurantPublished: publishing with out-of-range coordinates
   );
 });
 
+Deno.test('adminSetRestaurantPublished: publishing a restaurant whose pin is outside Nigeria answers 412 with the admin wording', async () => {
+  // Latitude and longitude swapped: 3.38 N, 6.52 E is in the Gulf of Guinea.
+  const state = installMocks({
+    id: 'restaurant-12',
+    name: 'Swapped Pin',
+    isPublished: false,
+    latitude: 3.38,
+    longitude: 6.52,
+  });
+
+  let thrown: unknown = null;
+  try {
+    await handler({
+      context: ADMIN_CONTEXT,
+      data: { restaurantId: 'restaurant-12', isPublished: true },
+      request: fakeRequest(),
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  const message = (thrown as { message?: string })?.message ?? '';
+  expectEqual((thrown as { status?: number })?.status, 412, 'status');
+  expectEqual(/outside Nigeria/.test(message) && /owner must correct/.test(message), true, 'admin outside-Nigeria wording');
+  expectEqual(state.updateCalls.length, 0, 'nothing written');
+  expectEqual(state.auditInserts.length, 0, 'no audit row');
+  expectEqual(state.broadcasts.length, 0, 'no broadcast');
+});
+
 Deno.test('adminSetRestaurantPublished: an unknown restaurant is still 404, not 412, when publishing', async () => {
   const state = installMocks(null);
 

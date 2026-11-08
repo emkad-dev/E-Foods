@@ -7,9 +7,14 @@ import { test } from 'node:test';
 import { isSafeServerMessage } from '../../observability/src/userMessage.ts';
 import {
   ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE,
+  ADMIN_RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+  NIGERIA_BOUNDS,
   RESTAURANT_LOCATION_REQUIRED_MESSAGE,
+  RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+  isInsideNigeria,
   isPublishBlockedByLocation,
   isUsableCoordinatePair,
+  restaurantLocationBlock,
 } from './restaurantLocation.ts';
 
 test('a normal Lagos coordinate is usable', () => {
@@ -127,4 +132,87 @@ test('the admin wording is its own, says the owner must act, and passes the clie
   assert.match(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE, /no location/);
   assert.match(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE, /owner must set it in Store details/);
   assert.equal(isSafeServerMessage(ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE), true);
+});
+
+test('Nigeria box: Lagos, Abuja, Kano and Port Harcourt are inside', () => {
+  assert.equal(isInsideNigeria(6.5244, 3.3792), true);
+  assert.equal(isInsideNigeria(9.0765, 7.3986), true);
+  assert.equal(isInsideNigeria(12.0022, 8.592), true);
+  assert.equal(isInsideNigeria(4.8156, 7.0498), true);
+});
+
+test('Nigeria box: the edges are inclusive and one step past each is outside', () => {
+  const { minLatitude, maxLatitude, minLongitude, maxLongitude } = NIGERIA_BOUNDS;
+  assert.equal(isInsideNigeria(minLatitude, minLongitude), true);
+  assert.equal(isInsideNigeria(maxLatitude, maxLongitude), true);
+  assert.equal(isInsideNigeria(minLatitude - 0.0001, 5), false);
+  assert.equal(isInsideNigeria(maxLatitude + 0.0001, 5), false);
+  assert.equal(isInsideNigeria(8, minLongitude - 0.0001), false);
+  assert.equal(isInsideNigeria(8, maxLongitude + 0.0001), false);
+});
+
+test('Nigeria box: a swapped Lagos pair, other countries and unusable values are outside', () => {
+  assert.equal(isInsideNigeria(3.38, 6.52), false);
+  assert.equal(isInsideNigeria(51.5, -0.12), false);
+  assert.equal(isInsideNigeria(-6.5, 3.4), false);
+  assert.equal(isInsideNigeria(0, 0), false);
+  assert.equal(isInsideNigeria(null, null), false);
+  assert.equal(isInsideNigeria('6.5', '3.4'), false);
+});
+
+const SWAPPED_LAGOS = { latitude: 3.38, longitude: 6.52 };
+
+test('publishing with a swapped Lagos pair is refused, new row or flip to published', () => {
+  assert.equal(isPublishBlockedByLocation(null, { isPublished: true, ...SWAPPED_LAGOS }), true);
+  assert.equal(
+    isPublishBlockedByLocation({ isPublished: false, ...UNLOCATED }, { isPublished: true, ...SWAPPED_LAGOS }),
+    true
+  );
+});
+
+test('going live with an unchanged pin that is outside Nigeria is refused', () => {
+  assert.equal(
+    isPublishBlockedByLocation({ isPublished: false, ...SWAPPED_LAGOS }, { isPublished: true, ...SWAPPED_LAGOS }),
+    true
+  );
+});
+
+test('changing the pin of a live restaurant to somewhere outside Nigeria is refused', () => {
+  assert.equal(
+    isPublishBlockedByLocation({ isPublished: true, ...LOCATED }, { isPublished: true, ...SWAPPED_LAGOS }),
+    true
+  );
+  assert.equal(
+    isPublishBlockedByLocation({ isPublished: true, ...UNLOCATED }, { isPublished: true, ...SWAPPED_LAGOS }),
+    true
+  );
+});
+
+test('a live restaurant whose existing pin is outside Nigeria still saves unrelated changes unchanged', () => {
+  const current = { isPublished: true, ...SWAPPED_LAGOS };
+  assert.equal(isPublishBlockedByLocation(current, { isPublished: true, ...SWAPPED_LAGOS }), false);
+});
+
+test('an unpublished row may hold an outside-Nigeria pin while it stays hidden', () => {
+  assert.equal(
+    isPublishBlockedByLocation({ isPublished: false, ...UNLOCATED }, { isPublished: false, ...SWAPPED_LAGOS }),
+    false
+  );
+});
+
+test('the block reason tells a missing pin from one outside Nigeria', () => {
+  assert.equal(restaurantLocationBlock(null, { isPublished: true, ...UNLOCATED }), 'missing');
+  assert.equal(restaurantLocationBlock(null, { isPublished: true, ...SWAPPED_LAGOS }), 'outside-nigeria');
+  assert.equal(restaurantLocationBlock(null, { isPublished: true, ...LOCATED }), null);
+});
+
+test('the outside-Nigeria wordings are distinct, say what to do, and pass the client-safe screen', () => {
+  assert.equal(
+    RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+    'Your pin is outside Nigeria. Check the latitude and longitude, or use your current location.'
+  );
+  assert.notEqual(ADMIN_RESTAURANT_OUTSIDE_NIGERIA_MESSAGE, RESTAURANT_OUTSIDE_NIGERIA_MESSAGE);
+  assert.match(ADMIN_RESTAURANT_OUTSIDE_NIGERIA_MESSAGE, /owner must correct/);
+  assert.equal(isSafeServerMessage(RESTAURANT_OUTSIDE_NIGERIA_MESSAGE), true);
+  assert.equal(isSafeServerMessage(ADMIN_RESTAURANT_OUTSIDE_NIGERIA_MESSAGE), true);
 });

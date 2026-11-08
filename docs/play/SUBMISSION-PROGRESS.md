@@ -19,6 +19,11 @@ Advertising ID (No), Target audience (16-17 + 18 and over), Content rating
 account, browse-then-sign-in note, full-access, creds entered by owner),
 Data safety (imported from docs/play/data-safety-customer.csv — no data shared;
 personal/financial/location/messages/photos/app-perf/app-activity collected; deletion URL).
+Note (2026-11-07, CSV unchanged): the text the user types (or the location they choose) is sent to
+third-party map and search services (OpenStreetMap Nominatim; FEASTY's search service, which forwards
+the typed text to Photon by komoot) to perform the search. The owner must decide in Play Console
+whether that counts as "shared"; the CSVs currently answer "not shared". The privacy policy names
+these providers.
 
 ## Customer app — Store presence: DONE ✅
 Category Food & drink; contact feastyfooders@gmail.com + https://feasty.com.ng;

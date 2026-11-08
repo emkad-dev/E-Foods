@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: September 11, 2026
+Last updated: November 7, 2026
 
 This Privacy Policy explains how FEASTY collects, uses, shares, and protects personal information for users in Nigeria.
 
@@ -20,6 +20,21 @@ Our service is currently intended for users in Nigeria only.
 - Payment and transaction metadata handled through Paystack
 - Device and session information needed to run the service securely
 
+## Maps, Address Search and Your Location
+
+FEASTY shows maps and helps you find addresses. To do this we use third-party map and address-search services, described below.
+
+- **Maps.** Maps in the apps are drawn with MapLibre using OpenStreetMap map tiles. Your device requests the tiles it needs to show the map.
+- **Searching for an address as you type.** The text you type is sent to FEASTY's own address-search service. It forwards only that text to Photon, run by komoot, which uses OpenStreetMap data. We may use LocationIQ instead. We do not send your IP address or other identifiers to these providers through this service, and the service does not store your search text.
+- **One-tap address search and turning a location into an address.** When you use these, the app sends the text you typed, or your location, directly to OpenStreetMap Nominatim. On Android, the built-in geocoder on your device may be used instead. That geocoder is provided by the device's operating system, which may send the text or location to Google.
+- **Customers.** We use your device location only when you choose "Use my current location". It is used to set your delivery or collection address and to check that you are within delivery range.
+
+## FEASTY Partner (restaurants)
+
+If you run a restaurant on the FEASTY Partner app, we also collect:
+
+- Your device location, only when you tap "Use my current location" on your store details. It is used to set your restaurant's pin on the map. Customers then see that pin as your restaurant's location.
+
 ## How We Use Information
 
 - Create and manage your account
@@ -33,7 +48,7 @@ Our service is currently intended for users in Nigeria only.
 - Paystack, for payment processing
 - Restaurants, for order preparation and fulfillment
 - Delivery partners and dispatch users, for delivery completion
-- Service providers that help us operate the apps and backend
+- Service providers that help us operate the apps and backend, including map and address-search providers such as OpenStreetMap (including Nominatim), Photon by komoot, and LocationIQ. They receive only what is needed for the search or map request, which is the text you type or the location you choose to use
 
 We do not sell your personal information.
 

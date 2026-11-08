@@ -7,33 +7,42 @@
  * whether anyone delivers to them. This asks first.
  *
  * It is skippable on purpose. Skipping lands on the feed exactly as before this
- * screen existed. The persisted flag stops the first-run REDIRECT from repeating;
+ * screen existed. Saving needs a pin (a GPS fix or a picked search result):
+ * typed text alone cannot be coverage-checked, so it is no longer offered. The persisted flag stops the first-run REDIRECT from repeating;
  * Home also asks once per app launch while no address is saved (in memory, see
  * utils/launchAddressPrompt.ts), reusing this screen. See
  * domain/customerOnboarding.ts for why the flag records "shown", not "satisfied".
  */
 import { useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
+import { MIN_TAP_TARGET, radius, type AddressPickOrigin, type AddressSuggestion } from '@feasty/design-system';
+import CustomerAddressSearch from '../src/components/CustomerAddressSearch';
 import { screenColumn } from '../src/components/ScreenColumn';
 import { useCart } from '../src/contexts/CartContext';
-import { getCurrentCoordinates, reverseGeocode } from '../src/services/deviceLocation';
+import { savedAddressFromPick, type AddressPin } from '../src/domain/addressEntry';
+import { createLatestChoice } from '../src/domain/latestChoice';
+import { useCurrentLocationPin } from '../src/hooks/useCurrentLocationPin';
 import { markLocationStepSeen } from '../src/services/customerOnboardingState';
 import { markLaunchAddressPromptShown } from '../src/utils/launchAddressPrompt';
+import { hasTextOnlyAddress } from '../src/utils/savedAddress';
 import { customerTheme } from '../src/theme/palette';
 import { pageTitleTextStyle } from '../src/theme/screenChrome';
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { setDeliveryLocation } = useCart();
+  const { deliveryLocation, setDeliveryLocation } = useCart();
+  // An older build saved typed text with no pin; it no longer counts, so say why we ask again.
+  const earlierTypedAddress = hasTextOnlyAddress(deliveryLocation) ? deliveryLocation?.address.trim() : null;
 
-  const [locating, setLocating] = useState(false);
-  const [manualAddress, setManualAddress] = useState('');
+  const { locate, locating } = useCurrentLocationPin();
   const [error, setError] = useState<string | null>(null);
   const finishingRef = useRef(false);
+  // The customer's last choice wins: a slow fix must not replace a place picked
+  // while it was running. See domain/latestChoice.ts.
+  const choiceRef = useRef(createLatestChoice());
 
   const finish = async () => {
     // A double tap must leave once, not back out twice.
@@ -41,7 +50,7 @@ export default function OnboardingScreen() {
       return;
     }
     finishingRef.current = true;
-    // Whichever way the visitor leaves (saved, typed or skipped), this launch has
+    // Whichever way the visitor leaves (saved or skipped), this launch has
     // asked, so Home must not ask again on top of the first-run step.
     markLaunchAddressPromptShown();
     await markLocationStepSeen();
@@ -55,53 +64,60 @@ export default function OnboardingScreen() {
     }
   };
 
-  const handleUseMyLocation = async () => {
-    if (locating || finishingRef.current) {
+  // The same pin rules as the delivery-address screen (domain/addressEntry.ts):
+  // the address text follows the pin, and nothing is saved without one.
+  const saveAndFinish = async (pin: AddressPin) => {
+    // Already leaving (saved, or skipped while a fix was running): save nothing more.
+    if (finishingRef.current) {
       return;
     }
-    setError(null);
-    setLocating(true);
-    try {
-      const result = await getCurrentCoordinates();
-      if (!result.ok) {
-        // The service already produces a human message per reason
-        // (permission-denied, unavailable, timeout); typing an address is
-        // always the fallback, so this is a nudge, not a dead end.
-        setError(result.message);
-        return;
-      }
-
-      const { latitude, longitude } = result.coordinates;
-      // A failed reverse geocode must not lose the fix: the coordinates are
-      // what coverage actually needs, the text is only for display.
-      const resolved = await reverseGeocode(latitude, longitude).catch(() => null);
-
-      setDeliveryLocation({
-        address: resolved?.address ?? 'Current location',
-        latitude,
-        longitude,
-        shortAddress: resolved?.shortAddress ?? null,
-      });
-      await finish();
-    } catch {
-      setError('We could not read your location. Type your address instead.');
-    } finally {
-      setLocating(false);
+    // From the saved address, not empty: a text-only customer's own words must survive the pick.
+    const saved = savedAddressFromPick(deliveryLocation, pin);
+    if (!saved) {
+      setError('That place could not be pinned. Try another search result, or use your current location.');
+      return;
     }
+    setDeliveryLocation(saved);
+    await finish();
   };
 
-  const handleUseTypedAddress = async () => {
-    const address = manualAddress.trim();
-    if (!address) {
-      setError('Enter an address, or skip for now.');
+  const handleUseMyLocation = async () => {
+    if (finishingRef.current || locating) {
       return;
     }
+    const ticket = choiceRef.current.next();
+    setError(null);
+    const result = await locate();
+    if (!result || finishingRef.current || !choiceRef.current.isLatest(ticket)) {
+      return;
+    }
+    if (!result.ok) {
+      // A human message per reason (blocked, too coarse, timed out); search is
+      // always the next step, so this is a nudge, not a dead end.
+      setError(result.message);
+      return;
+    }
+    await saveAndFinish({
+      latitude: result.pin.latitude,
+      longitude: result.pin.longitude,
+      label: result.pin.label,
+      shortLabel: result.pin.shortAddress,
+      source: 'gps',
+    });
+  };
 
-    // No coordinates: a typed address cannot be coverage-checked until it is
-    // geocoded at checkout, which is where the existing flow already resolves
-    // it. Storing it here still saves the customer retyping.
-    setDeliveryLocation({ address, latitude: null, longitude: null, shortAddress: null });
-    await finish();
+  const handlePick = (suggestion: AddressSuggestion, origin: AddressPickOrigin) => {
+    if (finishingRef.current) {
+      return;
+    }
+    choiceRef.current.next();
+    setError(null);
+    void saveAndFinish({
+      latitude: suggestion.latitude,
+      longitude: suggestion.longitude,
+      label: suggestion.label,
+      source: origin === 'map-search' ? 'map-search' : 'suggestion',
+    });
   };
 
   return (
@@ -119,6 +135,12 @@ export default function OnboardingScreen() {
       <Text style={styles.copy}>
         We use this to show only the restaurants that actually deliver to you — and how long they will take.
       </Text>
+      {earlierTypedAddress ? (
+        <Text style={styles.earlierAddress}>
+          Confirm your address on the map. You typed “{earlierTypedAddress}” before; search for it below or use your
+          current location so we can pin it.
+        </Text>
+      ) : null}
 
       <TouchableOpacity
         disabled={locating}
@@ -138,20 +160,7 @@ export default function OnboardingScreen() {
         <View style={styles.dividerLine} />
       </View>
 
-      <TextInput
-        style={styles.input}
-        onChangeText={(value) => {
-          setError(null);
-          setManualAddress(value);
-        }}
-        placeholder="Enter your delivery address"
-        placeholderTextColor={customerTheme.textSoft}
-        value={manualAddress}
-      />
-
-      <TouchableOpacity onPress={() => void handleUseTypedAddress()} style={styles.secondaryButton}>
-        <Text style={styles.secondaryButtonText}>Use this address</Text>
-      </TouchableOpacity>
+      <CustomerAddressSearch label="Search for your address" onSelect={handlePick} />
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -189,6 +198,17 @@ const styles = StyleSheet.create({
     marginBottom: 28,
     marginTop: 10,
   },
+  earlierAddress: {
+    backgroundColor: customerTheme.accentTint,
+    borderRadius: radius.lg,
+    color: customerTheme.accentStrong,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+    marginBottom: 18,
+    marginTop: -12,
+    padding: 12,
+  },
   primaryButton: {
     alignItems: 'center',
     backgroundColor: customerTheme.brandGreen,
@@ -218,28 +238,6 @@ const styles = StyleSheet.create({
     color: customerTheme.textSoft,
     fontSize: 12,
     fontWeight: '800',
-  },
-  input: {
-    backgroundColor: customerTheme.surface,
-    borderColor: customerTheme.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    color: customerTheme.text,
-    fontSize: 15,
-    minHeight: 54,
-    paddingHorizontal: 16,
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: customerTheme.surfaceMuted,
-    borderRadius: radius.lg,
-    marginTop: 12,
-    paddingVertical: 16,
-  },
-  secondaryButtonText: {
-    color: customerTheme.text,
-    fontSize: 15,
-    fontWeight: '900',
   },
   errorText: {
     color: customerTheme.dangerText,

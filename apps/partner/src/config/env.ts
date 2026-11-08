@@ -38,6 +38,12 @@ export const appEnv = {
       process.env.EXPO_PUBLIC_PARTNER_WEB_ORIGIN,
       Constants.expoConfig?.extra?.EXPO_PUBLIC_PARTNER_WEB_ORIGIN
     ) ?? 'https://partner.feasty.com.ng',
+  // Address-search Worker. Unset means the shared default (geo.feasty.com.ng),
+  // resolved in packages/runtime/src/addressSearch.ts.
+  geocodeUrl: getEnvValue(
+    process.env.EXPO_PUBLIC_GEOCODE_URL,
+    Constants.expoConfig?.extra?.EXPO_PUBLIC_GEOCODE_URL
+  ),
   projectId: getEnvValue(
     process.env.EXPO_PUBLIC_PROJECT_ID,
     Constants.expoConfig?.extra?.EXPO_PUBLIC_PROJECT_ID

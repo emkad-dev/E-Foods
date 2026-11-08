@@ -36,7 +36,7 @@ import { formatMoney } from '../../src/utils/formatting';
 import { COVERAGE_COMING_SOON_COPY } from '../../src/utils/coverageMessaging';
 import { getCollectionDistanceWarning } from '../../src/utils/collectionDistance';
 import { getRestaurantAvailability } from '../../src/utils/restaurantAvailability';
-import { hasSavedAddress } from '../../src/utils/savedAddress';
+import { hasSavedAddress, hasTextOnlyAddress } from '../../src/utils/savedAddress';
 
 const tipOptions = [0, 100, 150, 200] as const;
 const DEFAULT_TIP_AMOUNT = tipOptions[0];
@@ -283,8 +283,11 @@ export default function CartScreen() {
     ? 'Orders are grouped by restaurant. One payment completes the basket.'
     : 'Review your order before checkout.';
   // Collection needs an address too (it is what the distance check measures from), so this
-  // is no longer delivery-only. A typed address with no coordinates counts as saved.
+  // is no longer delivery-only. Only a pinned address counts: typed text alone cannot be
+  // coverage-checked or measured, so an older text-only address is asked for once more,
+  // worded as a confirmation because the customer already typed one.
   const needsAddress = !hasSavedAddress(deliveryLocation);
+  const textOnlyAddress = hasTextOnlyAddress(deliveryLocation);
   // A missing address is deliberately NOT a disable reason: the button
   // labels itself "Add your address" in that state and `handlePlaceOrder`
   // routes to the map, so disabling it made its own label a lie and left the
@@ -805,7 +808,9 @@ export default function CartScreen() {
                       <FontAwesome name="map-marker" size={20} color="#ef4444" />
                     </View>
                     <View style={styles.locationCopy}>
-                      <Text style={styles.locationTitle}>{deliveryLocation.shortAddress ?? 'Pinned delivery spot'}</Text>
+                      <Text style={styles.locationTitle}>
+                        {deliveryLocation.shortAddress ?? (textOnlyAddress ? 'Your typed address' : 'Pinned delivery spot')}
+                      </Text>
                       <Text style={styles.locationAddress}>{deliveryLocation.address}</Text>
                     </View>
                     <Text style={styles.locationAction}>Change</Text>
@@ -821,6 +826,21 @@ export default function CartScreen() {
                     </View>
                   </TouchableOpacity>
                 )}
+
+                {textOnlyAddress ? (
+                  <View style={styles.addressNotice}>
+                    <Text style={styles.warningText}>
+                      This address has no map pin yet. Confirm it on the map so we can check delivery and the rider can find you.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.addressNoticeButton}
+                      onPress={() => router.push('/delivery-location')}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.addressNoticeButtonText}>Confirm your address on the map</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
 
                 <TextInput
                   style={styles.noteInput}
@@ -849,14 +869,18 @@ export default function CartScreen() {
                 {needsAddress ? (
                   <View style={styles.addressNotice}>
                     <Text style={styles.warningText}>
-                      Add your address to order for collection. We use it to check how far the restaurant is.
+                      {textOnlyAddress
+                        ? 'Your address has no map pin yet. Confirm it on the map so we can check how far the restaurant is.'
+                        : 'Add your address to order for collection. We use it to check how far the restaurant is.'}
                     </Text>
                     <TouchableOpacity
                       style={styles.addressNoticeButton}
                       onPress={() => router.push('/delivery-location')}
                       accessibilityRole="button"
                     >
-                      <Text style={styles.addressNoticeButtonText}>Add your address</Text>
+                      <Text style={styles.addressNoticeButtonText}>
+                        {textOnlyAddress ? 'Confirm your address on the map' : 'Add your address'}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 ) : null}
@@ -1065,9 +1089,11 @@ export default function CartScreen() {
                     checkoutBlockedReason
                       ? 'Checkout unavailable'
                       : needsAddress
-                        ? fulfillmentType === 'delivery'
-                          ? 'Choose delivery location'
-                          : 'Add your address'
+                        ? textOnlyAddress
+                          ? 'Confirm your address on the map'
+                          : fulfillmentType === 'delivery'
+                            ? 'Choose delivery location'
+                            : 'Add your address'
                         : !user
                           ? 'Sign in to place order'
                           : 'Pay and place order'

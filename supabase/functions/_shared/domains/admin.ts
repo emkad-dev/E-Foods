@@ -93,7 +93,10 @@ import {
 import { defineRpcDomain, type AnonymousRpcHandler, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
 import { assertRestaurantLocationAllowsPublish } from '../restaurantLocation.ts';
-import { ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE } from '../../../../packages/domain/src/restaurantLocation.ts';
+import {
+  ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE,
+  ADMIN_RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+} from '../../../../packages/domain/src/restaurantLocation.ts';
 import { appendSupportMessage, isSupportStatus, type SupportConversationRow, type SupportMessageRow } from '../support.ts';
 
 type Handler = RpcHandler<AuthenticatedRequestContext>;
@@ -1880,7 +1883,10 @@ const adminSetRestaurantPublished: Handler = async ({ context, data }) => {
         latitude: currentRestaurant.latitude,
         longitude: currentRestaurant.longitude,
       },
-      ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE
+      {
+        missing: ADMIN_RESTAURANT_LOCATION_REQUIRED_MESSAGE,
+        outsideNigeria: ADMIN_RESTAURANT_OUTSIDE_NIGERIA_MESSAGE,
+      }
     );
   }
 

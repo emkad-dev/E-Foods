@@ -146,8 +146,15 @@ location change below):
   shared), purpose **App functionality**, and **optional** (users can choose
   whether it is collected). Added 2026-11-06 with Store details' "Use my current
   location" button, which reads one foreground fix to set the restaurant's map
-  pin. It can be declined: "Find from address" and typing the coordinates do the
+  pin. It can be declined: address search and typing the coordinates do the
   same job. Foreground only, no background location, no foreground service.
+- **Map and address-search providers (note added 2026-11-07, CSV unchanged):**
+  the partner app sends the typed address text to OpenStreetMap Nominatim and
+  to FEASTY's own search service (which forwards only the typed text to Photon
+  by komoot) to perform the search. It does not reverse geocode: a GPS reading
+  is not sent to any map service. The owner must decide in Play Console whether
+  this is "shared"; the CSVs currently answer "not shared". The privacy policy
+  names these providers.
 - **No data shared with third parties** (all `..._ONLY_SHARED` rows are
   blank), no data sold, deletion URL present
   (`https://feasty.com.ng/account-deletion.html`)

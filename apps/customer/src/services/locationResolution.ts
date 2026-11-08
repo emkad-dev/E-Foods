@@ -8,6 +8,8 @@
 export type Coordinates = {
   latitude: number;
   longitude: number;
+  /** Radius in metres the device is confident about, when it reports one. */
+  accuracyMeters?: number | null;
 };
 
 export type LocationErrorReason = 'permission-denied' | 'timeout' | 'unavailable' | 'unsupported';
@@ -27,12 +29,59 @@ export type BrowserPositionOptions = {
   timeout: number;
 };
 
+// Each one points at search, not at typing: typed text alone is not an address
+// any more (it has no pin), so "type your address" would be a dead end.
 export const LOCATION_ERROR_MESSAGES: Record<LocationErrorReason, string> = {
-  'permission-denied': 'Location access is blocked. Allow it for this site, or type your address below.',
-  timeout: 'Finding you took too long. Try again, or type your address below.',
-  unavailable: 'We could not read your location right now. Type your address below.',
-  unsupported: 'This browser cannot share your location. Type your address below.',
+  'permission-denied': 'Location access is blocked. Allow it and try again, or search for your address below.',
+  timeout: 'Finding you took too long. Try again, or search for your address below.',
+  unavailable: 'We could not read your location right now. Try again, or search for your address below.',
+  unsupported: 'This device cannot share your location. Search for your address below.',
 };
+
+/**
+ * Worse than this and the fix is not a delivery spot. A laptop browser
+ * locating by Wi-Fi or IP typically reports several kilometres, which would put
+ * the pin in the wrong neighbourhood and the coverage check on the wrong side
+ * of a boundary, so it is refused and the customer is asked to search instead.
+ */
+export const MAX_FIX_ACCURACY_METERS = 1000;
+
+export type FixAccuracyVerdict = { ok: true } | { ok: false; message: string };
+
+const describeDistance = (meters: number) =>
+  meters >= 1000 ? `${Math.round(meters / 100) / 10} km` : `${Math.round(meters)} m`;
+
+/**
+ * Should this fix become the pin?
+ *
+ * An unreported accuracy is accepted: some Android devices omit it on a
+ * perfectly good GPS fix, and refusing those would turn "Use my current
+ * location" off for them with no way to fix it. A reported radius that is not a
+ * finite non-negative number is treated the same as unreported.
+ */
+export const assessFixAccuracy = (
+  accuracyMeters: number | null | undefined,
+  maxMeters: number = MAX_FIX_ACCURACY_METERS
+): FixAccuracyVerdict => {
+  if (typeof accuracyMeters !== 'number' || !Number.isFinite(accuracyMeters) || accuracyMeters < 0) {
+    return { ok: true };
+  }
+
+  if (accuracyMeters <= maxMeters) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    message:
+      `Your device only knows your location to within about ${describeDistance(accuracyMeters)}, ` +
+      'which is too rough for a rider to find you. Search for your address below instead.',
+  };
+};
+
+/** The radius from a platform fix, or null when it is missing or meaningless. */
+export const toAccuracyMeters = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
 export const HIGH_ACCURACY_OPTIONS: BrowserPositionOptions = {
   enableHighAccuracy: true,

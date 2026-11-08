@@ -232,10 +232,16 @@ export const getRestaurantAvailability = (
   }
 
   if (restaurant.supportsDelivery === false && restaurant.supportsPickup !== false) {
+    // No radius (nobody delivers), but the distance is still useful: a customer
+    // collecting needs to know how far the kitchen is, and the feed sorts by it.
+    const kitchen = extractRestaurantCoordinates(restaurant);
+    const customer = deliveryLocation
+      ? extractCoordinatePoint({ latitude: deliveryLocation.latitude, longitude: deliveryLocation.longitude })
+      : null;
     return {
       isAvailable: true,
       reason: 'pickup_only',
-      distanceKm: null,
+      distanceKm: kitchen && customer ? calculateDistanceKm(kitchen, customer) : null,
       radiusKm: null,
     };
   }

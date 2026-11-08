@@ -33,19 +33,22 @@ export const getUsableAddressPoint = (location: AddressRecord | null | undefined
 /**
  * Is there a saved address worth acting on?
  *
- * Yes when it has usable coordinates OR a non-blank typed address. A typed
- * address legitimately has null coordinates (app/onboarding.tsx stores it that
- * way and leaves geocoding to checkout), so it counts as saved; it simply
- * produces no distance warning.
+ * Only when it has usable coordinates. Text alone is not an address: it cannot
+ * be coverage-checked, measured for the collection warning, or found by a
+ * rider. A text-only address saved by an older build therefore no longer counts,
+ * so the launch prompt asks again and checkout asks for a pin once.
  */
-export const hasSavedAddress = (location: AddressRecord | null | undefined): boolean => {
-  if (!location) {
-    return false;
-  }
+export const hasSavedAddress = (location: AddressRecord | null | undefined): boolean =>
+  getUsableAddressPoint(location) !== null;
 
-  if (getUsableAddressPoint(location)) {
-    return true;
-  }
-
-  return typeof location.address === 'string' && location.address.trim().length > 0;
-};
+/**
+ * A typed address with no usable pin: what older builds saved from the launch
+ * prompt. Kept as text (the customer wrote it) but the screens word their ask
+ * as "confirm it on the map" rather than "add one", because the customer
+ * already did add one.
+ */
+export const hasTextOnlyAddress = (location: AddressRecord | null | undefined): boolean =>
+  Boolean(location) &&
+  !hasSavedAddress(location) &&
+  typeof location?.address === 'string' &&
+  location.address.trim().length > 0;
