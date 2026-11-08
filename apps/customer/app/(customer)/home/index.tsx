@@ -448,9 +448,12 @@ export default function HomeScreen() {
                   // getPlatformCoverage fails open to isCovered=true when nothing is
                   // pinned, so without this check every card told a visitor who had set
                   // no address that they were inside a delivery zone.
-                  : isCovered && deliveryLocation
+                  : isCovered && deliveryLocation && availability.reason !== 'pickup_only'
                     ? 'Within your zone'
                     : null,
+                // A collection-only kitchen has no delivery zone to be within; say
+                // what it is instead (its distance, when known, is shown above).
+                availability.reason === 'pickup_only' ? 'Collection only' : null,
                 // Nothing when the partner published no estimate: this list is
                 // already `.filter(Boolean)`ed, so an absent ETA simply drops
                 // out rather than inventing a delivery promise for a kitchen

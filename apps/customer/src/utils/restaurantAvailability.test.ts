@@ -69,6 +69,16 @@ test('a restaurant without coordinates is skipped entirely, and the empty candid
   assert.deepEqual(coverage, { isCovered: true, nearestOrderableKm: null });
 });
 
+test('a collection-only restaurant reports its distance when both pins are known, and none otherwise', () => {
+  const kitchen = restaurant({ supportsDelivery: false, supportsPickup: true, latitude: 6.5170, longitude: 3.3841 });
+  const near = getRestaurantAvailability(kitchen, PINNED);
+  assert.equal(near.reason, 'pickup_only');
+  assert.equal(near.radiusKm, null);
+  assert.ok(near.distanceKm !== null && near.distanceKm > 6 && near.distanceKm < 8);
+  assert.equal(getRestaurantAvailability(kitchen, null).distanceKm, null);
+  assert.equal(getRestaurantAvailability(restaurant({ supportsDelivery: false, supportsPickup: true, latitude: null, longitude: null }), PINNED).distanceKm, null);
+});
+
 test('a zero radius falls back to the 12km default rather than blocking', () => {
   // ~7km from the pinned address: outside a literal 0km radius, inside the 12km fallback.
   const nearby = restaurant({ latitude: 6.5170, longitude: 3.3841, deliveryRadiusKm: 0 });
