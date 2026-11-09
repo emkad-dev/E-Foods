@@ -25,17 +25,17 @@ the confirm card; `needsAttention` stayed true after completion; the acceptance 
 4. Pickup tracker (customer app). The pickup progress steps (`PICKUP_TRACKING_STEPS`, `packages/domain/src/orders.ts`) end at
    ready for pickup; add the collected step so a collected order reads as complete.
 
-5. Payment refresh integrity (server).  →  (_shared/domains/orders.ts ~1343-1525, ~2093-2129) writes
+5. Payment refresh integrity (server). `refreshCustomerPaymentStatus` → `syncOrderPaymentState` (_shared/domains/orders.ts ~1343-1525, ~2093-2129) writes
    unconditionally: it marks money on a cancelled/rejected order as plainly paid (no needsAttention, no alert; the webhook then returns
    early), turns a refunded payment back into paid, can downgrade paid on a later 'reversed', and double-sends payment notifications
    (production: exactly 2 payment_confirmed events per paid order). Fix: one code path with the webhook's handlePaymentVerification
    (compare-and-set on the previous payment status, closed-order safeguard, single notification); never move a payment backwards.
-6. Unpaid expiry (server).  (_shared/orders.ts ~571-660) runs only when someone reads the order, writes
+6. Unpaid expiry (server). `maybeExpireUnpaidOrder` (_shared/orders.ts ~571-660) runs only when someone reads the order, writes
    unconditionally (can cancel an order the webhook just marked paid), uses 15 min for every method (bank transfers in production paid at
    9.5 and 31.5 min), and never updates PaymentTransaction (47 rows stuck pending). Fix: conditional update (still placed AND payment still
    pending), a scheduled sweep in queue-drainer like the other sweeps, 15 min for card and 35 min for bank transfer, PaymentTransaction
    updated in the same step. Orders whose payment FAILED are cancelled by the same sweep (three are stuck placed since 25 Jun).
-7. Acceptance sweep starvation (server).  takes the oldest 100 placed-like orders and skips unpaid ones, so 100 stale
+7. Acceptance sweep starvation (server). `sweepUnacceptedOrders` (`_shared/acceptanceDeadlineSweep.ts`) takes the oldest 100 placed-like orders and skips unpaid ones, so 100 stale
    unpaid orders would stop every new paid order being escalated. Fix: query only paid orders.
 8. Restaurant rejects a paid order (server). The reject path leaves payment 'paid' with no refund record and the promo slot held. Fix: record
    the full refund the same way cancellation does (buildRefundUpdate rate 1), release the promo redemption, set needsAttention and alert
@@ -85,13 +85,13 @@ the restaurant's share on a refunded split order. Do not change refund behaviour
 ### Task 4: Payment state integrity (Spec 5, 6, 7)
 - Refresh path shares the webhook's verification; expiry sweep with conditional writes, per-method windows, PaymentTransaction kept in step,
   failed-payment orders cancelled; acceptance sweep queries paid orders only. Deno tests for each race named in the spec.
-- Commit: .
+- Commit: `fix(payments): a payment never moves backwards and closed orders stay closed`.
 
 ### Task 5: Transition guards and paid rejection (Spec 8, 9)
 - Reject and failed_delivery record the refund and flag attention; partner delivered guard; conditional customer cancel; scheduled release
   checks payment; delivery-code attempt counting. Deno tests.
-- Commit: .
+- Commit: `fix(orders): every transition checks what it assumed`.
 
 ### Task 6: Admin way out and visibility (Spec 10, 11)
 - Admin RPC actions (update all four RPC count places), admin-web order actions with confirm, dashboard attention, payouts owed.
-- Commit: .
+- Commit: `feat(admin): resolve stuck orders and see what is owed`.
