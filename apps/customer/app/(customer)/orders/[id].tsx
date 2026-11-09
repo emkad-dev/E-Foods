@@ -14,6 +14,7 @@ import { useRiderPositionRealtime, type RiderPosition } from '../../../src/hooks
 import {
   canCustomerCancelOrder,
   formatOrderStatusLabel,
+  formatTrackingStepLabel,
   formatPaymentMethodLabel,
   formatPaymentStatusLabel,
   getCustomerRefundPolicyLabel,
@@ -464,7 +465,7 @@ export default function OrderTracking() {
           return (
             <Animated.View key={step} entering={FadeIn.delay(index * 120)} style={styles.stepRow}>
               <View style={[styles.stepCircle, active ? styles.stepCircleActive : null, current ? styles.stepCircleCurrent : null]} />
-              <Text style={[styles.stepLabel, active ? styles.stepLabelActive : null]}>{formatOrderStatusLabel(step)}</Text>
+              <Text style={[styles.stepLabel, active ? styles.stepLabelActive : null]}>{formatTrackingStepLabel(step, fulfillmentType)}</Text>
             </Animated.View>
           );
         })}

@@ -24,7 +24,13 @@ import {
   contrastRatio,
   flattenAlpha,
 } from '../../design-system/src/tokens/contrast.ts';
-import { getOrderStatusColor, LEGACY_ORDER_STATUS_MAP, ORDER_STATUSES } from './orders.ts';
+import {
+  formatTrackingStepLabel,
+  getOrderStatusColor,
+  getTrackingSteps,
+  LEGACY_ORDER_STATUS_MAP,
+  ORDER_STATUSES,
+} from './orders.ts';
 
 /** The alpha every call site appends: `${color}20`, 0x20 = 32/255 ≈ 12.5%. */
 const TINT_ALPHA = '20';
@@ -136,5 +142,30 @@ describe('getOrderStatusColor is fill only', () => {
           `cannot be contrast-checked.`,
       );
     }
+  });
+});
+
+describe('tracking steps', () => {
+  it('pickup ends at the collected step, after ready for pickup', () => {
+    assert.deepEqual(getTrackingSteps('pickup'), ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'delivered']);
+  });
+
+  it('delivery steps are unchanged', () => {
+    assert.deepEqual(getTrackingSteps('delivery'), [
+      'placed',
+      'accepted',
+      'preparing',
+      'ready_for_pickup',
+      'picked_up',
+      'on_the_way',
+      'delivered',
+    ]);
+    assert.deepEqual(getTrackingSteps(), getTrackingSteps('delivery'));
+  });
+
+  it('labels the last pickup step Collected and the last delivery step Delivered', () => {
+    assert.equal(formatTrackingStepLabel('delivered', 'pickup'), 'Collected');
+    assert.equal(formatTrackingStepLabel('delivered', 'delivery'), 'Delivered');
+    assert.equal(formatTrackingStepLabel('ready_for_pickup', 'pickup'), 'Ready for pickup');
   });
 });

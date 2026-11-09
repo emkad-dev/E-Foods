@@ -39,13 +39,22 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     orderRef.current = order;
   }, [order]);
 
+  // Only the very first load of an order may be served from the read cache.
+  // Every later load comes from a realtime change, the fallback poll, a
+  // foreground resume or a reload after confirm/report, and each of those exists
+  // because the order may have changed: a cached copy would hide that change.
+  const loadedOrderIdRef = useRef<string | null>(null);
+
   const loadOrder = useCallback(async () => {
     if (!orderId || !customerId) {
       return;
     }
 
+    const fresh = loadedOrderIdRef.current === orderId;
+    loadedOrderIdRef.current = orderId;
+
     try {
-      const nextData = await getCustomerOrderDetail(orderId);
+      const nextData = await getCustomerOrderDetail(orderId, { fresh });
 
       if (!activeRef.current) {
         return;

@@ -57,13 +57,16 @@ export const DELIVERY_TRACKING_STEPS: OrderStatus[] = [
   'delivered',
 ];
 
-// Pickup orders end at "ready for pickup" — the customer collects in person, so the
-// tracking timeline must not show a "Delivered" step.
+// A pickup order's last step is the restaurant marking it collected, which the
+// backend records as the `delivered` status. It is listed so a collected order
+// reads as complete; the timeline labels it "Collected", never "Delivered" (see
+// formatTrackingStepLabel).
 export const PICKUP_TRACKING_STEPS: OrderStatus[] = [
   'placed',
   'accepted',
   'preparing',
   'ready_for_pickup',
+  'delivered',
 ];
 
 export const normalizeOrderStatus = (status: string | null | undefined): OrderStatus => {
@@ -84,6 +87,11 @@ export const normalizeOrderStatus = (status: string | null | undefined): OrderSt
 
 export const getTrackingSteps = (fulfillmentType: FulfillmentType = 'delivery'): OrderStatus[] =>
   fulfillmentType === 'pickup' ? PICKUP_TRACKING_STEPS : DELIVERY_TRACKING_STEPS;
+
+export const formatTrackingStepLabel = (
+  step: OrderStatus,
+  fulfillmentType: FulfillmentType = 'delivery'
+): string => (fulfillmentType === 'pickup' && step === 'delivered' ? 'Collected' : formatOrderStatusLabel(step));
 
 export const formatOrderStatusLabel = (status: string | null | undefined): string => {
   const normalizedStatus = normalizeOrderStatus(status);
