@@ -7,7 +7,8 @@ import { KitchenBoard } from '../../src/components/KitchenBoard';
 import { SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useKitchenAlarm } from '../../src/contexts/KitchenAlarmContext';
 import { isOrderAlarming, orderNeedsAcceptDecision } from '../../src/domain/kitchenAlarm';
-import { formatOrderStatusLabel, formatPaymentStatusLabel } from '../../src/domain/orders';
+import { formatPaymentStatusLabel } from '../../src/domain/orders';
+import { formatPartnerOrderStatusLabel } from '../../src/domain/orderActionOutcome';
 import { getPartnerStatusColor } from '../../src/theme/statusColors';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
@@ -267,7 +268,7 @@ export default function PartnerOrdersScreen() {
                       order/[id].tsx and as the `Badge` primitive.
                     */}
                     <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
-                      <Text style={styles.statusText}>{formatOrderStatusLabel(order.status)}</Text>
+                      <Text style={styles.statusText}>{formatPartnerOrderStatusLabel(order.status, order.fulfillmentType)}</Text>
                     </View>
                   </View>
 

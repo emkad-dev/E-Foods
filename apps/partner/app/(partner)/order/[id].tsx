@@ -1,11 +1,17 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BusyLabel, radius, useNotice } from '@feasty/design-system';
 import { toUserMessage } from '../../../../../packages/observability/src/userMessage';
 import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton';
-import { formatOrderStatusLabel, normalizeOrderStatus } from '../../../src/domain/orders';
+import { normalizeOrderStatus } from '../../../src/domain/orders';
+import {
+  formatPartnerOrderStatusLabel,
+  hasOrderReachedActionTarget,
+  orderActionSuccessMessage,
+  type PartnerOrderAction,
+} from '../../../src/domain/orderActionOutcome';
 import { getOrderConfirmationStatus } from '../../../src/domain/orderConfirmationStatus';
 import { getPartnerStatusColor } from '../../../src/theme/statusColors';
 import { usePartnerOrder } from '../../../src/hooks/usePartnerOrder';
@@ -21,14 +27,18 @@ import { SCREEN_TITLE_SIZE, SCREEN_TITLE_WEIGHT, SCREEN_TOP_INSET } from '../../
 import { formatOrderItemOptions, formatPartnerMoney } from '../../../src/utils/partnerQueue';
 
 /** The five transitions this screen can fire; at most one may be in flight. */
-type OrderAction = 'accept' | 'preparing' | 'ready' | 'delivered' | 'reject';
+type OrderAction = PartnerOrderAction;
+
+// Long enough to read "Order rejected" before the screen closes; the notice
+// lives on this screen, so leaving at once would take the receipt with it.
+const LEAVE_AFTER_REJECT_MS = 1500;
 
 export default function PartnerOrderDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { error, loading, order } = usePartnerOrder(id as string);
+  const { error, loading, order, reload } = usePartnerOrder(id as string);
   const isCompactRail = width < 480;
   // Every action on this screen used to report failure through `Alert`, which
   // is `class Alert { static alert() {} }` in react-native-web — nothing at all
@@ -55,6 +65,21 @@ export default function PartnerOrderDetailScreen() {
     showNotice({ tone: 'error', title: 'Update failed', message });
   };
 
+  // A receipt after every action that worked (success notices fade on their
+  // own). Without it the only sign was the status chip moving whenever the next
+  // realtime read landed, which on a slow connection looked like nothing.
+  const reportSuccess = (action: OrderAction, fulfillmentType: string | null | undefined) => {
+    showNotice({ tone: 'success', title: orderActionSuccessMessage(action, fulfillmentType) });
+  };
+
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+    },
+    []
+  );
+
   // Per-action, not one screen-wide flag: the same reason the customer profile
   // screen keeps its own `busy` rather than reusing the auth context's. Only the
   // button that was tapped should say "Accepting...".
@@ -79,18 +104,45 @@ export default function PartnerOrderDetailScreen() {
     fallbackMessage: string
   ) => {
     const target = order;
-    if (!target || busyRef.current) return;
+    // A pending leave means the order was just rejected: nothing else may fire,
+    // and a second success would schedule a second router.back().
+    if (!target || busyRef.current || leaveTimerRef.current) return;
 
     busyRef.current = action;
     setBusy(action);
 
+    let succeeded = false;
+
     try {
       await run(target);
+      succeeded = true;
     } catch (nextError: any) {
-      reportFailure(toUserMessage(nextError, fallbackMessage));
+      // A failed call is not proof of a failed action. The reply can be lost on
+      // a bad connection after the server applied it, or a duplicate can meet
+      // the status the first request already moved (the 412 "This order can no
+      // longer be updated" over an order that HAD been collected). So read the
+      // order again, still busy so nothing else fires meanwhile, and believe the
+      // order rather than the error. Only an order that did not get there, or a
+      // reload that also failed, earns the failure notice.
+      const fresh = await reload();
+      if (fresh && hasOrderReachedActionTarget(action, fresh.status, fresh.fulfillmentType ?? target.fulfillmentType)) {
+        succeeded = true;
+      } else {
+        reportFailure(toUserMessage(nextError, fallbackMessage));
+      }
     } finally {
       busyRef.current = null;
       setBusy(null);
+    }
+
+    if (!succeeded) return;
+
+    reportSuccess(action, target.fulfillmentType);
+
+    // A rejected order has nothing left to do here, so the screen closes, but
+    // only after the receipt has been on screen long enough to read.
+    if (action === 'reject') {
+      leaveTimerRef.current = setTimeout(() => router.back(), LEAVE_AFTER_REJECT_MS);
     }
   };
 
@@ -115,14 +167,7 @@ export default function PartnerOrderDetailScreen() {
     );
 
   const handleReject = () =>
-    runAction(
-      'reject',
-      async (target) => {
-        await rejectPartnerOrder(target.id, target.timeline ?? null);
-        router.back();
-      },
-      'Unable to reject this order.'
-    );
+    runAction('reject', (target) => rejectPartnerOrder(target.id, target.timeline ?? null), 'Unable to reject this order.');
 
   if (loading) {
     return (
@@ -169,7 +214,7 @@ export default function PartnerOrderDetailScreen() {
           */}
           <View style={[styles.statusPill, { backgroundColor: `${getPartnerStatusColor(order.status)}20` }]}>
             <Text style={[styles.statusText, { color: partnerTheme.textOnHero }]}>
-              {formatOrderStatusLabel(order.status)}
+              {formatPartnerOrderStatusLabel(order.status, order.fulfillmentType)}
             </Text>
           </View>
         </View>

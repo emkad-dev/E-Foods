@@ -15,7 +15,7 @@ import { BusyLabel, MIN_TAP_TARGET, radius, useNotice } from '@feasty/design-sys
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { Skeleton, SkeletonListRow, SkeletonScreen } from '../../src/components/Skeleton';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { formatOrderStatusLabel } from '../../src/domain/orders';
+import { formatPartnerOrderStatusLabel } from '../../src/domain/orderActionOutcome';
 import { describeRatingSummary, toRatingSummary } from '../../src/domain/restaurantRatings';
 import { usePartnerOrders } from '../../src/hooks/usePartnerOrders';
 import { partnerTheme } from '../../src/theme/palette';
@@ -404,7 +404,7 @@ export default function PartnerHome() {
                           <Text style={styles.orderSub}>{formatOrderTime(order.createdAt)}</Text>
                         </View>
                         <View style={[styles.statusPill, { backgroundColor: `${statusFill}20` }]}>
-                          <Text style={styles.statusText}>{formatOrderStatusLabel(order.status)}</Text>
+                          <Text style={styles.statusText}>{formatPartnerOrderStatusLabel(order.status, order.fulfillmentType)}</Text>
                         </View>
                         <Text style={styles.orderAmount}>
                           {formatPartnerMoney(order.pricing?.total ?? (order as { total?: number }).total ?? 0)}

@@ -26,7 +26,7 @@ import { MIN_TAP_TARGET, radius } from '@feasty/design-system';
 import { useKitchenAlarm } from '../contexts/KitchenAlarmContext';
 import type { OrderDocument } from '../domain/entities';
 import { isOrderAlarming, orderNeedsAcceptDecision } from '../domain/kitchenAlarm';
-import { formatOrderStatusLabel } from '../domain/orders';
+import { formatPartnerOrderStatusLabel } from '../domain/orderActionOutcome';
 import { partnerTheme } from '../theme/palette';
 import {
   KITCHEN_LANES,
@@ -168,7 +168,7 @@ export function KitchenBoard({ activeOrders, restaurantName, onSelectOrder }: Ki
           {lane === 'scheduled'
             ? formatScheduledSlot(order.scheduledFor) ?? 'Scheduled'
             : lane === 'attention' || lane === 'handedOff'
-              ? `${formatOrderStatusLabel(order.status)} · ${getKitchenElapsedLabel(order.createdAt)}`
+              ? `${formatPartnerOrderStatusLabel(order.status, order.fulfillmentType)} · ${getKitchenElapsedLabel(order.createdAt)}`
               : getKitchenElapsedLabel(order.createdAt)}
         </Text>
       </TouchableOpacity>
