@@ -243,6 +243,21 @@ export type BackendRpcOptions = {
    * the caller guessing. Unset, behaviour is exactly as before.
    */
   deadlineMs?: number;
+  /**
+   * Marks a call that changes server state. When the direct request fails in
+   * transport (the connection dropped, nothing came back), a write is NOT sent
+   * again through the relay: the first request may already have succeeded and
+   * only its reply was lost. Re-sending it then hits a state the first one moved,
+   * and the caller is shown a rejection ("This order can no longer be updated")
+   * for an action that worked. The transport error is thrown instead, and the
+   * caller decides what to do (the partner order screen reloads the order).
+   *
+   * A write still goes through the relay when the relay is the ONLY path (no
+   * direct URL configured) or when the direct request was never sent, because
+   * then nothing can have reached the server twice. Unset (reads), the relay
+   * retry is exactly as before.
+   */
+  write?: boolean;
 };
 
 const deadlineError = (action: string, deadlineMs: number) => {
@@ -291,7 +306,8 @@ const callBackendRpcInternal = async <T>(
   env: BackendRpcEnv,
   action: string,
   data?: Record<string, unknown>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  write = false
 ): Promise<T> => {
   // Resolve the routing target before doing anything else — including
   // before the session dance below. An unknown action must fail
@@ -347,6 +363,10 @@ const callBackendRpcInternal = async <T>(
     data: data ?? {},
   };
 
+  // Set just before the direct fetch goes out. A failure before that point (a
+  // malformed configured URL) sent nothing, so even a write may use the relay.
+  let directRequestSent = false;
+
   const callViaDirectUrl = async () => {
     if (!env.backendRpcUrl?.trim()) {
       return null;
@@ -369,6 +389,7 @@ const callBackendRpcInternal = async <T>(
       headers.apikey = env.anonKey.trim();
     }
 
+    directRequestSent = true;
     const response = await fetch(targetUrl, {
       body: JSON.stringify(payload),
       headers,
@@ -416,6 +437,12 @@ const callBackendRpcInternal = async <T>(
     // The deadline fired and aborted the direct call: stop here instead of
     // starting a relay attempt nobody is waiting for any more.
     if (signal?.aborted) {
+      throw error;
+    }
+
+    // A write whose request went out may already have been applied; sending it
+    // again would turn a lost reply into a false failure. See `write` above.
+    if (write && directRequestSent) {
       throw error;
     }
 
@@ -472,7 +499,7 @@ export const callBackendRpc = async <T>(
 ): Promise<T> => {
   try {
     return await withDeadline(options?.deadlineMs, action, (signal) =>
-      callBackendRpcInternal<T>(supabase, env, action, data, signal)
+      callBackendRpcInternal<T>(supabase, env, action, data, signal, options?.write === true)
     );
   } catch (error) {
     if (shouldReportRpcFailure(error)) {
