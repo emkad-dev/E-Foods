@@ -228,6 +228,10 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
           filters.push([col, val]);
           return builder;
         },
+        // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
+        is(_col: string, _val: unknown) {
+          return builder;
+        },
         select(_columns?: string) {
           return apply().then((updated) => ({ data: updated.map((row) => ({ ...row })), error: null }));
         },

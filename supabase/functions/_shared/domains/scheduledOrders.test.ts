@@ -311,6 +311,10 @@ const installCancelMocks = (order: Row) => {
         filters.push([col, val]);
         return builder;
       },
+      // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
+      is(_col: string, _val: unknown) {
+        return builder;
+      },
       then(resolve: (v: { error: null }) => unknown, reject?: (r: unknown) => unknown) {
         for (const row of rows) {
           if (filters.every(([col, val]) => row[col] === val)) {

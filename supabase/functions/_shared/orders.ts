@@ -313,6 +313,44 @@ export const insertDeliveryEvent = async (payload: JsonObject) => {
   }
 };
 
+/**
+ * True when a status write means the order no longer needs a human: the
+ * restaurant accepted it, or it reached a terminal status. needsAttention is
+ * then stale (raised by the acceptance escalation or a late payment) and must
+ * be dropped - an admin queue full of delivered orders hides the real ones.
+ */
+export const statusWriteClearsAttention = (updates: JsonObject): boolean => {
+  if (typeof updates.status !== 'string') {
+    return false;
+  }
+  const next = normalizeOrderStatus(updates.status);
+  return next === ORDER_STATUS.ACCEPTED || TERMINAL_ORDER_STATUSES.has(next);
+};
+
+// The ONE place the rule lives: every accept / terminal write funnels through
+// updateOrderRecord or updateOrderRecordIfStatus, so partner, dispatch,
+// customer cancel and the sweeps all get it. A second, filtered UPDATE (rather
+// than needsAttention:false in the main write) because a customer problem
+// report (customerIssueReportedAt) must keep the flag, and PostgREST cannot
+// make one column of an update conditional on another. The status guard stops
+// it touching an order that has since moved on.
+const clearAttentionAfterStatusWrite = async (orderId: string, updates: JsonObject) => {
+  if (!statusWriteClearsAttention(updates)) {
+    return;
+  }
+  const { error } = await serviceClient
+    .from('CustomerOrder')
+    .update({ needsAttention: false })
+    .eq('id', orderId)
+    .eq('status', updates.status as string)
+    .eq('needsAttention', true)
+    .is('customerIssueReportedAt', null);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+};
+
 export const updateOrderRecord = async (orderId: string, updates: JsonObject) => {
   const { error } = await serviceClient.from('CustomerOrder').update(updates).eq('id', orderId);
 
@@ -320,6 +358,7 @@ export const updateOrderRecord = async (orderId: string, updates: JsonObject) =>
     throw new Error(error.message);
   }
 
+  await clearAttentionAfterStatusWrite(orderId, updates);
   await broadcastOrderChanged(orderId);
 };
 
@@ -392,6 +431,7 @@ export const updateOrderRecordIfStatus = async (
 
   const applied = Array.isArray(data) && data.length > 0;
   if (applied) {
+    await clearAttentionAfterStatusWrite(orderId, updates);
     await broadcastOrderChanged(orderId);
   }
   return applied;

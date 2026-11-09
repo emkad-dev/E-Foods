@@ -103,6 +103,10 @@ const createTable = (initialRows: Row[]) => {
           filters.push([col, val]);
           return builder;
         },
+        // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
+        is(_col: string, _val: unknown) {
+          return builder;
+        },
         select(_columns?: string) {
           const matched = matching();
           for (const row of matched) Object.assign(row, payload);

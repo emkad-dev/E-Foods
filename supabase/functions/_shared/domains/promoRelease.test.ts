@@ -131,6 +131,10 @@ const createTable = (initialRows: Row[]) => {
           }
           return b;
         },
+        // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
+        is(_col: string, _val: unknown) {
+          return b;
+        },
         select() {
           return b;
         },

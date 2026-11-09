@@ -412,3 +412,84 @@ Deno.test('sweep: an order that flips placed->accepted between the read and the 
     mocks.restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// The clock starts at PAYMENT. Production order c7655e4a was created 11:05:19,
+// paid 11:14:55 by bank transfer and escalated at 11:15:03 - 8 s after payment.
+// ---------------------------------------------------------------------------
+Deno.test('sweep: a slow bank transfer is not overdue until the deadline after PAYMENT', async () => {
+  const mocks = installMocks([
+    buildOrderRow({
+      id: 'order-slow-transfer',
+      createdAt: placedAgo(10 * 60_000 + 8_000),
+      payment: { capturedAmount: CAPTURED_AMOUNT, method: 'bank_transfer', paidAt: placedAgo(8_000), status: 'paid' },
+      timeline: { placedAt: placedAgo(10 * 60_000 + 8_000), paidAt: placedAgo(8_000) },
+    }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.escalated, 0, 'paid 8 s ago, so not escalated even though created 10 minutes ago');
+    expectEqual(mocks.order().needsAttention, false, 'no attention flag');
+    expectEqual(mocks.events('acceptance_deadline_escalated').length, 0, 'no escalation event');
+
+    // Same order, but paid a full deadline ago: now it is overdue.
+    mocks.order().timeline = {
+      placedAt: placedAgo(10 * 60_000 + DEADLINE_MS),
+      paidAt: placedAgo(DEADLINE_MS + 5_000),
+    };
+    const later = await sweepUnacceptedOrders();
+    expectEqual(later.escalated, 1, 'escalates once the deadline after payment has passed');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('sweep: payment.paidAt is used when timeline.paidAt is absent', async () => {
+  const mocks = installMocks([
+    buildOrderRow({
+      id: 'order-payment-paidat',
+      payment: { capturedAmount: CAPTURED_AMOUNT, method: 'card', paidAt: placedAgo(5_000), status: 'paid' },
+      timeline: { placedAt: placedAgo(DEADLINE_MS * 3) },
+    }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.escalated, 0, 'paid 5 s ago');
+    expectEqual(result.cancelled, 0, 'and not auto-cancelled either');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('sweep: a legacy row with no paidAt anywhere is measured from creation', async () => {
+  const mocks = installMocks([
+    buildOrderRow({
+      id: 'order-legacy',
+      createdAt: placedAgo(DEADLINE_MS + 5_000),
+      timeline: {},
+    }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.escalated, 1, 'created a deadline ago and never stamped paidAt: overdue');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('sweep: a scheduled order paid days ago is measured from its release, not its payment', async () => {
+  const mocks = installMocks([
+    buildOrderRow({
+      id: 'order-scheduled',
+      payment: { capturedAmount: CAPTURED_AMOUNT, method: 'card', paidAt: placedAgo(2 * 24 * 3_600_000), status: 'paid' },
+      timeline: { placedAt: placedAgo(5_000), paidAt: placedAgo(2 * 24 * 3_600_000) },
+    }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.escalated, 0, 'just released, kitchen has its full time');
+    expectEqual(result.cancelled, 0, 'and is not auto-cancelled');
+  } finally {
+    mocks.restore();
+  }
+});

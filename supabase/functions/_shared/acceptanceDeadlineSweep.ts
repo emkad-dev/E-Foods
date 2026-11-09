@@ -49,9 +49,10 @@ import {
   ORDER_STATUS,
   releasePromoRedemption,
 } from './orders.ts';
+import { acceptanceClockStartMs } from './acceptanceDeadline.ts';
 import { loadAcceptanceDeadlineConfig } from './platformSettings.ts';
 import { broadcastOrderChanged } from './realtime.ts';
-import { nowIso, toSortableTimestamp } from './rpc/coercion.ts';
+import { nowIso } from './rpc/coercion.ts';
 import { serviceClient } from './client.ts';
 
 /** The actor recorded on events the sweep causes. Not a real uid - there is no human here. */
@@ -301,11 +302,10 @@ export const sweepUnacceptedOrders = async (): Promise<AcceptanceDeadlineSweepRe
         continue;
       }
 
-      // The deadline clock starts when the order entered 'placed'
-      // (timeline.placedAt, stamped by both order-creation paths), falling back
-      // to createdAt if that is somehow absent.
-      const placedAt =
-        toSortableTimestamp((order.timeline ?? {}).placedAt) ?? toSortableTimestamp(order.createdAt);
+      // The deadline clock starts at PAYMENT (see acceptanceClockStartMs): a
+      // slow bank transfer must not eat the kitchen's time. Unpaid-field rows
+      // (cash, legacy) fall back to placedAt, then createdAt.
+      const placedAt = acceptanceClockStartMs(order);
       if (!placedAt) {
         result.skipped += 1;
         continue;
