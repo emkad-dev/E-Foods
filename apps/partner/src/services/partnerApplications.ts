@@ -30,7 +30,7 @@ export const submitPartnerApplication = async (input: PartnerApplicationInput) =
     submittedAt: string;
     restaurantId: string;
     targetUid: string;
-  }>('submitPartnerApplication', input);
+  }>('submitPartnerApplication', input, { write: true });
 
 /** Full single-flow onboarding payload: restaurant identity + KYC + payout. The raw
  *  document number is sent once for server-side hashing and is never persisted. */
@@ -54,7 +54,7 @@ export const submitPartnerOnboarding = async (input: PartnerOnboardingInput) =>
     payoutStatus: string;
     resolvedAccountName: string;
     targetUid: string;
-  }>('submitPartnerOnboarding', input);
+  }>('submitPartnerOnboarding', input, { write: true });
 
 export type PartnerVerificationUploadTarget = {
   bucket: string;

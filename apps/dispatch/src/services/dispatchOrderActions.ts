@@ -16,7 +16,7 @@ export const assignDispatchCourier = async (
   await callDispatchBackendRpc('dispatchAssignOrderCourier', {
     courierId: courier.id,
     orderId,
-  });
+  }, { write: true });
 };
 
 const updateDispatchOrderStatus = async (orderId: string, action: string, deliveryCode?: string) => {
@@ -26,7 +26,7 @@ const updateDispatchOrderStatus = async (orderId: string, action: string, delive
     // Only the `delivered` action carries a code; omitted entirely for every
     // other action so their payloads are unchanged.
     ...(deliveryCode !== undefined ? { deliveryCode } : {}),
-  });
+  }, { write: true });
 };
 
 export const markDispatchOrderPickedUp = async (orderId: string, _timeline: Record<string, unknown> | null) =>
@@ -55,10 +55,10 @@ export const escalateDispatchOrder = async (orderId: string, _timeline: Record<s
 // just be told "already accepted", and after a loss the offer is gone.
 
 export const acceptDispatchOffer = async (offerId: string) =>
-  callDispatchBackendRpc('dispatchAcceptOffer', { offerId });
+  callDispatchBackendRpc('dispatchAcceptOffer', { offerId }, { write: true });
 
 export const declineDispatchOffer = async (offerId: string) =>
-  callDispatchBackendRpc('dispatchDeclineOffer', { offerId });
+  callDispatchBackendRpc('dispatchDeclineOffer', { offerId }, { write: true });
 
 // Rider online/offline toggle (SP-3). `available: true` writes the caller's own
 // DispatchRiderRecord.status = 'Available'; `false` writes 'Offline'. The
@@ -66,8 +66,8 @@ export const declineDispatchOffer = async (offerId: string) =>
 export const setDispatchAvailability = async (available: boolean) =>
   callDispatchBackendRpc<{ courierId: string; status: 'Available' | 'Offline' }>('dispatchSetAvailability', {
     available,
-  });
+  }, { write: true });
 
 export const triggerRiderSOS = async (orderId: string): Promise<void> => {
-  await callDispatchBackendRpc('dispatchRiderSOS', { orderId });
+  await callDispatchBackendRpc('dispatchRiderSOS', { orderId }, { write: true });
 };

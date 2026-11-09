@@ -17,4 +17,4 @@ export const toggleFavoriteRestaurant = async (restaurantId: string, isFavorite?
   callCustomerBackendRpc<CustomerFavoriteToggleResult>('customerToggleFavoriteRestaurant', {
     isFavorite,
     restaurantId,
-  });
+  }, { write: true });

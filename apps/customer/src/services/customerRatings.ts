@@ -46,7 +46,7 @@ export const submitOrderRating = async (input: SubmitOrderRatingInput): Promise<
       restaurantScore: input.restaurantScore,
       ...(input.courierScore != null ? { courierScore: input.courierScore } : {}),
       ...(input.comment?.trim() ? { comment: input.comment.trim() } : {}),
-    });
+    }, { write: true });
 
     clearCustomerReadCache();
     return { outcome: 'submitted', ratingId: result.ratingId, restaurantId: result.restaurantId };

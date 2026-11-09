@@ -52,7 +52,7 @@ export const inviteStaffMember = (email: string) =>
     // optimistic row the screen renders identical to the one the next list
     // fetch returns, so the address does not visibly change case after send.
     email: email.trim().toLowerCase(),
-  });
+  }, { write: true });
 
 /**
  * Everyone who can act for this restaurant, plus every invite.
@@ -66,7 +66,7 @@ export const getPartnerStaff = () => callPartnerBackendRpc<PartnerStaffList>('pa
 
 /** Cancels an unredeemed invite. 404 once it is no longer pending. */
 export const revokeStaffInvite = (inviteId: string) =>
-  callPartnerBackendRpc<{ inviteId: string; status: string }>('partnerRevokeStaffInvite', { inviteId });
+  callPartnerBackendRpc<{ inviteId: string; status: string }>('partnerRevokeStaffInvite', { inviteId }, { write: true });
 
 /**
  * Unlinks a staff member from this restaurant and drops their role.
@@ -76,7 +76,7 @@ export const revokeStaffInvite = (inviteId: string) =>
  * 400 when targeting yourself, 404 when they are not your staff.
  */
 export const revokeStaffAccess = (targetUid: string) =>
-  callPartnerBackendRpc<{ targetUid: string }>('partnerRevokeStaffAccess', { targetUid });
+  callPartnerBackendRpc<{ targetUid: string }>('partnerRevokeStaffAccess', { targetUid }, { write: true });
 
 /**
  * Attaches the SIGNED-IN account to the restaurant that issued this code.
@@ -91,7 +91,7 @@ export const revokeStaffAccess = (targetUid: string) =>
  * try to guess which case it was.
  */
 export const redeemStaffInvite = (code: string) =>
-  callPartnerBackendRpc<RedeemStaffInviteResult>('redeemStaffInvite', { code: code.trim() });
+  callPartnerBackendRpc<RedeemStaffInviteResult>('redeemStaffInvite', { code: code.trim() }, { write: true });
 
 /* -------------------------------------------------------------------------- *
  * THE TWO PRE-AUTH CALLS

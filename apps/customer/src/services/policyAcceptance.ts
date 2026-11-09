@@ -35,4 +35,6 @@ export const getCustomerPolicyAcceptance = async (options?: BackendRpcOptions) =
   );
 
 export const recordCustomerPolicyAcceptance = async (source = 'customer_policy_gate') =>
-  callCustomerBackendRpc<PolicyAcceptanceStatus>('recordPolicyAcceptance', buildCustomerPolicyAcceptance(source));
+  callCustomerBackendRpc<PolicyAcceptanceStatus>('recordPolicyAcceptance', buildCustomerPolicyAcceptance(source), {
+    write: true,
+  });

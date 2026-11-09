@@ -102,4 +102,4 @@ export const upsertDispatchShiftSlots = async (input: {
     startsAt: string;
     status?: string;
   }>;
-}) => callDispatchBackendRpc<{ courierId: string; slots: DispatchShiftSlot[] }>('dispatchUpsertShiftSlots', input);
+}) => callDispatchBackendRpc<{ courierId: string; slots: DispatchShiftSlot[] }>('dispatchUpsertShiftSlots', input, { write: true });
