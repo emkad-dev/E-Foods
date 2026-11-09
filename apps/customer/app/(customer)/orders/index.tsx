@@ -11,8 +11,8 @@ import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
-  formatOrderStatusLabel,
   formatPaymentStatusLabel,
+  formatTrackingStepLabel,
   getOrderStatusColor,
   isTerminalOrderStatus,
   normalizeOrderStatus,
@@ -34,6 +34,7 @@ type Order = {
     status?: string;
   };
   status: string;
+  fulfillmentType?: 'delivery' | 'pickup' | null;
   createdAt: any;
 };
 
@@ -310,7 +311,9 @@ export default function OrdersList() {
                 primitive already encodes.
               */}
               <View style={[styles.statusBadge, { backgroundColor: `${getOrderStatusColor(item.status)}20` }]}>
-                <Text style={styles.status}>{formatOrderStatusLabel(item.status).toUpperCase()}</Text>
+                <Text style={styles.status}>
+                  {formatTrackingStepLabel(normalizeOrderStatus(item.status), item.fulfillmentType ?? 'delivery').toUpperCase()}
+                </Text>
               </View>
             </View>
             <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>

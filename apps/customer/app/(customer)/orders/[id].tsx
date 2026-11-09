@@ -13,7 +13,6 @@ import { computeEtaRangeBetween, formatEtaRange, shouldShowLiveMap } from '../..
 import { useRiderPositionRealtime, type RiderPosition } from '../../../src/hooks/useRiderPositionRealtime';
 import {
   canCustomerCancelOrder,
-  formatOrderStatusLabel,
   formatTrackingStepLabel,
   formatPaymentMethodLabel,
   formatPaymentStatusLabel,
@@ -387,7 +386,9 @@ export default function OrderTracking() {
             1.64:1. The 12.5% tint keeps the hue and the label is plain `text`.
           */}
           <View style={[styles.statusBadge, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
-            <Text style={styles.statusBadgeText}>{formatOrderStatusLabel(order.status)}</Text>
+            <Text style={styles.statusBadgeText}>
+              {formatTrackingStepLabel(normalizeOrderStatus(order.status), order.fulfillmentType ?? 'delivery')}
+            </Text>
           </View>
         </View>
         {scheduledSlotLabel ? (

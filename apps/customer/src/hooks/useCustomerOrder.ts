@@ -39,22 +39,18 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     orderRef.current = order;
   }, [order]);
 
-  // Only the very first load of an order may be served from the read cache.
-  // Every later load comes from a realtime change, the fallback poll, a
-  // foreground resume or a reload after confirm/report, and each of those exists
-  // because the order may have changed: a cached copy would hide that change.
-  const loadedOrderIdRef = useRef<string | null>(null);
-
+  // Every load of the order screen is fresh, the first included. Later loads come
+  // from a realtime change, the poll, a resume or a reload after an action, and
+  // exist because the order changed. The first one can follow a change made while
+  // the screen was closed, and the channel's first SUBSCRIBED does not reload, so
+  // a cached copy there would stay on screen until the next change.
   const loadOrder = useCallback(async () => {
     if (!orderId || !customerId) {
       return;
     }
 
-    const fresh = loadedOrderIdRef.current === orderId;
-    loadedOrderIdRef.current = orderId;
-
     try {
-      const nextData = await getCustomerOrderDetail(orderId, { fresh });
+      const nextData = await getCustomerOrderDetail(orderId, { fresh: true });
 
       if (!activeRef.current) {
         return;
