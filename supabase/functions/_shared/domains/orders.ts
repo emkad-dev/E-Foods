@@ -1920,7 +1920,7 @@ const refreshCustomerPaymentStatus: Handler = async ({ context, data }) => {
     fail(400, 'An order id is required.');
   }
 
-  const bundle = await loadOrderBundle(orderId);
+  const bundle = await loadOrderBundle(orderId, false, { expireUnpaid: false });
   if (!bundle) {
     fail(404, 'The selected order could not be found.');
   }

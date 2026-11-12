@@ -41,6 +41,8 @@ let paystackVerifyData: Row | null = null;
 let paystackVerifyCalls = 0;
 let rpcCalls: Array<{ fn: string; params: Row }> = [];
 let beforeUpdate: UpdateHook | null = null;
+// Every SELECT, for asserting what was NOT looked up (push recipients).
+let reads: Array<{ table: string; filterLabels: string[] }> = [];
 
 const MINUTE = 60_000;
 const REFERENCE = 'FEASTY-CRD-INTEGRITY-1';
@@ -75,6 +77,7 @@ const makeBuilder = (table: string) => {
     const matches = rows.filter((row) => filters.every((filter) => filter(row)));
 
     if (op === 'select') {
+      reads.push({ table, filterLabels: filterLabels.slice() });
       let result = matches;
       if (orderColumn) {
         const column = orderColumn;
@@ -216,11 +219,15 @@ const setup = (orders: Row[], transactions: Row[] = [pendingTransaction()]) => {
     PaymentTransaction: transactions.map((row) => structuredClone(row)),
     IdempotencyRecord: [],
     OperationalAlert: [],
-    UserRole: [{ userId: 'partner-user-1', role: 'restaurant', restaurantId: 'rest-1' }],
+    UserRole: [
+      { userId: 'partner-user-1', role: 'restaurant', restaurantId: 'rest-1' },
+      { userId: 'partner-user-2', role: 'restaurant', restaurantId: 'rest-2' },
+    ],
     UserAccount: [],
     queue_notifications: [],
   };
   rpcCalls = [];
+  reads = [];
   paystackVerifyCalls = 0;
   beforeUpdate = null;
 };
@@ -696,5 +703,178 @@ Deno.test('lazy expiry that loses the race to a payment returns the fresh, paid 
     assertEquals(after.status, 'placed');
     assertEquals(after.payment?.status, 'paid');
     assertEquals(order().status, 'placed');
+  });
+});
+
+// ───────────────────────── fix round 1 ─────────────────────────
+
+Deno.test('refresh after the expiry closed a bank transfer: an ongoing answer leaves order and ledger failed', async () => {
+  await withHarness(async () => {
+    setup([unpaidOrder('bank-closed', 'bank_transfer', 36)], [transactionFor('bank-closed')]);
+    await sweepUnpaidOrders(NOW);
+    assertEquals(order('bank-closed').status, 'cancelled');
+    const closedPayment = structuredClone(order('bank-closed').payment);
+    const closedLedger = structuredClone(db.PaymentTransaction[0]);
+
+    paystackVerifyData = charge('ongoing', { reference: 'REF-bank-closed', channel: 'bank_transfer' });
+    const { body } = await refresh('bank-closed');
+
+    assertEquals(body.data.paymentStatus, 'failed');
+    assertEquals(body.data.status, 'cancelled');
+    assertEquals(order('bank-closed').payment, closedPayment);
+    assertEquals(db.PaymentTransaction[0], closedLedger);
+  });
+});
+
+Deno.test('refresh: a failed payment never goes back to pending on an ongoing answer', async () => {
+  await withHarness(async () => {
+    const failed = {
+      method: 'card',
+      provider: 'paystack',
+      reference: REFERENCE,
+      status: 'failed',
+      failedAt: '2026-11-12T11:58:00.000Z',
+    };
+    setup([makeOrder({ payment: failed })], [pendingTransaction({ status: 'failed' })]);
+    paystackVerifyData = charge('ongoing');
+
+    const { body } = await refresh();
+
+    assertEquals(body.data.paymentStatus, 'failed');
+    assertEquals(order().payment, failed);
+    assertEquals(db.PaymentTransaction[0].status, 'failed');
+  });
+});
+
+Deno.test('refresh: no payment-not-completed push when a payment is claimed right after the failure write', async () => {
+  await withHarness(async () => {
+    setup([makeOrder()]);
+    paystackVerifyData = charge('failed');
+
+    // The refresh has written 'failed'; the customer's retry is confirmed by
+    // the webhook before the refresh gets to its push.
+    // The order's own failure write comes first; the hook re-arms past it.
+    const hook: UpdateHook = async (table, payload) => {
+      if (table !== 'PaymentTransaction' || payload.status !== 'failed') {
+        beforeUpdate = hook;
+        return;
+      }
+      paystackVerifyData = charge('success');
+      await webhook();
+    };
+    beforeUpdate = hook;
+
+    await refresh();
+
+    assertEquals(order().payment.status, 'paid');
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+    assertEquals(notifications('customer', 'payment_failed').length, 0);
+    assertEquals(notifications('customer', 'payment_confirmed').length, 1);
+  });
+});
+
+Deno.test('refresh that wins keeps the stored webhook payload and records the raw gateway answer', async () => {
+  await withHarness(async () => {
+    const storedEvent = { event: 'charge.success', data: { reference: REFERENCE } };
+    setup([makeOrder()], [pendingTransaction({ webhookEvent: storedEvent })]);
+    paystackVerifyData = charge('success');
+
+    await refresh();
+
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+    assertEquals(db.PaymentTransaction[0].webhookEvent, storedEvent);
+    assertEquals(db.PaymentTransaction[0].verificationResponse, charge('success'));
+  });
+});
+
+Deno.test('refresh does not run the unpaid expiry before asking Paystack', async () => {
+  await withHarness(async () => {
+    // Past its card window: the lazy expiry would cancel it on read.
+    setup([makeOrder({ createdAt: new Date(Date.now() - 20 * MINUTE).toISOString() })]);
+    paystackVerifyData = charge('success');
+
+    const { body } = await refresh();
+
+    assertEquals(body.data.status, 'placed');
+    assertEquals(body.data.paymentStatus, 'paid');
+    assertEquals(events('payment_timeout').length, 0);
+    assertEquals(db.OperationalAlert.length, 0);
+  });
+});
+
+Deno.test('group race: two verifications that each claim one order tell the customer once and each restaurant once', async () => {
+  await withHarness(async () => {
+    setup([
+      makeOrder({ id: 'order-1', orderGroupId: 'order-1', restaurantId: 'rest-1', pricing: { total: 1000 } }),
+      makeOrder({ id: 'order-2', orderGroupId: 'order-1', restaurantId: 'rest-2', pricing: { total: 1500 } }),
+    ]);
+    db.OrderGroup = [{ id: 'order-1', orderCount: 2, orderIds: ['order-1', 'order-2'], pricing: { total: 2500 } }];
+    paystackVerifyData = charge('success');
+
+    // A = webhook, B = customer refresh, interleaved so that A claims order-1
+    // and B claims order-2:
+    //   1. A is about to write order-1: start B and wait until B is about to
+    //      write order-1 too (both have read 'pending' everywhere).
+    //   2. B's order-1 write is held until A's order-1 write has committed.
+    //   3. A is about to write order-2 (its order-1 is committed): release B,
+    //      which loses order-1, claims order-2 and finishes; then A loses order-2.
+    let phase = 0;
+    let bReachedOrder1: () => void = () => {};
+    let releaseB: () => void = () => {};
+    const bAtOrder1 = new Promise<void>((resolve) => (bReachedOrder1 = resolve));
+    const bMayWrite = new Promise<void>((resolve) => (releaseB = resolve));
+    let bRun: Promise<unknown> | null = null;
+
+    const hook: UpdateHook = async (table, payload) => {
+      beforeUpdate = hook;
+      if (table !== 'CustomerOrder' || payload.payment?.status !== 'paid') return;
+      phase += 1;
+      if (phase === 1) {
+        bRun = refresh('order-1');
+        await bAtOrder1;
+      } else if (phase === 2) {
+        bReachedOrder1();
+        await bMayWrite;
+      } else if (phase === 3) {
+        releaseB();
+        await bRun;
+      }
+    };
+    beforeUpdate = hook;
+
+    await webhook();
+    beforeUpdate = null;
+
+    assertEquals(phase >= 4, true);
+    assertEquals(order('order-1').payment.status, 'paid');
+    assertEquals(order('order-2').payment.status, 'paid');
+    assertEquals(events('payment_confirmed').map((event) => event.orderId).sort(), ['order-1', 'order-2']);
+    assertEquals(notifications('customer', 'payment_confirmed').length, 1);
+    assertEquals(
+      notifications('partner', 'payment_confirmed').map((job) => job.payload.payload.data.orderId).sort(),
+      ['order-1', 'order-2']
+    );
+  });
+});
+
+Deno.test('expiry: an order more than 24h past its deadline is closed silently (event and promo release kept)', async () => {
+  await withHarness(async () => {
+    setup([unpaidOrder('june-order', 'card', 140 * 24 * 60, 'failed')], [transactionFor('june-order', 'failed')]);
+    const pushLookups = () =>
+      reads.filter((read) => read.table === 'UserAccount' && read.filterLabels.includes('uid in (cust-1)')).length;
+
+    await sweepUnpaidOrders(NOW);
+
+    assertEquals(order('june-order').status, 'cancelled');
+    assertEquals(events('payment_timeout').map((event) => [event.orderId, event.details.silent]), [['june-order', true]]);
+    assertEquals(releaseCalls().length, 1);
+    assertEquals(pushLookups(), 0);
+    assertEquals(reads.filter((read) => read.table === 'UserRole').length, 0);
+
+    // A normal expiry still notifies (proves the lookup above can see one).
+    db.CustomerOrder.push(structuredClone(unpaidOrder('recent-order', 'card', 16)));
+    await sweepUnpaidOrders(NOW);
+    assertEquals(order('recent-order').status, 'cancelled');
+    assertEquals(pushLookups() > 0, true);
   });
 });

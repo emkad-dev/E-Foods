@@ -12,7 +12,7 @@ import {
 import { broadcastOrderChanged } from '../_shared/realtime.ts';
 import { logEdgeEvent } from '../_shared/observability.ts';
 import { capturePaymentOnClosedOrderAlert, recordOperationalAlert } from '../_shared/operationalAlerts.ts';
-import { storedPaymentStatus } from '../_shared/orders.ts';
+import { storedPaymentStatus, TERMINAL_ORDER_STATUSES } from '../_shared/orders.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -161,7 +161,11 @@ const upsertPaymentTransaction = async (
     paidAt: paymentStatus === 'paid' ? new Date().toISOString() : null,
     verifiedAt: new Date().toISOString(),
     initializeResponse: payment.initializeResponse ?? null,
-    webhookEvent,
+    // The raw gateway answer this verification acted on, from either path.
+    verificationResponse: transactionData,
+    // Only a webhook delivery carries an event. A refresh-confirmed payment
+    // must not null out a payload a webhook already stored.
+    ...(webhookEvent ? { webhookEvent } : {}),
   };
 
   const { error } = await serviceClient.from('PaymentTransaction').upsert(payload, {
@@ -483,23 +487,29 @@ const markOrderPaymentState = async (
     await broadcastOrderChanged(claim.orderId, { restaurantId: claim.restaurantId });
   }
 
-  await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent, isGroup ? expectedAmount : undefined);
+  // The charge-level side effects (ledger, risk signals, the customer's push
+  // and email) belong to exactly one caller. Two verifications of a group can
+  // interleave so that each claims a different order; the one that claimed
+  // the FIRST order of the charge owns them, so the customer is told once.
+  const ownsChargeEffects = rows.length > 0 && claims.some((claim) => claim.orderId === rows[0].id);
 
-  await capturePaymentVerificationRiskSignals({
-    customerId: order.customerId,
-    orderId: order.id,
-    paymentReference,
-    transactionData,
-  });
+  if (ownsChargeEffects) {
+    await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent, isGroup ? expectedAmount : undefined);
+
+    await capturePaymentVerificationRiskSignals({
+      customerId: order.customerId,
+      orderId: order.id,
+      paymentReference,
+      transactionData,
+    });
+  }
 
   // A payment that landed on a cancelled order must not tell the restaurant it
   // has a paid order to prepare, nor tell the customer it will be prepared.
   const liveClaims = claims.filter((claim) => !claim.closed);
-  if (liveClaims.length === 0) {
-    return { success: true, orderId: order.id, paymentStatus: 'paid' };
-  }
 
-  // Every restaurant of a multi-store group has its own paid order to accept.
+  // Every restaurant of a multi-store group has its own paid order to accept,
+  // and each order is claimed by exactly one caller, so each is told once.
   for (const claim of liveClaims) {
     const restaurantUsers = await loadRestaurantRecipientUserIds(claim.restaurantId);
     if (restaurantUsers.length > 0) {
@@ -517,6 +527,10 @@ const markOrderPaymentState = async (
         },
       });
     }
+  }
+
+  if (!ownsChargeEffects || liveClaims.length === 0) {
+    return { success: true, orderId: order.id, paymentStatus: 'paid' };
   }
 
   // The webhook path is the one that confirms payments the customer walked
@@ -654,6 +668,12 @@ export const recordUnsuccessfulPaymentVerification = async ({
     return;
   }
 
+  // A closed order's unpaid payment stays as it was closed: a late 'ongoing'
+  // or 'abandoned' answer must not rewrite the order or its ledger row (the
+  // unpaid expiry already recorded both as failed).
+  const isClosedOrder = (row: CustomerOrderRow) => TERMINAL_ORDER_STATUSES.has(normalizeOrderStatusText(row.status));
+  if (isClosedOrder(order)) return;
+
   const nowIso = new Date().toISOString();
   const nextStatus = UNSUCCESSFUL_GATEWAY_STATUSES.has(gatewayStatus) ? 'failed' : 'pending';
   const channel = typeof transactionData.channel === 'string' ? transactionData.channel : null;
@@ -662,9 +682,11 @@ export const recordUnsuccessfulPaymentVerification = async ({
   let movedAny = false;
   let primaryPreviousStatus: string | null | undefined;
   for (const row of rows) {
-    if (isSettledPayment(row)) continue;
+    if (isSettledPayment(row) || isClosedOrder(row)) continue;
 
     const previousPaymentStatus = storedPaymentStatus(row);
+    // Never failed -> pending: a still-ongoing answer does not undo a failure.
+    if (nextStatus === 'pending' && normalizeOrderStatusText(previousPaymentStatus) === 'failed') continue;
     const rowPayment = (row.payment ?? {}) as JsonObject;
     const nextPayment = {
       ...rowPayment,
@@ -679,6 +701,9 @@ export const recordUnsuccessfulPaymentVerification = async ({
       .from('CustomerOrder')
       .update({ payment: nextPayment, updatedAt: nowIso })
       .eq('id', row.id);
+    // The order-status guard keeps a cancel that lands meanwhile (the unpaid
+    // expiry) from being followed by this write.
+    query = typeof row.status === 'string' ? query.eq('status', row.status) : query.is('status', null);
     query = previousPaymentStatus === null
       ? query.is('payment->>status', null)
       : query.eq('payment->>status', previousPaymentStatus);
@@ -720,7 +745,8 @@ export const recordUnsuccessfulPaymentVerification = async ({
         verifiedAt: nowIso,
       })
       .eq('reference', paymentReference)
-      .in('status', ['pending', 'failed']);
+      // Same rule as the order: failed never goes back to pending.
+      .in('status', nextStatus === 'failed' ? ['pending', 'failed'] : ['pending']);
     if (ledgerError) throw new Error(`Failed to update payment transaction: ${ledgerError.message}`);
   }
 
@@ -728,7 +754,11 @@ export const recordUnsuccessfulPaymentVerification = async ({
     nextStatus === 'failed' &&
     primaryPreviousStatus !== undefined &&
     normalizeOrderStatusText(primaryPreviousStatus) !== 'failed';
-  if (becameFailed) {
+  // Re-read just before telling the customer: a confirmation that claimed the
+  // payment after this failure write (the customer retried and paid) must not
+  // be followed by "did not go through".
+  const stillUnpaid = becameFailed ? !isSettledPayment((await loadOrderState(order.id)) ?? { payment: null }) : false;
+  if (becameFailed && stillUnpaid) {
     await enqueueNotification(serviceClient, {
       userIds: [order.customerId],
       payload: {
