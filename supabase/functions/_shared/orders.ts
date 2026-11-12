@@ -202,6 +202,11 @@ export const paymentTimeoutMsForMethod = (method: unknown) =>
  * closed and is never expired. */
 export const UNPAID_EXPIRY_ORDER_STATUSES = ['placed', 'pending', 'confirmed', 'draft', 'scheduled'];
 
+/** An expiry this long past its deadline is closed silently. The first sweep
+ * after deploy finds orders stuck since June; telling a customer "Order timed
+ * out" months later is noise, and the restaurant has long forgotten them. */
+export const SILENT_EXPIRY_AFTER_DEADLINE_MS = 24 * 60 * 60 * 1000;
+
 /** Payment states that mean no money was captured: the order may be expired. */
 export const UNCAPTURED_PAYMENT_STATUSES: string[] = [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.FAILED];
 
@@ -589,7 +594,16 @@ export const loadOrderRelations = async (orderIds: string[]) => {
   };
 };
 
-export const loadOrderBundle = async (orderId: string, includeEvents = false) => {
+export const loadOrderBundle = async (
+  orderId: string,
+  includeEvents = false,
+  options: {
+    /** False skips the lazy unpaid expiry. The payment refresh passes false: it
+     * is about to ask Paystack, and expiring first would cancel an order whose
+     * payment that very answer may confirm. */
+    expireUnpaid?: boolean;
+  } = {}
+) => {
   const { data: order, error } = await serviceClient
     .from('CustomerOrder')
     .select(CUSTOMER_ORDER_COLUMNS)
@@ -604,7 +618,7 @@ export const loadOrderBundle = async (orderId: string, includeEvents = false) =>
     return null;
   }
 
-  const normalizedOrder = await maybeExpireUnpaidOrder(order);
+  const normalizedOrder = options.expireUnpaid === false ? order : await maybeExpireUnpaidOrder(order);
   const { assignmentsByOrderId, eventsByOrderId, itemsByOrderId } = await loadOrderRelations([orderId]);
   return {
     assignment: assignmentsByOrderId.get(orderId) ?? null,
@@ -741,7 +755,9 @@ export const expireUnpaidOrder = async (
   const timedOutAt = nowIso();
   const paymentFailed = sanitizeText(order.payment?.status) === PAYMENT_STATUS.FAILED;
   const reason = paymentFailed ? 'payment_failed' : 'payment_timeout';
-  const timeoutMinutes = paymentTimeoutMsForMethod(order.payment?.method) / 60000;
+  const timeoutMs = paymentTimeoutMsForMethod(order.payment?.method);
+  const timeoutMinutes = timeoutMs / 60000;
+  const silent = nowMs - (toSortableTimestamp(order.createdAt) + timeoutMs) > SILENT_EXPIRY_AFTER_DEADLINE_MS;
   const payment = {
     ...(order.payment ?? {}),
     lastEvent: 'payment_timeout',
@@ -777,6 +793,15 @@ export const expireUnpaidOrder = async (
     return { expired: false, order };
   }
 
+  const expiredOrder: CustomerOrderRow = {
+    ...order,
+    cancellation,
+    payment,
+    status: ORDER_STATUS.CANCELLED,
+    timeline,
+    updatedAt: timedOutAt,
+  };
+
   await markPaymentTransactionExpired(order, timedOutAt, reason);
 
   // The order is now cancelled (payment never completed): free any promo-cap
@@ -789,10 +814,15 @@ export const expireUnpaidOrder = async (
     details: {
       paymentStatus: paymentFailed ? PAYMENT_STATUS.FAILED : PAYMENT_STATUS.PENDING,
       timeoutMinutes,
+      ...(silent ? { silent: true } : {}),
     },
     eventType: 'payment_timeout',
     orderId: order.id,
   });
+
+  if (silent) {
+    return { expired: true, order: expiredOrder };
+  }
 
   await notifyUsers([order.customerId], {
     title: 'Order timed out',
@@ -815,17 +845,7 @@ export const expireUnpaidOrder = async (
     }),
   });
 
-  return {
-    expired: true,
-    order: {
-      ...order,
-      cancellation,
-      payment,
-      status: ORDER_STATUS.CANCELLED,
-      timeline,
-      updatedAt: timedOutAt,
-    },
-  };
+  return { expired: true, order: expiredOrder };
 };
 
 /**

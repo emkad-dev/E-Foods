@@ -308,7 +308,7 @@ Deno.test('cancelCustomerOrder: cancelling a NO-PROMO order is a clean no-op (no
 const timedOutCardOrder = (overrides: Row = {}): Row =>
   cashOrder({
     payment: { method: 'card', status: 'pending' },
-    // Well past ORDER_PAYMENT_TIMEOUT_MS.
+    // Well past the card payment window (CARD_PAYMENT_TIMEOUT_MS).
     createdAt: '2020-01-01T00:00:00.000Z',
     ...overrides,
   });
