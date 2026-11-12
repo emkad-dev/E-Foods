@@ -34,6 +34,8 @@ import {
   type RiderRosterInput,
 } from '../adminFleetReads.ts';
 import { createAuditEntry } from '../auditLog.ts';
+import { adminForceCancelOrder, adminForceCompleteOrder, adminResolveOrderReport } from '../adminOrderInterventions.ts';
+import { restaurantOwedForOrder, selectAttentionOrders } from '../../../../packages/domain/src/adminOrders.ts';
 import { adminGetRiderPayouts } from '../riderPayoutAccount.ts';
 import { adminSetRestaurantDeliveryProvider } from '../restaurantDeliveryProviderAdmin.ts';
 import { loadPlatformDispatchEnabled, loadRestaurantDeliveryProviders } from '../deliveryProvider.ts';
@@ -61,6 +63,7 @@ import {
   isOrderCleanForReporting,
   loadOrderRelations,
   maybeExpireUnpaidOrder,
+  normalizeOrderStatus,
   toOrderSnapshotResponse,
   type CustomerOrderRow,
 } from '../orders.ts';
@@ -865,13 +868,25 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
   const users = (usersResult.data ?? []) as UserAccountRow[];
   const rolesByUserId = await loadUserRoles(users.map((user) => user.uid));
   const restaurants = (restaurantsResult.data ?? []) as RestaurantRecordRow[];
-  const orders = (
-    await Promise.all(
-      ((ordersResult.data ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order))
-    )
-  ).filter(isOrderCleanForReporting);
+  const allOrders = await Promise.all(
+    ((ordersResult.data ?? []) as CustomerOrderRow[]).map((order) => maybeExpireUnpaidOrder(order))
+  );
+  // The reporting feed (counts, revenue, the orders table) stays clean of closed
+  // and unpaid orders. The attention list does not: a late payment on a
+  // cancelled order or a refund to return by hand on a rejected one is exactly
+  // what an admin must see, and the reporting filter used to hide them.
+  const orders = allOrders.filter(isOrderCleanForReporting);
+  const attentionOrders = selectAttentionOrders(allOrders);
   const riders = (ridersResult.data ?? []) as DispatchRiderRow[];
-  const orderRelations = await loadOrderRelations(orders.map((order) => order.id));
+  const orderRelations = await loadOrderRelations([
+    ...new Set([...orders, ...attentionOrders].map((order) => order.id)),
+  ]);
+  const toSnapshot = (order: CustomerOrderRow) =>
+    toOrderSnapshotResponse(
+      order,
+      orderRelations.itemsByOrderId.get(order.id) ?? [],
+      orderRelations.assignmentsByOrderId.get(order.id) ?? null
+    );
   const { data: restaurantApprovals, error: restaurantApprovalError } = await serviceClient
     .from('RestaurantApproval')
     .select(RESTAURANT_APPROVAL_COLUMNS)
@@ -890,14 +905,9 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
 
   return json(200, {
     data: {
+      attentionOrders: attentionOrders.map(toSnapshot),
       dispatchProfiles: riders.map((rider) => buildDispatchRiderResponse(rider)),
-      orders: orders.map((order) =>
-        toOrderSnapshotResponse(
-          order,
-          orderRelations.itemsByOrderId.get(order.id) ?? [],
-          orderRelations.assignmentsByOrderId.get(order.id) ?? null
-        )
-      ),
+      orders: orders.map(toSnapshot),
       restaurants: restaurants.map((restaurant) => ({
         ...buildRestaurantResponse(restaurant, approvalByRestaurantId.get(restaurant.id) ?? null),
         // Admin-only surface (Task 14 / E3): kept out of the shared wire shape
@@ -1079,20 +1089,34 @@ const adminGetRestaurantPayouts: Handler = async ({ context }) => {
     throw new Error(payoutsResult.error.message);
   }
 
+  // What each restaurant is OWED, read from the orders rather than the payment
+  // ledger. Summing PaymentTransaction 'paid' rows at their gross amount counted
+  // the platform fee, the tip and a FEASTY rider's delivery fee as restaurant
+  // money, and kept counting orders whose payment was later refunded (a refund
+  // is recorded on the order only, the ledger row stays 'paid') or that the
+  // restaurant rejected. restaurantOwedForOrder keeps the restaurant's share of
+  // paid orders that were not cancelled or rejected; the split / manual mode the
+  // checkout stamped on the order's payment is kept so the page can still say
+  // who holds the money.
   const transactions: PaidTransactionInput[] = [];
   for (let page = 0; page < PAYOUT_MAX_PAGES; page += 1) {
     const { data, error } = await serviceClient
-      .from('PaymentTransaction')
-      .select('restaurantId,settlementMode,amount')
-      .eq('status', 'paid')
-      .gte('paidAt', since)
-      .order('paidAt', { ascending: false })
+      .from('CustomerOrder')
+      .select('id,restaurantId,status,payment,pricing')
+      .eq('payment->>status', 'paid')
+      .gte('createdAt', since)
+      .order('createdAt', { ascending: false })
       .range(page * PAYOUT_PAGE_SIZE, (page + 1) * PAYOUT_PAGE_SIZE - 1);
     if (error) {
       throw new Error(error.message);
     }
-    const rows = (data ?? []) as PaidTransactionInput[];
-    transactions.push(...rows);
+    const rows = (data ?? []) as CustomerOrderRow[];
+    for (const row of rows) {
+      const owed = restaurantOwedForOrder({ ...row, status: normalizeOrderStatus(row.status) });
+      if (owed) {
+        transactions.push(owed);
+      }
+    }
     if (rows.length < PAYOUT_PAGE_SIZE) {
       break;
     }
@@ -2134,6 +2158,9 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
   },
   handlers: {
     adminCreatePromoCode,
+    adminForceCancelOrder,
+    adminForceCompleteOrder,
+    adminResolveOrderReport,
     adminGetAccessOverview,
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,

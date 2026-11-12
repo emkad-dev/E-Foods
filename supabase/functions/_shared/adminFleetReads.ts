@@ -25,6 +25,8 @@ export type PayoutProfileInput = {
   updatedAt?: string | null;
 };
 
+// One paid order's contribution. adminGetRestaurantPayouts feeds the
+// restaurant's OWED share here (restaurantOwedForOrder), not the gross payment.
 export type PaidTransactionInput = {
   amount?: number | null;
   restaurantId?: string | null;

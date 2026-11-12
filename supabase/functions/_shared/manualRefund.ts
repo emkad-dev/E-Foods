@@ -1,5 +1,6 @@
 // A paid order that ends without the food reaching the customer: the restaurant
-// rejected it, or the rider's delivery failed. The customer's money was captured
+// rejected it, the rider's delivery failed, or an admin cancelled it (a
+// force-cancel or the dispatch write-off). The customer's money was captured
 // and nothing returns it automatically (real Paystack refunds await an owner
 // decision), so these paths do what cancellation does - record the full refund
 // in the order's payment ledger with buildRefundUpdate - and then make sure a
@@ -26,8 +27,8 @@ import type { JsonObject } from './rpc/coercion.ts';
 export const MANUAL_REFUND_ALERT_TYPE = 'manual_refund_required';
 
 /**
- * The fields to merge into the write that closes a PAID order (rejected or
- * failed_delivery): the full refund recorded exactly as cancellation records it,
+ * The fields to merge into the write that closes a PAID order (rejected,
+ * failed_delivery, or cancelled by an admin): the full refund recorded exactly as cancellation records it,
  * and needsAttention raised in the same statement (which also stops the
  * terminal-status attention clear from undoing it). Null when the stored payment
  * is not paid: nothing was captured, so the close stays as it always was.
@@ -45,10 +46,17 @@ export const buildManualRefundWrite = (
   };
 };
 
-const describeClosure = (closedStatus: string) =>
-  closedStatus === ORDER_STATUS.FAILED_DELIVERY
-    ? { short: 'delivery failed on a paid order', verb: 'failed delivery' }
-    : { short: 'restaurant rejected a paid order', verb: 'was rejected by the restaurant' };
+const describeClosure = (closedStatus: string) => {
+  if (closedStatus === ORDER_STATUS.FAILED_DELIVERY) {
+    return { short: 'delivery failed on a paid order', verb: 'failed delivery' };
+  }
+  // Only an admin cancels a paid order through here: a force-cancel or the
+  // dispatch write-off of an escalated order.
+  if (closedStatus === ORDER_STATUS.CANCELLED) {
+    return { short: 'admin cancelled a paid order', verb: 'was cancelled by an admin' };
+  }
+  return { short: 'restaurant rejected a paid order', verb: 'was rejected by the restaurant' };
+};
 
 /**
  * Side effects once the closing write committed (call only when it applied).

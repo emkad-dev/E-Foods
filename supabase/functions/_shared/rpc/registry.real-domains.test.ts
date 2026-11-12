@@ -98,11 +98,11 @@ Deno.test('the real domain modules register exactly the four expected pre-auth a
   }
 });
 
-Deno.test('the real domain modules together register all 106 handlers, none pre-auth but the two allowed', () => {
-  expectEqual(ALL_RPC_ACTIONS.length, 106, 'ALL_RPC_ACTIONS length');
+Deno.test('the real domain modules together register all 109 handlers, none pre-auth but the two allowed', () => {
+  expectEqual(ALL_RPC_ACTIONS.length, 109, 'ALL_RPC_ACTIONS length');
 
   const dispatcher = buildDispatcher(REAL_DOMAINS);
-  expectEqual(dispatcher.actions.length, 106, 'real dispatcher action count');
+  expectEqual(dispatcher.actions.length, 109, 'real dispatcher action count');
 
   for (const action of ALL_RPC_ACTIONS) {
     const isAnonymous = EXPECTED_ANONYMOUS_ACTIONS.includes(action);

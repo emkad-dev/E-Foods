@@ -1491,10 +1491,15 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
 
   // A full refund, matching the acceptance-deadline auto-cancel's rationale: an
   // order that had to be escalated and then written off is not a customer
-  // cancellation, so the customer-cancellation rate table does not apply. Reuses
-  // buildRefundUpdate so the refund is recorded exactly as every other refund on
-  // this codebase is - no second money path.
-  if (nextState.status === ORDER_STATUS.CANCELLED) {
+  // cancellation, so the customer-cancellation rate table does not apply. A PAID
+  // write-off goes through _shared/manualRefund.ts like every other paid order
+  // an admin or restaurant closes unserved: the refund recorded with
+  // buildRefundUpdate, needsAttention raised on the same write, the promo slot
+  // freed and admins alerted so the money is returned by hand. An unpaid one
+  // keeps the plain buildRefundUpdate note it always wrote (nothing captured,
+  // so nothing is refunded).
+  const isWriteOff = nextState.status === ORDER_STATUS.CANCELLED;
+  if (isWriteOff) {
     Object.assign(
       payment,
       buildRefundUpdate({
@@ -1511,7 +1516,9 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   const manualRefund =
     nextState.status === ORDER_STATUS.FAILED_DELIVERY
       ? buildManualRefundWrite(bundle.order, 'failed_delivery_full_refund')
-      : null;
+      : isWriteOff
+        ? buildManualRefundWrite(bundle.order, 'dispatch_escalation_cancelled_full_refund')
+        : null;
   if (manualRefund) {
     Object.assign(payment, manualRefund.payment);
   }
