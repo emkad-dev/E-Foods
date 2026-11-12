@@ -7,6 +7,8 @@
 // lives in platformSettings.ts (`loadAcceptanceDeadlineConfig`), matching
 // `loadDispatchTrackingConfig` exactly.
 
+import { toSortableTimestamp as toMs } from './rpc/coercion.ts';
+
 export interface AcceptanceDeadlineConfig {
   /** Minutes an order may sit 'placed' before escalation; 2x this = auto-cancel. */
   acceptanceDeadlineMinutes: number;
@@ -51,15 +53,6 @@ type ClockOrder = {
   timeline?: Record<string, unknown> | null;
 };
 
-const toMs = (value: unknown): number => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
-};
-
 /**
  * When the kitchen's acceptance clock starts (epoch ms), or 0 if unknowable.
  *
@@ -74,9 +67,13 @@ const toMs = (value: unknown): number => {
  * is paid days ahead and only stamped placedAt at release, and its kitchen
  * time runs from release. Hence the max() with placedAt.
  */
-export const acceptanceClockStartMs = (order: ClockOrder): number => {
+export const acceptanceClockStartMs = (order: ClockOrder, now: number = Date.now()): number => {
   const timeline = order.timeline ?? {};
   const placedOrCreated = toMs(timeline.placedAt) || toMs(order.createdAt);
-  const paid = toMs(timeline.paidAt) || toMs((order.payment ?? {}).paidAt);
+  // A paid time in the future is a bad gateway/clock value. Clamping it to "now"
+  // would re-start the clock on every sweep and never escalate, so it is
+  // ignored instead and the clock falls back to placed/created.
+  const rawPaid = toMs(timeline.paidAt) || toMs((order.payment ?? {}).paidAt);
+  const paid = rawPaid > now ? 0 : rawPaid;
   return Math.max(paid, placedOrCreated);
 };

@@ -323,35 +323,61 @@ export const statusWriteClearsAttention = (updates: JsonObject): boolean => {
   if (typeof updates.status !== 'string') {
     return false;
   }
+  // The same write raising the flag (a paid rejection, an admin force-cancel)
+  // is deliberately alerting a human: never undo it.
+  if (updates.needsAttention === true) {
+    return false;
+  }
   const next = normalizeOrderStatus(updates.status);
   return next === ORDER_STATUS.ACCEPTED || TERMINAL_ORDER_STATUSES.has(next);
 };
 
-// The ONE place the rule lives: every accept / terminal write funnels through
-// updateOrderRecord or updateOrderRecordIfStatus, so partner, dispatch,
-// customer cancel and the sweeps all get it. A second, filtered UPDATE (rather
-// than needsAttention:false in the main write) because a customer problem
-// report (customerIssueReportedAt) must keep the flag, and PostgREST cannot
-// make one column of an update conditional on another. The status guard stops
-// it touching an order that has since moved on.
+// Every accept / terminal write funnels through updateOrderRecord or
+// updateOrderRecordIfStatus, so partner, dispatch, customer cancel and the
+// sweeps all get the clear from this one place. It is a second, filtered UPDATE
+// (not needsAttention:false in the main write) because a customer problem report
+// (customerIssueReportedAt) must keep the flag, and PostgREST cannot make one
+// column of an update conditional on another.
+//
+// Two guards keep it from hiding a NEWER alert: the status guard (the order has
+// not moved on) and an updatedAt guard - the status write stamps updatedAt, and
+// the clear applies only if nobody has written since (a late-payment flag set
+// between the two statements bumps updatedAt and so survives).
+const withStampedUpdatedAt = (updates: JsonObject): JsonObject =>
+  statusWriteClearsAttention(updates) && typeof updates.updatedAt !== 'string'
+    ? { ...updates, updatedAt: new Date().toISOString() }
+    : updates;
+
+// BEST-EFFORT: the status write already committed, so a failure here must not
+// fail the caller's action (the partner would see "failed" over a done accept)
+// or skip its broadcast and notifications. Logged, never thrown.
 const clearAttentionAfterStatusWrite = async (orderId: string, updates: JsonObject) => {
-  if (!statusWriteClearsAttention(updates)) {
+  if (!statusWriteClearsAttention(updates) || typeof updates.updatedAt !== 'string') {
     return;
   }
-  const { error } = await serviceClient
-    .from('CustomerOrder')
-    .update({ needsAttention: false })
-    .eq('id', orderId)
-    .eq('status', updates.status as string)
-    .eq('needsAttention', true)
-    .is('customerIssueReportedAt', null);
+  try {
+    const { error } = await serviceClient
+      .from('CustomerOrder')
+      .update({ needsAttention: false })
+      .eq('id', orderId)
+      .eq('status', updates.status as string)
+      .eq('updatedAt', updates.updatedAt)
+      .eq('needsAttention', true)
+      .is('customerIssueReportedAt', null);
 
-  if (error) {
-    throw new Error(error.message);
+    if (error) {
+      throw new Error(error.message);
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'needsAttention clear after status write failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
   }
 };
 
-export const updateOrderRecord = async (orderId: string, updates: JsonObject) => {
+export const updateOrderRecord = async (orderId: string, rawUpdates: JsonObject) => {
+  const updates = withStampedUpdatedAt(rawUpdates);
   const { error } = await serviceClient.from('CustomerOrder').update(updates).eq('id', orderId);
 
   if (error) {
@@ -416,8 +442,9 @@ export const releasePromoRedemption = async (orderId: string): Promise<void> => 
 export const updateOrderRecordIfStatus = async (
   orderId: string,
   expectedStatus: string,
-  updates: JsonObject
+  rawUpdates: JsonObject
 ): Promise<boolean> => {
+  const updates = withStampedUpdatedAt(rawUpdates);
   const { data, error } = await serviceClient
     .from('CustomerOrder')
     .update(updates)

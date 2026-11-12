@@ -493,3 +493,20 @@ Deno.test('sweep: a scheduled order paid days ago is measured from its release, 
     mocks.restore();
   }
 });
+
+Deno.test('sweep: a future paid_at cannot delay escalation', async () => {
+  const mocks = installMocks([
+    buildOrderRow({
+      id: 'order-future-paid',
+      createdAt: placedAgo(DEADLINE_MS + 60_000),
+      payment: { capturedAmount: CAPTURED_AMOUNT, method: 'card', paidAt: new Date(Date.now() + 3_600_000).toISOString(), status: 'paid' },
+      timeline: { placedAt: placedAgo(DEADLINE_MS + 60_000) },
+    }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.escalated, 1, 'an impossible future paidAt is ignored; measured from placement');
+  } finally {
+    mocks.restore();
+  }
+});

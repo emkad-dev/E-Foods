@@ -20,7 +20,13 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
   }
 };
 
-const install = (initial: Row) => {
+type InstallOptions = {
+  /** Runs just before the follow-up clear is evaluated (a concurrent writer). */
+  beforeClear?: (row: Row) => void;
+  failClear?: boolean;
+};
+
+const install = (initial: Row, options: InstallOptions = {}) => {
   const row: Row = { ...initial };
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
@@ -34,6 +40,11 @@ const install = (initial: Row) => {
           is: (c: string, v: unknown) => (preds.push((r) => (r[c] ?? null) === v), builder),
           select: () => builder,
           then(resolve: (v: unknown) => unknown, reject?: (r: unknown) => unknown) {
+            const isClear = Object.keys(payload).length === 1 && payload.needsAttention === false;
+            if (isClear && options.beforeClear) options.beforeClear(row);
+            if (isClear && options.failClear) {
+              return Promise.resolve({ data: null, error: { message: 'boom' } }).then(resolve, reject);
+            }
             const matched = preds.every((p) => p(row));
             if (matched) Object.assign(row, payload);
             return Promise.resolve({ data: matched ? [{ id: row.id }] : [], error: null }).then(resolve, reject);
@@ -44,8 +55,12 @@ const install = (initial: Row) => {
     };
   };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (() => Promise.resolve(new Response('{}', { status: 200 }))) as typeof fetch;
-  return { row, restore: () => void (globalThis.fetch = originalFetch) };
+  const fetches = { count: 0 };
+  globalThis.fetch = (() => {
+    fetches.count += 1;
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  }) as typeof fetch;
+  return { row, fetches, restore: () => void (globalThis.fetch = originalFetch) };
 };
 
 const flagged = (overrides: Row = {}): Row => ({
@@ -119,6 +134,66 @@ Deno.test('attention: a stale CAS (status moved on) neither writes nor clears', 
     const applied = await updateOrderRecordIfStatus('o1', 'placed', { status: 'accepted' });
     expectEqual(applied, false, 'CAS refused');
     expectEqual(m.row.status, 'cancelled', 'status unchanged');
+    expectEqual(m.row.needsAttention, true, 'flag untouched by a refused CAS');
+  } finally {
+    m.restore();
+  }
+});
+
+Deno.test('attention: a late-payment flag written between the status write and the clear survives', async () => {
+  // The clear is a second statement. If another writer re-raises the flag in
+  // between (and so bumps updatedAt), the clear must not hide that newer alert.
+  const m = install(flagged({ status: 'cancelled', needsAttention: false }), {
+    beforeClear: (row) => {
+      row.needsAttention = true;
+      row.updatedAt = '2099-01-01T00:00:00.000Z';
+    },
+  });
+  try {
+    // Seed: the status write below leaves needsAttention as the row has it.
+    await updateOrderRecord('o1', { status: 'cancelled' });
+    expectEqual(m.row.needsAttention, true, 'newer alert not cleared');
+  } finally {
+    m.restore();
+  }
+});
+
+Deno.test('attention: the clear is guarded by the status it was written for', async () => {
+  // Remove the .eq('status') guard in the clear and this fails: the order has
+  // moved to another status by the time the clear runs.
+  const m = install(flagged({ status: 'placed' }), {
+    beforeClear: (row) => {
+      row.status = 'preparing';
+    },
+  });
+  try {
+    await updateOrderRecord('o1', { status: 'accepted', updatedAt: 'stamp-1' });
+    expectEqual(m.row.status, 'preparing', 'status moved on');
+    expectEqual(m.row.needsAttention, true, 'clear skipped for a different status');
+  } finally {
+    m.restore();
+  }
+});
+
+Deno.test('attention: a write that also raises needsAttention is never cleared', async () => {
+  const m = install(flagged({ needsAttention: false }));
+  try {
+    await updateOrderRecord('o1', { status: 'cancelled', needsAttention: true });
+    expectEqual(m.row.needsAttention, true, 'paid-rejection style write keeps its alert');
+    expectEqual(statusWriteClearsAttention({ status: 'rejected', needsAttention: true }), false, 'predicate agrees');
+  } finally {
+    m.restore();
+  }
+});
+
+Deno.test('attention: a failing clear neither throws nor skips the broadcast', async () => {
+  const m = install(flagged({ status: 'on_the_way' }), { failClear: true });
+  try {
+    const applied = await updateOrderRecordIfStatus('o1', 'on_the_way', { status: 'delivered' });
+    expectEqual(applied, true, 'action still reports success');
+    expectEqual(m.row.status, 'delivered', 'status write stands');
+    await updateOrderRecord('o1', { status: 'delivered' });
+    if (m.fetches.count < 2) throw new Error('broadcast did not run after a failed clear (fetches=' + m.fetches.count + ')');
   } finally {
     m.restore();
   }
