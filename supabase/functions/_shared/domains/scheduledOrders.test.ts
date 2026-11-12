@@ -303,24 +303,43 @@ const installCancelMocks = (order: Row) => {
     return builder;
   };
 
+  // A PostgREST column, including a JSON path like 'payment->>status' (the
+  // customer cancel compare-and-sets on the stored payment status too).
+  const readColumn = (row: Row, column: string): unknown => {
+    const [base, key] = column.split('->>');
+    if (key === undefined) return row[base];
+    const value = ((row[base] ?? {}) as Row)[key];
+    return value === undefined || value === null ? null : String(value);
+  };
+
   const updateBuilder = (rows: Row[]) => (payload: Row) => {
-    const filters: Array<[string, unknown]> = [];
+    const filters: Array<(row: Row) => boolean> = [];
+    const apply = () => {
+      const updated: Row[] = [];
+      for (const row of rows) {
+        if (filters.every((filter) => filter(row))) {
+          Object.assign(row, payload);
+          updated.push(row);
+        }
+      }
+      return updated;
+    };
     // deno-lint-ignore no-explicit-any
     const builder: any = {
       eq(col: string, val: unknown) {
-        filters.push([col, val]);
+        filters.push((row) => readColumn(row, col) === val);
         return builder;
       },
-      // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
-      is(_col: string, _val: unknown) {
+      is(col: string, val: unknown) {
+        filters.push((row) => (readColumn(row, col) ?? null) === val);
         return builder;
+      },
+      // The compare-and-set write reads back the rows it touched.
+      select(_columns?: string) {
+        return Promise.resolve({ data: apply().map((row) => ({ id: row.id })), error: null });
       },
       then(resolve: (v: { error: null }) => unknown, reject?: (r: unknown) => unknown) {
-        for (const row of rows) {
-          if (filters.every(([col, val]) => row[col] === val)) {
-            Object.assign(row, payload);
-          }
-        }
+        apply();
         return Promise.resolve({ error: null }).then(resolve, reject);
       },
     };

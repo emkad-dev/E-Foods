@@ -106,6 +106,15 @@ type TableHooks = {
 // interleaving point: a hook can commit another handler's whole transaction
 // in the window between "this handler decided to write" and "the write
 // landed").
+// A PostgREST column, including a JSON path like 'payment->>status' (text, or
+// null when absent) - the customer cancel compare-and-sets on the payment too.
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = ((row[base] ?? {}) as Row)[key];
+  return value === undefined || value === null ? null : String(value);
+};
+
 const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
   const rows: Row[] = [...initialRows];
 
@@ -215,7 +224,7 @@ const createTable = (initialRows: Row[], hooks: TableHooks = {}) => {
         if (hooks.beforeUpdate) await hooks.beforeUpdate();
         const updated: Row[] = [];
         for (const row of rows) {
-          if (filters.every(([col, val]) => row[col] === val)) {
+          if (filters.every(([col, val]) => readColumn(row, col) === val)) {
             Object.assign(row, payload);
             updated.push(row);
           }

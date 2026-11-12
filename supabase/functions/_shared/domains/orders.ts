@@ -51,10 +51,12 @@ import {
   PAYSTACK_PAYMENT_METHODS,
   PREPAID_PAYMENT_METHODS,
   releasePromoRedemption,
+  storedPaymentStatus,
   TERMINAL_ORDER_STATUSES,
   toOrderSnapshotResponse,
   updateDeliveredOrderIfNull,
   updateOrderRecord,
+  updateOrderRecordIfStatus,
   upsertPaymentTransaction,
   type CustomerOrderRow,
   type OrderGroupRow,
@@ -1990,13 +1992,35 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
     refundRate,
   };
 
-  await updateOrderRecord(orderId, {
-    cancellation,
-    payment,
-    status: ORDER_STATUS.CANCELLED,
-    timeline,
-    updatedAt: nowIso(),
-  });
+  // Compare-and-set on what this request checked: the RAW stored status (the
+  // kitchen may have moved the order to preparing since, which is no longer
+  // cancellable) and the RAW payment status the refund was computed from (a
+  // payment confirmed meanwhile must not be overwritten by the stale unpaid
+  // copy). A lost race changes nothing - no refund, no promo release, no
+  // notification.
+  const observedStatus = sanitizeText(bundle.order.status);
+  const applied = await updateOrderRecordIfStatus(
+    orderId,
+    observedStatus,
+    {
+      cancellation,
+      payment,
+      status: ORDER_STATUS.CANCELLED,
+      timeline,
+      updatedAt: nowIso(),
+    },
+    { expectedPaymentStatus: storedPaymentStatus(bundle.order) }
+  );
+
+  if (!applied) {
+    // Tell a moved-on order apart from a payment that only just landed: the
+    // latter can still be cancelled, with the refund read afresh.
+    const latest = await loadOrderBundle(orderId);
+    if (latest && sanitizeText(latest.order.status) === observedStatus) {
+      fail(409, 'This order changed while you were cancelling it. Reload the order and try again.');
+    }
+    fail(409, 'This order has already moved on and can no longer be cancelled.');
+  }
 
   // The order is now cancelled (customer/admin self-cancel, refunded per the
   // rate above): free any promo-cap slot it held so a single-use code the
