@@ -10,6 +10,7 @@ import { sweepCustomerConfirmations } from '../_shared/customerConfirmationSweep
 import { sweepDispatchOffers } from '../_shared/dispatchOfferSweep.ts';
 import { sweepExpiredDispatchRiderPings } from '../_shared/dispatchRiderPings.ts';
 import { sweepScheduledOrderReleases } from '../_shared/scheduledOrderReleaseSweep.ts';
+import { sweepUnpaidOrders } from '../_shared/unpaidOrderExpirySweep.ts';
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
@@ -372,12 +373,26 @@ Deno.serve(async (request) => {
     // sweepCustomerConfirmations.
     const customerConfirmationSweep = queueSelection === 'all' ? await sweepCustomerConfirmations() : null;
 
+    // Unpaid-order expiry: cancels prepaid checkouts whose payment never
+    // arrived (15 min card, 35 min bank transfer) or failed, instead of waiting
+    // for someone to read the order. Same safe side of runWithBackpressure as
+    // the sweeps above (an abandoned checkout must still close during the busy
+    // periods that cause shedding), bounded (UNPAID_EXPIRY_SWEEP_LIMIT_PER_METHOD
+    // per method) and never throws - see sweepUnpaidOrders.
+    const unpaidExpirySweep = queueSelection === 'all' ? await sweepUnpaidOrders() : null;
+
     // Liveness stamp for the watchdogs (broadcast-runner + a pg_cron SQL job,
     // migration 20261021b). Stamped here - after the sweeps, before the
     // backpressure-guarded drain - because the sweeps are what must not stop
     // silently, and a shed drain minute still ran them. Cron ('all') runs only.
     if (queueSelection === 'all') {
-      await recordDrainerHeartbeat({ acceptanceSweep, customerConfirmationSweep, offerSweep, scheduledReleaseSweep });
+      await recordDrainerHeartbeat({
+        acceptanceSweep,
+        customerConfirmationSweep,
+        offerSweep,
+        scheduledReleaseSweep,
+        unpaidExpirySweep,
+      });
     }
 
     const results = await runWithBackpressure(
@@ -403,6 +418,7 @@ Deno.serve(async (request) => {
         results,
         riderPingRetention,
         scheduledReleaseSweep,
+        unpaidExpirySweep,
       },
     });
     finishEdgeObservation(observation, { status: response.status });

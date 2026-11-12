@@ -47,6 +47,7 @@ import {
   isOrderOperationallyVisible,
   normalizeOrderStatus,
   ORDER_STATUS,
+  PAYMENT_STATUS,
   releasePromoRedemption,
 } from './orders.ts';
 import { acceptanceClockStartMs } from './acceptanceDeadline.ts';
@@ -272,6 +273,11 @@ export const sweepUnacceptedOrders = async (): Promise<AcceptanceDeadlineSweepRe
       .from('CustomerOrder')
       .select(CUSTOMER_ORDER_COLUMNS)
       .in('status', PLACED_LIKE_STATUSES)
+      // Paid only, in the query and not just the loop: the batch is the oldest
+      // ACCEPTANCE_SWEEP_LIMIT rows, so 100 stale unpaid checkouts would
+      // otherwise fill it every minute and no new paid order would ever be
+      // escalated. Unpaid orders belong to the unpaid expiry sweep.
+      .eq('payment->>status', PAYMENT_STATUS.PAID)
       .order('createdAt', { ascending: true })
       .limit(ACCEPTANCE_SWEEP_LIMIT);
 
@@ -295,7 +301,7 @@ export const sweepUnacceptedOrders = async (): Promise<AcceptanceDeadlineSweepRe
       }
 
       // A prepaid order still awaiting payment is not "waiting on the
-      // restaurant" - maybeExpireUnpaidOrder owns its fate. Never auto-cancel
+      // restaurant" - the unpaid expiry sweep owns its fate. Never auto-cancel
       // (and never emit a refund line for) money that was never captured.
       if (!isOrderOperationallyVisible(order)) {
         result.skipped += 1;

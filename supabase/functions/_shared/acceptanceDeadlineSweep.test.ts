@@ -60,6 +60,15 @@ const normalizeStatus = (value: unknown) => {
 // a real round trip does - so the sweep's candidate snapshot cannot silently
 // mutate when the rpc mock later writes the live row, which is exactly the
 // stale-read gap the compare-and-swap exists to close.
+// A PostgREST column, including a JSON path like 'payment->>status' (text, or
+// null when absent) - the candidate query filters to paid orders on one.
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = ((row[base] ?? {}) as Row)[key];
+  return value === undefined || value === null ? null : String(value);
+};
+
 const createTable = (initialRows: Row[]) => {
   const rows: Row[] = initialRows.map((row) => ({ ...row }));
   const snapshot = (row: Row) => ({ ...row });
@@ -72,11 +81,11 @@ const createTable = (initialRows: Row[]) => {
     // deno-lint-ignore no-explicit-any
     const builder: any = {
       eq(col: string, val: unknown) {
-        filtered = filtered.filter((row) => row[col] === val);
+        filtered = filtered.filter((row) => readColumn(row, col) === val);
         return builder;
       },
       in(col: string, vals: unknown[]) {
-        filtered = filtered.filter((row) => vals.includes(row[col]));
+        filtered = filtered.filter((row) => vals.includes(readColumn(row, col)));
         return builder;
       },
       is(col: string, val: unknown) {
@@ -506,6 +515,40 @@ Deno.test('sweep: a future paid_at cannot delay escalation', async () => {
   try {
     const result = await sweepUnacceptedOrders();
     expectEqual(result.escalated, 1, 'an impossible future paidAt is ignored; measured from placement');
+  } finally {
+    mocks.restore();
+  }
+});
+
+// The batch is the oldest ACCEPTANCE_SWEEP_LIMIT (100) placed rows. Before the
+// candidate query filtered to paid orders, 100 stale unpaid checkouts filled it
+// every minute and the paid order behind them was never escalated.
+Deno.test('sweep: 100 older unpaid orders cannot starve a paid order of escalation', async () => {
+  const unpaid = Array.from({ length: 100 }, (_, index) =>
+    buildOrderRow({
+      id: `order-unpaid-${String(index).padStart(3, '0')}`,
+      createdAt: placedAgo(24 * 3_600_000 + index * 1_000),
+      payment: { method: 'card', status: index % 2 === 0 ? 'pending' : 'failed' },
+      timeline: { placedAt: placedAgo(24 * 3_600_000 + index * 1_000) },
+    })
+  );
+  const paid = buildOrderRow({
+    id: 'order-paid-behind',
+    createdAt: placedAgo(DEADLINE_MS + 5_000),
+    timeline: { placedAt: placedAgo(DEADLINE_MS + 5_000) },
+  });
+  const mocks = installMocks([...unpaid, paid]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.escalated, 1, 'the paid order is escalated');
+    expectEqual(result.cancelled, 0, 'no unpaid order is auto-cancelled with a refund');
+    const paidRow = mocks.tables.CustomerOrder.rows.find((row) => row.id === 'order-paid-behind');
+    expectEqual(paidRow?.needsAttention, true, 'the paid order is flagged');
+    expectEqual(
+      mocks.tables.CustomerOrder.rows.filter((row) => row.needsAttention === true).length,
+      1,
+      'no unpaid order was touched'
+    );
   } finally {
     mocks.restore();
   }

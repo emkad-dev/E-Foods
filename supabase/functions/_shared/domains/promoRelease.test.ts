@@ -49,6 +49,14 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
 const fakeRequest = () => new Request('https://example.test/rpc', { method: 'POST' });
 type Row = Record<string, unknown>;
 const snapshot = (row: Row) => ({ ...row });
+// A PostgREST column, including a JSON path like 'payment->>status' (text, or
+// null when absent) - the unpaid expiry's compare-and-set filters on one.
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = ((row[base] ?? {}) as Row)[key];
+  return value === undefined || value === null ? null : String(value);
+};
 
 // Generic postgrest-shaped in-memory table (select/insert/update/delete + the
 // filter subset these paths use).
@@ -59,11 +67,11 @@ const createTable = (initialRows: Row[]) => {
     // deno-lint-ignore no-explicit-any
     const b: any = {
       eq(col: string, val: unknown) {
-        filtered = filtered.filter((r) => r[col] === val);
+        filtered = filtered.filter((r) => readColumn(r, col) === val);
         return b;
       },
       in(col: string, vals: unknown[]) {
-        filtered = filtered.filter((r) => vals.includes(r[col]));
+        filtered = filtered.filter((r) => vals.includes(readColumn(r, col)));
         return b;
       },
       gte(col: string, val: unknown) {
@@ -121,25 +129,33 @@ const createTable = (initialRows: Row[]) => {
       return { error: null };
     },
     update(updates: Row) {
+      // Filters are collected and applied together when the query runs, the
+      // way Postgres evaluates one UPDATE ... WHERE: a compare-and-set whose
+      // guard no longer matches must write nothing.
+      const filters: Array<(r: Row) => boolean> = [];
       // deno-lint-ignore no-explicit-any
       const b: any = {
-        matches: [] as Row[],
         eq(col: string, val: unknown) {
-          this.matches = rows.filter((r) => r[col] === val);
-          for (const r of this.matches) {
-            Object.assign(r, updates);
-          }
+          filters.push((r) => readColumn(r, col) === val);
           return b;
         },
-        // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
-        is(_col: string, _val: unknown) {
+        in(col: string, vals: unknown[]) {
+          filters.push((r) => vals.includes(readColumn(r, col)));
+          return b;
+        },
+        is(col: string, val: unknown) {
+          filters.push((r) => (readColumn(r, col) ?? null) === val);
           return b;
         },
         select() {
           return b;
         },
         then(resolve: (v: { data: Row[]; error: null }) => unknown, reject?: (r: unknown) => unknown) {
-          return Promise.resolve({ data: (b.matches as Row[]).map(snapshot), error: null }).then(resolve, reject);
+          const matches = rows.filter((r) => filters.every((f) => f(r)));
+          for (const r of matches) {
+            Object.assign(r, updates);
+          }
+          return Promise.resolve({ data: matches.map(snapshot), error: null }).then(resolve, reject);
         },
       };
       return b;
