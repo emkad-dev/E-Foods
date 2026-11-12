@@ -7,10 +7,12 @@ import { getIdempotencyRecord, storeIdempotencyRecord } from '../_shared/idempot
 import {
   buildNotificationData,
   loadRestaurantRecipientUserIds,
+  notifyAdmins,
 } from '../_shared/notifications.ts';
 import { broadcastOrderChanged } from '../_shared/realtime.ts';
 import { logEdgeEvent } from '../_shared/observability.ts';
-import { capturePaymentOnClosedOrderAlert } from '../_shared/operationalAlerts.ts';
+import { capturePaymentOnClosedOrderAlert, recordOperationalAlert } from '../_shared/operationalAlerts.ts';
+import { storedPaymentStatus } from '../_shared/orders.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -51,6 +53,10 @@ type OrderGroupRow = {
 
 export type PaymentVerificationRequest = PaymentVerificationJob & {
   webhookEvent?: JsonObject | null;
+  /** Paystack's verify answer when the caller already asked for it (the
+   * customer refresh), so one refresh does not verify the charge twice. It is
+   * validated exactly like a fresh answer. */
+  verifiedTransaction?: JsonObject | null;
 };
 
 const PAYSTACK_VERIFY_TIMEOUT_MS = 10_000;
@@ -172,12 +178,90 @@ const upsertPaymentTransaction = async (
 // else ('scheduled', accepted and later, or closed) must keep its status.
 const AWAITING_PAYMENT_ORDER_STATUSES = ['placed', 'draft', 'pending', 'confirmed'];
 // Terminal-without-delivery statuses: money arrived for an order that is
-// already dead (typically the 15-minute unpaid timeout cancelled it first).
+// already dead (typically the unpaid timeout cancelled it first).
 const CLOSED_ORDER_STATUSES = new Set(['cancelled', 'rejected', 'failed_delivery']);
+// Payment states a verification must never overwrite - a payment never moves
+// backwards. 'paid': another verification of this charge (the webhook, a
+// customer refresh, a queue retry) already recorded it and sent its
+// notifications. 'refunded': the money was handed back, and a later verify of
+// the same charge must not resurrect it as paid.
+const SETTLED_PAYMENT_STATUSES = new Set(['paid', 'refunded']);
+// Paystack verify statuses that mean the charge did not (or no longer) hold.
+const UNSUCCESSFUL_GATEWAY_STATUSES = new Set(['abandoned', 'failed', 'reversed']);
+// A payment write that loses its compare-and-set is re-judged on the fresh row;
+// an order that changes under us this many times in a row is reported, not
+// written blind.
+const MAX_PAYMENT_WRITE_ATTEMPTS = 3;
 
 const ORDER_STATE_COLUMNS = 'id,customerId,orderGroupId,restaurantId,status,payment,pricing,timeline';
 
 const normalizeOrderStatusText = (value: unknown) => normalizeStatus(value, '').toLowerCase();
+
+const isSettledPayment = (row: Pick<CustomerOrderRow, 'payment'>) =>
+  SETTLED_PAYMENT_STATUSES.has(normalizeOrderStatusText((row.payment ?? {}).status));
+
+const loadOrderState = async (orderId: string) => {
+  const { data, error } = await serviceClient
+    .from('CustomerOrder')
+    .select(ORDER_STATE_COLUMNS)
+    .eq('id', orderId)
+    .maybeSingle<CustomerOrderRow>();
+
+  if (error) throw new Error(`Failed to reload order: ${error.message}`);
+  return data ?? null;
+};
+
+/**
+ * The orders one Paystack charge pays for: the order itself, or every order of
+ * its multi-store group (one charge split across restaurants). Each order is
+ * judged on its OWN current state - the primary is the row the caller loaded,
+ * the others are read here.
+ */
+const loadChargeOrders = async (order: CustomerOrderRow) => {
+  const { data: groupRows, error: groupError } = await serviceClient
+    .from('OrderGroup')
+    .select('id,orderIds,pricing')
+    .eq('id', order.orderGroupId ?? '')
+    .maybeSingle<OrderGroupRow>();
+
+  if (groupError) {
+    throw new Error(`Failed to load order group: ${groupError.message}`);
+  }
+
+  const orderIds = Array.isArray(groupRows?.orderIds)
+    ? // A type-predicate filter, not map-to-null + filter(Boolean): the latter
+      // drops the same values at runtime but leaves the element type
+      // `string | null`, so every orderId below was nullable and could not be
+      // handed to broadcastOrderChanged. The `.length > 0` clause preserves
+      // filter(Boolean)'s rejection of the empty string exactly.
+      (groupRows.orderIds as unknown[]).filter(
+        (value): value is string => typeof value === 'string' && value.length > 0
+      )
+    : [order.id];
+  const expectedAmount = typeof groupRows?.pricing === 'object' && groupRows?.pricing
+    ? toNumber((groupRows.pricing as JsonObject).total, toNumber((order.pricing ?? {}).total, 0))
+    : toNumber((order.pricing ?? {}).total, 0);
+
+  const rowsById = new Map<string, CustomerOrderRow>([[order.id, order]]);
+  const peerIds = orderIds.filter((orderId) => orderId !== order.id);
+  if (peerIds.length > 0) {
+    const { data: peerRows, error: peerError } = await serviceClient
+      .from('CustomerOrder')
+      .select(ORDER_STATE_COLUMNS)
+      .in('id', peerIds)
+      .returns<CustomerOrderRow[]>();
+
+    if (peerError) {
+      throw new Error(`Failed to load group orders: ${peerError.message}`);
+    }
+    for (const peer of peerRows ?? []) rowsById.set(peer.id, peer);
+  }
+
+  const rows = orderIds
+    .map((orderId) => rowsById.get(orderId))
+    .filter((row): row is CustomerOrderRow => Boolean(row));
+  return { expectedAmount, isGroup: orderIds.length > 1, rows };
+};
 
 /**
  * A successful payment landed on an order that is already closed. We do NOT
@@ -218,6 +302,116 @@ const flagPaymentOnClosedOrder = async (input: {
   await capturePaymentOnClosedOrderAlert(input);
 };
 
+// One per order per payment: only the verification that won the payment
+// compare-and-set gets here. Best-effort, like the closed-order event - the
+// money is recorded, and throwing now would make a retry find the order paid
+// and skip the notifications below for good.
+const recordPaymentConfirmedEvent = async (input: { amount: number; orderId: string; paymentReference: string }) => {
+  try {
+    const { error } = await serviceClient.from('DeliveryEvent').insert({
+      id: crypto.randomUUID(),
+      orderId: input.orderId,
+      eventType: 'payment_confirmed',
+      actorUid: null,
+      details: {
+        amount: input.amount,
+        provider: 'paystack',
+        reference: input.paymentReference,
+      },
+    });
+    if (error) console.error(`Failed to record payment_confirmed event for ${input.orderId}: ${error.message}`);
+  } catch (error) {
+    console.error(`Failed to record payment_confirmed event for ${input.orderId}`, error);
+  }
+};
+
+type PaymentClaim = {
+  closed: boolean;
+  orderId: string;
+  orderStatus: string;
+  restaurantId: string;
+};
+
+/**
+ * Records the confirmed charge on ONE order as a compare-and-set on the payment
+ * status this call read (and on the order status its decision was made from).
+ *
+ * This is what makes "one payment, one set of notifications" hold when the
+ * webhook and a customer refresh verify the same charge at the same moment:
+ * both read 'pending' and both reach this UPDATE, but Postgres takes the row
+ * lock for one, and when the other gets it the WHERE is re-evaluated against the
+ * committed row - payment.status is now 'paid', zero rows match, and that caller
+ * returns null and sends nothing.
+ *
+ * Returns the claim when THIS call moved the payment, or null when the payment
+ * was already settled (paid or refunded) - whoever settled it owns every side
+ * effect.
+ */
+const claimOrderPayment = async (
+  initialRow: CustomerOrderRow,
+  buildPaidPayment: (row: CustomerOrderRow) => JsonObject,
+  confirmedTimeline: (row: CustomerOrderRow) => JsonObject,
+  nowIso: string
+): Promise<PaymentClaim | null> => {
+  let row = initialRow;
+  for (let attempt = 0; attempt < MAX_PAYMENT_WRITE_ATTEMPTS; attempt += 1) {
+    if (isSettledPayment(row)) return null;
+
+    const previousPaymentStatus = storedPaymentStatus(row);
+    const currentStatus = normalizeOrderStatusText(row.status);
+    const awaiting = AWAITING_PAYMENT_ORDER_STATUSES.includes(currentStatus);
+    // NOT awaiting payment: record the money, never touch `status`.
+    //  - 'scheduled' (and anything already in the kitchen) keeps its status;
+    //  - a closed order is flagged for a human, NOT revived and NOT auto-refunded.
+    const closed = !awaiting && CLOSED_ORDER_STATUSES.has(currentStatus);
+
+    const update = awaiting
+      ? {
+          // 'placed' = awaiting restaurant acceptance. 'confirmed' is NOT a valid order
+          // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
+          // partner's kitchen actions on paid orders.
+          status: 'placed',
+          payment: buildPaidPayment(row),
+          timeline: confirmedTimeline(row),
+          updatedAt: nowIso,
+        }
+      : {
+          payment: buildPaidPayment(row),
+          timeline: closed
+            ? { ...(row.timeline ?? {}), paidAt: nowIso, latePaymentAt: nowIso }
+            : confirmedTimeline(row),
+          updatedAt: nowIso,
+          ...(closed ? { needsAttention: true } : {}),
+        };
+
+    let query = serviceClient.from('CustomerOrder').update(update).eq('id', row.id);
+    // The order-status half of the guard: the order may have been cancelled
+    // (the unpaid timeout) after it was read and before Paystack answered.
+    query = awaiting
+      ? query.in('status', AWAITING_PAYMENT_ORDER_STATUSES)
+      : typeof row.status === 'string'
+        ? query.eq('status', row.status)
+        : query.is('status', null);
+    query = previousPaymentStatus === null
+      ? query.is('payment->>status', null)
+      : query.eq('payment->>status', previousPaymentStatus);
+
+    const { data: written, error } = await query.select('id');
+    if (error) throw new Error(`Failed to update order: ${error.message}`);
+
+    if (Array.isArray(written) && written.length > 0) {
+      return { closed, orderId: row.id, orderStatus: currentStatus, restaurantId: row.restaurantId };
+    }
+
+    // Lost the race: judge the order again on its committed state.
+    const fresh = await loadOrderState(row.id);
+    if (!fresh) return null;
+    row = fresh;
+  }
+
+  throw new Error(`Order ${initialRow.id} kept changing while its payment was being recorded`);
+};
+
 const markOrderPaymentState = async (
   order: CustomerOrderRow,
   transactionData: JsonObject,
@@ -225,59 +419,19 @@ const markOrderPaymentState = async (
 ) => {
   const nowIso = new Date().toISOString();
   const payment = (order.payment ?? {}) as JsonObject;
+  const paymentReference = normalizeStatus(payment.reference, '');
   const gatewayStatus =
     typeof transactionData.gateway_response === 'string'
       ? transactionData.gateway_response
       : normalizeStatus(transactionData.status, 'success');
 
-  const { data: groupRows, error: groupError } = await serviceClient
-    .from('OrderGroup')
-    .select('id,orderIds,pricing')
-    .eq('id', order.orderGroupId ?? '')
-    .maybeSingle<OrderGroupRow>();
-
-  if (groupError) {
-    throw new Error(`Failed to load order group: ${groupError.message}`);
-  }
-
-  const orderIds = Array.isArray(groupRows?.orderIds)
-    ? // A type-predicate filter, not map-to-null + filter(Boolean): the latter
-      // drops the same values at runtime but leaves the element type
-      // `string | null`, so every orderId below was nullable and could not be
-      // handed to broadcastOrderChanged. The `.length > 0` clause preserves
-      // filter(Boolean)'s rejection of the empty string exactly.
-      (groupRows.orderIds as unknown[]).filter(
-        (value): value is string => typeof value === 'string' && value.length > 0
-      )
-    : [order.id];
-  const expectedAmount = typeof groupRows?.pricing === 'object' && groupRows?.pricing
-    ? toNumber((groupRows.pricing as JsonObject).total, toNumber((order.pricing ?? {}).total, 0))
-    : toNumber((order.pricing ?? {}).total, 0);
-
-  const isGroup = orderIds.length > 1;
-
-  // Each order in the group is judged on its OWN current state. The primary
-  // order is the row this handler already loaded; the others are read here.
-  const rowsById = new Map<string, CustomerOrderRow>([[order.id, order]]);
-  const peerIds = orderIds.filter((orderId) => orderId !== order.id);
-  if (peerIds.length > 0) {
-    const { data: peerRows, error: peerError } = await serviceClient
-      .from('CustomerOrder')
-      .select(ORDER_STATE_COLUMNS)
-      .in('id', peerIds)
-      .returns<CustomerOrderRow[]>();
-
-    if (peerError) {
-      throw new Error(`Failed to load group orders: ${peerError.message}`);
-    }
-    for (const peer of peerRows ?? []) rowsById.set(peer.id, peer);
-  }
+  const { expectedAmount, isGroup, rows } = await loadChargeOrders(order);
 
   const buildPaidPayment = (row: CustomerOrderRow): JsonObject => ({
     ...((row.payment ?? {}) as JsonObject),
     provider: 'paystack',
     status: 'paid',
-    reference: normalizeStatus(payment.reference, ''),
+    reference: paymentReference,
     verifiedAt: nowIso,
     paidAt: nowIso,
     lastEvent: gatewayStatus,
@@ -294,95 +448,39 @@ const markOrderPaymentState = async (
     confirmedAt: (row.timeline ?? {}).confirmedAt ?? nowIso,
   });
 
-  let primaryClosed = false;
+  const claims: PaymentClaim[] = [];
+  for (const row of rows) {
+    const claim = await claimOrderPayment(row, buildPaidPayment, confirmedTimeline, nowIso);
+    if (claim) claims.push(claim);
+  }
 
-  for (const orderId of orderIds) {
-    let row = rowsById.get(orderId);
-    if (!row) continue;
+  if (claims.length === 0) {
+    // Another verification of this charge got there first and already sent
+    // every notification: report the settled state, change nothing.
+    const fresh = await loadOrderState(order.id);
+    return {
+      success: true,
+      orderId: order.id,
+      paymentStatus: normalizeOrderStatusText((fresh?.payment ?? {}).status) || 'paid',
+    };
+  }
 
-    if (AWAITING_PAYMENT_ORDER_STATUSES.includes(normalizeOrderStatusText(row.status))) {
-      const awaitingUpdate = {
-        // 'placed' = awaiting restaurant acceptance. 'confirmed' is NOT a valid order
-        // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
-        // partner's kitchen actions on paid orders.
-        status: 'placed',
-        payment: buildPaidPayment(row),
-        timeline: confirmedTimeline(row),
-        updatedAt: nowIso,
-      };
-
-      // Compare-and-set on the status: the order may have been cancelled (the
-      // 15-minute unpaid timeout) after it was read and before Paystack answered.
-      const { data: advanced, error } = await serviceClient
-        .from('CustomerOrder')
-        .update(awaitingUpdate)
-        .eq('id', orderId)
-        .in('status', AWAITING_PAYMENT_ORDER_STATUSES)
-        .select('id');
-
-      if (error) throw new Error(`Failed to update order: ${error.message}`);
-
-      if (Array.isArray(advanced) && advanced.length > 0) {
-        await broadcastOrderChanged(orderId, { restaurantId: row.restaurantId });
-        continue;
-      }
-
-      // Lost the race: judge the order on its current state instead.
-      const { data: fresh, error: freshError } = await serviceClient
-        .from('CustomerOrder')
-        .select(ORDER_STATE_COLUMNS)
-        .eq('id', orderId)
-        .maybeSingle<CustomerOrderRow>();
-
-      if (freshError) throw new Error(`Failed to reload order: ${freshError.message}`);
-      if (!fresh) continue;
-      row = fresh;
-
-      if (AWAITING_PAYMENT_ORDER_STATUSES.includes(normalizeOrderStatusText(row.status))) {
-        // Still awaiting (the guarded update simply reported no rows): fall back
-        // to the plain unconditional advance.
-        const { error: plainError } = await serviceClient
-          .from('CustomerOrder')
-          .update({ ...awaitingUpdate, payment: buildPaidPayment(row), timeline: confirmedTimeline(row) })
-          .eq('id', orderId);
-
-        if (plainError) throw new Error(`Failed to update order: ${plainError.message}`);
-        await broadcastOrderChanged(orderId, { restaurantId: row.restaurantId });
-        continue;
-      }
-    }
-
-    // NOT awaiting payment: record the money, never touch `status`.
-    //  - 'scheduled' (and anything already in the kitchen) keeps its status;
-    //  - a closed order is flagged for a human, NOT revived and NOT auto-refunded.
-    const currentStatus = normalizeOrderStatusText(row.status);
-    const closed = CLOSED_ORDER_STATUSES.has(currentStatus);
-    if (orderId === order.id) primaryClosed = closed;
-
-    const { error } = await serviceClient
-      .from('CustomerOrder')
-      .update({
-        payment: buildPaidPayment(row),
-        timeline: closed
-          ? { ...(row.timeline ?? {}), paidAt: nowIso, latePaymentAt: nowIso }
-          : confirmedTimeline(row),
-        updatedAt: nowIso,
-        ...(closed ? { needsAttention: true } : {}),
-      })
-      .eq('id', orderId);
-
-    if (error) throw new Error(`Failed to update order: ${error.message}`);
-
-    if (closed) {
+  for (const claim of claims) {
+    if (claim.closed) {
       await flagPaymentOnClosedOrder({
-        orderId,
-        orderStatus: currentStatus,
-        paymentReference: normalizeStatus(payment.reference, ''),
-        restaurantId: row.restaurantId,
+        orderId: claim.orderId,
+        orderStatus: claim.orderStatus,
+        paymentReference,
+        restaurantId: claim.restaurantId,
+      });
+    } else {
+      await recordPaymentConfirmedEvent({
+        amount: toNumber(transactionData.amount, 0) / 100,
+        orderId: claim.orderId,
+        paymentReference,
       });
     }
-
-    await broadcastOrderChanged(orderId, { restaurantId: row.restaurantId });
+    await broadcastOrderChanged(claim.orderId, { restaurantId: claim.restaurantId });
   }
 
   await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent, isGroup ? expectedAmount : undefined);
@@ -390,31 +488,35 @@ const markOrderPaymentState = async (
   await capturePaymentVerificationRiskSignals({
     customerId: order.customerId,
     orderId: order.id,
-    paymentReference: normalizeStatus(payment.reference, ''),
+    paymentReference,
     transactionData,
   });
 
   // A payment that landed on a cancelled order must not tell the restaurant it
   // has a paid order to prepare, nor tell the customer it will be prepared.
-  if (primaryClosed) {
+  const liveClaims = claims.filter((claim) => !claim.closed);
+  if (liveClaims.length === 0) {
     return { success: true, orderId: order.id, paymentStatus: 'paid' };
   }
 
-  const restaurantUsers = await loadRestaurantRecipientUserIds(order.restaurantId);
-  if (restaurantUsers.length > 0) {
-    await enqueueNotification(serviceClient, {
-      userIds: restaurantUsers,
-      payload: {
-        title: 'Paid Order Received',
-        body: `Order ${order.id} has been paid and is ready for confirmation`,
-        data: buildNotificationData({
-          app: 'partner',
-          orderId: order.id,
-          routeKey: 'partner_order_detail',
-          type: 'payment_confirmed',
-        }),
-      },
-    });
+  // Every restaurant of a multi-store group has its own paid order to accept.
+  for (const claim of liveClaims) {
+    const restaurantUsers = await loadRestaurantRecipientUserIds(claim.restaurantId);
+    if (restaurantUsers.length > 0) {
+      await enqueueNotification(serviceClient, {
+        userIds: restaurantUsers,
+        payload: {
+          title: 'Paid Order Received',
+          body: `Order ${claim.orderId} has been paid and is ready for confirmation`,
+          data: buildNotificationData({
+            app: 'partner',
+            orderId: claim.orderId,
+            routeKey: 'partner_order_detail',
+            type: 'payment_confirmed',
+          }),
+        },
+      });
+    }
   }
 
   // The webhook path is the one that confirms payments the customer walked
@@ -459,6 +561,195 @@ const markOrderPaymentState = async (
   return { success: true, orderId: order.id, paymentStatus: 'paid' };
 };
 
+// A charge Paystack reports as reversed AFTER the order was paid: the money was
+// genuinely pulled back. Silently writing 'failed' over 'paid' would hide that
+// the kitchen may be cooking an order nobody paid for, so the payment status is
+// left alone and a human is pointed at it instead. Once per order: the
+// timeline.paymentReversedAt stamp is the guard, so repeated customer refreshes
+// do not re-page the admins.
+const flagReversedPaidOrder = async (order: CustomerOrderRow, transactionData: JsonObject) => {
+  const nowIso = new Date().toISOString();
+  const paymentReference = normalizeStatus((order.payment ?? {}).reference, '');
+  const orderStatus = normalizeOrderStatusText(order.status);
+  const { data: flagged, error } = await serviceClient
+    .from('CustomerOrder')
+    .update({
+      needsAttention: true,
+      timeline: { ...(order.timeline ?? {}), paymentReversedAt: nowIso },
+      updatedAt: nowIso,
+    })
+    .eq('id', order.id)
+    .eq('payment->>status', 'paid')
+    .is('timeline->>paymentReversedAt', null)
+    .select('id');
+
+  if (error) throw new Error(`Failed to flag reversed payment: ${error.message}`);
+  if (!Array.isArray(flagged) || flagged.length === 0) return;
+
+  logEdgeEvent('warn', 'Paid order reported reversed by Paystack; flagged for manual review', {
+    orderId: order.id,
+    orderStatus,
+    paymentReference,
+  });
+
+  await recordOperationalAlert({
+    alertType: 'payment_reversed_on_paid_order',
+    dedupeKey: `ops:payment_reversed_on_paid_order:${order.id}`,
+    details: `Paystack reports the payment (${paymentReference}) for order ${order.id} as reversed, but the order is recorded as paid (status ${orderStatus || 'unknown'}). The payment status was not changed; check the charge and the order manually.`,
+    metadata: {
+      gatewayResponse: typeof transactionData.gateway_response === 'string' ? transactionData.gateway_response : null,
+      orderStatus,
+      paymentReference,
+      restaurantId: order.restaurantId,
+    },
+    severity: 'high',
+    subjectId: order.id,
+    subjectType: 'order',
+    title: 'Payment reversed on a paid order',
+  });
+
+  await notifyAdmins({
+    body: `Paystack reports the payment for order ${shortOrderCode(order.id)} as reversed. The order is still recorded as paid and needs attention.`,
+    data: buildNotificationData({
+      app: 'admin',
+      orderId: order.id,
+      restaurantId: order.restaurantId,
+      routeKey: 'admin_access',
+      type: 'payment_reversed',
+    }),
+    title: 'Payment reversed on a paid order',
+  });
+
+  await broadcastOrderChanged(order.id, { restaurantId: order.restaurantId });
+};
+
+/**
+ * Folds a Paystack verify that did NOT come back 'success' into the order(s)
+ * the charge pays for. Only the customer refresh calls this - the webhook acts
+ * on charge.success alone, through handlePaymentVerification.
+ *
+ * A payment never moves backwards:
+ *  - a settled payment (paid / refunded) is left exactly as it is; a 'reversed'
+ *    answer on a PAID order is flagged for a human (flagReversedPaidOrder);
+ *  - otherwise the payment becomes failed (abandoned / failed / reversed) or
+ *    stays pending, as a compare-and-set on the payment status read, so a
+ *    confirmation that lands meanwhile is never overwritten.
+ */
+export const recordUnsuccessfulPaymentVerification = async ({
+  orderId,
+  transactionData,
+}: {
+  orderId: string;
+  transactionData: JsonObject;
+}) => {
+  const order = await loadOrderState(orderId);
+  if (!order) throw new Error('Order not found');
+
+  const gatewayStatus = normalizeOrderStatusText(transactionData.status) || 'pending';
+
+  if (isSettledPayment(order)) {
+    if (gatewayStatus === 'reversed' && normalizeOrderStatusText((order.payment ?? {}).status) === 'paid') {
+      await flagReversedPaidOrder(order, transactionData);
+    }
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const nextStatus = UNSUCCESSFUL_GATEWAY_STATUSES.has(gatewayStatus) ? 'failed' : 'pending';
+  const channel = typeof transactionData.channel === 'string' ? transactionData.channel : null;
+  const { rows } = await loadChargeOrders(order);
+
+  let movedAny = false;
+  let primaryPreviousStatus: string | null | undefined;
+  for (const row of rows) {
+    if (isSettledPayment(row)) continue;
+
+    const previousPaymentStatus = storedPaymentStatus(row);
+    const rowPayment = (row.payment ?? {}) as JsonObject;
+    const nextPayment = {
+      ...rowPayment,
+      ...(channel ? { channel } : {}),
+      lastEvent: `paystack_${gatewayStatus}`,
+      status: nextStatus,
+      verifiedAt: nowIso,
+      ...(nextStatus === 'failed' ? { failedAt: normalizeStatus(rowPayment.failedAt, nowIso) } : {}),
+    };
+
+    let query = serviceClient
+      .from('CustomerOrder')
+      .update({ payment: nextPayment, updatedAt: nowIso })
+      .eq('id', row.id);
+    query = previousPaymentStatus === null
+      ? query.is('payment->>status', null)
+      : query.eq('payment->>status', previousPaymentStatus);
+    const { data: written, error } = await query.select('id');
+    if (error) throw new Error(`Failed to update order payment: ${error.message}`);
+
+    // Zero rows: a confirmation or another refresh wrote this payment first,
+    // and its write stands.
+    if (!Array.isArray(written) || written.length === 0) continue;
+
+    movedAny = true;
+    if (row.id === order.id) primaryPreviousStatus = previousPaymentStatus;
+    await broadcastOrderChanged(row.id, { restaurantId: row.restaurantId });
+  }
+
+  if (!movedAny) return;
+
+  // The ledger follows the order, guarded on its own status so a 'paid' row
+  // recorded by a racing confirmation is never overwritten.
+  const paymentReference = normalizeStatus((order.payment ?? {}).reference, '');
+  if (paymentReference) {
+    const gatewayResponse =
+      typeof transactionData.gateway_response === 'string' ? transactionData.gateway_response : gatewayStatus;
+    const { error: ledgerError } = await serviceClient
+      .from('PaymentTransaction')
+      .update({
+        channel,
+        failedAt: nextStatus === 'failed' ? nowIso : null,
+        gatewayStatus: gatewayResponse,
+        lastError:
+          nextStatus === 'failed'
+            ? typeof transactionData.message === 'string'
+              ? transactionData.message
+              : gatewayResponse
+            : null,
+        status: nextStatus,
+        updatedAt: nowIso,
+        verificationResponse: transactionData,
+        verifiedAt: nowIso,
+      })
+      .eq('reference', paymentReference)
+      .in('status', ['pending', 'failed']);
+    if (ledgerError) throw new Error(`Failed to update payment transaction: ${ledgerError.message}`);
+  }
+
+  const becameFailed =
+    nextStatus === 'failed' &&
+    primaryPreviousStatus !== undefined &&
+    normalizeOrderStatusText(primaryPreviousStatus) !== 'failed';
+  if (becameFailed) {
+    await enqueueNotification(serviceClient, {
+      userIds: [order.customerId],
+      payload: {
+        title: 'Payment not completed',
+        body: `Payment for order ${shortOrderCode(order.id)} did not go through. Open the order to try again.`,
+        data: buildNotificationData({
+          app: 'customer',
+          orderId: order.id,
+          routeKey: 'customer_order_detail',
+          type: 'payment_failed',
+        }),
+      },
+    }).catch((error) => {
+      logEdgeEvent('warn', 'customer payment-failed push could not be queued', {
+        error: error instanceof Error ? error.message : String(error),
+        orderId: order.id,
+      });
+    });
+  }
+};
+
 /**
  * Verify a Paystack payment for an order.
  *
@@ -470,11 +761,20 @@ const markOrderPaymentState = async (
  * Idempotency lets the drainer safely reclaim stale `processing` jobs and lets
  * Paystack redeliver the webhook without double-processing. We guard on:
  *   1. An IdempotencyRecord keyed on order id + payment reference.
- *   2. The order's own payment status — if it is already `paid`, we skip
- *      re-verification and (importantly) the re-notification side effect.
+ *   2. The order's own payment status — if it is already `paid` (or
+ *      `refunded`), we skip re-verification and (importantly) the
+ *      re-notification side effect.
+ *   3. A compare-and-set on that payment status when writing (see
+ *      claimOrderPayment), which is what actually holds when two
+ *      verifications of the same charge - the webhook and a customer refresh -
+ *      both pass check 2 at the same moment.
+ *
+ * The customer refresh (refreshCustomerPaymentStatus) comes through here too,
+ * passing the verify answer it already has, so a payment confirmed either way
+ * gets the same closed-order safeguard and exactly one set of notifications.
  */
 export const handlePaymentVerification = async (job: PaymentVerificationRequest) => {
-  const { orderId, paymentReference, webhookEvent = null } = job;
+  const { orderId, paymentReference, webhookEvent = null, verifiedTransaction: prefetchedTransaction = null } = job;
   const idempotencyKey = `payment_verification:${orderId}:${paymentReference}`;
 
   const existingRecord = await getIdempotencyRecord(serviceClient, idempotencyKey);
@@ -494,13 +794,12 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
 
   if (orderError || !order) throw new Error('Order not found');
 
-  const currentPayment = (order.payment ?? {}) as JsonObject;
-  if (normalizeStatus(currentPayment.status, '') === 'paid') {
+  if (isSettledPayment(order)) {
     await capturePaymentVerificationReplaySignal({
       orderId,
       paymentReference,
     });
-    const response = { success: true, orderId, paymentStatus: 'paid' };
+    const response = { success: true, orderId, paymentStatus: normalizeOrderStatusText((order.payment ?? {}).status) };
     await storeIdempotencyRecord(
       serviceClient,
       idempotencyKey,
@@ -511,7 +810,7 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
     return response;
   }
 
-  const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
+  const verifiedTransaction = prefetchedTransaction ?? (await verifyPaystackTransaction(paymentReference));
 
   // Multi-store checkout is ONE charge for the whole group; the order resolved
   // here is only the primary one. Single-store orders carry no orderGroupId, so
@@ -569,8 +868,8 @@ export const markPaymentVerificationFailed = async (
   // into it (see markOrderPaymentState above) instead of replacing it — a
   // wholesale replace drops `method`/`provider`/`currency`/etc. and makes a
   // failed card order look non-prepaid downstream. Reading the order is
-  // best-effort: if it fails we still record the failure, just without prior
-  // fields to preserve, and we never throw past the caller (see doc comment).
+  // best-effort: if it fails the failure signal is still captured, and we
+  // never throw past the caller (see doc comment).
   let existingPayment: JsonObject = {};
   const { data: order, error: orderError } = await serviceClient
     .from('CustomerOrder')
@@ -586,30 +885,36 @@ export const markPaymentVerificationFailed = async (
 
   // Guard against a race where the webhook path already verified this
   // payment (status: 'paid') while a stale queue retry for the same job was
-  // still in flight and only fails afterward. Reading the row above makes
-  // this check nearly free, so skip the write rather than stamping 'failed'
-  // next to a paidAt/paystackResponse that says otherwise.
-  if (normalizeStatus(existingPayment.status, '') === 'paid') {
-    console.log(`Skipping payment-failed write for ${orderId}: payment already marked paid.`);
-    return;
-  }
+  // still in flight and only fails afterward - or the order was refunded. A
+  // payment never moves backwards, so skip the write rather than stamping
+  // 'failed' next to a paidAt/paystackResponse that says otherwise.
+  if (isSettledPayment({ payment: existingPayment })) {
+    console.log(`Skipping payment-failed write for ${orderId}: payment already ${normalizeStatus(existingPayment.status, '')}.`);
+  } else if (!orderError) {
+    // Compare-and-set on the status just read: a confirmation landing between
+    // that read and this write wins. An unreadable order is not written blind.
+    const previousPaymentStatus = storedPaymentStatus({ payment: existingPayment });
+    let query = serviceClient
+      .from('CustomerOrder')
+      .update({
+        payment: {
+          ...existingPayment,
+          status: 'failed',
+          reference: paymentReference,
+          error: message,
+          failedAt: nowIso,
+        },
+        updatedAt: nowIso,
+      })
+      .eq('id', orderId);
+    query = previousPaymentStatus === null
+      ? query.is('payment->>status', null)
+      : query.eq('payment->>status', previousPaymentStatus);
+    const { error } = await query;
 
-  const { error } = await serviceClient
-    .from('CustomerOrder')
-    .update({
-      payment: {
-        ...existingPayment,
-        status: 'failed',
-        reference: paymentReference,
-        error: message,
-        failedAt: nowIso,
-      },
-      updatedAt: nowIso,
-    })
-    .eq('id', orderId);
-
-  if (error) {
-    console.error(`Failed to mark payment failed for ${orderId}: ${error.message}`);
+    if (error) {
+      console.error(`Failed to mark payment failed for ${orderId}: ${error.message}`);
+    }
   }
 
   await capturePaymentVerificationFailureSignal({

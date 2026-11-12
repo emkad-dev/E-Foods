@@ -23,6 +23,15 @@ const originalFrom = serviceClient.from.bind(serviceClient);
 const originalFetch = globalThis.fetch;
 const originalConsole = { error: console.error, warn: console.warn, log: console.log };
 
+// PostgREST column, including a JSON path like 'payment->>status' (text, or
+// null when absent) - the payment compare-and-set filters on one.
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = (row[base] ?? {})[key];
+  return value === undefined || value === null ? null : String(value);
+};
+
 const makeBuilder = (table: string) => {
   const filters: Array<(row: Row) => boolean> = [];
   const filterLabels: string[] = [];
@@ -67,13 +76,18 @@ const makeBuilder = (table: string) => {
   const builder: any = {
     select: () => builder,
     eq: (column: string, value: unknown) => {
-      filters.push((row) => row[column] === value);
+      filters.push((row) => readColumn(row, column) === value);
       filterLabels.push(`${column}=${String(value)}`);
       return builder;
     },
     in: (column: string, values: unknown[]) => {
-      filters.push((row) => values.includes(row[column]));
+      filters.push((row) => values.includes(readColumn(row, column)));
       filterLabels.push(`${column} in (${values.join(',')})`);
+      return builder;
+    },
+    is: (column: string, value: unknown) => {
+      filters.push((row) => (readColumn(row, column) ?? null) === value);
+      filterLabels.push(`${column} is ${String(value)}`);
       return builder;
     },
     order: () => builder,
@@ -215,7 +229,9 @@ Deno.test('single-store payment: order is placed + paid, restaurant notified, pa
       ['partner', 'customer']
     );
     assertEquals(db.OperationalAlert.length, 0);
-    assertEquals(db.DeliveryEvent.length, 0);
+    // Exactly one payment_confirmed event: this path is now shared with the
+    // customer refresh, which used to be the only one recording it.
+    assertEquals(db.DeliveryEvent.map((event) => event.eventType), ['payment_confirmed']);
     // Single-store orders carry no group, so no OrderGroup lookup for amount validation.
     assertEquals(writes.filter((w) => w.table === 'CustomerOrder').length, 1);
     // The write is exactly the pre-existing shape: these four columns, nothing else
@@ -429,7 +445,13 @@ Deno.test('multi-order group: awaiting order is placed, cancelled order is only 
     assertEquals(second.needsAttention, true);
     assertEquals(second.timeline.cancelledAt, '2026-10-19T10:15:00.000Z');
 
-    assertEquals(db.DeliveryEvent.map((e) => e.orderId), ['order-2']);
+    assertEquals(
+      db.DeliveryEvent.map((e) => [e.orderId, e.eventType]),
+      [
+        ['order-1', 'payment_confirmed'],
+        ['order-2', 'payment_received_on_closed_order'],
+      ]
+    );
     assertEquals(db.OperationalAlert.map((a) => a.subjectId), ['order-2']);
     // One Paystack charge, one transaction row, for the whole group total.
     assertEquals(db.PaymentTransaction.length, 1);
@@ -452,7 +474,7 @@ Deno.test('multi-order group: all orders awaiting are all placed and paid', asyn
     assertEquals(orderById('order-1').payment.capturedAmount, 4300);
     assertEquals(orderById('order-2').payment.capturedAmount, 8500);
     assertEquals(db.OperationalAlert.length, 0);
-    assertEquals(db.DeliveryEvent.length, 0);
+    assertEquals(db.DeliveryEvent.map((e) => e.orderId), ['order-1', 'order-2']);
   });
 });
 

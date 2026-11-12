@@ -33,7 +33,6 @@ import { captureManualSettlementFallbackAlert } from '../operationalAlerts.ts';
 import { generateDeliveryCode } from '../deliveryCode.ts';
 import {
   captureOrderPlacementRiskSignals,
-  capturePaymentVerificationRiskSignals,
   captureRefundAbuseSignals,
 } from '../riskSignals.ts';
 import {
@@ -59,12 +58,10 @@ import {
   upsertPaymentTransaction,
   type CustomerOrderRow,
   type OrderGroupRow,
-  type PaymentTransactionRow,
 } from '../orders.ts';
 import {
   assertPaystackConfigured,
   buildPaystackReference,
-  fromKoboAmount,
   getNormalizedPaystackCallbackUrl,
   getPaystackPublicKey,
   initializePaystackTransaction,
@@ -72,6 +69,10 @@ import {
   verifyPaystackTransaction,
 } from '../paystack.ts';
 import { loadDispatchTrackingConfig, loadPricingConfig } from '../platformSettings.ts';
+import {
+  handlePaymentVerification,
+  recordUnsuccessfulPaymentVerification,
+} from '../../payment-verification/handler.ts';
 import {
   validateScheduledSlot,
   scheduledSlotRejectionMessage,
@@ -1339,207 +1340,19 @@ const loadOrderGroupSummary = async (order: CustomerOrderRow): Promise<OrderGrou
   return data ?? null;
 };
 
-/** Folds a verified Paystack transaction into the order + payment ledger. */
-const syncOrderPaymentState = async ({
-  order,
-  transactionData,
-  webhookEvent = null,
-}: {
-  order: CustomerOrderRow;
-  transactionData: JsonObject;
-  webhookEvent?: JsonObject | null;
-}) => {
-  const verifiedAtIso = nowIso();
-  const existingPayment = (order.payment ?? {}) as JsonObject;
-  const paymentMethod = sanitizeText(
-    existingPayment.method,
-    sanitizeText(transactionData.channel) === 'bank_transfer' ? 'bank_transfer' : 'card'
-  );
-  const paymentReference = sanitizeText(transactionData.reference, sanitizeText(existingPayment.reference));
-  const transactionStatus = sanitizeText(transactionData.status, 'pending');
-  const gatewayStatus = sanitizeText(
-    transactionData.gateway_response ?? transactionData.gatewayResponse ?? transactionStatus,
-    transactionStatus
-  );
-  const transactionAmount = fromKoboAmount(transactionData.amount);
-  const groupOrders = await loadOrderGroupOrders(order);
-  const groupSummary = await loadOrderGroupSummary(order);
-  const expectedAmount = parseNumber(groupSummary?.pricing?.total, parseNumber(order.pricing?.total, 0));
-
-  let nextPayment: JsonObject = {
-    ...existingPayment,
-    accessCode: sanitizeOptionalText(existingPayment.accessCode),
-    authorizationUrl: sanitizeOptionalText(existingPayment.authorizationUrl),
-    method: paymentMethod,
-    processor: PAYMENT_PROVIDER_PAYSTACK,
-    reference: paymentReference,
-    settlementMode: sanitizeText(
-      existingPayment.settlementMode,
-      sanitizeOptionalText(existingPayment.splitSubaccountCode) ? 'split' : 'manual'
-    ),
-    splitSubaccountCode: sanitizeOptionalText(existingPayment.splitSubaccountCode),
-    verifiedAt: verifiedAtIso,
-  };
-
-  if (transactionStatus === 'success') {
-    nextPayment = {
-      ...nextPayment,
-      capturedAmount: transactionAmount,
-      channel: sanitizeOptionalText(transactionData.channel) ?? sanitizeOptionalText(nextPayment.channel),
-      lastEvent: 'paystack_payment_confirmed',
-      paidAt:
-        sanitizeOptionalText(transactionData.paid_at ?? transactionData.transaction_date) ?? verifiedAtIso,
-      status: PAYMENT_STATUS.PAID,
-    };
-  } else if (['abandoned', 'failed', 'reversed'].includes(transactionStatus)) {
-    nextPayment = {
-      ...nextPayment,
-      channel: sanitizeOptionalText(transactionData.channel) ?? sanitizeOptionalText(nextPayment.channel),
-      lastEvent: `paystack_${transactionStatus}`,
-      status: PAYMENT_STATUS.FAILED,
-    };
-  } else {
-    nextPayment = {
-      ...nextPayment,
-      channel: sanitizeOptionalText(transactionData.channel) ?? sanitizeOptionalText(nextPayment.channel),
-      lastEvent: `paystack_${transactionStatus}`,
-      status: PAYMENT_STATUS.PENDING,
-    };
-  }
-
-  for (const groupOrder of groupOrders) {
-    const orderPayment = {
-      ...nextPayment,
-      capturedAmount:
-        sanitizeText(nextPayment.status) === PAYMENT_STATUS.PAID
-          ? parseNumber(groupOrder.pricing?.total, expectedAmount)
-          : parseNumber(groupOrder.payment?.capturedAmount, 0),
-    };
-
-    await updateOrderRecord(groupOrder.id, {
-      payment: orderPayment,
-      updatedAt: verifiedAtIso,
-    });
-  }
-
-  await upsertPaymentTransaction({
-    orderId: order.id,
-    customerId: order.customerId,
-    restaurantId: order.restaurantId,
-    orderGroupId: sanitizeText(order.orderGroupId) || null,
-    provider: PAYMENT_PROVIDER_PAYSTACK,
-    method: paymentMethod,
-    reference: paymentReference,
-    currency: DEFAULT_CURRENCY,
-    amount: expectedAmount,
-    splitSubaccountCode: sanitizeOptionalText(nextPayment.splitSubaccountCode),
-    settlementMode: sanitizeText(nextPayment.settlementMode, 'manual'),
-    status: sanitizeText(nextPayment.status, PAYMENT_STATUS.PENDING),
-    accessCode: sanitizeOptionalText(existingPayment.accessCode),
-    authorizationUrl: sanitizeOptionalText(existingPayment.authorizationUrl),
-    externalTransactionId:
-      transactionData.id === null || transactionData.id === undefined ? null : String(transactionData.id),
-    channel: sanitizeOptionalText(transactionData.channel),
-    gatewayStatus,
-    lastError:
-      sanitizeText(nextPayment.status) === PAYMENT_STATUS.FAILED
-        ? sanitizeOptionalText(transactionData.message) ?? gatewayStatus
-        : null,
-    paidAt: sanitizeText(nextPayment.status) === PAYMENT_STATUS.PAID ? nextPayment.paidAt ?? verifiedAtIso : null,
-    failedAt: sanitizeText(nextPayment.status) === PAYMENT_STATUS.FAILED ? verifiedAtIso : null,
-    verifiedAt: verifiedAtIso,
-    verificationResponse: transactionData,
-    webhookEvent,
-    updatedAt: verifiedAtIso,
-  });
-
-  await capturePaymentVerificationRiskSignals({
-    customerId: order.customerId,
-    orderId: order.id,
-    paymentReference,
-    transactionData,
-  });
-
-  // Notify on the TRANSITION only. refreshCustomerPaymentStatus can be called
-  // again after the order is already paid (the customer re-opening the order
-  // screen), and each call used to re-send "Paid order received" to the
-  // kitchen.
-  const previousPaymentStatus = sanitizeText(existingPayment.status);
-  const nextPaymentStatus = sanitizeText(nextPayment.status);
-  const becamePaid = nextPaymentStatus === PAYMENT_STATUS.PAID && previousPaymentStatus !== PAYMENT_STATUS.PAID;
-  const becameFailed =
-    nextPaymentStatus === PAYMENT_STATUS.FAILED &&
-    previousPaymentStatus !== PAYMENT_STATUS.FAILED &&
-    previousPaymentStatus !== PAYMENT_STATUS.PAID;
-
-  if (becamePaid) {
-    await notifyUsers([order.customerId], {
-      title: 'Payment confirmed',
-      body: `We received your payment for order ${order.id.slice(-6).toUpperCase()}. The restaurant has been notified.`,
-      data: buildNotificationData({
-        app: 'customer',
-        orderId: order.id,
-        routeKey: 'customer_order_detail',
-        type: 'payment_confirmed',
-      }),
-    });
-  } else if (becameFailed) {
-    await notifyUsers([order.customerId], {
-      title: 'Payment not completed',
-      body: `Payment for order ${order.id.slice(-6).toUpperCase()} did not go through. Open the order to try again.`,
-      data: buildNotificationData({
-        app: 'customer',
-        orderId: order.id,
-        routeKey: 'customer_order_detail',
-        type: 'payment_failed',
-      }),
-    });
-  }
-
-  if (becamePaid) {
-    for (const groupOrder of groupOrders) {
-      await insertDeliveryEvent({
-        orderId: groupOrder.id,
-        eventType: 'payment_confirmed',
-        actorUid: null,
-        details: {
-          amount: transactionAmount,
-          provider: PAYMENT_PROVIDER_PAYSTACK,
-          reference: paymentReference,
-        },
-      });
-      await notifyRestaurantUsers(groupOrder.restaurantId, {
-        title: 'Paid order received',
-        body: `Order ${groupOrder.id.slice(-6).toUpperCase()} is paid and ready for confirmation.`,
-        data: buildNotificationData({
-          app: 'partner',
-          orderId: groupOrder.id,
-          routeKey: 'partner_order_detail',
-          type: 'order_update',
-        }),
-      });
-    }
-  }
-
-  return nextPayment;
-};
-
-const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEvent: JsonObject | null = null) => {
+/**
+ * Asks Paystack about the order's charge and folds the answer in through THE
+ * shared verification path (payment-verification/handler.ts), the same code the
+ * webhook runs. This used to be a second copy that wrote unconditionally: it
+ * marked money on a cancelled order as plainly paid (no needsAttention, no
+ * alert), turned a refunded payment back into paid, downgraded paid on a later
+ * 'reversed', and sent a second set of payment notifications whenever it and
+ * the webhook both saw the payment first. Returns the order as stored after.
+ */
+const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow): Promise<CustomerOrderRow> => {
   const paymentReference = sanitizeText(order.payment?.reference);
   if (!paymentReference) {
     fail(412, 'This order does not have a Paystack reference to verify.');
-  }
-
-  const { data: paymentRecord, error: paymentError } = await serviceClient
-    .from('PaymentTransaction')
-    .select(
-      'orderId,orderGroupId,customerId,restaurantId,method,reference,status,accessCode,authorizationUrl,channel,gatewayStatus,lastError'
-    )
-    .eq('reference', paymentReference)
-    .maybeSingle<PaymentTransactionRow>();
-
-  if (paymentError) {
-    throw new Error(paymentError.message);
   }
 
   const verifiedTransaction = await verifyPaystackTransaction(paymentReference);
@@ -1553,11 +1366,21 @@ const refreshPaystackPaymentForOrder = async (order: CustomerOrderRow, webhookEv
     fail(412, 'Verified Paystack amount does not match the expected order total.');
   }
 
-  return syncOrderPaymentState({
-    order,
-    transactionData: verifiedTransaction,
-    webhookEvent,
-  });
+  if (sanitizeText(verifiedTransaction.status) === 'success') {
+    await handlePaymentVerification({ orderId: order.id, paymentReference, verifiedTransaction });
+  } else {
+    await recordUnsuccessfulPaymentVerification({ orderId: order.id, transactionData: verifiedTransaction });
+  }
+
+  const { data: refreshed, error } = await serviceClient
+    .from('CustomerOrder')
+    .select(CUSTOMER_ORDER_COLUMNS)
+    .eq('id', order.id)
+    .maybeSingle<CustomerOrderRow>();
+  if (error) {
+    throw new Error(error.message);
+  }
+  return refreshed ?? order;
 };
 
 const customerGetOrders: Handler = async ({ context, data }) => {
@@ -2117,13 +1940,13 @@ const refreshCustomerPaymentStatus: Handler = async ({ context, data }) => {
     });
   }
 
-  const nextPayment = await refreshPaystackPaymentForOrder(bundle.order);
+  const refreshed = await refreshPaystackPaymentForOrder(bundle.order);
   return json(200, {
     data: {
-      gatewayStatus: sanitizeText(nextPayment.lastEvent, 'verification_complete'),
+      gatewayStatus: sanitizeText(refreshed.payment?.lastEvent, 'verification_complete'),
       orderId,
-      paymentStatus: sanitizeText(nextPayment.status, PAYMENT_STATUS.PENDING),
-      status: sanitizeText(bundle.order.status, ORDER_STATUS.PLACED),
+      paymentStatus: sanitizeText(refreshed.payment?.status, PAYMENT_STATUS.PENDING),
+      status: sanitizeText(refreshed.status, ORDER_STATUS.PLACED),
     },
   });
 };
