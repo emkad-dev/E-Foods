@@ -62,19 +62,30 @@ export const announceManualRefund = async (input: {
   payment: JsonObject;
 }) => {
   const { actorUid, closedStatus, order, payment } = input;
-  const code = shortOrderCode(order.id);
-  const refundAmount = typeof payment.refundAmount === 'number' ? payment.refundAmount : null;
-  const closure = describeClosure(closedStatus);
 
   await releasePromoRedemption(order.id);
 
+  // Everything that formats or sends is inside the try, so nothing here throws.
   try {
+    const code = shortOrderCode(order.id);
+    const closure = describeClosure(closedStatus);
+    const refundAmount = typeof payment.refundAmount === 'number' ? payment.refundAmount : null;
+    // buildRefundUpdate records nothing for a payment it cannot refund (not a
+    // prepaid method, or no captured amount). Say so rather than claim a refund.
+    const refundRecorded = payment.status === PAYMENT_STATUS.REFUNDED && refundAmount !== null;
+    const details = refundRecorded
+      ? `Order ${order.id} ${closure.verb} after payment. A full refund of ${formatNairaAmount(
+          refundAmount
+        )} is recorded on the order but no money has moved: return it to the customer by hand.`
+      : `Order ${order.id} ${closure.verb} after payment. No refund could be recorded automatically: check the payment and return the money to the customer by hand.`;
+    const adminBody = refundRecorded
+      ? `Order ${code} ${closure.verb} after payment. The refund is recorded but must be paid back by hand.`
+      : `Order ${code} ${closure.verb} after payment. No refund could be recorded automatically; check the payment by hand.`;
+
     await recordOperationalAlert({
       alertType: MANUAL_REFUND_ALERT_TYPE,
       dedupeKey: `ops:${MANUAL_REFUND_ALERT_TYPE}:${order.id}`,
-      details: `Order ${order.id} ${closure.verb} after payment. A full refund${
-        refundAmount === null ? '' : ` of ${formatNairaAmount(refundAmount)}`
-      } is recorded on the order but no money has moved: return it to the customer by hand.`,
+      details,
       metadata: {
         actorUid,
         closedStatus,
@@ -89,7 +100,7 @@ export const announceManualRefund = async (input: {
     });
 
     await notifyAdmins({
-      body: `Order ${code} ${closure.verb} after payment. The refund is recorded but must be paid back by hand.`,
+      body: adminBody,
       data: buildNotificationData({
         app: 'admin',
         orderId: order.id,

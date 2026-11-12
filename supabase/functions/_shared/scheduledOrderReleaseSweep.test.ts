@@ -389,6 +389,34 @@ Deno.test('release sweep: an unpaid scheduled order is never released (left for 
   }
 });
 
+Deno.test('release sweep: more unpaid scheduled rows than the batch cap cannot starve a paid one', async () => {
+  // RELEASE_SWEEP_LIMIT is 100 and the batch is ordered by scheduledFor. 110
+  // unpaid rows due earlier than the paid one would fill the whole batch if the
+  // paid filter lived only in the loop; it must be in the query.
+  const dueBase = Date.now() + PREP_MS - 60 * 60_000;
+  const unpaid = Array.from({ length: 110 }, (_, index) =>
+    buildScheduledOrder({
+      id: `order-unpaid-${index}`,
+      payment: { method: 'bank_transfer', status: 'pending' },
+      scheduledFor: new Date(dueBase + index * 1000).toISOString(),
+    })
+  );
+  const paid = buildScheduledOrder({ id: 'order-paid-late', scheduledFor: new Date(Date.now() + PREP_MS - 60_000).toISOString() });
+  const mocks = installMocks([...unpaid, paid]);
+  try {
+    const result = await sweepScheduledOrderReleases();
+    expectEqual(result.released, 1, 'the paid order releases');
+    expectEqual(mocks.tables.CustomerOrder.rows.find((row) => row.id === 'order-paid-late')!.status, 'placed', 'paid order placed');
+    expectEqual(
+      mocks.tables.CustomerOrder.rows.filter((row) => row.status === 'scheduled').length,
+      110,
+      'every unpaid order is still scheduled'
+    );
+  } finally {
+    mocks.restore();
+  }
+});
+
 Deno.test('release sweep: a payment that is no longer paid at write time is not released', async () => {
   // Defence in depth for the write's payment guard: the candidate read saw paid,
   // the stored payment no longer is when the CAS lands.

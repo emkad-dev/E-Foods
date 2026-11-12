@@ -1953,6 +1953,10 @@ const refreshCustomerPaymentStatus: Handler = async ({ context, data }) => {
   });
 };
 
+// Before the kitchen starts preparing, including a scheduled order still
+// waiting for release (Task 18 / G2).
+const CUSTOMER_CANCELLABLE_STATUSES: readonly string[] = [ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED];
+
 const cancelCustomerOrder: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['customer', 'admin']);
   const orderId = sanitizeText(data.orderId);
@@ -1972,7 +1976,7 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   const currentStatus = normalizeOrderStatus(bundle.order.status);
   // Cancellation is only allowed before the kitchen starts preparing — which
   // includes a scheduled order still waiting for release (Task 18 / G2).
-  if (!([ORDER_STATUS.SCHEDULED, ORDER_STATUS.PLACED, ORDER_STATUS.ACCEPTED] as readonly string[]).includes(currentStatus)) {
+  if (!CUSTOMER_CANCELLABLE_STATUSES.includes(currentStatus)) {
     fail(412, 'This order can no longer be cancelled.');
   }
 
@@ -2013,10 +2017,11 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   );
 
   if (!applied) {
-    // Tell a moved-on order apart from a payment that only just landed: the
-    // latter can still be cancelled, with the refund read afresh.
+    // Tell an order that is no longer cancellable apart from one that only
+    // changed (a payment landed, placed -> accepted): the latter can still be
+    // cancelled, with the refund read afresh.
     const latest = await loadOrderBundle(orderId);
-    if (latest && sanitizeText(latest.order.status) === observedStatus) {
+    if (latest && CUSTOMER_CANCELLABLE_STATUSES.includes(normalizeOrderStatus(latest.order.status))) {
       fail(409, 'This order changed while you were cancelling it. Reload the order and try again.');
     }
     fail(409, 'This order has already moved on and can no longer be cancelled.');

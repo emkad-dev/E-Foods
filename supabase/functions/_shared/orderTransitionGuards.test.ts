@@ -286,6 +286,7 @@ Deno.test('partner reject of a PAID order records the full refund, flags attenti
     assertEquals(refundAlerts().length, 1, 'one OperationalAlert for the admin console');
     assertEquals(refundAlerts()[0].severity, 'high');
     assertEquals(refundAlerts()[0].subjectId, ORDER_ID);
+    assertEquals(String(refundAlerts()[0].details).includes('A full refund of'), true, 'alert names the recorded refund');
     assertEquals(adminAlertEmails().length, 1, 'admins notified (push + email)');
 
     assertEquals(db.PaymentTransaction[0].status, 'paid', 'ledger untouched, as cancellation leaves it');
@@ -316,6 +317,23 @@ Deno.test('partner reject of an unpaid (cash) order is unchanged: no refund, no 
     assertEquals(promoReleases().length, 0);
     assertEquals(refundAlerts().length, 0);
     assertEquals(adminAlertEmails().length, 0);
+  });
+});
+
+Deno.test('a paid order whose refund could not be recorded is still flagged, and the alert does not claim a refund', async () => {
+  // buildRefundUpdate records nothing for a non-prepaid method. The order still
+  // needs a human, but the alert must say the payment has to be checked by hand.
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'accepted', payment: { method: 'cash', status: 'paid' } }));
+    const response = await partnerAction('reject');
+    assertEquals(response.status, 200);
+    assertEquals(order().status, 'rejected');
+    assertEquals(order().payment.status, 'paid', 'nothing recorded');
+    assertEquals(order().needsAttention, true);
+    assertEquals(refundAlerts().length, 1);
+    const details = String(refundAlerts()[0].details);
+    assertEquals(details.includes('No refund could be recorded automatically'), true);
+    assertEquals(details.includes('is recorded'), false);
   });
 });
 
@@ -353,6 +371,26 @@ Deno.test('dispatch failed_delivery on a PAID order records the full refund, fla
     assertEquals(adminAlertEmails().length, 1);
     // Riders and the rider-load release are unchanged.
     assertEquals(rpcCalls.filter((c) => c.fn === 'ebuy_release_dispatch_assignment_load').length, 1);
+  });
+});
+
+Deno.test('dispatch failed_delivery losing a race to a concurrent close changes nothing and alerts nobody', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'on_the_way', pricing: { total: CAPTURED, deliveryProvider: 'platform' } }), riderAssignment());
+    updateHook = {
+      when: (table, payload) => table === 'CustomerOrder' && payload.status === 'failed_delivery',
+      run: () => {
+        order().status = 'delivered';
+      },
+    };
+    const error = await expectFailure(() => dispatchAction('failed_delivery'));
+    assertEquals(error.status, 409);
+    assertEquals(order().status, 'delivered');
+    assertEquals(order().payment.status, 'paid', 'no refund written by the loser');
+    assertEquals(order().needsAttention, false);
+    assertEquals(promoReleases().length, 0);
+    assertEquals(refundAlerts().length, 0);
+    assertEquals(adminAlertEmails().length, 0);
   });
 });
 
@@ -416,6 +454,24 @@ Deno.test('customer cancel losing a race to preparing changes nothing', async ()
     assertEquals(order().cancellation, null);
     assertEquals(promoReleases().length, 0, 'promo slot still held');
     assertEquals(events('order_cancelled').length, 0);
+  });
+});
+
+Deno.test('customer cancel losing a race to accepted (still cancellable) asks for a reload, and changes nothing', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'placed' }));
+    updateHook = {
+      when: (table, payload) => table === 'CustomerOrder' && payload.status === 'cancelled',
+      run: () => {
+        order().status = 'accepted';
+      },
+    };
+    const error = await expectFailure(() => customerCancel());
+    assertEquals(error.status, 409);
+    assertEquals(error.message, 'This order changed while you were cancelling it. Reload the order and try again.');
+    assertEquals(order().status, 'accepted');
+    assertEquals(order().payment.status, 'paid');
+    assertEquals(promoReleases().length, 0);
   });
 });
 
