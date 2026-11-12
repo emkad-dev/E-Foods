@@ -263,7 +263,7 @@ Deno.test('delivered with the correct deliveryCode: transitions and stamps deliv
     expectEqual(response.status, 200, 'handler succeeds');
     expectEqual(state.order().status, 'delivered', 'order delivered');
     expectEqual(typeof state.order().deliveryCodeVerifiedAt, 'string', 'verified stamp set');
-    expectEqual(state.order().deliveryCodeAttempts, 1, 'the slot was reserved before the compare');
+    expectEqual(state.order().deliveryCodeAttempts, 0, 'a correct code hands its reserved slot back');
     // The delivery code IS the customer's confirmation, so the rider path must never
     // start the restaurant-completion confirmation clock.
     expectEqual(state.order().customerConfirmDueAt ?? null, null, 'rider delivery sets no confirmation deadline');

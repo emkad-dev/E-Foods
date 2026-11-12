@@ -16,7 +16,9 @@ import {
   isStaffInviteExpired,
 } from '../staffInviteCodes.ts';
 import { serviceClient } from '../client.ts';
+import { readOrderDeliveryProvider } from '../deliveryProvider.ts';
 import { releaseDispatchAssignmentLoad, runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
+import { announceManualRefund, buildManualRefundWrite } from '../manualRefund.ts';
 import { buildNotificationData, customerOrderStatusCopy, notifyAdmins, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import {
@@ -1316,13 +1318,33 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   // from a single deref of bundle.order.status.
   const observedStatus = sanitizeText(bundle.order.status);
   const currentStatus = normalizeOrderStatus(observedStatus);
+
+  // A FEASTY rider's delivery ends only with the customer's handoff code in the
+  // dispatch app (proof of delivery, rider pay). The restaurant marking it
+  // delivered would skip both, so only pickups and the restaurant's own
+  // deliveries (pricing.deliveryProvider 'restaurant', stamped at checkout - the
+  // same stamp that picks the rider pool) may be completed from here.
+  if (
+    nextAction === 'delivered' &&
+    sanitizeText(bundle.order.fulfillmentType, 'delivery') === 'delivery' &&
+    readOrderDeliveryProvider(bundle.order.pricing) === 'platform'
+  ) {
+    fail(412, 'A FEASTY rider is delivering this order. It is completed when the rider hands it over to the customer.');
+  }
+
   const nextState = buildPartnerStatusUpdate(currentStatus, nextAction);
   const timeline = {
     ...(bundle.order.timeline ?? {}),
     ...nextState.timelinePatch,
   };
 
-  const payment = { ...(bundle.order.payment ?? {}) } as JsonObject;
+  // Rejecting a PAID order: the full refund is recorded and the order flagged
+  // for a human in the same write as `rejected` (see _shared/manualRefund.ts).
+  const manualRefund =
+    nextState.status === ORDER_STATUS.REJECTED
+      ? buildManualRefundWrite(bundle.order, 'restaurant_rejected_full_refund')
+      : null;
+  const payment = manualRefund?.payment ?? ({ ...(bundle.order.payment ?? {}) } as JsonObject);
 
   // Compare-and-swap on the status this transition was computed from. bundle is
   // a stale snapshot (loadOrderBundle does a plain read, no FOR UPDATE), and the
@@ -1336,16 +1358,32 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
   // Same write as the status change, so an order can never be `delivered` by
   // the restaurant without its confirmation deadline (or the reverse).
   const customerConfirmDueAt = 'customerConfirmDueAt' in nextState ? nextState.customerConfirmDueAt : null;
-  const applied = await updateOrderRecordIfStatus(orderId, observedStatus, {
-    ...(customerConfirmDueAt ? { customerConfirmDueAt } : {}),
-    payment,
-    status: nextState.status,
-    timeline,
-    updatedAt: nowIso(),
-  });
+  const applied = await updateOrderRecordIfStatus(
+    orderId,
+    observedStatus,
+    {
+      ...(customerConfirmDueAt ? { customerConfirmDueAt } : {}),
+      ...(manualRefund ? { needsAttention: true } : {}),
+      payment,
+      status: nextState.status,
+      timeline,
+      updatedAt: nowIso(),
+    },
+    // The refund was computed from the paid payment this request read.
+    manualRefund ? { expectedPaymentStatus: PAYMENT_STATUS.PAID } : {}
+  );
 
   if (!applied) {
     fail(409, 'This order changed while you were updating it. Reload the order and try again.');
+  }
+
+  if (manualRefund) {
+    await announceManualRefund({
+      actorUid: context.uid,
+      closedStatus: nextState.status,
+      order: bundle.order,
+      payment,
+    });
   }
 
   await insertDeliveryEvent({

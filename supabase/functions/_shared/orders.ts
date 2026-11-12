@@ -414,11 +414,11 @@ export const updateOrderRecord = async (orderId: string, rawUpdates: JsonObject)
 
 // Task 17 (G1): free the promo-cap slot an order held once it ends
 // cancelled/refunded. THE single shared release path — the customer placement
-// handlers (on synchronous placement/init failure) and all three
-// post-placement terminal-cancel transitions (customer self-cancel,
-// unpaid-payment timeout, acceptance-deadline auto-cancel) all funnel through
-// here, so a redemption tied to an order that does not end successful is always
-// released.
+// handlers (on synchronous placement/init failure), the post-placement
+// terminal-cancel transitions (customer self-cancel, unpaid-payment timeout,
+// acceptance-deadline auto-cancel) and a paid order's rejection or failed
+// delivery (_shared/manualRefund.ts) all funnel through here, so a redemption
+// tied to an order that does not end successful is always released.
 //
 // Safe by construction:
 //   * IDEMPOTENT & no-op on the no-promo case — ebuy_release_promo_redemption
