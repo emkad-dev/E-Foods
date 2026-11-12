@@ -348,18 +348,19 @@ type PaymentClaim = {
  * returns null and sends nothing.
  *
  * Returns the claim when THIS call moved the payment, or null when the payment
- * was already settled (paid or refunded) - whoever settled it owns every side
- * effect.
+ * was already settled (paid or refunded) - whoever settled it owns that
+ * order's side effects. `row` is the latest state this call saw, which tells
+ * the caller whether an order someone else claimed is live or closed.
  */
 const claimOrderPayment = async (
   initialRow: CustomerOrderRow,
   buildPaidPayment: (row: CustomerOrderRow) => JsonObject,
   confirmedTimeline: (row: CustomerOrderRow) => JsonObject,
   nowIso: string
-): Promise<PaymentClaim | null> => {
+): Promise<{ claim: PaymentClaim | null; row: CustomerOrderRow }> => {
   let row = initialRow;
   for (let attempt = 0; attempt < MAX_PAYMENT_WRITE_ATTEMPTS; attempt += 1) {
-    if (isSettledPayment(row)) return null;
+    if (isSettledPayment(row)) return { claim: null, row };
 
     const previousPaymentStatus = storedPaymentStatus(row);
     const currentStatus = normalizeOrderStatusText(row.status);
@@ -404,12 +405,15 @@ const claimOrderPayment = async (
     if (error) throw new Error(`Failed to update order: ${error.message}`);
 
     if (Array.isArray(written) && written.length > 0) {
-      return { closed, orderId: row.id, orderStatus: currentStatus, restaurantId: row.restaurantId };
+      return {
+        claim: { closed, orderId: row.id, orderStatus: currentStatus, restaurantId: row.restaurantId },
+        row,
+      };
     }
 
     // Lost the race: judge the order again on its committed state.
     const fresh = await loadOrderState(row.id);
-    if (!fresh) return null;
+    if (!fresh) return { claim: null, row };
     row = fresh;
   }
 
@@ -453,9 +457,20 @@ const markOrderPaymentState = async (
   });
 
   const claims: PaymentClaim[] = [];
+  // Per order of the charge, in orderIds order: whether it is live (not
+  // closed), judged from this call's claim or, for an order another caller
+  // claimed, from the state this call last saw. Closed is terminal, so every
+  // caller reaches the same answer.
+  const liveByOrderId = new Map<string, boolean>();
   for (const row of rows) {
-    const claim = await claimOrderPayment(row, buildPaidPayment, confirmedTimeline, nowIso);
-    if (claim) claims.push(claim);
+    const outcome = await claimOrderPayment(row, buildPaidPayment, confirmedTimeline, nowIso);
+    if (outcome.claim) claims.push(outcome.claim);
+    liveByOrderId.set(
+      row.id,
+      outcome.claim
+        ? !outcome.claim.closed
+        : !CLOSED_ORDER_STATUSES.has(normalizeOrderStatusText(outcome.row.status))
+    );
   }
 
   if (claims.length === 0) {
@@ -487,15 +502,24 @@ const markOrderPaymentState = async (
     await broadcastOrderChanged(claim.orderId, { restaurantId: claim.restaurantId });
   }
 
-  // The charge-level side effects (ledger, risk signals, the customer's push
-  // and email) belong to exactly one caller. Two verifications of a group can
-  // interleave so that each claims a different order; the one that claimed
-  // the FIRST order of the charge owns them, so the customer is told once.
-  const ownsChargeEffects = rows.length > 0 && claims.some((claim) => claim.orderId === rows[0].id);
+  // The ledger is written by EVERY caller that claimed anything: the upsert is
+  // idempotent (conflict on reference), and if only one caller wrote it, that
+  // caller crashing here would leave paid orders next to a pending ledger row
+  // forever - a retry finds every order settled and does nothing.
+  await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent, isGroup ? expectedAmount : undefined);
 
-  if (ownsChargeEffects) {
-    await upsertPaymentTransaction(order, transactionData, 'paid', webhookEvent, isGroup ? expectedAmount : undefined);
+  // The other charge-level side effects belong to exactly one caller. Two
+  // verifications of a group can interleave so that each claims a different
+  // order. Risk signals go with the FIRST order of the charge (live or closed,
+  // so a payment on a cancelled order is still screened); the customer's push
+  // and email go with the first LIVE order, so the customer is told once even
+  // when the first order was already closed.
+  const claimedIds = new Set(claims.map((claim) => claim.orderId));
+  const firstLiveRow = rows.find((row) => liveByOrderId.get(row.id));
+  const ownsRiskSignals = rows.length > 0 && claimedIds.has(rows[0].id);
+  const ownsCustomerConfirmation = Boolean(firstLiveRow) && claimedIds.has((firstLiveRow as CustomerOrderRow).id);
 
+  if (ownsRiskSignals) {
     await capturePaymentVerificationRiskSignals({
       customerId: order.customerId,
       orderId: order.id,
@@ -529,7 +553,7 @@ const markOrderPaymentState = async (
     }
   }
 
-  if (!ownsChargeEffects || liveClaims.length === 0) {
+  if (!ownsCustomerConfirmation) {
     return { success: true, orderId: order.id, paymentStatus: 'paid' };
   }
 

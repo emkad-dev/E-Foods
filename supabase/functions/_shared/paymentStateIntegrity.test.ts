@@ -802,50 +802,68 @@ Deno.test('refresh does not run the unpaid expiry before asking Paystack', async
   });
 });
 
+const groupOrders = (first: Row = {}) => [
+  makeOrder({ id: 'order-1', orderGroupId: 'order-1', restaurantId: 'rest-1', pricing: { total: 1000 }, ...first }),
+  makeOrder({ id: 'order-2', orderGroupId: 'order-1', restaurantId: 'rest-2', pricing: { total: 1500 } }),
+];
+const GROUP_ROW = { id: 'order-1', orderCount: 2, orderIds: ['order-1', 'order-2'], pricing: { total: 2500 } };
+
+/**
+ * A = webhook, B = customer refresh, interleaved so that A claims order-1 and
+ * B claims order-2:
+ *   1. A is about to write order-1: start B and wait until B is about to write
+ *      order-1 too (both have read 'pending' everywhere).
+ *   2. B's order-1 write is held until A's order-1 write has committed.
+ *   3. A is about to write order-2 (its order-1 is committed): release B, which
+ *      loses order-1, claims order-2 and finishes; then A loses order-2 - or,
+ *      with crashA, A dies right there, before any of its own side effects.
+ * Returns A's error, if any.
+ */
+const runInterleavedGroupRace = async ({ crashA = false } = {}) => {
+  let phase = 0;
+  let bReachedOrder1: () => void = () => {};
+  let releaseB: () => void = () => {};
+  const bAtOrder1 = new Promise<void>((resolve) => (bReachedOrder1 = resolve));
+  const bMayWrite = new Promise<void>((resolve) => (releaseB = resolve));
+  let bRun: Promise<unknown> | null = null;
+
+  const hook: UpdateHook = async (table, payload) => {
+    beforeUpdate = hook;
+    if (table !== 'CustomerOrder' || payload.payment?.status !== 'paid') return;
+    phase += 1;
+    if (phase === 1) {
+      bRun = refresh('order-1');
+      await bAtOrder1;
+    } else if (phase === 2) {
+      bReachedOrder1();
+      await bMayWrite;
+    } else if (phase === 3) {
+      releaseB();
+      await bRun;
+      if (crashA) throw new Error('simulated crash of the first-order owner');
+    }
+  };
+  beforeUpdate = hook;
+
+  let errorA: unknown = null;
+  try {
+    await webhook();
+  } catch (error) {
+    errorA = error;
+  }
+  beforeUpdate = null;
+  assertEquals(phase >= 4, true);
+  return errorA;
+};
+
 Deno.test('group race: two verifications that each claim one order tell the customer once and each restaurant once', async () => {
   await withHarness(async () => {
-    setup([
-      makeOrder({ id: 'order-1', orderGroupId: 'order-1', restaurantId: 'rest-1', pricing: { total: 1000 } }),
-      makeOrder({ id: 'order-2', orderGroupId: 'order-1', restaurantId: 'rest-2', pricing: { total: 1500 } }),
-    ]);
-    db.OrderGroup = [{ id: 'order-1', orderCount: 2, orderIds: ['order-1', 'order-2'], pricing: { total: 2500 } }];
+    setup(groupOrders());
+    db.OrderGroup = [structuredClone(GROUP_ROW)];
     paystackVerifyData = charge('success');
 
-    // A = webhook, B = customer refresh, interleaved so that A claims order-1
-    // and B claims order-2:
-    //   1. A is about to write order-1: start B and wait until B is about to
-    //      write order-1 too (both have read 'pending' everywhere).
-    //   2. B's order-1 write is held until A's order-1 write has committed.
-    //   3. A is about to write order-2 (its order-1 is committed): release B,
-    //      which loses order-1, claims order-2 and finishes; then A loses order-2.
-    let phase = 0;
-    let bReachedOrder1: () => void = () => {};
-    let releaseB: () => void = () => {};
-    const bAtOrder1 = new Promise<void>((resolve) => (bReachedOrder1 = resolve));
-    const bMayWrite = new Promise<void>((resolve) => (releaseB = resolve));
-    let bRun: Promise<unknown> | null = null;
+    assertEquals(await runInterleavedGroupRace(), null);
 
-    const hook: UpdateHook = async (table, payload) => {
-      beforeUpdate = hook;
-      if (table !== 'CustomerOrder' || payload.payment?.status !== 'paid') return;
-      phase += 1;
-      if (phase === 1) {
-        bRun = refresh('order-1');
-        await bAtOrder1;
-      } else if (phase === 2) {
-        bReachedOrder1();
-        await bMayWrite;
-      } else if (phase === 3) {
-        releaseB();
-        await bRun;
-      }
-    };
-    beforeUpdate = hook;
-
-    await webhook();
-    beforeUpdate = null;
-
-    assertEquals(phase >= 4, true);
     assertEquals(order('order-1').payment.status, 'paid');
     assertEquals(order('order-2').payment.status, 'paid');
     assertEquals(events('payment_confirmed').map((event) => event.orderId).sort(), ['order-1', 'order-2']);
@@ -854,6 +872,50 @@ Deno.test('group race: two verifications that each claim one order tell the cust
       notifications('partner', 'payment_confirmed').map((job) => job.payload.payload.data.orderId).sort(),
       ['order-1', 'order-2']
     );
+    // One ledger row for the one charge, paid at the group total.
+    assertEquals(db.PaymentTransaction.length, 1);
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+    assertEquals(db.PaymentTransaction[0].amount, 2500);
+  });
+});
+
+Deno.test('group race: the first-order owner crashing before the ledger write still leaves the ledger paid', async () => {
+  await withHarness(async () => {
+    setup(groupOrders());
+    db.OrderGroup = [structuredClone(GROUP_ROW)];
+    paystackVerifyData = charge('success');
+
+    const errorA = await runInterleavedGroupRace({ crashA: true });
+
+    assertEquals(errorA instanceof Error, true);
+    assertEquals(order('order-1').payment.status, 'paid');
+    assertEquals(order('order-2').payment.status, 'paid');
+    // B claimed only order-2, yet it recorded the ledger: a retry of A would
+    // find every order settled and could never fix a pending row.
+    assertEquals(db.PaymentTransaction.length, 1);
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+  });
+});
+
+Deno.test('group race: when the first order is closed, the caller of the first LIVE order tells the customer', async () => {
+  await withHarness(async () => {
+    setup(groupOrders({ status: 'cancelled', payment: { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'failed' } }));
+    db.OrderGroup = [structuredClone(GROUP_ROW)];
+    paystackVerifyData = charge('success');
+
+    assertEquals(await runInterleavedGroupRace(), null);
+
+    // A claimed the cancelled order-1 (flagged, no confirmation); B claimed
+    // the live order-2 and owns the customer's confirmation.
+    assertEquals(order('order-1').status, 'cancelled');
+    assertEquals(order('order-1').needsAttention, true);
+    assertEquals(order('order-2').payment.status, 'paid');
+    assertEquals(notifications('customer', 'payment_confirmed').length, 1);
+    assertEquals(
+      notifications('partner', 'payment_confirmed').map((job) => job.payload.payload.data.orderId),
+      ['order-2']
+    );
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
   });
 });
 
