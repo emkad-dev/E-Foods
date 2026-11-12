@@ -100,6 +100,17 @@ export default function OrdersPage() {
 
   const currency = filteredOrders.find((order) => order.pricing?.currency)?.pricing?.currency ?? 'NGN';
 
+  // Every flagged order, whatever its status and outside the date range: the
+  // table below is the reporting feed and has no cancelled or rejected rows, so
+  // a refund to return by hand on a rejected order would never appear in it.
+  const attentionOrders = useMemo(
+    () =>
+      [...(snapshot.attentionOrders ?? [])].sort(
+        (left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0)
+      ),
+    [snapshot.attentionOrders]
+  );
+
   // The `hasData &&` guards below stopped the console *claiming* "no orders"
   // after a failed fetch, but the other half of the claim was never closed:
   // both false branches fell through to the table, so a failed fetch drew a
@@ -196,6 +207,53 @@ export default function OrdersPage() {
 
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
+      {hasData && attentionOrders.length > 0 ? (
+        <div className="card">
+          <div className="card-title-row">
+            <h3 className="card-title">Needs attention ({formatNumber(attentionOrders.length)})</h3>
+            <span className="muted">Flagged orders of any status, cancelled and rejected included</span>
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Order id</th>
+                  <th>Restaurant</th>
+                  <th>Status</th>
+                  <th>Payment</th>
+                  <th>Date &amp; time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attentionOrders.map((order) => (
+                  <tr key={order.id}>
+                    <td className="cell-strong">
+                      <Link to={`/orders/${encodeURIComponent(order.id)}`}>
+                        #{String(order.id).slice(-8).toUpperCase()}
+                      </Link>
+                    </td>
+                    <td>{order.restaurantName || 'Unknown restaurant'}</td>
+                    <td>
+                      <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
+                      {order.customerIssueReportedAt ? (
+                        <span className="badge badge-warning">Problem reported</span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <StatusBadge
+                        label={order.payment?.status ?? 'unknown'}
+                        tone={getPaymentTone(order.payment?.status?.toString())}
+                      />
+                    </td>
+                    <td className="muted">{formatDateTime(order.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
       <div className="card">
         {/* The skeleton belongs INSIDE the card, in place of the table. As a
             sibling above it, a first load painted shimmer bars and a complete
@@ -232,10 +290,11 @@ export default function OrdersPage() {
                       {/* An escalated order stays `placed` -- the acceptance
                           sweep raises this flag instead of moving the status,
                           so `status` alone cannot tell the operator that the
-                          restaurant's clock already ran out. The snapshot has
-                          carried the flag all along and nothing read it. */}
+                          restaurant's clock already ran out. The flag is also
+                          raised by a late payment, a refund to return by hand
+                          and a customer problem report. */}
                       {order.needsAttention === true ? (
-                        <span className="badge badge-warning" title="Past its acceptance deadline and escalated.">
+                        <span className="badge badge-warning" title="Flagged for an admin. Open the order to see why.">
                           Needs attention
                         </span>
                       ) : null}

@@ -24,6 +24,10 @@ import type { AdminTone } from '../theme/tones';
  * settlement) and must pay the restaurant out by hand. Nothing in the console
  * showed which restaurants were in that state, so a published restaurant could
  * take orders for weeks while its money sat with the platform.
+ *
+ * The figures are what each restaurant is OWED (its settlement share of paid
+ * orders), not gross payments: summing the payment ledger counted the platform
+ * fee, tips and refunded or rejected orders as restaurant money.
  */
 
 const payoutTone = (status: string): AdminTone => {
@@ -119,14 +123,14 @@ export default function RestaurantsPage() {
             caption="Platform holds their money"
           />
           <KpiCard
-            label={`Paid manually (${windowDays}d)`}
+            label={`Owed, held by platform (${windowDays}d)`}
             value={formatCurrency(data.platformSettlement.manualAmount)}
-            caption={`${formatNumber(data.platformSettlement.manualCount)} payments held by the platform`}
+            caption={`${formatNumber(data.platformSettlement.manualCount)} paid orders to pay out by hand`}
           />
           <KpiCard
-            label={`Paid with split (${windowDays}d)`}
+            label={`Owed, split at source (${windowDays}d)`}
             value={formatCurrency(data.platformSettlement.splitAmount)}
-            caption={`${formatNumber(data.platformSettlement.splitCount)} payments split at source`}
+            caption={`${formatNumber(data.platformSettlement.splitCount)} paid orders Paystack splits to the restaurant`}
           />
         </div>
       ) : null}
@@ -139,6 +143,12 @@ export default function RestaurantsPage() {
           </button>
         </div>
 
+        {viewState === 'ready' ? (
+          <p className="muted" style={{ marginTop: 0 }}>
+            Owed is each restaurant&apos;s share of its paid orders (what the split sends, or what must be paid out
+            by hand), not the amount the customer paid. Refunded payments and cancelled or rejected orders are left out.
+          </p>
+        ) : null}
         {viewState === 'loading' ? (
           <SkeletonRows count={5} />
         ) : viewState === 'error' ? (
@@ -158,8 +168,8 @@ export default function RestaurantsPage() {
                   <th>Paystack subaccount</th>
                   <th>Payout profile</th>
                   <th>Delivery</th>
-                  <th>Manual ({windowDays}d)</th>
-                  <th>Split ({windowDays}d)</th>
+                  <th>Owed, manual ({windowDays}d)</th>
+                  <th>Owed, split ({windowDays}d)</th>
                 </tr>
               </thead>
               <tbody>

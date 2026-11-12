@@ -17,6 +17,7 @@ import { getAdminDashboardSnapshot, type AdminDashboardSnapshot } from '../servi
 const POLL_INTERVAL_MS = 120000;
 
 const EMPTY_SNAPSHOT: AdminDashboardSnapshot = {
+  attentionOrders: [],
   dispatchProfiles: [],
   featureFlags: {},
   orders: [],

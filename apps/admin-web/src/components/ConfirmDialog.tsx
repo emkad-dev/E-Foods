@@ -5,6 +5,8 @@ type ConfirmDialogProps = {
   busy?: boolean;
   busyLabel?: string;
   cancelLabel?: string;
+  /** Holds the confirm button off until the body's input is valid (e.g. a required reason). */
+  confirmDisabled?: boolean;
   confirmLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -25,6 +27,7 @@ export default function ConfirmDialog({
   busy = false,
   busyLabel = 'Working…',
   cancelLabel = 'Cancel',
+  confirmDisabled = false,
   confirmLabel = 'Confirm',
   onCancel,
   onConfirm,
@@ -91,7 +94,7 @@ export default function ConfirmDialog({
           >
             {cancelLabel}
           </button>
-          <button type="button" className="btn btn-sm confirm-dialog-confirm" disabled={busy} onClick={onConfirm}>
+          <button type="button" className="btn btn-sm confirm-dialog-confirm" disabled={busy || confirmDisabled} onClick={onConfirm}>
             {busy ? busyLabel : confirmLabel}
           </button>
         </div>
