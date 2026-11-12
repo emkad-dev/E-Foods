@@ -208,7 +208,8 @@ export const setAdminRestaurantDeliveryProvider = (input: {
 }) =>
   callAdminRpc<{ deliveryProvider: RestaurantDeliveryProvider; id: string; name: string | null; previous: RestaurantDeliveryProvider }>(
     'adminSetRestaurantDeliveryProvider',
-    input
+    input,
+    { write: true }
   );
 
 export type RiderRosterRow = {
@@ -286,7 +287,7 @@ export const upsertAdminFeatureFlag = (input: {
   description?: string | null;
   enabled: boolean;
   key: string;
-}) => callAdminRpc<AdminUpsertFeatureFlagResponse>('adminUpsertFeatureFlag', input);
+}) => callAdminRpc<AdminUpsertFeatureFlagResponse>('adminUpsertFeatureFlag', input, { write: true });
 
 /* ---------------------------------------------------------------- audit log */
 

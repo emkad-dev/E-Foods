@@ -39,9 +39,9 @@ export const assignUserRole = (targetUid: string, role: AppRole, restaurantId?: 
     restaurantId: restaurantId?.trim() ? restaurantId.trim() : null,
     role,
     targetUid,
-  });
+  }, { write: true });
 
-export const revokeUserRole = (targetUid: string) => callAdminRpc<RoleMutationResult>('revokeUserRole', { targetUid });
+export const revokeUserRole = (targetUid: string) => callAdminRpc<RoleMutationResult>('revokeUserRole', { targetUid }, { write: true });
 
 export const provisionStaffAccount = (input: {
   displayName?: string;
@@ -49,7 +49,7 @@ export const provisionStaffAccount = (input: {
   password: string;
   role: Extract<AppRole, 'restaurant' | 'dispatch' | 'admin'>;
   restaurantId?: string | null;
-}) => callAdminRpc<ProvisionStaffResult>('provisionStaffAccount', input);
+}) => callAdminRpc<ProvisionStaffResult>('provisionStaffAccount', input, { write: true });
 
 export const updateUserRestaurantLink = (targetUid: string, restaurantId?: string | null) =>
   callAdminRpc<{ restaurantId: string | null; targetUid: string; tokenRefreshRequired: boolean }>(
@@ -57,17 +57,18 @@ export const updateUserRestaurantLink = (targetUid: string, restaurantId?: strin
     {
       restaurantId: restaurantId?.trim() ? restaurantId.trim() : null,
       targetUid,
-    }
+    },
+    { write: true }
   );
 
 export const disableUserAccess = (targetUid: string) =>
-  callAdminRpc<DisableAccessResult>('disableUserAccess', { targetUid });
+  callAdminRpc<DisableAccessResult>('disableUserAccess', { targetUid }, { write: true });
 
 export const enableUserAccess = (targetUid: string) =>
-  callAdminRpc<EnableAccessResult>('enableUserAccess', { targetUid });
+  callAdminRpc<EnableAccessResult>('enableUserAccess', { targetUid }, { write: true });
 
 export const deleteAdminAccess = (targetUid: string) =>
-  callAdminRpc<DeleteAdminAccessResult>('deleteAdminAccess', { targetUid });
+  callAdminRpc<DeleteAdminAccessResult>('deleteAdminAccess', { targetUid }, { write: true });
 
 /**
  * Honours a deletion request from a NON-admin account holder who cannot reach
@@ -79,4 +80,4 @@ export const deleteUserAccountOnRequest = (targetUid: string, reason?: string | 
   callAdminRpc<DeleteAdminAccessResult>('deleteUserAccountOnRequest', {
     reason: reason?.trim() ? reason.trim() : null,
     targetUid,
-  });
+  }, { write: true });

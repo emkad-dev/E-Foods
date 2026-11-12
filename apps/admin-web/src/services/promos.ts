@@ -33,10 +33,10 @@ export const createPromo = (input: {
   detailBody?: string | null;
   terms?: string | null;
   ctaLabel?: string | null;
-}) => callAdminRpc<{ promo: Promo }>('promoCreate', input);
+}) => callAdminRpc<{ promo: Promo }>('promoCreate', input, { write: true });
 
 export const setPromoActive = (id: string, active: boolean) =>
-  callAdminRpc<{ promo: Promo }>('promoSetActive', { id, active });
+  callAdminRpc<{ promo: Promo }>('promoSetActive', { id, active }, { write: true });
 
 export type PromoCodeType = 'percent' | 'fixed' | 'free_delivery';
 export type PromoCodeFunding = 'platform' | 'restaurant';
@@ -76,7 +76,9 @@ export interface CreatePromoCodeInput {
 export const listPromoCodes = () => callAdminRpc<{ promoCodes: PromoCode[] }>('adminListPromoCodes');
 
 export const createPromoCode = (input: CreatePromoCodeInput) =>
-  callAdminRpc<{ promoCode: PromoCode }>('adminCreatePromoCode', input as unknown as Record<string, unknown>);
+  callAdminRpc<{ promoCode: PromoCode }>('adminCreatePromoCode', input as unknown as Record<string, unknown>, {
+    write: true,
+  });
 
 export const setPromoCodeActive = (id: string, isActive: boolean) =>
-  callAdminRpc<{ promoCode: PromoCode }>('adminSetPromoCodeActive', { id, isActive });
+  callAdminRpc<{ promoCode: PromoCode }>('adminSetPromoCodeActive', { id, isActive }, { write: true });

@@ -41,9 +41,25 @@ import { supabase } from './supabase/config';
  * so an expected 4xx rejection (e.g. a wrong staff-invite code) is not
  * reported as a fault, same as the authenticated path.
  */
-export const callAnonymousBackendRpc = async <T>(action: string, data: Record<string, unknown>): Promise<T> => {
+export type AnonymousBackendRpcOptions = {
+  /**
+   * Same meaning as `BackendRpcOptions.write` on the authenticated path: a call
+   * that changes server state is not re-sent through the relay after its direct
+   * request went out and failed in transport. `staffInviteCreateAccount` creates
+   * an account; if its reply is lost and it is sent again, the second request
+   * finds the account the first one made and the invitee is told their signup
+   * failed when it worked.
+   */
+  write?: boolean;
+};
+
+export const callAnonymousBackendRpc = async <T>(
+  action: string,
+  data: Record<string, unknown>,
+  options?: AnonymousBackendRpcOptions
+): Promise<T> => {
   try {
-    return await callAnonymousBackendRpcInternal<T>(action, data);
+    return await callAnonymousBackendRpcInternal<T>(action, data, options?.write === true);
   } catch (error) {
     if (shouldReportRpcFailure(error)) {
       reportError('partner.anonymous_rpc', error, { action });
@@ -53,7 +69,11 @@ export const callAnonymousBackendRpc = async <T>(action: string, data: Record<st
   }
 };
 
-const callAnonymousBackendRpcInternal = async <T>(action: string, data: Record<string, unknown>): Promise<T> => {
+const callAnonymousBackendRpcInternal = async <T>(
+  action: string,
+  data: Record<string, unknown>,
+  write: boolean
+): Promise<T> => {
   // Resolved the same way `callBackendRpc` does, so this deliberately separate
   // transport follows the split/legacy kill switch instead of drifting from it.
   const targetFunction = resolveRpcTarget(action, resolveRpcMode(appEnv.rpcMode));
@@ -66,8 +86,13 @@ const callAnonymousBackendRpcInternal = async <T>(action: string, data: Record<s
   const backendRpcUrl = appEnv.backendRpcUrl?.trim();
 
   if (backendRpcUrl && anonKey) {
+    // Set just before the fetch: a malformed configured URL throws earlier and
+    // sent nothing, so even a write may still use the relay.
+    let directRequestSent = false;
+
     try {
       const targetUrl = deriveRpcFunctionUrl(backendRpcUrl, targetFunction, KNOWN_RPC_TARGETS);
+      directRequestSent = true;
       const response = await fetch(targetUrl, {
         body: JSON.stringify(payload),
         headers: {
@@ -90,6 +115,17 @@ const callAnonymousBackendRpcInternal = async <T>(action: string, data: Record<s
     } catch (error) {
       if (error instanceof Error && error.name === 'BackendRpcError') {
         throw error;
+      }
+
+      // A write that went out may already have been applied; see `write` above.
+      // Named NetworkError so it reads as a connection problem, the same as the
+      // authenticated path's transport failures.
+      if (write && directRequestSent) {
+        const networkError = new Error(
+          error instanceof Error ? error.message : `Anonymous RPC ${action} failed to send request.`
+        );
+        networkError.name = 'NetworkError';
+        throw networkError;
       }
 
       console.warn(`Anonymous RPC ${action} direct URL transport failure, retrying via relay:`, error);

@@ -42,9 +42,11 @@ const isOfflineSignal = (error: unknown) => {
 
 const isTimeoutSignal = (error: unknown) => {
   const name = readString(error, 'name');
-  // 'NetworkError' is what callBackendRpc throws when both its direct call and
-  // its relay could not reach the server ("Backend RPC x failed: Failed to send
-  // a request to the Edge Function"); no message pattern matches that wording.
+  // 'NetworkError' is what callBackendRpc throws on any transport failure: a read
+  // whose direct call and relay both could not reach the server ("Backend RPC x
+  // failed: Failed to send a request to the Edge Function"), or a write whose
+  // direct call failed and which is deliberately not re-sent through the relay
+  // (the raw fetch message). No message pattern covers all of those wordings.
   // 'TimeoutError' is its overall-deadline expiry. Browsers also use both names
   // for dropped and timed-out requests.
   if (name === 'AbortError' || name === 'AuthRetryableFetchError' || name === 'NetworkError' || name === 'TimeoutError') {

@@ -253,8 +253,10 @@ export const getKitchenSignal = (order: OrderDocument): KitchenSignal => {
     return { label: 'Handed off', tone: 'success' };
   }
 
+  // A collected pickup order is stored as `delivered`, but nothing was delivered:
+  // the customer took it at the counter. Same wording as the status pill.
   if (status === 'delivered') {
-    return { label: 'Delivered', tone: 'success' };
+    return { label: order.fulfillmentType === 'pickup' ? 'Collected' : 'Delivered', tone: 'success' };
   }
 
   if (status === 'failed_delivery') {

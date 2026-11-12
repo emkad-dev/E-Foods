@@ -132,6 +132,9 @@ export type StaffInviteResolveResult = {
  *
  * A WRONG code costs one of five attempts. A correct one costs nothing, so
  * re-resolving the same valid code (going back a step, say) is free.
+ *
+ * Marked as a write for that reason: a wrong code sent twice by an automatic
+ * re-send would cost two attempts for one tap.
  */
 export const resolveStaffInvite = (email: string, code: string) =>
   callAnonymousBackendRpc<StaffInviteResolveResult>('staffInviteResolve', {
@@ -139,7 +142,7 @@ export const resolveStaffInvite = (email: string, code: string) =>
     // echoes back identical to the one the server matched on.
     email: email.trim().toLowerCase(),
     code: code.trim(),
-  });
+  }, { write: true });
 
 export type StaffInviteCreateAccountResult = {
   email: string;
@@ -181,4 +184,4 @@ export const createStaffInviteAccount = (input: {
     // and trimming it here would create the account with a password that does
     // not match what the person typed into the sign-in call two lines later.
     password: input.password,
-  });
+  }, { write: true });

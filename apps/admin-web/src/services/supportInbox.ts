@@ -45,10 +45,10 @@ export const getConversation = (conversationId: string) =>
   });
 
 export const sendAgentReply = (conversationId: string, body: string) =>
-  callAdminRpc<{ message: SupportMessage }>('supportSendAgentReply', { conversationId, body });
+  callAdminRpc<{ message: SupportMessage }>('supportSendAgentReply', { conversationId, body }, { write: true });
 
 export const setStatus = (conversationId: string, status: SupportStatus) =>
-  callAdminRpc<{ conversation: InboxConversation }>('supportSetConversationStatus', { conversationId, status });
+  callAdminRpc<{ conversation: InboxConversation }>('supportSetConversationStatus', { conversationId, status }, { write: true });
 
 export const assignConversation = (conversationId: string, assignTo: string | null | 'me') =>
-  callAdminRpc<{ conversation: InboxConversation }>('supportAssignConversation', { conversationId, assignTo });
+  callAdminRpc<{ conversation: InboxConversation }>('supportAssignConversation', { conversationId, assignTo }, { write: true });

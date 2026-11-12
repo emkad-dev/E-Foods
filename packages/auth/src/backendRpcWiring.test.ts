@@ -476,3 +476,30 @@ test('a server answer is never retried, for a write or a read', async () => {
     assert.equal(relay.calls, 0, `no relay retry (${options ? 'write' : 'read'})`);
   }
 });
+
+test('a write whose direct request was never sent (malformed URL) still uses the relay', async () => {
+  const { supabase, relay } = countingRelayClient();
+  let directCalls = 0;
+
+  await withFetch(
+    async () => {
+      directCalls += 1;
+      return jsonResponse(200, { data: { via: 'direct' } });
+    },
+    async () => {
+      // `new URL` throws on this before any fetch, so nothing reached the server
+      // and sending through the relay cannot apply the write twice.
+      const result = await callBackendRpc<{ via: string }>(
+        supabase,
+        { ...ENV, backendRpcUrl: 'not a url' },
+        'partnerUpdateOrderStatus',
+        {},
+        { write: true }
+      );
+      assert.deepEqual(result, { via: 'relay' });
+    }
+  );
+
+  assert.equal(directCalls, 0, 'no direct request went out');
+  assert.equal(relay.calls, 1);
+});

@@ -8,8 +8,9 @@ import { SkeletonDetail, SkeletonScreen } from '../../../src/components/Skeleton
 import { normalizeOrderStatus } from '../../../src/domain/orders';
 import {
   formatPartnerOrderStatusLabel,
-  hasOrderReachedActionTarget,
+  ORDER_ALREADY_CANCELLED_MESSAGE,
   orderActionSuccessMessage,
+  resolveFailedOrderAction,
   type PartnerOrderAction,
 } from '../../../src/domain/orderActionOutcome';
 import { getOrderConfirmationStatus } from '../../../src/domain/orderConfirmationStatus';
@@ -73,12 +74,31 @@ export default function PartnerOrderDetailScreen() {
   };
 
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
+  // An action can outlive the screen: the kitchen taps Reject, then backs out
+  // while the call (or the reload after a failure) is still open. When it
+  // settles, a notice would land on nothing and a scheduled router.back() would
+  // pop whatever screen they had moved on to. So nothing is shown or scheduled
+  // once this is false. Set in the effect (not at declaration) so a StrictMode
+  // remount turns it back on.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
-    },
-    []
-  );
+      leaveTimerRef.current = null;
+    };
+  }, []);
+
+  // A rejected (or already cancelled) order has nothing left to do here, so the
+  // screen closes, but only after the notice has been on screen long enough to
+  // read. The ref is cleared when it fires so it never points at a spent timer.
+  const leaveAfterNotice = () => {
+    leaveTimerRef.current = setTimeout(() => {
+      leaveTimerRef.current = null;
+      router.back();
+    }, LEAVE_AFTER_REJECT_MS);
+  };
 
   // Per-action, not one screen-wide flag: the same reason the customer profile
   // screen keeps its own `busy` rather than reusing the auth context's. Only the
@@ -111,11 +131,12 @@ export default function PartnerOrderDetailScreen() {
     busyRef.current = action;
     setBusy(action);
 
-    let succeeded = false;
+    let outcome: 'done' | 'cancelled' | 'failed' = 'failed';
+    let failureMessage: string | null = null;
 
     try {
       await run(target);
-      succeeded = true;
+      outcome = 'done';
     } catch (nextError: any) {
       // A failed call is not proof of a failed action. The reply can be lost on
       // a bad connection after the server applied it, or a duplicate can meet
@@ -125,24 +146,36 @@ export default function PartnerOrderDetailScreen() {
       // order rather than the error. Only an order that did not get there, or a
       // reload that also failed, earns the failure notice.
       const fresh = await reload();
-      if (fresh && hasOrderReachedActionTarget(action, fresh.status, fresh.fulfillmentType ?? target.fulfillmentType)) {
-        succeeded = true;
-      } else {
-        reportFailure(toUserMessage(nextError, fallbackMessage));
+      outcome = fresh
+        ? resolveFailedOrderAction(action, fresh.status, fresh.fulfillmentType ?? target.fulfillmentType)
+        : 'failed';
+      if (outcome === 'failed') {
+        failureMessage = toUserMessage(nextError, fallbackMessage);
       }
     } finally {
       busyRef.current = null;
       setBusy(null);
     }
 
-    if (!succeeded) return;
+    if (!mountedRef.current) return;
+
+    if (outcome === 'failed') {
+      reportFailure(failureMessage ?? fallbackMessage);
+      return;
+    }
+
+    if (outcome === 'cancelled') {
+      // Not "Order rejected" (this tap did not reject it) and not a failure
+      // (there is nothing left to do): just what happened.
+      showNotice({ tone: 'info', title: ORDER_ALREADY_CANCELLED_MESSAGE });
+      leaveAfterNotice();
+      return;
+    }
 
     reportSuccess(action, target.fulfillmentType);
 
-    // A rejected order has nothing left to do here, so the screen closes, but
-    // only after the receipt has been on screen long enough to read.
     if (action === 'reject') {
-      leaveTimerRef.current = setTimeout(() => router.back(), LEAVE_AFTER_REJECT_MS);
+      leaveAfterNotice();
     }
   };
 

@@ -7,6 +7,7 @@ import {
   formatPartnerOrderStatusLabel,
   hasOrderReachedActionTarget,
   orderActionSuccessMessage,
+  resolveFailedOrderAction,
   type PartnerOrderAction,
 } from './orderActionOutcome.ts';
 
@@ -63,12 +64,28 @@ test('rider steps are not part of a pickup order, so they do not count there', (
   assert.equal(reached('accept', 'picked_up', 'pickup'), false);
 });
 
-test('reject is reached when the order was rejected or cancelled, and only then', () => {
+test('reject is reached only when the order was rejected', () => {
   assert.equal(reached('reject', 'rejected'), true);
-  assert.equal(reached('reject', 'cancelled'), true);
-  assert.equal(reached('reject', 'cancelled', 'pickup'), true);
-  for (const status of ['placed', 'accepted', 'preparing', 'delivered', 'failed_delivery']) {
+  assert.equal(reached('reject', 'rejected', 'pickup'), true);
+  for (const status of ['cancelled', 'placed', 'accepted', 'preparing', 'delivered', 'failed_delivery']) {
     assert.equal(reached('reject', status), false, status);
+  }
+});
+
+test('after a failed call: done when the order got there, failed when it did not', () => {
+  assert.equal(resolveFailedOrderAction('delivered', 'delivered', 'pickup'), 'done');
+  assert.equal(resolveFailedOrderAction('accept', 'preparing', 'delivery'), 'done');
+  assert.equal(resolveFailedOrderAction('reject', 'rejected', 'delivery'), 'done');
+  assert.equal(resolveFailedOrderAction('accept', 'placed', 'delivery'), 'failed');
+  assert.equal(resolveFailedOrderAction('reject', 'accepted', 'pickup'), 'failed');
+});
+
+test('a reject that finds the order cancelled is neither done nor failed', () => {
+  assert.equal(resolveFailedOrderAction('reject', 'cancelled', 'delivery'), 'cancelled');
+  assert.equal(resolveFailedOrderAction('reject', 'cancelled', 'pickup'), 'cancelled');
+  // Only a reject gets the neutral outcome; a forward action on a cancelled order failed.
+  for (const action of ['accept', 'preparing', 'ready', 'delivered'] as const) {
+    assert.equal(resolveFailedOrderAction(action, 'cancelled', 'delivery'), 'failed', action);
   }
 });
 
@@ -87,7 +104,7 @@ test('a missing fulfilment type is a delivery order', () => {
 
 test('success messages say what happened', () => {
   assert.equal(orderActionSuccessMessage('accept', 'delivery'), 'Order accepted');
-  assert.equal(orderActionSuccessMessage('preparing', 'pickup'), 'Preparing');
+  assert.equal(orderActionSuccessMessage('preparing', 'pickup'), 'Marked as preparing');
   assert.equal(orderActionSuccessMessage('ready', 'pickup'), 'Marked ready for pickup');
   assert.equal(orderActionSuccessMessage('ready', 'delivery'), 'Marked ready');
   assert.equal(orderActionSuccessMessage('delivered', 'pickup'), 'Order collected. Waiting for the customer to confirm.');

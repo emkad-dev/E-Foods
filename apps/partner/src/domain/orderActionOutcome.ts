@@ -43,8 +43,9 @@ const FORWARD_TARGET: Record<Exclude<PartnerOrderAction, 'reject'>, OrderStatus>
  * True when `status` is at or past the status `action` aimed for, so the action
  * can be treated as done even though the call that sent it failed.
  *
- * Reject aims for an end, not a step: a rejected order, or one that ended up
- * cancelled, has stopped either way.
+ * Reject counts only when the order is `rejected`. An order that ended up
+ * `cancelled` was not rejected by this tap (the customer or the deadline sweep
+ * ended it), so "Order rejected" would be untrue; see `resolveFailedOrderAction`.
  */
 export const hasOrderReachedActionTarget = (
   action: PartnerOrderAction,
@@ -54,7 +55,7 @@ export const hasOrderReachedActionTarget = (
   const current = normalizeOrderStatus(status);
 
   if (action === 'reject') {
-    return current === 'rejected' || current === 'cancelled';
+    return current === 'rejected';
   }
 
   const path = isPickup(fulfillmentType) ? PICKUP_PATH : DELIVERY_PATH;
@@ -65,6 +66,32 @@ export const hasOrderReachedActionTarget = (
 
   return currentIndex >= path.indexOf(FORWARD_TARGET[action]);
 };
+
+/**
+ * What the screen does after an action's call failed and the order was read
+ * again:
+ * - `done`: the order got where the action aimed, so report success.
+ * - `cancelled`: a reject met an order that is already cancelled. Nothing is
+ *   left to reject, so neither success nor failure is true; the screen says the
+ *   order was cancelled and closes as it would after a reject.
+ * - `failed`: show the failure notice.
+ */
+export type FailedOrderActionOutcome = 'done' | 'cancelled' | 'failed';
+
+export const resolveFailedOrderAction = (
+  action: PartnerOrderAction,
+  status: string | null | undefined,
+  fulfillmentType: string | null | undefined
+): FailedOrderActionOutcome => {
+  if (hasOrderReachedActionTarget(action, status, fulfillmentType)) {
+    return 'done';
+  }
+
+  return action === 'reject' && normalizeOrderStatus(status) === 'cancelled' ? 'cancelled' : 'failed';
+};
+
+/** The neutral notice for a reject that found the order already cancelled. */
+export const ORDER_ALREADY_CANCELLED_MESSAGE = 'This order was cancelled.';
 
 /** The receipt shown after an action worked, worded for what actually happened. */
 export const orderActionSuccessMessage = (
@@ -77,7 +104,7 @@ export const orderActionSuccessMessage = (
     case 'accept':
       return 'Order accepted';
     case 'preparing':
-      return 'Preparing';
+      return 'Marked as preparing';
     case 'ready':
       return pickup ? 'Marked ready for pickup' : 'Marked ready';
     case 'delivered':
