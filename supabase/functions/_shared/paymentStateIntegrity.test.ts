@@ -136,6 +136,13 @@ const makeBuilder = (table: string) => {
         const cell = readColumn(row, column);
         return cell !== null && cell !== undefined && (cell as string) < (value as string);
       }),
+    // Unfiltered: only the customer cancel's risk-signal reads use these, and
+    // nothing here asserts on what they return.
+    gte: () => builder,
+    lte: () => builder,
+    gt: () => builder,
+    not: () => builder,
+    or: () => builder,
     order: (column: string, options?: { ascending?: boolean }) => {
       orderColumn = column;
       orderAscending = options?.ascending !== false;
@@ -376,6 +383,150 @@ Deno.test('refresh: a refunded payment is never turned back into paid', async ()
     assertEquals(db.PaymentTransaction[0].status, 'refunded');
     assertEquals(db.queue_notifications.length, 0);
     assertEquals(db.DeliveryEvent.length, 0);
+  });
+});
+
+// ───────────── Late payment on a cancelled order that was never paid ─────────────
+
+// What cancels used to store on an unpaid checkout: 'refunded' with a refund
+// of the order total, although nothing was ever captured (production rows).
+const phantomRefund = () => ({
+  method: 'bank_transfer',
+  provider: 'paystack',
+  reference: REFERENCE,
+  status: 'refunded',
+  capturedAmount: 0,
+  paidAt: null,
+  refundAmount: 2500,
+  refundedAt: '2026-11-09T10:05:00.000Z',
+  lastEvent: 'customer_cancelled_full_refund',
+});
+
+const cancelledOrder = (payment: Row) =>
+  makeOrder({
+    status: 'cancelled',
+    payment,
+    cancellation: { actor: 'customer', refundRate: 1 },
+    timeline: { placedAt: '2026-11-09T10:00:00.000Z', cancelledAt: '2026-11-09T10:05:00.000Z' },
+  });
+
+const assertFlaggedLatePayment = () => {
+  assertEquals(order().status, 'cancelled', 'never reopened');
+  assertEquals(order().timeline.cancelledAt, '2026-11-09T10:05:00.000Z');
+  assertEquals(order().payment.status, 'paid');
+  assertEquals(order().payment.capturedAmount, 2500);
+  assertEquals(order().needsAttention, true);
+  assertEquals(typeof order().timeline.latePaymentAt, 'string');
+  assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_on_closed_order']);
+  assertEquals(events('payment_received_on_closed_order').length, 1, 'alerted once');
+  assertEquals(events('payment_confirmed').length, 0);
+  assertEquals(notifications('partner', 'payment_confirmed').length, 0, 'the restaurant is not told to cook');
+  assertEquals(notifications('customer', 'payment_confirmed').length <= 1, true);
+  assertEquals(db.PaymentTransaction[0].status, 'paid', 'the ledger records the captured money');
+};
+
+Deno.test('webhook: a late success on a legacy refunded-but-never-captured cancelled order is flagged and alerted once', async () => {
+  await withHarness(async () => {
+    setup([cancelledOrder(phantomRefund())]);
+    paystackVerifyData = charge('success', { channel: 'bank_transfer' });
+
+    const result = await webhook();
+    assertEquals(result.paymentStatus, 'paid');
+    assertFlaggedLatePayment();
+    assertEquals(order().payment.refundAmount, 0, 'the phantom refund is not carried onto the paid payment');
+    assertEquals(order().payment.refundedAt, null);
+
+    // A redelivery (past the idempotency record) now finds real money: settled.
+    db.IdempotencyRecord = [];
+    await webhook();
+    assertFlaggedLatePayment();
+  });
+});
+
+Deno.test('refresh: the same late success on a legacy phantom refund goes down the closed-order path too', async () => {
+  await withHarness(async () => {
+    setup([cancelledOrder(phantomRefund())]);
+    paystackVerifyData = charge('success', { channel: 'bank_transfer' });
+
+    const { body } = await refresh();
+    assertEquals(body.data.paymentStatus, 'paid');
+    assertEquals(body.data.status, 'cancelled');
+    assertFlaggedLatePayment();
+  });
+});
+
+Deno.test('webhook: a late success after a new-style unpaid customer cancel is flagged and alerted once', async () => {
+  await withHarness(async () => {
+    setup([
+      makeOrder({
+        payment: {
+          method: 'bank_transfer',
+          provider: 'paystack',
+          reference: REFERENCE,
+          status: 'pending',
+          capturedAmount: 0,
+          paidAt: null,
+          refundAmount: 0,
+          refundedAt: null,
+        },
+      }),
+    ]);
+
+    // The real customer cancel, then the transfer lands.
+    const cancelled = await ordersDomain.handlers.cancelCustomerOrder({
+      context: customerContext,
+      data: { orderId: 'order-1' },
+      request: new Request('https://example.test/rpc', { method: 'POST' }),
+    } as never);
+    assertEquals(cancelled.status, 200);
+    assertEquals(order().status, 'cancelled');
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(order().payment.refundAmount, 0);
+    assertEquals(db.PaymentTransaction[0].status, 'failed');
+    assertEquals(db.OperationalAlert.length, 0, 'an unpaid cancel alerts nobody');
+    const cancelledAt = order().timeline.cancelledAt;
+
+    paystackVerifyData = charge('success', { channel: 'bank_transfer' });
+    await webhook();
+    assertEquals(order().status, 'cancelled', 'never reopened');
+    assertEquals(order().timeline.cancelledAt, cancelledAt);
+    assertEquals(order().payment.status, 'paid');
+    assertEquals(order().needsAttention, true);
+    assertEquals(typeof order().timeline.latePaymentAt, 'string');
+    assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_on_closed_order']);
+    assertEquals(events('payment_received_on_closed_order').length, 1);
+    assertEquals(notifications('partner', 'payment_confirmed').length, 0);
+    assertEquals(db.PaymentTransaction[0].status, 'paid');
+
+    db.IdempotencyRecord = [];
+    await webhook();
+    assertEquals(events('payment_received_on_closed_order').length, 1, 'a redelivery alerts nobody again');
+  });
+});
+
+Deno.test('webhook: a duplicate delivery on a genuinely refunded paid order stays settled and alerts nobody', async () => {
+  await withHarness(async () => {
+    const refunded = {
+      method: 'card',
+      provider: 'paystack',
+      reference: REFERENCE,
+      status: 'refunded',
+      capturedAmount: 2500,
+      paidAt: '2026-11-09T10:01:00.000Z',
+      refundAmount: 2500,
+      refundedAt: '2026-11-09T11:00:00.000Z',
+    };
+    setup([cancelledOrder(refunded)], [pendingTransaction({ status: 'paid' })]);
+    paystackVerifyData = charge('success');
+
+    const result = await webhook();
+    assertEquals(result.paymentStatus, 'refunded');
+    assertEquals(order().payment, refunded);
+    assertEquals(order().needsAttention, false);
+    assertEquals(db.OperationalAlert.length, 0);
+    assertEquals(db.DeliveryEvent.length, 0);
+    assertEquals(db.queue_notifications.length, 0);
+    assertEquals(paystackVerifyCalls, 0, 'settled money is not even re-verified');
   });
 });
 

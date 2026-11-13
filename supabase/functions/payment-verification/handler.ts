@@ -12,7 +12,7 @@ import {
 import { broadcastOrderChanged } from '../_shared/realtime.ts';
 import { logEdgeEvent } from '../_shared/observability.ts';
 import { capturePaymentOnClosedOrderAlert, recordOperationalAlert } from '../_shared/operationalAlerts.ts';
-import { storedPaymentStatus, TERMINAL_ORDER_STATUSES } from '../_shared/orders.ts';
+import { isPaymentCaptured, storedPaymentStatus, TERMINAL_ORDER_STATUSES } from '../_shared/orders.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -204,8 +204,24 @@ const ORDER_STATE_COLUMNS = 'id,customerId,orderGroupId,restaurantId,status,paym
 
 const normalizeOrderStatusText = (value: unknown) => normalizeStatus(value, '').toLowerCase();
 
-const isSettledPayment = (row: Pick<CustomerOrderRow, 'payment'>) =>
-  SETTLED_PAYMENT_STATUSES.has(normalizeOrderStatusText((row.payment ?? {}).status));
+// 'refunded' is settled only when money was actually taken. Cancels used to
+// record a refund on checkouts that were never paid (production still holds
+// such rows); treating those as settled let a late bank transfer be captured
+// with no flag and no alert. An uncaptured 'refunded' is unpaid, so a late
+// success goes down the closed-order path like any other.
+const isSettledPayment = (row: Pick<CustomerOrderRow, 'payment'>) => {
+  const status = normalizeOrderStatusText((row.payment ?? {}).status);
+  if (status === 'refunded') return isPaymentCaptured(row.payment);
+  return SETTLED_PAYMENT_STATUSES.has(status);
+};
+
+// A refund recorded on a payment that was never captured is not a refund: when
+// the money finally lands, the paid payment must not carry the old refund
+// amount, or every screen shows a refund nobody made.
+const withoutPhantomRefund = (payment: JsonObject): JsonObject =>
+  normalizeOrderStatusText(payment.status) === 'refunded' && !isPaymentCaptured(payment)
+    ? { ...payment, refundAmount: 0, refundedAt: null }
+    : payment;
 
 const loadOrderState = async (orderId: string) => {
   const { data, error } = await serviceClient
@@ -439,7 +455,7 @@ const markOrderPaymentState = async (
   const { expectedAmount, isGroup, rows } = await loadChargeOrders(order);
 
   const buildPaidPayment = (row: CustomerOrderRow): JsonObject => ({
-    ...((row.payment ?? {}) as JsonObject),
+    ...withoutPhantomRefund((row.payment ?? {}) as JsonObject),
     provider: 'paystack',
     status: 'paid',
     reference: paymentReference,
