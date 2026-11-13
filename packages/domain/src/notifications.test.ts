@@ -22,6 +22,7 @@ import {
   resolveEasProjectId,
   resolveNotificationHref,
 } from './notifications.ts';
+import * as notificationsModule from './notifications.ts';
 
 test('every route key the server can send is one the apps understand', () => {
   // The server copy lives in a Deno module that node cannot import, so the
@@ -223,22 +224,65 @@ const listServerSources = (dir: string): string[] =>
     return name.endsWith('.ts') && !name.endsWith('.test.ts') ? [path] : [];
   });
 
+// Push type constants: every exported `*_NOTIFICATION_TYPE` of this module,
+// plus any `const NAME = '...'` a server file declares, so a push whose type is
+// a constant (`type: DISPATCH_OFFER_NOTIFICATION_TYPE`) is checked like a
+// literal one instead of slipping past the scan.
+const DOMAIN_TYPE_CONSTANTS: Record<string, string> = Object.fromEntries(
+  Object.entries(notificationsModule).filter(
+    (entry): entry is [string, string] => entry[0].endsWith('_NOTIFICATION_TYPE') && typeof entry[1] === 'string'
+  )
+);
+
+const serverStringConstants = (sources: string[]) => {
+  const constants: Record<string, string> = { ...DOMAIN_TYPE_CONSTANTS };
+  for (const source of sources) {
+    for (const match of source.matchAll(/const ([A-Z][A-Z0-9_]*) = '([a-z_]+)'/g)) {
+      constants[match[1]] = match[2];
+    }
+  }
+  return constants;
+};
+
 test('every push type the server sends to an app has a mapping row', () => {
   const known = new Set(SERVER_PUSHES.map((push) => `${push.app}:${push.type}`));
+  const files = listServerSources(FUNCTIONS_DIR);
+  const sources = files.map((file) => readFileSync(file, 'utf8'));
+  const constants = serverStringConstants(sources);
   const missing: string[] = [];
-  for (const file of listServerSources(FUNCTIONS_DIR)) {
-    const source = readFileSync(file, 'utf8');
-    for (const match of source.matchAll(/buildNotificationData\(\{([\s\S]*?)\}\)/g)) {
+  let constantTyped = 0;
+  files.forEach((file, index) => {
+    for (const match of sources[index].matchAll(/buildNotificationData\(\{([\s\S]*?)\}\)/g)) {
       const block = match[1];
-      const type = block.match(/type: '([a-z_]+)'/)?.[1];
       const app = block.match(/app: '([a-z]+)'/)?.[1];
       // Computed apps (role-derived staff_access) are covered per app above;
       // admin pushes all take the platform default whatever their type.
-      if (!type || !app || app === 'admin') continue;
-      if (!known.has(`${app}:${type}`)) missing.push(`${app}:${type} in ${file.slice(FUNCTIONS_DIR.length)}`);
+      if (!app || app === 'admin') continue;
+      const literal = block.match(/type: '([a-z_]+)'/)?.[1];
+      const constantName = block.match(/type: ([A-Z][A-Z0-9_]*)\b/)?.[1];
+      if (constantName) constantTyped += 1;
+      const type = literal ?? (constantName ? constants[constantName] : undefined);
+      const where = file.slice(FUNCTIONS_DIR.length);
+      if (!type) {
+        missing.push(`${app}: unresolvable type ${constantName ?? '(none)'} in ${where}`);
+      } else if (!known.has(`${app}:${type}`)) {
+        missing.push(`${app}:${type} in ${where}`);
+      }
     }
-  }
+  });
   assert.deepEqual(missing, []);
+  // The offer and the reminder are sent with constant types today; if the scan
+  // stopped seeing them it would be checking nothing for them.
+  assert.ok(constantTyped >= 2, `constant-typed pushes scanned: ${constantTyped}`);
+});
+
+test('every exported push type constant has a mapping row', () => {
+  const tabled = new Set(SERVER_PUSHES.map((push) => push.type));
+  const constants = Object.entries(DOMAIN_TYPE_CONSTANTS);
+  assert.ok(constants.length >= 3, 'the offer, reminder and broadcast constants are exported');
+  for (const [name, value] of constants) {
+    assert.ok(tabled.has(value), `${name} (${value}) has no row in SERVER_PUSHES`);
+  }
 });
 
 test('only an all-customer broadcast audience names the customer channel', () => {
