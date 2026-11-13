@@ -193,14 +193,135 @@ const resolveFallbackPath = (app: NotificationApp, data: AppNotificationPayload)
 };
 
 /**
- * Android notification channel ids the server targets. A push whose channelId
- * does not exist on the device is DROPPED by Android, so every id here must be
- * created by the app before its first push can arrive.
+ * Android notification channel ids. Android fixes a channel's sound the first
+ * time the app creates it, so a channel can never gain a custom sound later:
+ * the sounded channels are new ids, and changing one of their sounds means
+ * another new id.
+ *
+ * A push naming a channel the device does not have is not lost: the installed
+ * expo-notifications (0.32) shows it on its own fallback channel
+ * (IMPORTANCE_HIGH, default sound). That is what a build from before these
+ * channels shows for a new-channel push, so the legacy ids below stay
+ * registered by every app only so a push queued for an old id still lands on
+ * the channel the user already knows.
  */
 export const ANDROID_NOTIFICATION_CHANNELS = {
+  /** Legacy (no custom sound). The server no longer targets it. */
   default: 'default',
+  /** Legacy dispatch offer channel (no custom sound). The server no longer targets it. */
   dispatchOffers: 'offers',
+  /** Customer order progress and payment; partner and dispatch everyday updates. Chime. */
+  orderUpdates: 'order_updates',
+  /** Customer promos, broadcasts and support messages. Marimba. */
+  offersAndNews: 'offers_news',
+  /** Partner: a new order to accept, and the acceptance reminder. Urgent. */
+  newOrders: 'new_orders',
+  /** Dispatch: a delivery offer with a short window to accept. Urgent. */
+  deliveryOffers: 'delivery_offers',
 } as const;
+
+export type AndroidNotificationChannelId =
+  (typeof ANDROID_NOTIFICATION_CHANNELS)[keyof typeof ANDROID_NOTIFICATION_CHANNELS];
+
+/**
+ * Sound files bundled with the apps (assets/sounds, listed in the
+ * expo-notifications plugin `sounds`, and copied into android res/raw).
+ * Android resource names allow only lowercase letters, digits and
+ * underscores. iOS plays the file the push names; Android plays the channel's.
+ */
+export const NOTIFICATION_SOUNDS = {
+  chime: 'feasty_chime.wav',
+  marimba: 'feasty_marimba.wav',
+  urgent: 'feasty_urgent.wav',
+} as const;
+
+export type NotificationSoundFile = (typeof NOTIFICATION_SOUNDS)[keyof typeof NOTIFICATION_SOUNDS];
+
+/** Push type of the restaurant's half-deadline acceptance reminder. */
+export const ACCEPTANCE_REMINDER_NOTIFICATION_TYPE = 'acceptance_reminder';
+
+/** The rider's delivery offer (45 s to accept). */
+export const DISPATCH_OFFER_NOTIFICATION_TYPE = 'dispatch_offer';
+
+/** A broadcast from the admin console (it carries no data payload of its own). */
+export const BROADCAST_NOTIFICATION_TYPE = 'broadcast';
+
+// Partner pushes that need the kitchen's attention now. A paid order
+// ('payment_confirmed' to the partner) and the reminder are the orders the
+// restaurant must accept before the deadline; an 'order_update' at status
+// 'placed' is a new order reaching the queue (order placement, a scheduled
+// order released).
+const PARTNER_URGENT_TYPES = new Set<string>(['payment_confirmed', ACCEPTANCE_REMINDER_NOTIFICATION_TYPE]);
+const DISPATCH_URGENT_TYPES = new Set<string>([DISPATCH_OFFER_NOTIFICATION_TYPE]);
+// Customer pushes that are not about an order in progress.
+const CUSTOMER_NEWS_TYPES = new Set<string>([BROADCAST_NOTIFICATION_TYPE, 'promo', 'support_reply']);
+
+export type PushChannelChoice = {
+  /** Undefined lets Expo use its "Default" channel (the app's legacy `default`). */
+  channelId: AndroidNotificationChannelId | undefined;
+  sound: NotificationSoundFile | 'default';
+};
+
+const choice = (channelId: AndroidNotificationChannelId, sound: NotificationSoundFile): PushChannelChoice => ({
+  channelId,
+  sound,
+});
+
+/**
+ * The one place a push's Android channel and sound are chosen, from the app it
+ * is addressed to and its type (and status, for order updates). Pushes for an
+ * app with no FEASTY channels (admin, or no app named) keep the platform
+ * default sound and channel.
+ */
+export const resolvePushChannel = (input: {
+  app?: unknown;
+  status?: unknown;
+  type?: unknown;
+}): PushChannelChoice => {
+  const app = sanitizeText(input.app);
+  const type = sanitizeText(input.type) ?? '';
+  const status = sanitizeText(input.status);
+
+  if (app === 'customer') {
+    return CUSTOMER_NEWS_TYPES.has(type)
+      ? choice(ANDROID_NOTIFICATION_CHANNELS.offersAndNews, NOTIFICATION_SOUNDS.marimba)
+      : choice(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, NOTIFICATION_SOUNDS.chime);
+  }
+
+  if (app === 'partner') {
+    const urgent = PARTNER_URGENT_TYPES.has(type) || (type === 'order_update' && status === 'placed');
+    return urgent
+      ? choice(ANDROID_NOTIFICATION_CHANNELS.newOrders, NOTIFICATION_SOUNDS.urgent)
+      : choice(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, NOTIFICATION_SOUNDS.chime);
+  }
+
+  if (app === 'dispatch') {
+    return DISPATCH_URGENT_TYPES.has(type)
+      ? choice(ANDROID_NOTIFICATION_CHANNELS.deliveryOffers, NOTIFICATION_SOUNDS.urgent)
+      : choice(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, NOTIFICATION_SOUNDS.chime);
+  }
+
+  return { channelId: undefined, sound: 'default' };
+};
+
+/**
+ * Which app a broadcast is addressed to. Broadcasts go to the legacy per-user
+ * token, which can belong to any app, so only an audience made purely of
+ * customers can safely name the customer channel; a mixed or staff audience
+ * keeps the platform default rather than landing on a channel their app lacks.
+ */
+export const resolveBroadcastPushApp = (segment: {
+  activity?: unknown;
+  restaurantId?: unknown;
+  roles?: readonly string[] | null;
+}): NotificationApp | null => {
+  const roles = Array.isArray(segment.roles) ? segment.roles : [];
+  if (roles.length === 0) {
+    // Mirrors resolveBroadcastAudience: customer filters alone mean customers.
+    return segment.activity || segment.restaurantId ? 'customer' : null;
+  }
+  return roles.every((role) => role === 'customer') ? 'customer' : null;
+};
 
 const EAS_PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

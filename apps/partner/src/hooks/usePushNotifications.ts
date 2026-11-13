@@ -12,6 +12,7 @@ import {
 } from '../../../../packages/auth/src';
 import {
   ANDROID_NOTIFICATION_CHANNELS,
+  NOTIFICATION_SOUNDS,
   resolveEasProjectId,
   resolveNotificationHref,
   type AppNotificationPayload,
@@ -61,16 +62,39 @@ if (pushSupported) {
 /**
  * Channels must exist BEFORE the permission prompt and before any push
  * arrives: on Android 13+ the POST_NOTIFICATIONS prompt is only shown once a
- * channel exists, and a push naming a channel the device does not have is
- * silently dropped.
+ * channel exists, and a push naming a channel the device does not have lands
+ * on expo's generic fallback channel instead of the one with our sound.
+ *
+ * The sound is fixed when Android first creates a channel, which is why the
+ * sounded channels are new ids (the server picks them in
+ * packages/domain resolvePushChannel). The legacy `default` channel stays so
+ * a push already queued for it, from before the switch, still shows.
  */
 const ensureAndroidChannels = async () => {
   if (Platform.OS !== 'android') {
     return;
   }
 
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.newOrders, {
+    name: 'New orders',
+    description: 'A new order to accept, and the reminder when one is still waiting.',
+    importance: Notifications.AndroidImportance.MAX,
+    lightColor: '#F57C00',
+    enableLights: true,
+    enableVibrate: true,
+    vibrationPattern: [0, 500, 150, 500, 150, 500],
+    sound: NOTIFICATION_SOUNDS.urgent,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, {
+    name: 'Order updates',
+    description: 'Cancellations, customer confirmations, rider pickups and account news.',
+    importance: Notifications.AndroidImportance.HIGH,
+    lightColor: '#F57C00',
+    vibrationPattern: [0, 250, 250, 250],
+    sound: NOTIFICATION_SOUNDS.chime,
+  });
   await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
-    name: 'Order alerts',
+    name: 'Other notifications',
     importance: Notifications.AndroidImportance.MAX,
     lightColor: '#F57C00',
     vibrationPattern: [0, 250, 250, 250],
