@@ -198,17 +198,18 @@ const resolveFallbackPath = (app: NotificationApp, data: AppNotificationPayload)
  * the sounded channels are new ids, and changing one of their sounds means
  * another new id.
  *
- * A push naming a channel the device does not have is not lost: the installed
- * expo-notifications (0.32) shows it on its own fallback channel
- * (IMPORTANCE_HIGH, default sound). That is what a build from before these
- * channels shows for a new-channel push, so the legacy ids below stay
- * registered by every app only so a push queued for an old id still lands on
- * the channel the user already knows.
+ * A build from before these channels does not have them. The installed
+ * expo-notifications code would show such a push on its generic fallback
+ * channel, but Expo's own docs say it is not displayed, so the server never
+ * relies on that: the new ids go only to devices the sound-channel gate says
+ * have them (see buildPushMessages), and every other device gets exactly the
+ * legacy channel and sound it got before. The apps keep registering the legacy
+ * ids too.
  */
 export const ANDROID_NOTIFICATION_CHANNELS = {
-  /** Legacy (no custom sound). The server no longer targets it. */
+  /** Legacy, no custom sound. What every pre-sound build receives (Expo's default channel). */
   default: 'default',
-  /** Legacy dispatch offer channel (no custom sound). The server no longer targets it. */
+  /** Legacy dispatch offer channel, no custom sound. Pre-sound builds still get offers here. */
   dispatchOffers: 'offers',
   /** Customer order progress and payment; partner and dispatch everyday updates. Chime. */
   orderUpdates: 'order_updates',
@@ -289,8 +290,7 @@ export const resolvePushChannel = (input: {
   }
 
   if (app === 'partner') {
-    const urgent = PARTNER_URGENT_TYPES.has(type) || (type === 'order_update' && status === 'placed');
-    return urgent
+    return isPartnerUrgentPush({ status, type })
       ? choice(ANDROID_NOTIFICATION_CHANNELS.newOrders, NOTIFICATION_SOUNDS.urgent)
       : choice(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, NOTIFICATION_SOUNDS.chime);
   }
@@ -302,6 +302,78 @@ export const resolvePushChannel = (input: {
   }
 
   return { channelId: undefined, sound: 'default' };
+};
+
+/**
+ * True for a partner push about an order the kitchen must accept now: a new
+ * order or the acceptance reminder. The partner app also reads this to keep
+ * the push quiet while its own kitchen alarm is sounding.
+ */
+export const isPartnerUrgentPush = (input: { status?: unknown; type?: unknown }) => {
+  const type = sanitizeText(input.type) ?? '';
+  return PARTNER_URGENT_TYPES.has(type) || (type === 'order_update' && sanitizeText(input.status) === 'placed');
+};
+
+/**
+ * Exactly what the server sent before sounded channels existed: no channel
+ * (Expo's default, the apps' `default`) and the default sound, except the
+ * rider's offer on its `offers` channel. A build without the new channels must
+ * keep receiving this, unchanged.
+ */
+export const resolveLegacyPushChannel = (input: { app?: unknown; type?: unknown }): PushChannelChoice => ({
+  channelId:
+    sanitizeText(input.app) === 'dispatch' && sanitizeText(input.type) === DISPATCH_OFFER_NOTIFICATION_TYPE
+      ? ANDROID_NOTIFICATION_CHANNELS.dispatchOffers
+      : undefined,
+  sound: 'default',
+});
+
+/**
+ * FeatureFlag key that turns the sounded channels on. Off (or absent) means
+ * every device gets the legacy channel and sound. Turn it on only once the
+ * builds that register the channels have replaced the old ones on users'
+ * phones: the push registration stores nothing that says which build a token
+ * came from (PushDevice holds only user, app and token), so this one switch
+ * stands in for a per-device check.
+ */
+export const PUSH_SOUND_CHANNELS_FLAG = 'push_sound_channels';
+
+/** The sounded channel for a device that registers it, the legacy one otherwise. */
+export const resolvePushChannelForDevice = (
+  routing: { app?: unknown; status?: unknown; type?: unknown },
+  deviceHasSoundChannels: boolean
+): PushChannelChoice => (deviceHasSoundChannels ? resolvePushChannel(routing) : resolveLegacyPushChannel(routing));
+
+export type PushMessageInput = {
+  body: string;
+  data?: Record<string, unknown>;
+  title: string;
+};
+
+/**
+ * One Expo message per token, each with the channel and sound that token's
+ * device can play: the sounded channel where `deviceHasSoundChannels` says the
+ * installed build registers it, the legacy channel and sound everywhere else.
+ * Old and new devices can share one push.
+ */
+export const buildPushMessages = (
+  tokens: readonly string[],
+  payload: PushMessageInput,
+  deviceHasSoundChannels: (token: string) => boolean
+) => {
+  const routing = { app: payload.data?.app, status: payload.data?.status, type: payload.data?.type };
+
+  return tokens.map((token) => {
+    const { channelId, sound } = resolvePushChannelForDevice(routing, deviceHasSoundChannels(token));
+    return {
+      body: payload.body,
+      channelId,
+      data: payload.data,
+      sound,
+      title: payload.title,
+      to: token,
+    };
+  });
 };
 
 /**

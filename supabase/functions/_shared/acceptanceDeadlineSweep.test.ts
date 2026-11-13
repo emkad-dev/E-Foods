@@ -191,6 +191,8 @@ type SweepMockOptions = {
   beforeAutoCancelCas?: (tables: Record<string, ReturnType<typeof createTable>>) => void;
   /** The configured acceptance deadline. Defaults to DEADLINE_MINUTES. */
   deadlineMinutes?: number;
+  /** The push_sound_channels FeatureFlag. Absent (off) by default. */
+  soundChannels?: boolean;
 };
 
 // The restaurant's owner and a linked staff member, each with a partner push
@@ -254,6 +256,12 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
 
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
+    if (table === 'FeatureFlag') {
+      // loadFeatureFlagMap: select(...).returns<T>()
+      const rows =
+        options.soundChannels === undefined ? [] : [{ key: 'push_sound_channels', enabled: options.soundChannels }];
+      return { select: () => ({ returns: () => Promise.resolve({ data: rows, error: null }) }) };
+    }
     const mock = tables[table];
     if (!mock) {
       throw new Error(`acceptanceDeadlineSweep.test.ts: unexpected table "${table}"`);
@@ -722,12 +730,31 @@ Deno.test('reminder: at half the deadline the restaurant is reminded once, on th
       'Order ABC123 has waited 4 minutes. Accept it now or it will be cancelled and refunded in 12 minutes.',
       'body computed from the 8-minute config: cancel is at 16 minutes'
     );
-    expectEqual(push.channelId, 'new_orders', 'same urgent channel as the paid-order push');
-    expectEqual(push.sound, 'feasty_urgent.wav', 'urgent sound, which iOS reads from the payload');
+    // Sound-channel flag off (the default): exactly the legacy message.
+    expectEqual(push.channelId, undefined, 'legacy: no channel, as the paid-order push had before');
+    expectEqual(push.sound, 'default', 'legacy: default sound');
     expectEqual(push.data.app, 'partner', 'addressed to the partner app');
     expectEqual(push.data.routeKey, 'partner_order_detail', 'routes to the order');
     expectEqual(push.data.path, '/order/order-remind-abc123', 'opens the order screen');
     expectEqual(push.data.orderId, 'order-remind-abc123', 'carries the order id');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: with the sound-channel flag on it rides the urgent "New orders" channel', async () => {
+  const mocks = installMocks(
+    [buildOrderRow({ id: 'order-remind-snd123', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } })],
+    { soundChannels: true }
+  );
+  try {
+    await sweepUnacceptedOrders();
+    const pushes = mocks.reminders();
+    expectEqual(pushes.length, RESTAURANT_USERS.length, 'owner and staff each get it');
+    for (const push of pushes) {
+      expectEqual(push.channelId, 'new_orders', 'urgent channel');
+      expectEqual(push.sound, 'feasty_urgent.wav', 'urgent sound, which iOS reads from the payload');
+    }
   } finally {
     mocks.restore();
   }

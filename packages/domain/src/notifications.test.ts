@@ -11,8 +11,13 @@ import {
   ANDROID_NOTIFICATION_CHANNELS,
   NOTIFICATION_ROUTE_KEYS,
   NOTIFICATION_SOUNDS,
+  buildPushMessages,
+  isPartnerUrgentPush,
+  PUSH_SOUND_CHANNELS_FLAG,
   resolveBroadcastPushApp,
+  resolveLegacyPushChannel,
   resolvePushChannel,
+  resolvePushChannelForDevice,
   resolveEasProjectId,
   resolveNotificationHref,
 } from './notifications.ts';
@@ -130,6 +135,75 @@ test('every server push gets the sound the owner picked for it', () => {
       `${push.app} ${push.type} ${push.status ?? ''} (${push.note})`
     );
   }
+});
+
+test('a device without the sounded channels gets exactly what every push carried before', () => {
+  // Before this change the only channel the server ever named was the rider
+  // offer's `offers`; everything else went with no channel and sound 'default'.
+  for (const push of SERVER_PUSHES) {
+    const expected =
+      push.app === 'dispatch' && push.type === 'dispatch_offer'
+        ? { channelId: 'offers', sound: 'default' }
+        : PLATFORM_DEFAULT;
+    assert.deepEqual(
+      resolveLegacyPushChannel({ app: push.app, type: push.type }),
+      expected,
+      `${push.app} ${push.type} (${push.note})`
+    );
+    assert.deepEqual(resolvePushChannelForDevice({ app: push.app, status: push.status, type: push.type }, false), expected);
+  }
+});
+
+test('one push to an old and a new device gives each the channel it can play', () => {
+  const data = { app: 'partner', orderId: 'o1', routeKey: 'partner_order_detail', type: 'payment_confirmed', version: '1' };
+  const messages = buildPushMessages(
+    ['ExponentPushToken[old]', 'ExponentPushToken[new]'],
+    { body: 'Order o1 has been paid', data, title: 'Paid Order Received' },
+    (token) => token === 'ExponentPushToken[new]'
+  );
+
+  // Serialised as Expo receives it: an undefined channelId is dropped, which is
+  // byte-for-byte the message an old build was sent before.
+  assert.deepEqual(JSON.parse(JSON.stringify(messages[0])), {
+    body: 'Order o1 has been paid',
+    data,
+    sound: 'default',
+    title: 'Paid Order Received',
+    to: 'ExponentPushToken[old]',
+  });
+  assert.deepEqual(messages[1], {
+    body: 'Order o1 has been paid',
+    channelId: 'new_orders',
+    data,
+    sound: 'feasty_urgent.wav',
+    title: 'Paid Order Received',
+    to: 'ExponentPushToken[new]',
+  });
+});
+
+test('an old rider device keeps getting offers on the legacy offers channel', () => {
+  const [oldDevice, newDevice] = buildPushMessages(
+    ['T[old]', 'T[new]'],
+    { body: 'b', data: { app: 'dispatch', type: 'dispatch_offer' }, title: 't' },
+    (token) => token === 'T[new]'
+  );
+  assert.equal(oldDevice.channelId, 'offers');
+  assert.equal(oldDevice.sound, 'default');
+  assert.equal(newDevice.channelId, 'delivery_offers');
+  assert.equal(newDevice.sound, 'feasty_urgent.wav');
+});
+
+test('the gate flag key is stable (operators set it by name)', () => {
+  assert.equal(PUSH_SOUND_CHANNELS_FLAG, 'push_sound_channels');
+});
+
+test('isPartnerUrgentPush marks new orders and the reminder only', () => {
+  assert.equal(isPartnerUrgentPush({ type: 'payment_confirmed' }), true);
+  assert.equal(isPartnerUrgentPush({ type: ACCEPTANCE_REMINDER_NOTIFICATION_TYPE, status: 'placed' }), true);
+  assert.equal(isPartnerUrgentPush({ type: 'order_update', status: 'placed' }), true);
+  assert.equal(isPartnerUrgentPush({ type: 'order_update', status: 'cancelled' }), false);
+  assert.equal(isPartnerUrgentPush({ type: 'order_update' }), false);
+  assert.equal(isPartnerUrgentPush({}), false);
 });
 
 test('a push with no app, or an unknown type, falls back safely', () => {

@@ -8,13 +8,13 @@ import {
   unsubscribeUrl,
   type BroadcastSegment,
 } from '../_shared/broadcast.ts';
-import { sendExpoPushMessages } from '../_shared/notifications.ts';
+import { loadPushSoundChannelGate, sendExpoPushMessages } from '../_shared/notifications.ts';
 import { constantTimeEqual } from '../_shared/crypto.ts';
 import { checkDrainerHeartbeat } from '../_shared/drainerHeartbeat.ts';
 import {
   BROADCAST_NOTIFICATION_TYPE,
   resolveBroadcastPushApp,
-  resolvePushChannel,
+  resolvePushChannelForDevice,
 } from '../../../packages/domain/src/notifications.ts';
 
 const WORKER_TOKEN = Deno.env.get('QUEUE_WORKER_TOKEN')?.trim() ?? '';
@@ -109,12 +109,13 @@ const processBroadcast = async (broadcast: BroadcastRow) => {
   }
 
   if (broadcast.channels.includes('push') && broadcast.pushTitle && broadcast.pushBody) {
-    // Customer-only audiences hear the "Offers and news" marimba; a mixed or
-    // staff audience keeps the platform default (see resolveBroadcastPushApp).
-    const { channelId, sound } = resolvePushChannel({
-      app: resolveBroadcastPushApp(broadcast.segment),
-      type: BROADCAST_NOTIFICATION_TYPE,
-    });
+    // Customer-only audiences hear the "Offers and news" marimba on devices
+    // that have that channel; a mixed or staff audience, and every device
+    // without the sounded channels, gets the legacy default exactly as before.
+    // The message carries no data, as before, so it is built here rather than
+    // by buildPushMessages.
+    const routing = { app: resolveBroadcastPushApp(broadcast.segment), type: BROADCAST_NOTIFICATION_TYPE };
+    const deviceHasSoundChannels = await loadPushSoundChannelGate();
     const tokens = recipients
       .map((recipient) => recipient.expoPushToken)
       .filter((token): token is string => Boolean(token));
@@ -125,8 +126,7 @@ const processBroadcast = async (broadcast: BroadcastRow) => {
             to,
             title: broadcast.pushTitle as string,
             body: broadcast.pushBody as string,
-            channelId,
-            sound,
+            ...resolvePushChannelForDevice(routing, deviceHasSoundChannels(to)),
           }))
         );
         sentPush += result.sent;

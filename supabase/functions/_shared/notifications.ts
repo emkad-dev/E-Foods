@@ -8,7 +8,8 @@ import {
   type ExpoPushFailure,
   type ExpoPushMessage,
 } from './expoPush.ts';
-import { resolvePushChannel } from '../../../packages/domain/src/notifications.ts';
+import { buildPushMessages, PUSH_SOUND_CHANNELS_FLAG } from '../../../packages/domain/src/notifications.ts';
+import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
 import { logEdgeEvent } from './observability.ts';
 import { enqueuePushReceiptCheck, PUSH_RECEIPT_CHECK_MAX_ATTEMPTS } from './queue.ts';
 import { isRateLimitAllowed } from './rateLimit.ts';
@@ -409,24 +410,33 @@ export const sendPushNotificationsToUsers = async (
 ) => {
   const app = sanitizeText(payload.data?.app);
   const tokens = await resolvePushTokensForUsers(userIds, app);
+  if (tokens.length === 0) {
+    return { sent: 0 };
+  }
   // Channel and sound come only from the app, type and status the push
-  // carries (packages/domain resolvePushChannel), so no caller can put a
-  // push on a channel its app never creates.
-  const { channelId, sound } = resolvePushChannel({
-    app,
-    status: payload.data?.status,
-    type: payload.data?.type,
-  });
-  const messages = tokens.map((token) => ({
-    body: payload.body,
-    channelId,
-    data: payload.data,
-    sound,
-    title: payload.title,
-    to: token,
-  }));
+  // carries (packages/domain buildPushMessages), so no caller can put a push on
+  // a channel its app never creates, and a device without the sounded
+  // channels gets exactly the legacy channel and sound.
+  const deviceHasSoundChannels = await loadPushSoundChannelGate();
+  return sendExpoPushMessages(buildPushMessages(tokens, payload, deviceHasSoundChannels));
+};
 
-  return sendExpoPushMessages(messages);
+/**
+ * Which devices get the sounded channels. Nothing stored with a push token says
+ * which build it came from, so today this is one FeatureFlag for every device
+ * (PUSH_SOUND_CHANNELS_FLAG, off unless set). Any read failure counts as off:
+ * the legacy channel is the one every build can show.
+ */
+export const loadPushSoundChannelGate = async (): Promise<(token: string) => boolean> => {
+  let enabled = false;
+  try {
+    enabled = isFeatureEnabled(await loadFeatureFlagMap(), PUSH_SOUND_CHANNELS_FLAG);
+  } catch (error) {
+    logEdgeEvent('warn', 'push sound-channel flag unreadable; sending legacy channels', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return () => enabled;
 };
 
 export const sendPushNotificationsToRoles = async (
