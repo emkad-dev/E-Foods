@@ -122,6 +122,33 @@ export const useDispatchOrder = (orderId: string) => {
     }
   }, [orderId]);
 
+  // A read after a failed status action, so the screen can tell an action whose
+  // reply was lost (it landed) from one that did not. Returns the order it read,
+  // or null when the read also failed. Unlike loadOrder, a failure here leaves
+  // the order on screen: the screen reports the action's failure, and blanking
+  // the page over a read that also hit a bad connection would hide the delivery
+  // the rider is in the middle of.
+  const reload = useCallback(async (): Promise<DispatchOrderDetail | null> => {
+    if (!orderId) {
+      return null;
+    }
+
+    try {
+      const nextData = await getDispatchOrderDetail(orderId);
+      const nextOrder = nextData.order as DispatchOrderDetail;
+
+      if (activeRef.current) {
+        setOrder(nextOrder);
+        setError(null);
+      }
+
+      return nextOrder;
+    } catch (nextError) {
+      console.warn('Could not reload dispatch order after a failed action:', nextError);
+      return null;
+    }
+  }, [orderId]);
+
   const subscribe = useCallback<RealtimeResourceSubscribe>(
     (onChanged, onStatusChange) =>
       subscribeToRealtimeChanges(supabase, [orderRealtimeTopic(orderId)], () => onChanged(), onStatusChange),
@@ -138,5 +165,5 @@ export const useDispatchOrder = (orderId: string) => {
     enabled,
   });
 
-  return { error, loading, order };
+  return { error, loading, order, reload };
 };

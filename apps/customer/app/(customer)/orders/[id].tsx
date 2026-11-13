@@ -295,6 +295,11 @@ export default function OrderTracking() {
       });
     } catch (nextError) {
       setCancelError(toUserMessage(nextError, 'We could not cancel this order right now.'));
+      // The cancel is never re-sent automatically, so a lost reply can hide one
+      // that landed, and a 409/412 means the order moved on. Read the order
+      // fresh (useCustomerOrder always bypasses the read cache) so the screen
+      // shows its true state instead of a stale Cancel button.
+      void reload();
     }
   };
 

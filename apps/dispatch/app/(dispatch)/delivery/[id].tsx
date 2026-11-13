@@ -19,6 +19,12 @@ import {
   getOrderStatusColor,
   normalizeOrderStatus,
 } from '../../../src/domain/orders';
+import {
+  dispatchActionSuccessMessage,
+  hasCourierAssignmentLanded,
+  hasDispatchActionReachedTarget,
+  type DispatchStatusAction,
+} from '../../../src/domain/riderActionOutcome';
 import { useDispatchOrder } from '../../../src/hooks/useDispatchOrder';
 import { useDispatchRiders } from '../../../src/hooks/useDispatchRiders';
 import {
@@ -63,7 +69,7 @@ export default function DispatchDeliveryDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { error, loading, order } = useDispatchOrder(id as string);
+  const { error, loading, order, reload } = useDispatchOrder(id as string);
   const { error: ridersError, loading: ridersLoading, riders } = useDispatchRiders();
   // The customer's delivery code, read back to the rider at the door. Kept in
   // state across a rejected attempt so a mistyped digit can be corrected
@@ -117,6 +123,46 @@ export default function DispatchDeliveryDetailScreen() {
   const reportFailure = (title: string, message: string) => {
     showNotice({ tone: 'error', title, message });
   };
+
+  // Success notices fade on their own. Without one, the only sign an action
+  // worked was the status chip moving whenever the next realtime read landed.
+  const reportSuccess = (title: string) => {
+    showNotice({ tone: 'success', title });
+  };
+
+  // A failed call is not proof of a failed action. Dispatch writes are never
+  // re-sent automatically, so a reply lost on a bad connection after the server
+  // applied it surfaces here as an error, and the rider's retry meets the
+  // status the first tap already moved (412). So read the order and its
+  // assignment again and believe them rather than the error: true when the
+  // action did land. A reload that also fails counts as not landed.
+  const didActionLand = async (landed: (fresh: NonNullable<typeof order>) => boolean) => {
+    const fresh = await reload();
+    return fresh ? landed(fresh) : false;
+  };
+
+  const runStatusAction = (
+    key: string,
+    action: DispatchStatusAction,
+    send: (orderId: string, timeline: Record<string, unknown> | null) => Promise<void>,
+    failureTitle: string,
+    fallbackMessage: string
+  ) =>
+    runAction(key, async () => {
+      if (!order) {
+        return;
+      }
+
+      try {
+        await send(order.id, order.timeline ?? null);
+      } catch (nextError: any) {
+        if (!(await didActionLand((fresh) => hasDispatchActionReachedTarget(action, fresh.status)))) {
+          reportFailure(failureTitle, toUserMessage(nextError, fallbackMessage));
+          return;
+        }
+      }
+      reportSuccess(dispatchActionSuccessMessage(action));
+    });
   const rawDeliveryLocation = order?.deliveryLocation as
     | { latitude?: number; longitude?: number; address?: string | null; shortAddress?: string | null; note?: string | null }
     | null
@@ -175,22 +221,16 @@ export default function DispatchDeliveryDetailScreen() {
       try {
         await assignDispatchCourier(order.id, courier, order.assignment ?? null);
       } catch (nextError: any) {
-        reportFailure('Assignment failed', toUserMessage(nextError, 'Could not assign this rider.'));
+        if (!(await didActionLand((fresh) => hasCourierAssignmentLanded(fresh.assignment, courier.id)))) {
+          reportFailure('Assignment failed', toUserMessage(nextError, 'Could not assign this rider.'));
+          return;
+        }
       }
+      reportSuccess(`Assigned to ${courier.name}`);
     });
 
   const handleMarkPickedUp = () =>
-    runAction('pickup', async () => {
-      if (!order) {
-        return;
-      }
-
-      try {
-        await markDispatchOrderPickedUp(order.id, order.timeline ?? null);
-      } catch (nextError: any) {
-        reportFailure('Update failed', toUserMessage(nextError, 'Could not confirm pickup.'));
-      }
-    });
+    runStatusAction('pickup', 'picked_up', markDispatchOrderPickedUp, 'Update failed', 'Could not confirm pickup.');
 
   const handleMarkDelivered = async () => {
     if (!order || submittingDelivery) {
@@ -207,55 +247,33 @@ export default function DispatchDeliveryDetailScreen() {
 
     setSubmittingDelivery(true);
     try {
-      await markDispatchOrderDelivered(order.id, order.timeline ?? null, deliveryCode);
+      try {
+        await markDispatchOrderDelivered(order.id, order.timeline ?? null, deliveryCode);
+      } catch (nextError: any) {
+        // A lost reply on the doorstep: the order may already be delivered (the
+        // retry would only meet 412). A wrong code leaves it on the way.
+        if (!(await didActionLand((fresh) => hasDispatchActionReachedTarget('delivered', fresh.status)))) {
+          // The code stays in the field so the rider can correct it and retry
+          // (until the server locks the order).
+          reportFailure('Delivery not confirmed', toDeliveryCodeMessage(nextError, 'Could not mark this order delivered.'));
+          return;
+        }
+      }
       setDeliveryCode('');
-    } catch (nextError: any) {
-      // The code stays in the field so the rider can correct it and retry
-      // (until the server locks the order).
-      reportFailure('Delivery not confirmed', toDeliveryCodeMessage(nextError, 'Could not mark this order delivered.'));
+      reportSuccess(dispatchActionSuccessMessage('delivered'));
     } finally {
       setSubmittingDelivery(false);
     }
   };
 
   const handleMarkOnTheWay = () =>
-    runAction('onTheWay', async () => {
-      if (!order) {
-        return;
-      }
-
-      try {
-        await markDispatchOrderOnTheWay(order.id, order.timeline ?? null);
-      } catch (nextError: any) {
-        reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this order on the way.'));
-      }
-    });
+    runStatusAction('onTheWay', 'on_the_way', markDispatchOrderOnTheWay, 'Update failed', 'Could not mark this order on the way.');
 
   const handleMarkFailed = () =>
-    runAction('failed', async () => {
-      if (!order) {
-        return;
-      }
-
-      try {
-        await markDispatchOrderFailed(order.id, order.timeline ?? null);
-      } catch (nextError: any) {
-        reportFailure('Update failed', toUserMessage(nextError, 'Could not mark this delivery as failed.'));
-      }
-    });
+    runStatusAction('failed', 'failed_delivery', markDispatchOrderFailed, 'Update failed', 'Could not mark this delivery as failed.');
 
   const handleEscalate = () =>
-    runAction('escalate', async () => {
-      if (!order) {
-        return;
-      }
-
-      try {
-        await escalateDispatchOrder(order.id, order.timeline ?? null);
-      } catch (nextError: any) {
-        reportFailure('Escalation failed', toUserMessage(nextError, 'Could not escalate this delivery.'));
-      }
-    });
+    runStatusAction('escalate', 'escalate', escalateDispatchOrder, 'Escalation failed', 'Could not escalate this delivery.');
 
   const handleSOS = async () => {
     if (!order) {
