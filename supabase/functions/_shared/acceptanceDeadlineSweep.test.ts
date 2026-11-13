@@ -201,7 +201,7 @@ const RESTAURANT_USERS = [
   { uid: 'partner-staff-1', token: 'ExponentPushToken[staff-1]' },
 ];
 
-type PushMessage = { body: string; channelId?: string; data: Row; title: string; to: string };
+type PushMessage = { body: string; channelId?: string; data: Row; sound?: string | null; title: string; to: string };
 
 const buildOrderRow = (overrides: Row): Row => ({
   cancellation: null,
@@ -722,7 +722,8 @@ Deno.test('reminder: at half the deadline the restaurant is reminded once, on th
       'Order ABC123 has waited 4 minutes. Accept it now or it will be cancelled and refunded in 12 minutes.',
       'body computed from the 8-minute config: cancel is at 16 minutes'
     );
-    expectEqual(push.channelId, undefined, 'same channel as the paid-order push (none named: the default)');
+    expectEqual(push.channelId, 'new_orders', 'same urgent channel as the paid-order push');
+    expectEqual(push.sound, 'feasty_urgent.wav', 'urgent sound, which iOS reads from the payload');
     expectEqual(push.data.app, 'partner', 'addressed to the partner app');
     expectEqual(push.data.routeKey, 'partner_order_detail', 'routes to the order');
     expectEqual(push.data.path, '/order/order-remind-abc123', 'opens the order screen');

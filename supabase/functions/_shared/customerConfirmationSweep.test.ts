@@ -177,7 +177,14 @@ const createPlainTable = (initialRows: Row[]) => {
   };
 };
 
-type PushMessage = { body: string; data: Record<string, string>; title: string; to: string };
+type PushMessage = {
+  body: string;
+  channelId?: string;
+  data: Record<string, string>;
+  sound?: string | null;
+  title: string;
+  to: string;
+};
 
 const completedMinutesAgo = (minutes: number, now: Date = DAYTIME) => ({
   // dueAt = completion + 3h; the sweep derives completion back from it.
@@ -256,6 +263,10 @@ Deno.test('sweep: each reminder stage is sent exactly once, with stage-specific 
     const first = await sweepCustomerConfirmations(DAYTIME);
     expectEqual(first.reminded, 3, 'one reminder per order');
     expectEqual(mocks.pushes.length, 3, 'three pushes reached Expo');
+    for (const push of mocks.pushes) {
+      expectEqual(push.channelId, 'order_updates', 'confirm prompts ride the customer order-updates channel');
+      expectEqual(push.sound, 'feasty_chime.wav', 'with the chime');
+    }
     expectEqual(mocks.order('order-s1-aaaaaa').customerConfirmRemindersSent, 1, 'stage 1 recorded');
     expectEqual(mocks.order('order-s2-bbbbbb').customerConfirmRemindersSent, 2, 'stage 2 recorded');
     expectEqual(mocks.order('order-s3-cccccc').customerConfirmRemindersSent, 3, 'stage 3 recorded');

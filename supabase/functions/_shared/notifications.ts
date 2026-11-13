@@ -8,6 +8,7 @@ import {
   type ExpoPushFailure,
   type ExpoPushMessage,
 } from './expoPush.ts';
+import { resolvePushChannel } from '../../../packages/domain/src/notifications.ts';
 import { logEdgeEvent } from './observability.ts';
 import { enqueuePushReceiptCheck, PUSH_RECEIPT_CHECK_MAX_ATTEMPTS } from './queue.ts';
 import { isRateLimitAllowed } from './rateLimit.ts';
@@ -402,19 +403,25 @@ export const sendPushNotificationsToUsers = async (
   userIds: string[],
   payload: {
     body: string;
-    channelId?: string;
     data?: JsonObject;
-    sound?: 'default' | null;
     title: string;
   }
 ) => {
   const app = sanitizeText(payload.data?.app);
   const tokens = await resolvePushTokensForUsers(userIds, app);
+  // Channel and sound come only from the app, type and status the push
+  // carries (packages/domain resolvePushChannel), so no caller can put a
+  // push on a channel its app never creates.
+  const { channelId, sound } = resolvePushChannel({
+    app,
+    status: payload.data?.status,
+    type: payload.data?.type,
+  });
   const messages = tokens.map((token) => ({
     body: payload.body,
-    channelId: payload.channelId,
+    channelId,
     data: payload.data,
-    sound: payload.sound ?? 'default',
+    sound,
     title: payload.title,
     to: token,
   }));
@@ -426,9 +433,7 @@ export const sendPushNotificationsToRoles = async (
   roles: string[],
   payload: {
     body: string;
-    channelId?: string;
     data?: JsonObject;
-    sound?: 'default' | null;
     title: string;
   }
 ) => {
@@ -456,7 +461,6 @@ export const notifyUsers = async (
   userIds: string[],
   payload: {
     body: string;
-    channelId?: string;
     data?: JsonObject;
     title: string;
   }
@@ -464,7 +468,6 @@ export const notifyUsers = async (
   await notifySafely(async () => {
     await sendPushNotificationsToUsers(userIds, {
       body: payload.body,
-      channelId: payload.channelId,
       data: payload.data ?? {},
       title: payload.title,
     });

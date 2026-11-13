@@ -72,6 +72,7 @@ import { DISPATCH_MAX_LOCATION_AGE_SECONDS, isRiderEligibleForOffer } from './ri
 import type { DispatchWeights } from './dispatchWeights.ts';
 import type { UserAccountRow } from './accounts.ts';
 import { buildNotificationData, notifyAdmins, notifyUsers } from './notifications.ts';
+import { DISPATCH_OFFER_NOTIFICATION_TYPE } from '../../../packages/domain/src/notifications.ts';
 import {
   CUSTOMER_ORDER_COLUMNS,
   getDispatchAssignmentOwnerId,
@@ -787,12 +788,13 @@ export const runAutomaticDispatchAssignment = async (
 
   await notifyUsers([winner.id], {
     body: `Order ${order.id.slice(-6).toUpperCase()} is available - you have ${DISPATCH_OFFER_TTL_SECONDS} seconds to accept.`,
-    channelId: 'offers',
+    // The offer type is what puts this on the urgent delivery-offers channel
+    // and sound (resolvePushChannel); the 45 s window needs the loud one.
     data: buildNotificationData({
       app: 'dispatch',
       orderId: order.id,
       routeKey: 'dispatch_delivery_offer',
-      type: 'dispatch_offer',
+      type: DISPATCH_OFFER_NOTIFICATION_TYPE,
     }),
     title: 'New delivery offer',
   });

@@ -62,6 +62,7 @@ import {
   storedPaymentStatus,
 } from './orders.ts';
 import { acceptanceClockStartMs } from './acceptanceDeadline.ts';
+import { ACCEPTANCE_REMINDER_NOTIFICATION_TYPE } from '../../../packages/domain/src/notifications.ts';
 import { loadAcceptanceDeadlineConfig } from './platformSettings.ts';
 import { broadcastOrderChanged } from './realtime.ts';
 import { nowIso, type JsonObject } from './rpc/coercion.ts';
@@ -85,8 +86,10 @@ const ACCEPTANCE_SWEEP_LIMIT = 100;
 const PLACED_LIKE_STATUSES = ['placed', 'pending', 'confirmed'];
 
 /** The push type of the half-deadline reminder. The app routes on routeKey, so
- * the type only names the push (and lets channel/sound mapping pick it out). */
-export const ACCEPTANCE_REMINDER_NOTIFICATION_TYPE = 'acceptance_reminder';
+ * the type only names the push; it lives beside the channel/sound mapping that
+ * puts it on the partner's urgent "New orders" channel. Re-exported so callers
+ * and tests keep importing it from here. */
+export { ACCEPTANCE_REMINDER_NOTIFICATION_TYPE };
 
 export type AcceptanceDeadlineSweepResult = {
   /** Orders whose restaurant this run reminded (stamp written this run). */
@@ -166,8 +169,9 @@ const remindRestaurant = async (
   const code = order.id.slice(-6).toUpperCase();
 
   // The same fan-out and channel as the paid-order push (restaurant owner and
-  // linked staff, no channelId - the partner app's MAX-importance default).
-  // notifyRestaurantUsers is best-effort internally and never throws.
+  // linked staff, the partner's urgent "New orders" channel, chosen from this
+  // type by resolvePushChannel). notifyRestaurantUsers is best-effort
+  // internally and never throws.
   await notifyRestaurantUsers(order.restaurantId, {
     title: 'Order waiting: accept now',
     body:
