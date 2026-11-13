@@ -28,6 +28,7 @@ import {
   describeCustomerCancelOutcome,
   formatTrackingStepLabel,
   getOrderStatusColor,
+  getDisplayedRefundAmount,
   getTrackingSteps,
   hasCapturedPayment,
   isPhantomRefund,
@@ -210,5 +211,19 @@ describe('refunds on payments that were never captured', () => {
       describeCustomerCancelOutcome({ paidWhenCancelled: false, refundRate: 1 }),
       'Order cancelled. No payment was taken, so there is nothing to refund.'
     );
+  });
+});
+
+describe('the refund line on the customer order screen', () => {
+  it('shows only a refund recorded on a captured, refunded payment', () => {
+    assert.equal(
+      getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 2500, paidAt: '2026-11-09T10:01:00.000Z', refundAmount: 2500 }),
+      2500
+    );
+    assert.equal(getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 0, paidAt: null, refundAmount: 2500 }), null);
+    assert.equal(getDisplayedRefundAmount({ status: 'failed', capturedAmount: 0, refundAmount: 2500 }), null);
+    assert.equal(getDisplayedRefundAmount({ status: 'paid', capturedAmount: 2500, refundAmount: 2500 }), null);
+    assert.equal(getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 2500, refundAmount: 0 }), null);
+    assert.equal(getDisplayedRefundAmount(null), null);
   });
 });

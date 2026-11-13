@@ -18,6 +18,7 @@ import {
   formatPaymentMethodLabel,
   formatPaymentStatusLabel,
   getCustomerRefundPolicyLabel,
+  getDisplayedRefundAmount,
   getOrderStatusColor,
   getTrackingSteps,
   isPhantomRefund,
@@ -192,6 +193,7 @@ export default function OrderTracking() {
   // shown as what it is - an unpaid payment - with no refund line below.
   const phantomRefund = isPhantomRefund(order.payment);
   const paymentStatus = formatPaymentStatusLabel(phantomRefund ? 'failed' : order.payment?.status, order.payment?.method);
+  const refundToShow = getDisplayedRefundAmount(order.payment);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
   const canCancel = canCustomerCancelOrder(order.status);
   const refundPolicy = getCustomerRefundPolicyLabel(order.status);
@@ -513,8 +515,8 @@ export default function OrderTracking() {
         <Text style={[styles.detailLine, styles.detailLineSpaced]}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
         {order.payment?.reference ? <Text style={styles.detailLine}>Reference: {order.payment.reference}</Text> : null}
-        {!phantomRefund && typeof order.payment?.refundAmount === 'number' && order.payment.refundAmount > 0 ? (
-          <Text style={styles.detailLine}>Refund amount: {formatMoney(order.payment.refundAmount)}</Text>
+        {refundToShow !== null ? (
+          <Text style={styles.detailLine}>Refund amount: {formatMoney(refundToShow)}</Text>
         ) : null}
         <Text style={styles.detailLine}>
           {fulfillmentType === 'pickup'

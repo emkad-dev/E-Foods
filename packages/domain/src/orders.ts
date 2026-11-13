@@ -250,6 +250,39 @@ export const hasCapturedPayment = (payment: CapturablePayment) => {
 export const isPhantomRefund = (payment: CapturablePayment) =>
   payment?.status === 'refunded' && !hasCapturedPayment(payment);
 
+/** The refund amount to show the customer, or null: only a refunded payment
+ * that was actually captured has one. A stray refundAmount on any other status
+ * (a failed payment written over an old phantom refund) is not a refund. */
+export const getDisplayedRefundAmount = (
+  payment: (CapturablePayment & { refundAmount?: unknown }) | null | undefined
+): number | null => {
+  if (!payment || payment.status !== 'refunded' || isPhantomRefund(payment)) return null;
+  const amount = payment.refundAmount;
+  return typeof amount === 'number' && Number.isFinite(amount) && amount > 0 ? amount : null;
+};
+
+const CLOSED_UNSERVED_ORDER_STATUSES = ['cancelled', 'rejected', 'failed_delivery'];
+
+/**
+ * The payment label the customer sees. An order that closed without being paid
+ * (cancelled before the transfer, timed out, an older cancel's refund on money
+ * never taken) reads "Not paid": "Payment failed" or "Awaiting confirmation" on
+ * a dead order suggests something is still wrong or still coming. A live order
+ * keeps the plain label, so a failed payment there still reads "Payment failed".
+ */
+export const formatCustomerPaymentStatusLabel = (input: {
+  orderStatus: string | null | undefined;
+  payment: (CapturablePayment & { method?: string | null }) | null | undefined;
+}) => {
+  const status = input.payment?.status ?? 'pending';
+  const closed = CLOSED_UNSERVED_ORDER_STATUSES.includes(normalizeOrderStatus(input.orderStatus));
+  const unpaid = status === 'pending' || status === 'failed' || isPhantomRefund(input.payment);
+  if (closed && unpaid) {
+    return 'Not paid';
+  }
+  return formatPaymentStatusLabel(isPhantomRefund(input.payment) ? 'failed' : status, input.payment?.method);
+};
+
 /**
  * What the customer is told after cancelling. Speaks of a refund only when one
  * was recorded: refundRate is the policy and comes back for an unpaid order

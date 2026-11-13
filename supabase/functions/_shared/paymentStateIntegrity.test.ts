@@ -26,7 +26,7 @@ import { assertEquals } from 'jsr:@std/assert';
 
 const { serviceClient } = await import('./client.ts');
 const { ordersDomain } = await import('./domains/orders.ts');
-const { handlePaymentVerification } = await import('../payment-verification/handler.ts');
+const { handlePaymentVerification, markPaymentVerificationFailed } = await import('../payment-verification/handler.ts');
 const { sweepUnpaidOrders } = await import('./unpaidOrderExpirySweep.ts');
 const { maybeExpireUnpaidOrder } = await import('./orders.ts');
 
@@ -513,6 +513,27 @@ Deno.test('webhook: a late success after a new-style unpaid customer cancel is f
     await webhook();
     assertEquals(events('payment_received_on_closed_order').length, 1, 'a redelivery alerts nobody again');
     assertEquals(closedOrderAdminEmails().length, 1);
+  });
+});
+
+Deno.test('a terminal verification failure over a legacy phantom refund records failed without the refund', async () => {
+  await withHarness(async () => {
+    setup([cancelledOrder(phantomRefund())]);
+    await markPaymentVerificationFailed('order-1', REFERENCE, 'retries exhausted', 5);
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(order().payment.refundAmount, 0, 'no refund shown next to a failed payment');
+    assertEquals(order().payment.refundedAt, null);
+    assertEquals(order().payment.error, 'retries exhausted');
+    assertEquals(order().status, 'cancelled');
+  });
+});
+
+Deno.test('a terminal verification failure on a genuinely refunded payment changes nothing', async () => {
+  await withHarness(async () => {
+    const refunded = { ...phantomRefund(), capturedAmount: 2500, paidAt: '2026-11-09T10:01:00.000Z' };
+    setup([cancelledOrder(refunded)]);
+    await markPaymentVerificationFailed('order-1', REFERENCE, 'retries exhausted', 5);
+    assertEquals(order().payment, refunded);
   });
 });
 

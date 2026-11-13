@@ -1121,7 +1121,9 @@ export const markPaymentVerificationFailed = async (
       .from('CustomerOrder')
       .update({
         payment: {
-          ...existingPayment,
+          // A legacy refund on money never captured is not carried onto the
+          // failed payment: "Payment failed" next to a refund amount is false.
+          ...withoutPhantomRefund(existingPayment),
           status: 'failed',
           reference: paymentReference,
           error: message,
