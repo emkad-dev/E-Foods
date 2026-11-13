@@ -53,6 +53,7 @@ import {
   assertOrderPaymentReadyForOperations,
   insertDeliveryEvent,
   loadOrderBundle,
+  markUncapturedPaymentTransactionFailed,
   normalizeOrderStatus,
   releasePromoRedemption,
   storedPaymentStatus,
@@ -234,6 +235,10 @@ export const adminForceCancelOrder: Handler = async ({ context, data }) => {
       payment,
     });
   } else {
+    // Nothing was captured: the checkout's ledger row must not sit 'pending'
+    // forever on a cancelled order. Guarded (pending/failed -> failed only), so a
+    // capture recorded in the meantime is never overwritten; best-effort.
+    await markUncapturedPaymentTransactionFailed(order, cancelledAt, 'admin_force_cancel');
     await releasePromoRedemption(orderId);
   }
 

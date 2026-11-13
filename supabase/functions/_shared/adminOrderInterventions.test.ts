@@ -378,6 +378,26 @@ Deno.test('force-cancel of an UNPAID escalated order simply cancels it: no refun
   });
 });
 
+Deno.test('force-cancel of an UNPAID order marks its pending payment transaction failed, never a captured one', async () => {
+  await withHarness(async () => {
+    for (const ledgerStatus of ['pending', 'failed']) {
+      setup(makeOrder({ status: 'placed', payment: { method: 'card', provider: 'paystack', reference: REFERENCE, status: ledgerStatus } }));
+      db.PaymentTransaction[0].status = ledgerStatus;
+      assertEquals((await asAdmin(forceCancel, { reason: 'Never paid' })).status, 200);
+      assertEquals(db.PaymentTransaction[0].status, 'failed', `${ledgerStatus} -> failed`);
+      assertEquals(db.PaymentTransaction[0].lastError, 'admin_force_cancel');
+      assertEquals(typeof db.PaymentTransaction[0].failedAt, 'string');
+    }
+
+    // A capture the ledger recorded after the order was read (the webhook wrote
+    // the ledger but the order still says pending) is never overwritten.
+    setup(makeOrder({ status: 'placed', payment: { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'pending' } }));
+    assertEquals((await asAdmin(forceCancel, { reason: 'Never paid' })).status, 200);
+    assertEquals(db.PaymentTransaction[0].status, 'paid', 'a paid ledger row is left alone');
+    assertEquals(db.PaymentTransaction[0].lastError, undefined);
+  });
+});
+
 Deno.test('force-cancel works from a rider-held status and refuses an order that has already ended', async () => {
   await withHarness(async () => {
     setup(makeOrder({ status: 'on_the_way', fulfillmentType: 'delivery' }), riderAssignment());

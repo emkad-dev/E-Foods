@@ -711,11 +711,17 @@ export const isUnpaidOrderExpired = (order: CustomerOrderRow, nowMs: number) => 
 };
 
 // The ledger row must agree with the order, or 47 transactions sit 'pending' on
-// orders the timeout cancelled long ago. Guarded on the ledger's own status so a
-// payment confirmation recorded in between is never overwritten. Best-effort:
-// the order is already cancelled, and the promo release, event and notifications
-// after this must still happen exactly once.
-const markPaymentTransactionExpired = async (order: CustomerOrderRow, failedAt: string, reason: string) => {
+// orders the timeout cancelled long ago. Guarded on the ledger's own status
+// (pending or failed -> failed only) so a payment confirmation recorded in
+// between is never overwritten. Best-effort: the order is already cancelled, and
+// the promo release, event and notifications after this must still happen
+// exactly once. Used by the unpaid expiry and an admin force-cancel of an
+// unpaid order.
+export const markUncapturedPaymentTransactionFailed = async (
+  order: CustomerOrderRow,
+  failedAt: string,
+  reason: string
+) => {
   const reference = sanitizeText(order.payment?.reference);
   if (!reference) {
     return;
@@ -730,7 +736,7 @@ const markPaymentTransactionExpired = async (order: CustomerOrderRow, failedAt: 
       throw new Error(error.message);
     }
   } catch (error) {
-    logEdgeEvent('error', 'payment transaction not marked failed on unpaid expiry', {
+    logEdgeEvent('error', 'payment transaction not marked failed after an unpaid cancel', {
       error: error instanceof Error ? error.message : String(error),
       orderId: order.id,
     });
@@ -807,7 +813,7 @@ export const expireUnpaidOrder = async (
     updatedAt: timedOutAt,
   };
 
-  await markPaymentTransactionExpired(order, timedOutAt, reason);
+  await markUncapturedPaymentTransactionFailed(order, timedOutAt, reason);
 
   // The order is now cancelled (payment never completed): free any promo-cap
   // slot it held so a single-use code is not consumed by an order the customer
