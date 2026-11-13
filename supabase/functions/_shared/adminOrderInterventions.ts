@@ -12,9 +12,12 @@
 //                             on_the_way. Starts the same customer-confirmation
 //                             clock the partner `delivered` action starts, so the
 //                             customer can still confirm or report.
-//   adminResolveOrderReport - clears the flag a customer report raised, notes
-//                             the resolution, and closes the confirmation flow
-//                             the way the 3-hour auto-close does.
+//   adminResolveOrderReport - "Mark resolved": clears needsAttention on ANY
+//                             flagged order (terminal ones included; no status
+//                             changes) and notes the resolution. For a customer
+//                             report whose confirmation flow is still open it
+//                             also closes that flow the way the 3-hour
+//                             auto-close does.
 //
 // Every write is a compare-and-set on what this request read, so a concurrent
 // partner, rider, customer or sweep write wins and this request changes nothing
@@ -342,18 +345,26 @@ export const adminResolveOrderReport: Handler = async ({ context, data }) => {
   const note = parseAdminOrderNote(data.note, 'note');
 
   const { order } = await loadOrderForAdmin(orderId);
-  if (!order.customerIssueReportedAt) {
-    fail(412, 'This order has no customer problem report to resolve.');
-  }
+  // Any flag, not only a customer report: a late payment on a closed order, a
+  // refund to return by hand, a stale escalation. Each can outlive the order's
+  // last status change and had no other way to be cleared.
   if (!canAdminResolveOrderReport(order)) {
-    fail(412, 'This report has already been resolved.');
+    fail(412, 'This order is not flagged for attention.');
   }
 
   const resolvedAt = nowIso();
-  // A customer may confirm after reporting; then only the flag is left to clear.
-  // Otherwise the confirmation flow is closed exactly as the auto-close closes
-  // it (source 'auto'), so the customer screen and partner app read it as done.
-  const closesConfirmation = !order.customerConfirmedAt;
+  const reportedAt = order.customerIssueReportedAt ?? null;
+  // The confirmation flow is closed only for a customer report whose flow is
+  // still open (delivered, a deadline set, not yet confirmed), exactly as the
+  // auto-close closes it (source 'auto'), so the customer screen and partner
+  // app read it as done. A customer who confirmed after reporting, or any
+  // other flag, leaves the confirmation fields alone. No status changes.
+  const closesConfirmation = Boolean(
+    reportedAt &&
+      normalizeOrderStatus(order.status) === ORDER_STATUS.DELIVERED &&
+      order.customerConfirmDueAt &&
+      !order.customerConfirmedAt
+  );
 
   let query = serviceClient
     .from('CustomerOrder')
@@ -362,16 +373,20 @@ export const adminResolveOrderReport: Handler = async ({ context, data }) => {
       needsAttention: false,
       // The resolution time lives on the timeline; the admin's note goes to the
       // audit log and the timeline event, not onto a record the customer reads.
-      timeline: { ...(order.timeline ?? {}), reportResolvedAt: resolvedAt },
+      timeline: {
+        ...(order.timeline ?? {}),
+        attentionResolvedAt: resolvedAt,
+        ...(reportedAt ? { reportResolvedAt: resolvedAt } : {}),
+      },
       updatedAt: resolvedAt,
     })
     .eq('id', orderId)
     .eq('status', sanitizeText(order.status))
-    .eq('needsAttention', true)
-    .eq('customerIssueReportedAt', order.customerIssueReportedAt as string);
-  query = closesConfirmation
-    ? query.is('customerConfirmedAt', null)
-    : query.eq('customerConfirmedAt', order.customerConfirmedAt as string);
+    .eq('needsAttention', true);
+  query = reportedAt ? query.eq('customerIssueReportedAt', reportedAt) : query.is('customerIssueReportedAt', null);
+  query = order.customerConfirmedAt
+    ? query.eq('customerConfirmedAt', order.customerConfirmedAt)
+    : query.is('customerConfirmedAt', null);
   // Any write since the read (a late confirm, a timeline change) bumps
   // updatedAt; the timeline above was merged from the read, so it must win only
   // over the row it was merged from.
@@ -388,25 +403,26 @@ export const adminResolveOrderReport: Handler = async ({ context, data }) => {
 
   await broadcastOrderChanged(orderId);
 
-  await createAuditEntry(context.uid, 'order_report_resolved', 'order', orderId, {
+  await createAuditEntry(context.uid, reportedAt ? 'order_report_resolved' : 'order_attention_resolved', 'order', orderId, {
     closedConfirmation: closesConfirmation,
     note,
+    status: normalizeOrderStatus(order.status),
   });
 
   await insertDeliveryEvent({
     actorUid: context.uid,
     details: { closedConfirmation: closesConfirmation },
-    eventType: 'admin_report_resolved',
+    eventType: reportedAt ? 'admin_report_resolved' : 'admin_attention_resolved',
     note,
     orderId,
   });
 
   return json(200, {
     data: {
-      customerConfirmedAt: closesConfirmation ? resolvedAt : order.customerConfirmedAt,
+      attentionResolvedAt: resolvedAt,
+      customerConfirmedAt: closesConfirmation ? resolvedAt : (order.customerConfirmedAt ?? null),
       needsAttention: false,
       orderId,
-      reportResolvedAt: resolvedAt,
     },
   });
 };

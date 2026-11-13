@@ -189,7 +189,7 @@ export const forceCompleteAdminOrder = (input: { orderId: string; reason: string
   callAdminRpc<{ orderId: string; status: string }>('adminForceCompleteOrder', input, { write: true });
 
 export const resolveAdminOrderReport = (input: { note: string; orderId: string }) =>
-  callAdminRpc<{ customerConfirmedAt: string | null; needsAttention: boolean; orderId: string; reportResolvedAt: string }>(
+  callAdminRpc<{ attentionResolvedAt: string; customerConfirmedAt: string | null; needsAttention: boolean; orderId: string }>(
     'adminResolveOrderReport',
     input,
     { write: true }

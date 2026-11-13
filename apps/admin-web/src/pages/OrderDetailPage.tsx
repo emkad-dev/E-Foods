@@ -32,7 +32,8 @@ import { getOrderTone, getPaymentTone } from '../theme/tones';
  * failed order can be inspected.
  *
  * It is also the admin's way out for a stuck order: force-cancel, force-complete
- * and resolving a customer problem report. Each button shows only when the
+ * and marking any flagged order resolved (which also closes an open customer
+ * problem report). Each button shows only when the
  * server would accept the action (the rules are shared with it through
  * packages/domain/src/adminOrders.ts), and each asks for a reason in an in-page
  * dialog before anything is sent.
@@ -60,10 +61,10 @@ const INTERVENTION_COPY: Record<
   },
   resolve: {
     busyLabel: 'Resolving…',
-    buttonLabel: 'Resolve report',
-    confirmLabel: 'Resolve report',
+    buttonLabel: 'Mark resolved',
+    confirmLabel: 'Mark resolved',
     fieldLabel: 'Resolution note (recorded in the audit log)',
-    title: "Resolve the customer's report?",
+    title: 'Mark this order resolved?',
   },
 };
 
@@ -80,9 +81,13 @@ const describeIntervention = (kind: InterventionKind, order: AdminOrderDetail, c
   if (kind === 'complete') {
     return 'The order is marked delivered. The customer gets 3 hours to confirm they received it or report a problem, and the restaurant is told FEASTY support completed it.';
   }
-  return order.customerConfirmedAt
-    ? 'The customer already confirmed this order. Resolving clears the attention flag.'
-    : 'Resolving clears the attention flag and closes the order the way the 3-hour auto-close does.';
+  // Mirrors the server: only an open customer-report flow is closed.
+  const closesConfirmation = Boolean(
+    order.customerIssueReportedAt && order.status === 'delivered' && order.customerConfirmDueAt && !order.customerConfirmedAt
+  );
+  return closesConfirmation
+    ? 'The attention flag is cleared and the customer confirmation is closed the way the 3-hour auto-close does. The order status does not change.'
+    : 'The attention flag is cleared. The order status does not change.';
 };
 
 const dash = (value: ReactNode) => (value === null || value === undefined || value === '' ? '—' : value);
@@ -163,8 +168,12 @@ export default function OrderDetailPage() {
         await forceCompleteAdminOrder({ orderId: order.id, reason: note });
         setActionNotice('Order marked completed. The customer has 3 hours to confirm it or report a problem.');
       } else {
-        await resolveAdminOrderReport({ orderId: order.id, note });
-        setActionNotice('Report resolved. The attention flag is cleared and the order is closed.');
+        const result = await resolveAdminOrderReport({ orderId: order.id, note });
+        setActionNotice(
+          result.customerConfirmedAt && !order.customerConfirmedAt
+            ? 'Marked resolved. The attention flag is cleared and the customer confirmation is closed.'
+            : 'Marked resolved. The attention flag is cleared.'
+        );
       }
     } catch (nextError) {
       // The server's own message: a 409 says the order changed meanwhile, a 412

@@ -521,6 +521,7 @@ Deno.test('resolving a report clears the flag, records the resolution and closes
     assertEquals(order().customerConfirmationSource, 'auto', 'closed the way the 3-hour auto-close closes it');
     assertEquals(typeof order().customerConfirmedAt, 'string');
     assertEquals(order().timeline.reportResolvedAt, order().customerConfirmedAt);
+    assertEquals(order().timeline.attentionResolvedAt, order().customerConfirmedAt);
     assertEquals(order().customerIssueReportedAt, '2026-11-09T11:30:00.000Z', 'the report itself is kept');
     assertEquals(order().status, 'delivered');
 
@@ -540,15 +541,57 @@ Deno.test('resolving a report the customer already confirmed only clears the fla
   });
 });
 
-Deno.test('resolve refuses an order with no report and a report already resolved', async () => {
+Deno.test('resolve refuses an order that is not flagged (a report already resolved, or nothing raised)', async () => {
   await withHarness(async () => {
-    setup(makeOrder({ status: 'delivered', needsAttention: true }));
-    assertEquals((await expectFailure(() => asAdmin(resolveReport, { note: 'x' }))).status, 412);
-    assertEquals(order().needsAttention, true);
-
     setup(reportedOrder({ needsAttention: false }));
     assertEquals((await expectFailure(() => asAdmin(resolveReport, { note: 'x' }))).status, 412);
     assertNoSideEffects();
+
+    setup(makeOrder({ status: 'preparing', needsAttention: false }));
+    assertEquals((await expectFailure(() => asAdmin(resolveReport, { note: 'x' }))).status, 412);
+    assertNoSideEffects();
+  });
+});
+
+Deno.test('a stale flag on a delivered pickup (no report) is cleared; no status or confirmation change', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        status: 'delivered',
+        needsAttention: true,
+        customerConfirmDueAt: '2026-11-09T14:00:00.000Z',
+        customerConfirmedAt: null,
+      })
+    );
+    const response = await asAdmin(resolveReport, { note: 'Late payment checked, nothing owed' });
+    assertEquals(response.status, 200);
+    assertEquals(order().needsAttention, false);
+    assertEquals(order().status, 'delivered');
+    assertEquals(order().customerConfirmedAt, null, 'no report: the confirmation flow is left to the customer');
+    assertEquals(order().customerConfirmationSource, null);
+    assertEquals(typeof order().timeline.attentionResolvedAt, 'string');
+    assertEquals(order().timeline.reportResolvedAt, undefined);
+    assertEquals(audits('order_attention_resolved')[0].details.note, 'Late payment checked, nothing owed');
+    assertEquals(events('admin_attention_resolved').length, 1);
+  });
+});
+
+Deno.test('the manual-refund flag on a rejected order can be marked resolved; the order stays rejected', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        status: 'rejected',
+        needsAttention: true,
+        payment: { method: 'card', reference: REFERENCE, status: 'refunded', refundAmount: CAPTURED },
+      })
+    );
+    const response = await asAdmin(resolveReport, { note: 'Refund sent by bank transfer' });
+    assertEquals(response.status, 200);
+    assertEquals(order().needsAttention, false);
+    assertEquals(order().status, 'rejected');
+    assertEquals(order().payment.status, 'refunded', 'payment untouched');
+    assertEquals(order().customerConfirmedAt, null);
+    assertEquals(audits('order_attention_resolved').length, 1);
   });
 });
 
