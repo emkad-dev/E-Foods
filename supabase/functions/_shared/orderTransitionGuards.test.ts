@@ -544,17 +544,69 @@ Deno.test('customer cancel of an unpaid order raises no flag and no alert', asyn
         payment: { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'pending' },
       })
     );
+    db.PaymentTransaction[0].status = 'pending';
     const response = await customerCancel();
     assertEquals(response.status, 200);
     assertEquals(order().status, 'cancelled');
-    // buildRefundUpdate (unchanged, refund behaviour is out of scope) still
-    // writes a 'refunded' entry from the order total for an uncaptured prepaid
-    // order. Nothing was captured, so no human is asked to return anything.
-    assertEquals(order().payment.status, 'refunded');
+    // Nothing was captured, so nothing is refunded: the payment closes as
+    // failed (never 'refunded', which a late payment would read as settled).
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(order().payment.refundAmount, undefined);
+    assertEquals(order().payment.refundedAt, undefined);
+    assertEquals(typeof order().payment.failedAt, 'string');
+    assertEquals(order().payment.lastEvent, 'customer_cancelled_full_refund', 'the cancel reason is kept');
+    assertEquals(order().payment.reference, REFERENCE);
+    assertEquals(db.PaymentTransaction[0].status, 'failed', 'the ledger follows the order');
+    assertEquals(db.PaymentTransaction[0].lastError, 'customer_cancelled');
     assertEquals(order().needsAttention, false);
     assertEquals(refundAlerts().length, 0);
     assertEquals(adminAlertEmails().length, 0);
     assertEquals(promoReleases().length, 1, 'the promo slot is still released');
+  });
+});
+
+Deno.test('customer cancel of a new-style unpaid checkout (capturedAmount 0, paidAt null) records no refund', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        status: 'placed',
+        payment: {
+          method: 'bank_transfer',
+          provider: 'paystack',
+          reference: REFERENCE,
+          status: 'pending',
+          capturedAmount: 0,
+          paidAt: null,
+          refundAmount: 0,
+          refundedAt: null,
+        },
+      })
+    );
+    db.PaymentTransaction[0].status = 'pending';
+    const response = await customerCancel();
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.data.refundAmount, 0, 'the app is told no refund was recorded');
+    assertEquals(body.data.refundRate, 1, 'the policy rate is still reported');
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(order().payment.refundAmount, 0);
+    assertEquals(order().payment.refundedAt, null);
+    assertEquals(db.PaymentTransaction[0].status, 'failed');
+    assertEquals(order().needsAttention, false);
+    assertEquals(refundAlerts().length, 0);
+  });
+});
+
+Deno.test('customer cancel of a PAID order still records the refund and tells the app its amount', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'placed' }));
+    const response = await customerCancel();
+    const body = await response.json();
+    assertEquals(body.data.refundAmount, CAPTURED);
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(order().payment.refundAmount, CAPTURED);
+    assertEquals(typeof order().payment.refundedAt, 'string');
+    assertEquals(db.PaymentTransaction[0].status, 'paid', 'ledger untouched, as before');
   });
 });
 

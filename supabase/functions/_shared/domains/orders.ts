@@ -42,8 +42,10 @@ import {
   CUSTOMER_ORDER_COLUMNS,
   DEFAULT_CURRENCY,
   insertDeliveryEvent,
+  isPaymentCaptured,
   loadOrderBundle,
   loadOrderRelations,
+  markUncapturedPaymentTransactionFailed,
   ORDER_GROUP_COLUMNS,
   maybeExpireUnpaidOrder,
   normalizeOrderStatus,
@@ -1270,6 +1272,27 @@ export const buildRefundUpdate = ({
 }) => {
   const existingPayment = (order.payment ?? {}) as JsonObject;
   const paymentMethod = sanitizeText(existingPayment.method, 'cash');
+
+  // A prepaid checkout that was never paid has no money to give back. It used to
+  // fall through to the order-total fallback below and come back 'refunded',
+  // which a late payment then read as settled - the money was captured with
+  // nobody told. It closes as a failed payment instead: no refund amount, no
+  // refund time, the same shape the unpaid expiry writes. A stored 'paid' still
+  // counts as captured so paid orders refund exactly as before.
+  if (
+    PREPAID_PAYMENT_METHODS.has(paymentMethod) &&
+    sanitizeText(existingPayment.status) !== PAYMENT_STATUS.PAID &&
+    !isPaymentCaptured(existingPayment)
+  ) {
+    return {
+      ...existingPayment,
+      // A payment that had already failed keeps the time it actually failed.
+      failedAt: sanitizeOptionalText(existingPayment.failedAt) ?? nowIso(),
+      lastEvent: reason,
+      status: PAYMENT_STATUS.FAILED,
+    };
+  }
+
   const capturedAmount = roundCurrency(
     parseNumber(existingPayment.capturedAmount, parseNumber((order.pricing ?? {}).total, 0))
   );
@@ -2010,9 +2033,9 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   // refunds await an owner decision), so a human must pay it back. Raise
   // needsAttention on this same write - which also stops the terminal-status
   // attention clear from dropping it - exactly as a paid rejection does.
-  // Gated on the payment having been PAID: buildRefundUpdate falls back to the
-  // order total when nothing was captured, so an unpaid prepaid order also comes
-  // back 'refunded' - but there is no money to return, so no human is needed.
+  // Gated on the payment having been PAID: an unpaid prepaid order comes back
+  // from buildRefundUpdate as a failed payment with no refund, so there is no
+  // money to return and no human is needed.
   const writtenPayment = payment as JsonObject;
   const refundRecorded =
     storedPaymentStatus(bundle.order) === PAYMENT_STATUS.PAID &&
@@ -2059,6 +2082,21 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
     });
   } else {
     await releasePromoRedemption(orderId);
+  }
+
+  // An unpaid checkout closed as a failed payment: its ledger row follows, so it
+  // does not sit 'pending' under a cancelled order. Guarded (pending/failed ->
+  // failed only), so a payment recorded meanwhile is never overwritten, and a
+  // late one still reaches the closed-order safeguard; best-effort.
+  if (
+    storedPaymentStatus(bundle.order) !== PAYMENT_STATUS.FAILED &&
+    sanitizeText(writtenPayment.status) === PAYMENT_STATUS.FAILED
+  ) {
+    await markUncapturedPaymentTransactionFailed(
+      bundle.order,
+      sanitizeText(writtenPayment.failedAt, nowIso()),
+      `${cancellation.actor}_cancelled`
+    );
   }
 
   // Routed through releaseDispatchAssignmentLoad, not the plain
@@ -2149,6 +2187,11 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   return json(200, {
     data: {
       orderId,
+      // What was actually recorded, so the app only speaks of a refund when
+      // there is one: refundRate is the policy, and applies to an unpaid order
+      // too, where nothing was taken.
+      refundAmount:
+        sanitizeText(writtenPayment.status) === PAYMENT_STATUS.REFUNDED ? parseNumber(writtenPayment.refundAmount, 0) : 0,
       refundRate,
       status: ORDER_STATUS.CANCELLED,
     },

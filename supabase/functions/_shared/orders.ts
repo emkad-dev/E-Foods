@@ -177,6 +177,23 @@ export const PAYMENT_STATUS = {
   REFUNDED: 'refunded',
 } as const;
 
+/**
+ * Whether money was actually taken for this payment. Every confirmation path
+ * (the webhook / refresh verification, and the older payment sync before it)
+ * stamps paidAt and a positive capturedAmount together, while a checkout is
+ * created with capturedAmount 0 and paidAt null. The stored status alone cannot
+ * tell: cancels used to write 'refunded' on payments that were never captured
+ * (production still holds such rows), and those must not read as settled money.
+ */
+export const isPaymentCaptured = (payment: JsonObject | null | undefined) => {
+  const stored = (payment ?? {}) as JsonObject;
+  if (sanitizeText(stored.paidAt)) {
+    return true;
+  }
+  const captured = typeof stored.capturedAmount === 'string' ? Number.parseFloat(stored.capturedAmount) : stored.capturedAmount;
+  return typeof captured === 'number' && Number.isFinite(captured) && captured > 0;
+};
+
 export const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 export const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 
