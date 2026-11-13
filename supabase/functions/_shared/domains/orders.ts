@@ -31,6 +31,9 @@ import {
 import { logEdgeEvent } from '../observability.ts';
 import { captureManualSettlementFallbackAlert } from '../operationalAlerts.ts';
 import { generateDeliveryCode } from '../deliveryCode.ts';
+// Circular with manualRefund.ts (it imports buildRefundUpdate from here); safe
+// because neither module uses the other's bindings at module scope.
+import { announceManualRefund } from '../manualRefund.ts';
 import {
   captureOrderPlacementRiskSignals,
   captureRefundAbuseSignals,
@@ -2003,11 +2006,23 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   // copy). A lost race changes nothing - no refund, no promo release, no
   // notification.
   const observedStatus = sanitizeText(bundle.order.status);
+  // A recorded refund is only a ledger entry: no money moves (real Paystack
+  // refunds await an owner decision), so a human must pay it back. Raise
+  // needsAttention on this same write - which also stops the terminal-status
+  // attention clear from dropping it - exactly as a paid rejection does.
+  // Gated on the payment having been PAID: buildRefundUpdate falls back to the
+  // order total when nothing was captured, so an unpaid prepaid order also comes
+  // back 'refunded' - but there is no money to return, so no human is needed.
+  const refundRecorded =
+    storedPaymentStatus(bundle.order) === PAYMENT_STATUS.PAID &&
+    sanitizeText(payment.status) === PAYMENT_STATUS.REFUNDED &&
+    parseNumber(payment.refundAmount, 0) > 0;
   const applied = await updateOrderRecordIfStatus(
     orderId,
     observedStatus,
     {
       cancellation,
+      ...(refundRecorded ? { needsAttention: true } : {}),
       payment,
       status: ORDER_STATUS.CANCELLED,
       timeline,
@@ -2030,8 +2045,20 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   // The order is now cancelled (customer/admin self-cancel, refunded per the
   // rate above): free any promo-cap slot it held so a single-use code the
   // customer cancelled out of is theirs to use again. Best-effort — a release
-  // failure must not undo the cancel/refund just committed.
-  await releasePromoRedemption(orderId);
+  // failure must not undo the cancel/refund just committed. A recorded refund
+  // also alerts admins (OperationalAlert + push/email); announceManualRefund
+  // does the promo release itself and never throws.
+  if (refundRecorded) {
+    await announceManualRefund({
+      actorUid: context.uid,
+      cancelledBy: context.role === 'admin' ? 'admin' : 'customer',
+      closedStatus: ORDER_STATUS.CANCELLED,
+      order: bundle.order,
+      payment: payment as JsonObject,
+    });
+  } else {
+    await releasePromoRedemption(orderId);
+  }
 
   // Routed through releaseDispatchAssignmentLoad, not the plain
   // adjustDispatchRiderLoad(-1) this used to call (review round 3): this is

@@ -1,6 +1,7 @@
 // A paid order that ends without the food reaching the customer: the restaurant
-// rejected it, the rider's delivery failed, or an admin cancelled it (a
-// force-cancel or the dispatch write-off). The customer's money was captured
+// rejected it, the rider's delivery failed, an admin cancelled it (a
+// force-cancel or the dispatch write-off), the customer cancelled it, or the
+// acceptance deadline auto-cancelled it. The customer's money was captured
 // and nothing returns it automatically (real Paystack refunds await an owner
 // decision), so these paths do what cancellation does - record the full refund
 // in the order's payment ledger with buildRefundUpdate - and then make sure a
@@ -46,13 +47,27 @@ export const buildManualRefundWrite = (
   };
 };
 
-const describeClosure = (closedStatus: string) => {
+/**
+ * Who closed a cancelled order, for the admin-facing wording only. Omitted means
+ * an admin (a force-cancel, the dispatch write-off, or an admin cancelling on the
+ * customer's behalf).
+ */
+export type ManualRefundCancelledBy = 'admin' | 'customer' | 'acceptance_timeout';
+
+const describeClosure = (closedStatus: string, cancelledBy: ManualRefundCancelledBy) => {
   if (closedStatus === ORDER_STATUS.FAILED_DELIVERY) {
     return { short: 'delivery failed on a paid order', verb: 'failed delivery' };
   }
-  // Only an admin cancels a paid order through here: a force-cancel or the
-  // dispatch write-off of an escalated order.
   if (closedStatus === ORDER_STATUS.CANCELLED) {
+    if (cancelledBy === 'customer') {
+      return { short: 'customer cancelled a paid order', verb: 'was cancelled by the customer' };
+    }
+    if (cancelledBy === 'acceptance_timeout') {
+      return {
+        short: 'paid order cancelled unaccepted',
+        verb: 'was cancelled automatically because the restaurant did not accept it in time',
+      };
+    }
     return { short: 'admin cancelled a paid order', verb: 'was cancelled by an admin' };
   }
   return { short: 'restaurant rejected a paid order', verb: 'was rejected by the restaurant' };
@@ -65,6 +80,8 @@ const describeClosure = (closedStatus: string) => {
  */
 export const announceManualRefund = async (input: {
   actorUid: string;
+  /** Only read when closedStatus is cancelled; defaults to an admin. */
+  cancelledBy?: ManualRefundCancelledBy;
   closedStatus: string;
   order: CustomerOrderRow;
   payment: JsonObject;
@@ -76,7 +93,7 @@ export const announceManualRefund = async (input: {
   // Everything that formats or sends is inside the try, so nothing here throws.
   try {
     const code = shortOrderCode(order.id);
-    const closure = describeClosure(closedStatus);
+    const closure = describeClosure(closedStatus, input.cancelledBy ?? 'admin');
     const refundAmount = typeof payment.refundAmount === 'number' ? payment.refundAmount : null;
     // buildRefundUpdate records nothing for a payment it cannot refund (not a
     // prepaid method, or no captured amount). Say so rather than claim a refund.

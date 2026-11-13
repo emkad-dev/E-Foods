@@ -27,12 +27,15 @@
 //   * the refund is recorded-only into the order's payment ledger (the same
 //     mechanism cancelCustomerOrder uses via buildRefundUpdate), so even a
 //     hypothetical double-write would be the same idempotent payload.
+//   * the manual-refund flag + admin alert after a cancel run only on the run
+//     whose CAS cancelled the order, behind a status + updatedAt guarded write.
 //
 // Nothing here throws to the caller. queue-drainer's own job draining must not
 // fail because the acceptance sweep had a bad minute, and a single bad order
 // must not abort the batch - both mirror sweepDispatchOffers.
 
 import { buildRefundUpdate } from './domains/orders.ts';
+import { announceManualRefund } from './manualRefund.ts';
 import {
   buildNotificationData,
   notifyAdmins,
@@ -49,11 +52,12 @@ import {
   ORDER_STATUS,
   PAYMENT_STATUS,
   releasePromoRedemption,
+  storedPaymentStatus,
 } from './orders.ts';
 import { acceptanceClockStartMs } from './acceptanceDeadline.ts';
 import { loadAcceptanceDeadlineConfig } from './platformSettings.ts';
 import { broadcastOrderChanged } from './realtime.ts';
-import { nowIso } from './rpc/coercion.ts';
+import { nowIso, type JsonObject } from './rpc/coercion.ts';
 import { serviceClient } from './client.ts';
 
 /** The actor recorded on events the sweep causes. Not a real uid - there is no human here. */
@@ -142,6 +146,77 @@ const escalateOrder = async (order: CustomerOrderRow, result: AcceptanceDeadline
   });
 };
 
+/**
+ * After ebuy_auto_cancel_unaccepted_order cancelled a paid order: the SQL wrote
+ * the full refund (p_payment, built by buildRefundUpdate above) but also cleared
+ * needsAttention, and the refund is recorded only - no money moves. Raise the
+ * flag and alert admins, as a paid rejection does, without touching the SQL.
+ *
+ * Reads the committed row (not the sweep's stale snapshot) and flags it with a
+ * write guarded on status = cancelled and the updatedAt it read, so an order that
+ * changed in between (another writer, a second sweep) is left alone. Returns
+ * whether it flagged and announced. Never throws: the cancel already committed.
+ */
+const flagAutoCancelledRefund = async (snapshot: CustomerOrderRow): Promise<boolean> => {
+  const orderId = snapshot.id;
+  // Only money that was captured needs paying back (the candidate query already
+  // selects paid orders; this keeps the helper honest on its own).
+  if (storedPaymentStatus(snapshot) !== PAYMENT_STATUS.PAID) {
+    return false;
+  }
+  try {
+    const { data: current, error: readError } = await serviceClient
+      .from('CustomerOrder')
+      .select(CUSTOMER_ORDER_COLUMNS)
+      .eq('id', orderId)
+      .maybeSingle();
+    if (readError) {
+      throw new Error(readError.message);
+    }
+    const order = current as CustomerOrderRow | null;
+    const payment = (order?.payment ?? {}) as JsonObject;
+    const refundAmount = typeof payment.refundAmount === 'number' ? payment.refundAmount : 0;
+    if (
+      !order ||
+      normalizeOrderStatus(order.status) !== ORDER_STATUS.CANCELLED ||
+      payment.status !== PAYMENT_STATUS.REFUNDED ||
+      refundAmount <= 0 ||
+      typeof order.updatedAt !== 'string'
+    ) {
+      return false;
+    }
+
+    const { data: flagged, error: flagError } = await serviceClient
+      .from('CustomerOrder')
+      .update({ needsAttention: true, updatedAt: nowIso() })
+      .eq('id', orderId)
+      .eq('status', ORDER_STATUS.CANCELLED)
+      .eq('updatedAt', order.updatedAt)
+      .select('id');
+    if (flagError) {
+      throw new Error(flagError.message);
+    }
+    if (!Array.isArray(flagged) || flagged.length === 0) {
+      return false;
+    }
+
+    await announceManualRefund({
+      actorUid: ACCEPTANCE_DEADLINE_SWEEP_ACTOR,
+      cancelledBy: 'acceptance_timeout',
+      closedStatus: ORDER_STATUS.CANCELLED,
+      order,
+      payment,
+    });
+    return true;
+  } catch (error) {
+    logEdgeEvent('error', 'acceptance auto-cancel refund flag failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+    return false;
+  }
+};
+
 const autoCancelOrder = async (order: CustomerOrderRow, result: AcceptanceDeadlineSweepResult) => {
   const cancelledAt = nowIso();
 
@@ -194,17 +269,23 @@ const autoCancelOrder = async (order: CustomerOrderRow, result: AcceptanceDeadli
   // the RPC, so a realtime nudge, an event insert, or a push that fails must
   // not undo it or abort the batch.
 
+  // The recorded refund moves no money, so a human must pay it back: flag the
+  // order and alert admins (announceManualRefund also frees the promo slot).
+  const announced = await flagAutoCancelledRefund(order);
+
   // Free any promo-cap slot the now-cancelled (and fully refunded) order held:
   // a single-use code must not be burned because the restaurant failed to
   // accept in time. Runs only on a genuine cancel (cancelled === true above),
   // and is itself best-effort — a release failure never aborts the batch.
-  try {
-    await releasePromoRedemption(order.id);
-  } catch (releaseError) {
-    logEdgeEvent('error', 'acceptance auto-cancel promo release failed', {
-      error: releaseError instanceof Error ? releaseError.message : String(releaseError),
-      orderId: order.id,
-    });
+  if (!announced) {
+    try {
+      await releasePromoRedemption(order.id);
+    } catch (releaseError) {
+      logEdgeEvent('error', 'acceptance auto-cancel promo release failed', {
+        error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+        orderId: order.id,
+      });
+    }
   }
 
   try {

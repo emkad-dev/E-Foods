@@ -516,6 +516,48 @@ Deno.test('customer cancel with no race still cancels and refunds as before', as
   });
 });
 
+// ───────────────────────── Customer cancel of a paid order needs a human ─────────────────────────
+
+Deno.test('customer cancel of a PAID order flags attention and alerts admins once', async () => {
+  // The refund is recorded only - no money moves - so somebody must pay it back.
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'placed', needsAttention: true }));
+    const response = await customerCancel();
+    assertEquals(response.status, 200);
+    assertEquals(order().status, 'cancelled');
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(order().payment.refundAmount, CAPTURED);
+    assertEquals(order().needsAttention, true, 'flag kept through the terminal clear');
+    assertEquals(refundAlerts().length, 1);
+    assertEquals(String(refundAlerts()[0].details).includes('was cancelled by the customer'), true);
+    assertEquals(String(refundAlerts()[0].details).includes('A full refund of'), true);
+    assertEquals(adminAlertEmails().length, 1);
+    assertEquals(promoReleases().length, 1, 'one promo release, not two');
+  });
+});
+
+Deno.test('customer cancel of an unpaid order raises no flag and no alert', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        status: 'placed',
+        payment: { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'pending' },
+      })
+    );
+    const response = await customerCancel();
+    assertEquals(response.status, 200);
+    assertEquals(order().status, 'cancelled');
+    // buildRefundUpdate (unchanged, refund behaviour is out of scope) still
+    // writes a 'refunded' entry from the order total for an uncaptured prepaid
+    // order. Nothing was captured, so no human is asked to return anything.
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(order().needsAttention, false);
+    assertEquals(refundAlerts().length, 0);
+    assertEquals(adminAlertEmails().length, 0);
+    assertEquals(promoReleases().length, 1, 'the promo slot is still released');
+  });
+});
+
 // ───────────────────────── Spec 9: delivery-code attempts ─────────────────────────
 
 Deno.test('delivery code: a correct code does not use an attempt', async () => {

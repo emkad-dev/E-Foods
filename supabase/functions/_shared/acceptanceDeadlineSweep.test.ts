@@ -138,20 +138,38 @@ const createTable = (initialRows: Row[]) => {
       rows.push({ ...payload });
       return { error: null };
     },
+    // OperationalAlert rows are keyed on dedupeKey, as recordOperationalAlert upserts them.
+    async upsert(payload: Row, options?: { onConflict?: string }) {
+      const key = options?.onConflict ?? 'id';
+      const existing = rows.find((row) => row[key] === payload[key]);
+      if (existing) Object.assign(existing, payload);
+      else rows.push({ ...payload });
+      return { error: null };
+    },
     update(payload: Row) {
       const filters: Array<[string, unknown]> = [];
+      // Every filter is applied together at execution, the way Postgres
+      // evaluates the WHERE; `.select()` surfaces the matched rows.
+      const apply = () => {
+        const matched = rows.filter((row) => filters.every(([col, val]) => readColumn(row, col) === val));
+        for (const row of matched) Object.assign(row, payload);
+        return matched.map(snapshot);
+      };
       // deno-lint-ignore no-explicit-any
       const builder: any = {
         eq(col: string, val: unknown) {
           filters.push([col, val]);
           return builder;
         },
+        select(_columns?: string) {
+          return {
+            then(resolve: (value: { data: Row[]; error: null }) => unknown, reject?: (reason: unknown) => unknown) {
+              return Promise.resolve({ data: apply(), error: null }).then(resolve, reject);
+            },
+          };
+        },
         then(resolve: (value: { error: null }) => unknown, reject?: (reason: unknown) => unknown) {
-          for (const row of rows) {
-            if (filters.every(([col, val]) => row[col] === val)) {
-              Object.assign(row, payload);
-            }
-          }
+          apply();
           return Promise.resolve({ error: null }).then(resolve, reject);
         },
       };
@@ -198,6 +216,8 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
     CustomerOrder: createTable(orders),
     RestaurantRecord: createTable([{ id: RESTAURANT_ID, ownerId: null, missedOrderCount: 0 }]),
     DeliveryEvent: createTable([]),
+    OperationalAlert: createTable([]),
+    PushDevice: createTable([]),
     UserRole: createTable([]),
     UserAccount: createTable([]),
   };
@@ -263,6 +283,11 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
         restaurant.missedOrderCount = ((restaurant.missedOrderCount as number) ?? 0) + 1;
       }
       return Promise.resolve({ data: [{ cancelled: true, restaurantId }], error: null });
+    }
+
+    // The promo release and the admin-email dedupe limiter: recorded above, no-op here.
+    if (fn === 'ebuy_release_promo_redemption' || fn === 'auth_rl_hit') {
+      return Promise.resolve({ data: [], error: null });
     }
 
     throw new Error(`acceptanceDeadlineSweep.test.ts: unexpected rpc "${fn}"`);
@@ -549,6 +574,77 @@ Deno.test('sweep: 100 older unpaid orders cannot starve a paid order of escalati
       1,
       'no unpaid order was touched'
     );
+  } finally {
+    mocks.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// A paid auto-cancel records a refund that moves no money, and the SQL clears
+// needsAttention: the sweep must re-flag it and alert admins so someone pays
+// the customer back.
+// ---------------------------------------------------------------------------
+const refundAlertsFor = (mocks: ReturnType<typeof installMocks>) =>
+  mocks.tables.OperationalAlert.rows.filter((row) => row.alertType === 'manual_refund_required');
+const adminEmailsFor = (mocks: ReturnType<typeof installMocks>, orderId: string) =>
+  mocks.rpcCalls.filter(
+    (call) => call.fn === 'auth_rl_hit' && call.params.p_key === `admin-alert-email:manual_refund_required:${orderId}`
+  );
+const promoReleasesFor = (mocks: ReturnType<typeof installMocks>, orderId: string) =>
+  mocks.rpcCalls.filter((call) => call.fn === 'ebuy_release_promo_redemption' && call.params.p_order_id === orderId);
+
+Deno.test('sweep: a paid auto-cancel is flagged and alerted exactly once across repeated sweeps', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-refund-flag', timeline: { placedAt: placedAgo(DEADLINE_MS * 2 + 5_000) } }),
+  ]);
+  try {
+    const first = await sweepUnacceptedOrders();
+    expectEqual(first.cancelled, 1, 'the order is cancelled');
+    expectEqual(mocks.order().status, 'cancelled', 'cancelled');
+    expectEqual((mocks.order().payment as Row).refundAmount, CAPTURED_AMOUNT, 'the SQL wrote the full refund');
+    expectEqual(mocks.order().needsAttention, true, 'flagged after the SQL cleared it');
+
+    const alerts = refundAlertsFor(mocks);
+    expectEqual(alerts.length, 1, 'one manual-refund OperationalAlert');
+    expectEqual(alerts[0].subjectId, 'order-refund-flag', 'alert names the order');
+    expectEqual(alerts[0].severity, 'high', 'high severity');
+    expectEqual(String(alerts[0].details).includes('did not accept it in time'), true, 'admin wording names the cause');
+    expectEqual(String(alerts[0].details).includes('A full refund of'), true, 'alert names the recorded refund');
+    expectEqual(adminEmailsFor(mocks, 'order-refund-flag').length, 1, 'admins emailed once');
+    expectEqual(promoReleasesFor(mocks, 'order-refund-flag').length, 1, 'promo released once (by the announcement)');
+
+    const second = await sweepUnacceptedOrders();
+    expectEqual(second.cancelled, 0, 'a second sweep cancels nothing');
+    expectEqual(refundAlertsFor(mocks).length, 1, 'still one alert');
+    expectEqual(adminEmailsFor(mocks, 'order-refund-flag').length, 1, 'still one admin email');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('sweep: an auto-cancelled order that changed before the flag write is left alone', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-refund-lost', timeline: { placedAt: placedAgo(DEADLINE_MS * 2 + 5_000) } }),
+  ]);
+  // Another writer commits between the sweep's read of the cancelled row and its
+  // guarded flag write: updatedAt moves, so the guard no longer matches.
+  const update = mocks.tables.CustomerOrder.update;
+  let fired = false;
+  mocks.tables.CustomerOrder.update = (payload: Row) => {
+    if (!fired && payload.needsAttention === true) {
+      fired = true;
+      mocks.order().updatedAt = new Date(Date.now() + 60_000).toISOString();
+    }
+    return update(payload);
+  };
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.cancelled, 1, 'the cancel itself committed');
+    expectEqual(fired, true, 'the flag write was attempted');
+    expectEqual(mocks.order().needsAttention, false, 'no flag written over the newer row');
+    expectEqual(refundAlertsFor(mocks).length, 0, 'no alert');
+    expectEqual(adminEmailsFor(mocks, 'order-refund-lost').length, 0, 'no admin email');
+    expectEqual(promoReleasesFor(mocks, 'order-refund-lost').length, 1, 'the promo slot is still released');
   } finally {
     mocks.restore();
   }
