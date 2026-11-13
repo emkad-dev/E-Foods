@@ -104,7 +104,9 @@ const upsertPaymentTransaction = async (
   webhookEvent: JsonObject | null,
   // A multi-store group is one Paystack charge: record the group total, not the
   // primary order's own share. Omitted (single order) => the order's total.
-  amountOverride?: number
+  amountOverride?: number,
+  // When the charge was paid earlier (a ledger repaired on a retry), not now.
+  paidAtOverride?: string
 ) => {
   const payment = (order.payment ?? {}) as JsonObject;
   const paymentReference = normalizeStatus(payment.reference, '');
@@ -158,7 +160,7 @@ const upsertPaymentTransaction = async (
             ? transactionData.gateway_response
             : null
         : null,
-    paidAt: paymentStatus === 'paid' ? new Date().toISOString() : null,
+    paidAt: paymentStatus === 'paid' ? paidAtOverride ?? new Date().toISOString() : null,
     verifiedAt: new Date().toISOString(),
     initializeResponse: payment.initializeResponse ?? null,
     // The raw gateway answer this verification acted on, from either path.
@@ -805,6 +807,55 @@ export const recordUnsuccessfulPaymentVerification = async ({
 };
 
 /**
+ * The ledger half of a charge whose order payment is already settled. The
+ * verification that claimed the order writes the ledger AFTER its claim, so a
+ * crash (or a throw) between the two leaves a paid order next to a pending (or
+ * failed) ledger row, and every retry then finds the order settled. Repaired
+ * here from what the claim stored on the order (payment.paystackResponse is the
+ * verified Paystack answer it acted on). Skipped when the row already says paid
+ * or refunded, so a replay does not rewrite timestamps; the upsert itself is
+ * safe to repeat (conflict on reference). Throws, so a failed repair is retried
+ * by the caller rather than recorded as done.
+ */
+const repairSettledChargeLedger = async (
+  order: CustomerOrderRow,
+  charge: { expectedAmount: number; isGroup: boolean },
+  webhookEvent: JsonObject | null,
+  fallbackTransaction: JsonObject | null
+) => {
+  const payment = (order.payment ?? {}) as JsonObject;
+  const paymentReference = normalizeStatus(payment.reference, '');
+  if (!paymentReference) return;
+
+  const { data: ledger, error } = await serviceClient
+    .from('PaymentTransaction')
+    .select('status')
+    .eq('reference', paymentReference)
+    .maybeSingle<{ status?: string | null }>();
+  if (error) throw new Error(`Failed to read payment transaction: ${error.message}`);
+  if (ledger && SETTLED_PAYMENT_STATUSES.has(normalizeOrderStatusText(ledger.status))) return;
+
+  const storedResponse = payment.paystackResponse;
+  const transactionData =
+    storedResponse && typeof storedResponse === 'object' && !Array.isArray(storedResponse)
+      ? (storedResponse as JsonObject)
+      : fallbackTransaction ?? {};
+  logEdgeEvent('warn', 'Settled order had an unsettled payment transaction; repairing the ledger', {
+    ledgerStatus: ledger?.status ?? null,
+    orderId: order.id,
+    paymentReference,
+  });
+  await upsertPaymentTransaction(
+    order,
+    transactionData,
+    'paid',
+    webhookEvent,
+    charge.isGroup ? charge.expectedAmount : undefined,
+    typeof payment.paidAt === 'string' ? payment.paidAt : undefined
+  );
+};
+
+/**
  * Verify a Paystack payment for an order.
  *
  * This handler is idempotent and does NOT manage its own queue row lifecycle —
@@ -817,7 +868,9 @@ export const recordUnsuccessfulPaymentVerification = async ({
  *   1. An IdempotencyRecord keyed on order id + payment reference.
  *   2. The order's own payment status — if it is already `paid` (or
  *      `refunded`), we skip re-verification and (importantly) the
- *      re-notification side effect.
+ *      re-notification side effect. What a crashed claimer left undone is
+ *      still finished: its ledger row is repaired, and unclaimed group
+ *      siblings are verified and claimed (and only they are notified).
  *   3. A compare-and-set on that payment status when writing (see
  *      claimOrderPayment), which is what actually holds when two
  *      verifications of the same charge - the webhook and a customer refresh -
@@ -848,7 +901,26 @@ export const handlePaymentVerification = async (job: PaymentVerificationRequest)
 
   if (orderError || !order) throw new Error('Order not found');
 
+  // Settled: another verification claimed this order. If it crashed partway,
+  // finish its work here - but send nothing for what it claimed (a lost push
+  // beats a duplicate). A group sibling it never got to falls through to the
+  // full verification below, which claims ONLY the still-unsettled orders, so
+  // the sibling claimed on this retry gets its notification and the order
+  // claimed earlier gets none (markOrderPaymentState notifies claim winners).
+  // A lone order, or a group whose orders are all settled, only gets its
+  // ledger repaired.
+  let resumeUnclaimedSiblings = false;
   if (isSettledPayment(order)) {
+    const charge = order.orderGroupId
+      ? await loadChargeOrders(order)
+      : { expectedAmount: toNumber((order.pricing ?? {}).total, 0), isGroup: false, rows: [order] };
+    resumeUnclaimedSiblings = charge.rows.some((row) => row.id !== order.id && !isSettledPayment(row));
+    if (!resumeUnclaimedSiblings) {
+      await repairSettledChargeLedger(order, charge, webhookEvent, prefetchedTransaction);
+    }
+  }
+
+  if (isSettledPayment(order) && !resumeUnclaimedSiblings) {
     await capturePaymentVerificationReplaySignal({
       orderId,
       paymentReference,
