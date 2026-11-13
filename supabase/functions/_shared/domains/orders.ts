@@ -2013,10 +2013,11 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   // Gated on the payment having been PAID: buildRefundUpdate falls back to the
   // order total when nothing was captured, so an unpaid prepaid order also comes
   // back 'refunded' - but there is no money to return, so no human is needed.
+  const writtenPayment = payment as JsonObject;
   const refundRecorded =
     storedPaymentStatus(bundle.order) === PAYMENT_STATUS.PAID &&
-    sanitizeText(payment.status) === PAYMENT_STATUS.REFUNDED &&
-    parseNumber(payment.refundAmount, 0) > 0;
+    sanitizeText(writtenPayment.status) === PAYMENT_STATUS.REFUNDED &&
+    parseNumber(writtenPayment.refundAmount, 0) > 0;
   const applied = await updateOrderRecordIfStatus(
     orderId,
     observedStatus,
@@ -2054,7 +2055,7 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
       cancelledBy: context.role === 'admin' ? 'admin' : 'customer',
       closedStatus: ORDER_STATUS.CANCELLED,
       order: bundle.order,
-      payment: payment as JsonObject,
+      payment: writtenPayment,
     });
   } else {
     await releasePromoRedemption(orderId);
