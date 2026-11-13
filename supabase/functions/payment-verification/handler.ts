@@ -43,6 +43,7 @@ type CustomerOrderRow = {
   payment: JsonObject | null;
   pricing: JsonObject | null;
   timeline: JsonObject | null;
+  updatedAt?: string | null;
 };
 
 type OrderGroupRow = {
@@ -199,7 +200,7 @@ const UNSUCCESSFUL_GATEWAY_STATUSES = new Set(['abandoned', 'failed', 'reversed'
 // written blind.
 const MAX_PAYMENT_WRITE_ATTEMPTS = 3;
 
-const ORDER_STATE_COLUMNS = 'id,customerId,orderGroupId,restaurantId,status,payment,pricing,timeline';
+const ORDER_STATE_COLUMNS = 'id,customerId,orderGroupId,restaurantId,status,payment,pricing,timeline,updatedAt';
 
 const normalizeOrderStatusText = (value: unknown) => normalizeStatus(value, '').toLowerCase();
 
@@ -607,30 +608,69 @@ const markOrderPaymentState = async (
 // left alone and a human is pointed at it instead. Once per order: the
 // timeline.paymentReversedAt stamp is the guard, so repeated customer refreshes
 // do not re-page the admins.
-const flagReversedPaidOrder = async (order: CustomerOrderRow, transactionData: JsonObject) => {
-  const nowIso = new Date().toISOString();
-  const paymentReference = normalizeStatus((order.payment ?? {}).reference, '');
-  const orderStatus = normalizeOrderStatusText(order.status);
-  const { data: flagged, error } = await serviceClient
+//
+// The flag write merges the timeline this call read, so it is guarded on the
+// status and updatedAt read as well: a concurrent timeline patch (a status
+// change, a late stamp) must not be clobbered by the stale copy. A lost guard is
+// re-read and retried once; if it loses again the write is given up and logged,
+// but the OperationalAlert and the admin page still go out - the reversal must
+// reach a human even when the flag could not be written.
+const MAX_REVERSAL_FLAG_ATTEMPTS = 2;
+
+const writeReversalFlag = async (row: CustomerOrderRow, nowIso: string) => {
+  let query = serviceClient
     .from('CustomerOrder')
     .update({
       needsAttention: true,
-      timeline: { ...(order.timeline ?? {}), paymentReversedAt: nowIso },
+      timeline: { ...(row.timeline ?? {}), paymentReversedAt: nowIso },
       updatedAt: nowIso,
     })
-    .eq('id', order.id)
+    .eq('id', row.id)
     .eq('payment->>status', 'paid')
-    .is('timeline->>paymentReversedAt', null)
-    .select('id');
-
+    .is('timeline->>paymentReversedAt', null);
+  query = typeof row.status === 'string' ? query.eq('status', row.status) : query.is('status', null);
+  query = typeof row.updatedAt === 'string' ? query.eq('updatedAt', row.updatedAt) : query.is('updatedAt', null);
+  const { data: flagged, error } = await query.select('id');
   if (error) throw new Error(`Failed to flag reversed payment: ${error.message}`);
-  if (!Array.isArray(flagged) || flagged.length === 0) return;
+  return Array.isArray(flagged) && flagged.length > 0;
+};
 
-  logEdgeEvent('warn', 'Paid order reported reversed by Paystack; flagged for manual review', {
-    orderId: order.id,
-    orderStatus,
-    paymentReference,
-  });
+const isUnflaggedReversalCandidate = (row: CustomerOrderRow) =>
+  normalizeOrderStatusText((row.payment ?? {}).status) === 'paid' &&
+  !normalizeStatus((row.timeline ?? {}).paymentReversedAt, '');
+
+const flagReversedPaidOrder = async (order: CustomerOrderRow, transactionData: JsonObject) => {
+  const nowIso = new Date().toISOString();
+  const paymentReference = normalizeStatus((order.payment ?? {}).reference, '');
+
+  let row = order;
+  let flagged = false;
+  for (let attempt = 0; attempt < MAX_REVERSAL_FLAG_ATTEMPTS; attempt += 1) {
+    if (await writeReversalFlag(row, nowIso)) {
+      flagged = true;
+      break;
+    }
+    // Lost the guard: judge the committed row. Already flagged (another
+    // refresh) or no longer paid means there is nothing left to raise.
+    const fresh = await loadOrderState(order.id);
+    if (!fresh || !isUnflaggedReversalCandidate(fresh)) return;
+    row = fresh;
+  }
+
+  const orderStatus = normalizeOrderStatusText(row.status);
+  if (flagged) {
+    logEdgeEvent('warn', 'Paid order reported reversed by Paystack; flagged for manual review', {
+      orderId: order.id,
+      orderStatus,
+      paymentReference,
+    });
+  } else {
+    logEdgeEvent('error', 'Paid order reported reversed by Paystack, but the order kept changing; flag not written', {
+      orderId: order.id,
+      orderStatus,
+      paymentReference,
+    });
+  }
 
   await recordOperationalAlert({
     alertType: 'payment_reversed_on_paid_order',
@@ -660,7 +700,9 @@ const flagReversedPaidOrder = async (order: CustomerOrderRow, transactionData: J
     title: 'Payment reversed on a paid order',
   });
 
-  await broadcastOrderChanged(order.id, { restaurantId: order.restaurantId });
+  if (flagged) {
+    await broadcastOrderChanged(order.id, { restaurantId: order.restaurantId });
+  }
 };
 
 /**

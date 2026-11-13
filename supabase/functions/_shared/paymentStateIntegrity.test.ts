@@ -424,6 +424,64 @@ Deno.test('refresh: a reversed charge on a paid order keeps it paid, flags it an
   });
 });
 
+const reversalFlagWrite = (table: string, payload: Row) => table === 'CustomerOrder' && payload.needsAttention === true;
+const reversalPages = () =>
+  rpcCalls.filter((call) => call.fn === 'auth_rl_hit' && call.params.p_key === 'admin-alert-email:payment_reversed:order-1');
+
+Deno.test('refresh: a reversal flag never clobbers a timeline patch that landed after the read; it re-reads and retries', async () => {
+  await withHarness(async () => {
+    const paid = { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'paid', capturedAmount: 2500 };
+    setup([makeOrder({ status: 'preparing', payment: paid })], [pendingTransaction({ status: 'paid' })]);
+    paystackVerifyData = charge('reversed');
+    // The kitchen marks the order ready between the reversal's read and its write.
+    beforeUpdate = (table, payload) => {
+      if (!reversalFlagWrite(table, payload)) return;
+      Object.assign(order(), {
+        status: 'ready_for_pickup',
+        timeline: { ...order().timeline, readyAt: '2026-11-12T12:00:00.000Z' },
+        updatedAt: '2026-11-12T12:00:00.000Z',
+      });
+    };
+
+    await refresh();
+
+    assertEquals(order().status, 'ready_for_pickup');
+    assertEquals(order().timeline.readyAt, '2026-11-12T12:00:00.000Z', 'the concurrent patch survives');
+    assertEquals(typeof order().timeline.paymentReversedAt, 'string', 'flagged on the retry');
+    assertEquals(order().needsAttention, true);
+    assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_reversed_on_paid_order']);
+    assertEquals(reversalPages().length, 1);
+  });
+});
+
+Deno.test('refresh: a reversal on an order that keeps changing gives up the flag but still alerts admins', async () => {
+  await withHarness(async () => {
+    const paid = { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'paid', capturedAmount: 2500 };
+    setup([makeOrder({ status: 'preparing', payment: paid })], [pendingTransaction({ status: 'paid' })]);
+    paystackVerifyData = charge('reversed');
+    let bumps = 0;
+    const bump = (table: string, payload: Row) => {
+      if (!reversalFlagWrite(table, payload)) return;
+      bumps += 1;
+      order().timeline = { ...order().timeline, [`patch${bumps}`]: true };
+      order().updatedAt = `2026-11-12T12:00:0${bumps}.000Z`;
+      beforeUpdate = bump; // one-shot hook: re-arm for the retry
+    };
+    beforeUpdate = bump;
+
+    await refresh();
+
+    assertEquals(bumps, 2, 'one write and one retry, then it gives up');
+    assertEquals(order().needsAttention, false, 'no flag written over a row it did not read');
+    assertEquals(order().timeline.paymentReversedAt, undefined);
+    assertEquals(order().timeline.patch1, true);
+    assertEquals(order().timeline.patch2, true);
+    assertEquals(order().payment.status, 'paid');
+    assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_reversed_on_paid_order'], 'alert still raised');
+    assertEquals(reversalPages().length, 1, 'admins still paged');
+  });
+});
+
 Deno.test('refresh: an abandoned verify on an unpaid order records failed and tells the customer once', async () => {
   await withHarness(async () => {
     setup([makeOrder()]);
