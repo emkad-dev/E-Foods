@@ -99,7 +99,7 @@ export const announceManualRefund = async (input: {
     // prepaid method, or no captured amount). Say so rather than claim a refund.
     const refundRecorded = payment.status === PAYMENT_STATUS.REFUNDED && refundAmount !== null;
     const details = refundRecorded
-      ? `Order ${order.id} ${closure.verb} after payment. A full refund of ${formatNairaAmount(
+      ? `Order ${order.id} ${closure.verb} after payment. A refund of ${formatNairaAmount(
           refundAmount
         )} is recorded on the order but no money has moved: return it to the customer by hand.`
       : `Order ${order.id} ${closure.verb} after payment. No refund could be recorded automatically: check the payment and return the money to the customer by hand.`;

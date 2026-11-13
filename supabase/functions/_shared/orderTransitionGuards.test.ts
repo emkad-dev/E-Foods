@@ -286,7 +286,7 @@ Deno.test('partner reject of a PAID order records the full refund, flags attenti
     assertEquals(refundAlerts().length, 1, 'one OperationalAlert for the admin console');
     assertEquals(refundAlerts()[0].severity, 'high');
     assertEquals(refundAlerts()[0].subjectId, ORDER_ID);
-    assertEquals(String(refundAlerts()[0].details).includes('A full refund of'), true, 'alert names the recorded refund');
+    assertEquals(String(refundAlerts()[0].details).includes('A refund of'), true, 'alert names the recorded refund');
     assertEquals(adminAlertEmails().length, 1, 'admins notified (push + email)');
 
     assertEquals(db.PaymentTransaction[0].status, 'paid', 'ledger untouched, as cancellation leaves it');
@@ -530,7 +530,7 @@ Deno.test('customer cancel of a PAID order flags attention and alerts admins onc
     assertEquals(order().needsAttention, true, 'flag kept through the terminal clear');
     assertEquals(refundAlerts().length, 1);
     assertEquals(String(refundAlerts()[0].details).includes('was cancelled by the customer'), true);
-    assertEquals(String(refundAlerts()[0].details).includes('A full refund of'), true);
+    assertEquals(String(refundAlerts()[0].details).includes('A refund of'), true);
     assertEquals(adminAlertEmails().length, 1);
     assertEquals(promoReleases().length, 1, 'one promo release, not two');
   });

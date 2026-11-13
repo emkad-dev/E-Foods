@@ -346,7 +346,7 @@ Deno.test('force-cancel of a PAID order records the full refund, flags attention
     assertEquals(promoReleases().length, 1);
     assertEquals(refundAlerts().length, 1, 'one OperationalAlert');
     assertEquals(String(refundAlerts()[0].details).includes('cancelled by an admin'), true);
-    assertEquals(String(refundAlerts()[0].details).includes('A full refund of'), true);
+    assertEquals(String(refundAlerts()[0].details).includes('A refund of'), true);
     assertEquals(adminAlertEmails().length, 1);
     assertEquals(loadReleases().length, 1, 'rider load released');
 

@@ -609,7 +609,7 @@ Deno.test('sweep: a paid auto-cancel is flagged and alerted exactly once across 
     expectEqual(alerts[0].subjectId, 'order-refund-flag', 'alert names the order');
     expectEqual(alerts[0].severity, 'high', 'high severity');
     expectEqual(String(alerts[0].details).includes('did not accept it in time'), true, 'admin wording names the cause');
-    expectEqual(String(alerts[0].details).includes('A full refund of'), true, 'alert names the recorded refund');
+    expectEqual(String(alerts[0].details).includes('A refund of'), true, 'alert names the recorded refund');
     expectEqual(adminEmailsFor(mocks, 'order-refund-flag').length, 1, 'admins emailed once');
     expectEqual(promoReleasesFor(mocks, 'order-refund-flag').length, 1, 'promo released once (by the announcement)');
 
