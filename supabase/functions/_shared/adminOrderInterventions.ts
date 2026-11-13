@@ -21,8 +21,11 @@
 //
 // Every write is a compare-and-set on what this request read, so a concurrent
 // partner, rider, customer or sweep write wins and this request changes nothing
-// (409). Each applied action is audited (AdminAuditLog, not best-effort) and
-// leaves a DeliveryEvent carrying the admin's note for the order timeline.
+// (409). After an applied write the consistency side effects run first (rider
+// load release, the manual-refund alert and promo release, notifications),
+// then the admin trail: a DeliveryEvent carrying the admin's note and the
+// AdminAuditLog entry, both best-effort (logged, never thrown) so they can
+// neither skip the side effects nor turn a done action into an error.
 // Recorded only: no money moves and Paystack is never called.
 
 import {
@@ -113,6 +116,49 @@ const releaseRiderLoad = async (orderId: string, status: string) => {
   }
 };
 
+/**
+ * The admin trail for an applied action: the order timeline event (with the
+ * admin's note) and the AdminAuditLog entry. Runs LAST and best-effort: the
+ * status write has committed, so a failed trail write must neither skip a
+ * consistency side effect (rider load, refund alert, promo release,
+ * notifications) nor turn a done action into a 500 the admin would retry
+ * against an order that has moved on. Each failure is logged on its own.
+ */
+const recordAdminTrail = async (input: {
+  actorUid: string;
+  auditAction: string;
+  auditDetails: JsonObject;
+  eventDetails: JsonObject;
+  eventType: string;
+  note: string;
+  orderId: string;
+}) => {
+  try {
+    await insertDeliveryEvent({
+      actorUid: input.actorUid,
+      details: input.eventDetails,
+      eventType: input.eventType,
+      note: input.note,
+      orderId: input.orderId,
+    });
+  } catch (error) {
+    logEdgeEvent('error', 'admin order event write failed', {
+      error: error instanceof Error ? error.message : String(error),
+      eventType: input.eventType,
+      orderId: input.orderId,
+    });
+  }
+  try {
+    await createAuditEntry(input.actorUid, input.auditAction, 'order', input.orderId, input.auditDetails);
+  } catch (error) {
+    logEdgeEvent('error', 'admin order audit write failed', {
+      action: input.auditAction,
+      error: error instanceof Error ? error.message : String(error),
+      orderId: input.orderId,
+    });
+  }
+};
+
 const notifyCarryingCourier = async (
   assignment: DeliveryAssignmentRow | null,
   orderId: string,
@@ -179,13 +225,6 @@ export const adminForceCancelOrder: Handler = async ({ context, data }) => {
   const payment = (manualRefund?.payment ?? order.payment ?? {}) as JsonObject;
   const refundRecorded = payment.status === PAYMENT_STATUS.REFUNDED && manualRefund !== null;
 
-  await createAuditEntry(context.uid, 'order_force_cancelled', 'order', orderId, {
-    previousStatus,
-    reason,
-    refundRecorded,
-    wasPaid: manualRefund !== null,
-  });
-
   if (manualRefund) {
     // Releases the promo slot, records the one OperationalAlert and tells admins.
     await announceManualRefund({
@@ -199,14 +238,6 @@ export const adminForceCancelOrder: Handler = async ({ context, data }) => {
   }
 
   await releaseRiderLoad(orderId, ORDER_STATUS.CANCELLED);
-
-  await insertDeliveryEvent({
-    actorUid: context.uid,
-    details: { previousStatus, refundRecorded },
-    eventType: 'admin_force_cancelled',
-    note: reason,
-    orderId,
-  });
 
   // The existing cancellation wording on every channel. Nothing here says the
   // money was returned: the refund is recorded only.
@@ -238,6 +269,16 @@ export const adminForceCancelOrder: Handler = async ({ context, data }) => {
     'Delivery cancelled',
     `Order ${orderId.slice(-6).toUpperCase()} was cancelled by FEASTY support. You do not need to deliver it.`
   );
+
+  await recordAdminTrail({
+    actorUid: context.uid,
+    auditAction: 'order_force_cancelled',
+    auditDetails: { previousStatus, reason, refundRecorded, wasPaid: manualRefund !== null },
+    eventDetails: { previousStatus, refundRecorded },
+    eventType: 'admin_force_cancelled',
+    note: reason,
+    orderId,
+  });
 
   return json(200, {
     data: {
@@ -291,21 +332,7 @@ export const adminForceCompleteOrder: Handler = async ({ context, data }) => {
     fail(409, CHANGED_MESSAGE);
   }
 
-  await createAuditEntry(context.uid, 'order_force_completed', 'order', orderId, {
-    fulfillmentType,
-    previousStatus,
-    reason,
-  });
-
   await releaseRiderLoad(orderId, ORDER_STATUS.DELIVERED);
-
-  await insertDeliveryEvent({
-    actorUid: context.uid,
-    details: { previousStatus },
-    eventType: 'admin_force_completed',
-    note: reason,
-    orderId,
-  });
 
   await notifyUsers([order.customerId], {
     ...customerOrderStatusCopy(ORDER_STATUS.DELIVERED, orderId),
@@ -335,6 +362,16 @@ export const adminForceCompleteOrder: Handler = async ({ context, data }) => {
     'Delivery completed',
     `Order ${orderId.slice(-6).toUpperCase()} was marked delivered by FEASTY support.`
   );
+
+  await recordAdminTrail({
+    actorUid: context.uid,
+    auditAction: 'order_force_completed',
+    auditDetails: { fulfillmentType, previousStatus, reason },
+    eventDetails: { previousStatus },
+    eventType: 'admin_force_completed',
+    note: reason,
+    orderId,
+  });
 
   return json(200, { data: { orderId, status: ORDER_STATUS.DELIVERED } });
 };
@@ -403,15 +440,11 @@ export const adminResolveOrderReport: Handler = async ({ context, data }) => {
 
   await broadcastOrderChanged(orderId);
 
-  await createAuditEntry(context.uid, reportedAt ? 'order_report_resolved' : 'order_attention_resolved', 'order', orderId, {
-    closedConfirmation: closesConfirmation,
-    note,
-    status: normalizeOrderStatus(order.status),
-  });
-
-  await insertDeliveryEvent({
+  await recordAdminTrail({
     actorUid: context.uid,
-    details: { closedConfirmation: closesConfirmation },
+    auditAction: reportedAt ? 'order_report_resolved' : 'order_attention_resolved',
+    auditDetails: { closedConfirmation: closesConfirmation, note, status: normalizeOrderStatus(order.status) },
+    eventDetails: { closedConfirmation: closesConfirmation },
     eventType: reportedAt ? 'admin_report_resolved' : 'admin_attention_resolved',
     note,
     orderId,

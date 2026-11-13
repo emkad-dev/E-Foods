@@ -35,6 +35,8 @@ type UpdateHook = { when: (table: string, payload: Row) => boolean; run: () => v
 let db: Record<string, Row[]> = {};
 let rpcCalls: Array<{ fn: string; params: Row }> = [];
 let updateHook: UpdateHook | null = null;
+// Tables whose INSERT returns an error (a failing audit or event write).
+let failingInsertTables = new Set<string>();
 
 const ORDER_ID = 'order-admin-1';
 const REFERENCE = 'FEASTY-CRD-ADMIN-1';
@@ -82,6 +84,9 @@ const makeBuilder = (table: string) => {
       for (const row of matches) Object.assign(row, structuredClone(payload));
       const data = matches.map((row) => structuredClone(row));
       return Promise.resolve({ data: mode === 'many' ? data : (data[0] ?? null), error: null });
+    }
+    if (op === 'insert' && failingInsertTables.has(table)) {
+      return Promise.resolve({ data: null, error: { message: `${table} insert failed` } });
     }
     if (op === 'insert') {
       for (const item of Array.isArray(payload) ? payload : [payload]) rows.push(structuredClone(item as Row));
@@ -207,6 +212,7 @@ const setup = (order: Row, assignment: Row | null = null) => {
     UserAccount: [],
   };
   rpcCalls = [];
+  failingInsertTables = new Set();
   updateHook = null;
 };
 
@@ -385,6 +391,42 @@ Deno.test('force-cancel works from a rider-held status and refuses an order that
       assertEquals(order().status, status);
       assertNoSideEffects();
     }
+  });
+});
+
+Deno.test('a failing audit and event write on a paid platform force-cancel skips no side effect and still succeeds', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({ status: 'on_the_way', fulfillmentType: 'delivery', pricing: { total: CAPTURED, deliveryProvider: 'platform' } }),
+      riderAssignment()
+    );
+    failingInsertTables = new Set(['AdminAuditLog', 'DeliveryEvent']);
+    const response = await asAdmin(forceCancel, { reason: 'Rider unreachable' });
+    assertEquals(response.status, 200, 'a done action is reported as done');
+    assertEquals(order().status, 'cancelled');
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(order().needsAttention, true);
+    assertEquals(loadReleases().length, 1, 'rider load released');
+    assertEquals(refundAlerts().length, 1, 'alert raised');
+    assertEquals(adminAlertEmails().length, 1, 'admins told');
+    assertEquals(promoReleases().length, 1, 'promo released');
+    assertEquals(db.AdminAuditLog.length, 0);
+  });
+});
+
+Deno.test('a failing audit write on force-complete and resolve still reports success', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'preparing' }));
+    failingInsertTables = new Set(['AdminAuditLog']);
+    assertEquals((await asAdmin(forceComplete, { reason: 'x' })).status, 200);
+    assertEquals(order().status, 'delivered');
+    assertEquals(loadReleases().length, 1);
+    assertEquals(events('admin_force_completed').length, 1, 'the event still lands when only the audit fails');
+
+    setup(makeOrder({ status: 'rejected', needsAttention: true }));
+    failingInsertTables = new Set(['AdminAuditLog']);
+    assertEquals((await asAdmin(resolveReport, { note: 'x' })).status, 200);
+    assertEquals(order().needsAttention, false);
   });
 });
 
