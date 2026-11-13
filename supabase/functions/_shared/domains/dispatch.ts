@@ -1499,16 +1499,6 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   // keeps the plain buildRefundUpdate note it always wrote (nothing captured,
   // so nothing is refunded).
   const isWriteOff = nextState.status === ORDER_STATUS.CANCELLED;
-  if (isWriteOff) {
-    Object.assign(
-      payment,
-      buildRefundUpdate({
-        order: bundle.order,
-        refundRate: 1,
-        reason: 'dispatch_escalation_cancelled_full_refund',
-      })
-    );
-  }
 
   // A failed delivery on a PAID order: the customer never got the food, so the
   // full refund is recorded and the order flagged for a human in the same write
@@ -1519,8 +1509,19 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
       : isWriteOff
         ? buildManualRefundWrite(bundle.order, 'dispatch_escalation_cancelled_full_refund')
         : null;
+  // The refund is written once: the paid write-off carries it in manualRefund,
+  // an unpaid one keeps the plain note it always wrote (nothing is refunded).
   if (manualRefund) {
     Object.assign(payment, manualRefund.payment);
+  } else if (isWriteOff) {
+    Object.assign(
+      payment,
+      buildRefundUpdate({
+        order: bundle.order,
+        refundRate: 1,
+        reason: 'dispatch_escalation_cancelled_full_refund',
+      })
+    );
   }
 
   // Compare-and-swap on the status this transition was validated against,

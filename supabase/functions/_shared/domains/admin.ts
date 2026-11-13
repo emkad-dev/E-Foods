@@ -840,7 +840,7 @@ const adminReviewPartnerApplication: Handler = async ({ context, data }) => {
 
 const adminGetDashboardSnapshot: Handler = async ({ context }) => {
   ensureRole(context.role, ['admin']);
-  const [usersResult, restaurantsResult, ordersResult, ridersResult, featureFlags] = await Promise.all([
+  const [usersResult, restaurantsResult, ordersResult, ridersResult, featureFlags, attentionResult] = await Promise.all([
     serviceClient
       .from('UserAccount')
       .select(USER_ACCOUNT_COLUMNS)
@@ -858,14 +858,23 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
       .select(DISPATCH_RIDER_COLUMNS)
       .order('updatedAt', { ascending: false }),
     loadFeatureFlagMap(),
+    // Its own query, not a filter over the orders above: that select is capped
+    // (PostgREST max rows), so an old flagged order past the cap would vanish
+    // from the one list that exists to surface it.
+    serviceClient
+      .from('CustomerOrder')
+      .select(CUSTOMER_ORDER_COLUMNS)
+      .eq('needsAttention', true)
+      .order('createdAt', { ascending: false }),
   ]);
 
-  if (usersResult.error || restaurantsResult.error || ordersResult.error || ridersResult.error) {
+  if (usersResult.error || restaurantsResult.error || ordersResult.error || ridersResult.error || attentionResult.error) {
     throw new Error(
       usersResult.error?.message ??
         restaurantsResult.error?.message ??
         ordersResult.error?.message ??
         ridersResult.error?.message ??
+        attentionResult.error?.message ??
         'Failed to load admin dashboard snapshot.'
     );
   }
@@ -881,7 +890,12 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
   // cancelled order or a refund to return by hand on a rejected one is exactly
   // what an admin must see, and the reporting filter used to hide them.
   const orders = allOrders.filter(isOrderCleanForReporting);
-  const attentionOrders = selectAttentionOrders(allOrders);
+  // Prefer the copy the lazy expiry above may just have settled, so one order
+  // never shows two statuses on the same screen.
+  const settledById = new Map(allOrders.map((order) => [order.id, order]));
+  const attentionOrders = selectAttentionOrders(
+    ((attentionResult.data ?? []) as CustomerOrderRow[]).map((order) => settledById.get(order.id) ?? order)
+  );
   const riders = (ridersResult.data ?? []) as DispatchRiderRow[];
   const orderRelations = await loadOrderRelations([
     ...new Set([...orders, ...attentionOrders].map((order) => order.id)),

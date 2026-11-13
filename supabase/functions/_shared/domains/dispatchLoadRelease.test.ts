@@ -402,6 +402,12 @@ const installHandlerMocks = (orderStatus: string, startingRiderLoad: number, opt
     RestaurantRecord: createTable([{ id: RESTAURANT_ID, ownerId: null }]),
     UserAccount: createTable([]), // no row for ADMIN_CONTEXT.uid -> loadUserAccount returns null -> loadManagedRestaurantForUser falls back to the RestaurantRecord query below, and every push-token lookup returns no rows (push sending is skipped, not something these tests assert on).
     UserRole: createTable([]), // no restaurant-role links -> notifyRestaurantUsers falls back to RestaurantRecord.ownerId.
+    // Side tables the handlers touch best-effort: push devices (none), offers a
+    // manual assignment supersedes, and the refund alert a paid write-off raises.
+    // Present so a scenario's output is clean, not asserted on.
+    DeliveryOffer: createTable([]),
+    OperationalAlert: createTable([]),
+    PushDevice: createTable([]),
   };
 
   const assignmentRow = () => tables.DeliveryAssignment.rows.find((row) => row.orderId === ORDER_ID) ?? null;
@@ -507,6 +513,15 @@ const installHandlerMocks = (orderStatus: string, startingRiderLoad: number, opt
       }
       adjustLoad(nextCourierId, 1);
       return { data: [{ claimed: true }], error: null };
+    }
+
+    // Two rpcs that never touch activeLoad: the promo-slot release a closed
+    // order makes, and the rate limiter behind the admin alert email.
+    if (fn === 'ebuy_release_promo_redemption') {
+      return { data: null, error: null };
+    }
+    if (fn === 'auth_rl_hit') {
+      return { data: [{ allowed: true, retry_after: 0 }], error: null };
     }
 
     throw new Error(

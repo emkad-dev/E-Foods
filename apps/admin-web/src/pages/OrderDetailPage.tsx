@@ -49,21 +49,21 @@ const INTERVENTION_COPY: Record<
     busyLabel: 'Cancelling…',
     buttonLabel: 'Force cancel',
     confirmLabel: 'Cancel this order',
-    fieldLabel: 'Reason (recorded in the audit log)',
+    fieldLabel: 'Reason',
     title: 'Force cancel this order?',
   },
   complete: {
     busyLabel: 'Completing…',
     buttonLabel: 'Force complete',
     confirmLabel: 'Mark completed',
-    fieldLabel: 'Reason (recorded in the audit log)',
+    fieldLabel: 'Reason',
     title: 'Mark this order completed?',
   },
   resolve: {
     busyLabel: 'Resolving…',
     buttonLabel: 'Mark resolved',
     confirmLabel: 'Mark resolved',
-    fieldLabel: 'Resolution note (recorded in the audit log)',
+    fieldLabel: 'Resolution note',
     title: 'Mark this order resolved?',
   },
 };
@@ -175,18 +175,24 @@ export default function OrderDetailPage() {
             : 'Marked resolved. The attention flag is cleared.'
         );
       }
+      setPendingAction(null);
     } catch (nextError) {
       // The server's own message: a 409 says the order changed meanwhile, a 412
-      // says why the action no longer applies.
+      // says why the action no longer applies. The dialog stays open with the
+      // typed reason so the admin can retry or back out without retyping it.
       setActionError(
         nextError instanceof Error ? nextError.message : 'The action failed. Reload the order and try again.'
       );
     } finally {
       setActionBusy(false);
-      setPendingAction(null);
       // Success or failure, show the order as it now stands.
       void load();
     }
+  };
+
+  const closeAction = () => {
+    setPendingAction(null);
+    setActionError(null);
   };
 
   const viewState = resolveViewState({ hasData: order !== null, error });
@@ -213,14 +219,13 @@ export default function OrderDetailPage() {
       </div>
 
       {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
-      {actionError ? <ErrorBanner message={actionError} /> : null}
-
       {order && pendingAction ? (
         <ConfirmDialog
           title={INTERVENTION_COPY[pendingAction].title}
           body={
             <>
               <p>{describeIntervention(pendingAction, order, currency)}</p>
+              {actionError ? <ErrorBanner message={actionError} /> : null}
               <div className="field">
                 <label htmlFor="order-action-note">{INTERVENTION_COPY[pendingAction].fieldLabel}</label>
                 <textarea
@@ -228,8 +233,12 @@ export default function OrderDetailPage() {
                   rows={3}
                   maxLength={ADMIN_ORDER_NOTE_MAX_LENGTH}
                   value={actionNote}
+                  aria-describedby="order-action-note-hint"
                   onChange={(event) => setActionNote(event.target.value)}
                 />
+                <span id="order-action-note-hint" className="muted" style={{ fontSize: 12 }}>
+                  Recorded in the audit log and visible to FEASTY staff and the assigned dispatcher.
+                </span>
               </div>
             </>
           }
@@ -238,7 +247,7 @@ export default function OrderDetailPage() {
           cancelLabel="Back"
           confirmDisabled={actionNote.trim() === ''}
           confirmLabel={INTERVENTION_COPY[pendingAction].confirmLabel}
-          onCancel={() => setPendingAction(null)}
+          onCancel={closeAction}
           onConfirm={() => void runAction()}
         />
       ) : null}
