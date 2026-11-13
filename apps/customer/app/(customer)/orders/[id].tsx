@@ -16,12 +16,12 @@ import {
   describeCustomerCancelOutcome,
   formatTrackingStepLabel,
   formatPaymentMethodLabel,
+  formatCustomerPaymentStatusLabel,
   formatPaymentStatusLabel,
   getCustomerRefundPolicyLabel,
   getDisplayedRefundAmount,
   getOrderStatusColor,
   getTrackingSteps,
-  isPhantomRefund,
   isPrepaidPaymentMethod,
   normalizeOrderStatus,
 } from '../../../src/domain/orders';
@@ -189,10 +189,9 @@ export default function OrderTracking() {
     total: restaurantTotal,
   });
   const paymentTotalLabel = groupSummary ? 'Shared checkout total' : 'Total';
-  // A refund recorded on a payment never captured (older cancels did this) is
-  // shown as what it is - an unpaid payment - with no refund line below.
-  const phantomRefund = isPhantomRefund(order.payment);
-  const paymentStatus = formatPaymentStatusLabel(phantomRefund ? 'failed' : order.payment?.status, order.payment?.method);
+  // A closed order that was never paid (including an older cancel's refund on
+  // money never taken) reads "Not paid", with no refund line below.
+  const paymentStatus = formatCustomerPaymentStatusLabel({ orderStatus: order.status, payment: order.payment });
   const refundToShow = getDisplayedRefundAmount(order.payment);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
   const canCancel = canCustomerCancelOrder(order.status);

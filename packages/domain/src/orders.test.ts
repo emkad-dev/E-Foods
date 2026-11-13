@@ -26,6 +26,7 @@ import {
 } from '../../design-system/src/tokens/contrast.ts';
 import {
   describeCustomerCancelOutcome,
+  formatCustomerPaymentStatusLabel,
   formatTrackingStepLabel,
   getOrderStatusColor,
   getDisplayedRefundAmount,
@@ -225,5 +226,37 @@ describe('the refund line on the customer order screen', () => {
     assert.equal(getDisplayedRefundAmount({ status: 'paid', capturedAmount: 2500, refundAmount: 2500 }), null);
     assert.equal(getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 2500, refundAmount: 0 }), null);
     assert.equal(getDisplayedRefundAmount(null), null);
+  });
+});
+
+describe('the payment label the customer sees', () => {
+  const card = (status: string, extra: Record<string, unknown> = {}) => ({ method: 'card', status, ...extra });
+
+  it('a cancelled order whose payment failed or never came reads "Not paid"', () => {
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('failed') }), 'Not paid');
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('pending') }), 'Not paid');
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'rejected', payment: card('failed') }), 'Not paid');
+    assert.equal(
+      formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('refunded', { capturedAmount: 0, paidAt: null }) }),
+      'Not paid',
+      'an older cancel refund on money never taken'
+    );
+  });
+
+  it('a live order keeps the plain label, so a failed payment still reads "Payment failed"', () => {
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'placed', payment: card('failed') }), 'Payment failed');
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'placed', payment: card('pending') }), 'Awaiting confirmation');
+  });
+
+  it('money that was taken keeps its label on a closed order', () => {
+    assert.equal(
+      formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('refunded', { capturedAmount: 2500 }) }),
+      'Refunded'
+    );
+    assert.equal(
+      formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('paid', { capturedAmount: 2500 }) }),
+      'Paid',
+      'a late payment on a cancelled order is shown as paid'
+    );
   });
 });

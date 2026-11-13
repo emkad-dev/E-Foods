@@ -11,10 +11,9 @@ import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
-  formatPaymentStatusLabel,
+  formatCustomerPaymentStatusLabel,
   formatTrackingStepLabel,
   getOrderStatusColor,
-  isPhantomRefund,
   isTerminalOrderStatus,
   normalizeOrderStatus,
 } from '../../../src/domain/orders';
@@ -320,11 +319,8 @@ export default function OrdersList() {
             <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>
             <View style={styles.metaRow}>
               <Text style={styles.payment}>
-                {/* An older cancel's refund on a never-paid checkout reads as unpaid. */}
-                {formatPaymentStatusLabel(
-                  isPhantomRefund(item.payment) ? 'failed' : item.payment?.status ?? 'pending',
-                  item.payment?.method
-                )}
+                {/* A closed order never paid for reads "Not paid", as on the detail screen. */}
+                {formatCustomerPaymentStatusLabel({ orderStatus: item.status, payment: item.payment })}
               </Text>
               <Text style={styles.date}>{formatOrderDate(item.createdAt)}</Text>
             </View>
