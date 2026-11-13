@@ -360,7 +360,8 @@ export const statusWriteClearsAttention = (updates: JsonObject): boolean => {
 // updateOrderRecordIfStatus, so partner, dispatch, customer cancel and the
 // sweeps all get the clear from this one place. It is a second, filtered UPDATE
 // (not needsAttention:false in the main write) because a customer problem report
-// (customerIssueReportedAt) must keep the flag, and PostgREST cannot make one
+// (customerIssueReportedAt) and a payment reversal (timeline.paymentReversedAt)
+// must keep the flag, and PostgREST cannot make one
 // column of an update conditional on another.
 //
 // Two guards keep it from hiding a NEWER alert: the status guard (the order has
@@ -387,7 +388,11 @@ const clearAttentionAfterStatusWrite = async (orderId: string, updates: JsonObje
       .eq('status', updates.status as string)
       .eq('updatedAt', updates.updatedAt)
       .eq('needsAttention', true)
-      .is('customerIssueReportedAt', null);
+      .is('customerIssueReportedAt', null)
+      // A payment Paystack reversed on a live order (flagReversedPaidOrder) is
+      // still owed back whatever the kitchen does next: accepting or completing
+      // the order must not drop it from the admin attention list.
+      .is('timeline->>paymentReversedAt', null);
 
     if (error) {
       throw new Error(error.message);

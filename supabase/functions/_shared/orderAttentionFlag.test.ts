@@ -20,6 +20,15 @@ const expectEqual = (actual: unknown, expected: unknown, label: string) => {
   }
 };
 
+// A PostgREST column, including a JSON path like 'timeline->>paymentReversedAt'
+// (text, or null when absent).
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = ((row[base] ?? {}) as Row)[key];
+  return value === undefined || value === null ? null : String(value);
+};
+
 type InstallOptions = {
   /** Runs just before the follow-up clear is evaluated (a concurrent writer). */
   beforeClear?: (row: Row) => void;
@@ -36,8 +45,8 @@ const install = (initial: Row, options: InstallOptions = {}) => {
         const preds: Array<(r: Row) => boolean> = [];
         // deno-lint-ignore no-explicit-any
         const builder: any = {
-          eq: (c: string, v: unknown) => (preds.push((r) => r[c] === v), builder),
-          is: (c: string, v: unknown) => (preds.push((r) => (r[c] ?? null) === v), builder),
+          eq: (c: string, v: unknown) => (preds.push((r) => readColumn(r, c) === v), builder),
+          is: (c: string, v: unknown) => (preds.push((r) => (readColumn(r, c) ?? null) === v), builder),
           select: () => builder,
           then(resolve: (v: unknown) => unknown, reject?: (r: unknown) => unknown) {
             const isClear = Object.keys(payload).length === 1 && payload.needsAttention === false;
@@ -196,5 +205,27 @@ Deno.test('attention: a failing clear neither throws nor skips the broadcast', a
     if (m.fetches.count < 2) throw new Error('broadcast did not run after a failed clear (fetches=' + m.fetches.count + ')');
   } finally {
     m.restore();
+  }
+});
+
+Deno.test('attention: a payment-reversal flag survives accept and terminal writes', async () => {
+  // flagReversedPaidOrder raises needsAttention on a LIVE paid order Paystack
+  // reversed. The kitchen accepting or completing it must not hide that.
+  const reversed = { timeline: { paymentReversedAt: '2026-11-09T11:00:00.000Z' } };
+  const accepted = install(flagged(reversed));
+  try {
+    await updateOrderRecordIfStatus('o1', 'placed', { status: 'accepted' });
+    expectEqual(accepted.row.status, 'accepted', 'accept applied');
+    expectEqual(accepted.row.needsAttention, true, 'reversal flag kept on accept');
+  } finally {
+    accepted.restore();
+  }
+  const delivered = install(flagged({ ...reversed, status: 'ready_for_pickup' }));
+  try {
+    await updateOrderRecord('o1', { status: 'delivered' });
+    expectEqual(delivered.row.status, 'delivered', 'delivered applied');
+    expectEqual(delivered.row.needsAttention, true, 'reversal flag kept on delivered');
+  } finally {
+    delivered.restore();
   }
 });
