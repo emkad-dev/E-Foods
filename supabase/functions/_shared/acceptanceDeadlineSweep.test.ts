@@ -719,8 +719,8 @@ Deno.test('reminder: at half the deadline the restaurant is reminded once, on th
     expectEqual(push.title, 'Order waiting: accept now', 'title');
     expectEqual(
       push.body,
-      'Order ABC123 has waited 4 minutes. Accept it in the next 4 minutes or it will be cancelled and refunded.',
-      'body computed from the 8-minute config'
+      'Order ABC123 has waited 4 minutes. Accept it now or it will be cancelled and refunded in 12 minutes.',
+      'body computed from the 8-minute config: cancel is at 16 minutes'
     );
     expectEqual(push.channelId, undefined, 'same channel as the paid-order push (none named: the default)');
     expectEqual(push.data.app, 'partner', 'addressed to the partner app');
@@ -911,8 +911,8 @@ Deno.test('reminder: a configured 20-minute deadline reminds at 10 minutes, not 
     expectEqual(atTen.reminded, 1, 'reminded at 10 minutes');
     expectEqual(
       mocks.reminders()[0]?.body,
-      'Order TWENTY has waited 10 minutes. Accept it in the next 10 minutes or it will be cancelled and refunded.',
-      'minutes follow the config'
+      'Order TWENTY has waited 10 minutes. Accept it now or it will be cancelled and refunded in 30 minutes.',
+      'minutes follow the config: cancel is at 40 minutes'
     );
   } finally {
     const settings = mocks.tables.PlatformSettings.rows[0];

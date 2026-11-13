@@ -158,10 +158,11 @@ const remindRestaurant = async (
   result.reminded += 1;
 
   // From the real age, not the nominal half-deadline: a sweep that ran late
-  // must not promise time the kitchen no longer has. ageMs < deadlineMs here,
-  // so at least one minute remains.
+  // must not promise time the kitchen no longer has. The countdown is to the
+  // auto-cancel at 2x the deadline - the deadline itself only pages admin and
+  // the order stays acceptable, so naming it as the cancel time would be false.
   const waitedMinutes = Math.floor(ageMs / 60_000);
-  const remainingMinutes = Math.max(1, Math.ceil((deadlineMs - ageMs) / 60_000));
+  const minutesToCancel = Math.max(1, Math.ceil((deadlineMs * 2 - ageMs) / 60_000));
   const code = order.id.slice(-6).toUpperCase();
 
   // The same fan-out and channel as the paid-order push (restaurant owner and
@@ -170,8 +171,8 @@ const remindRestaurant = async (
   await notifyRestaurantUsers(order.restaurantId, {
     title: 'Order waiting: accept now',
     body:
-      `Order ${code} has waited ${minutesLabel(waitedMinutes)}. Accept it in the next ` +
-      `${minutesLabel(remainingMinutes)} or it will be cancelled and refunded.`,
+      `Order ${code} has waited ${minutesLabel(waitedMinutes)}. Accept it now or it will be ` +
+      `cancelled and refunded in ${minutesLabel(minutesToCancel)}.`,
     data: buildNotificationData({
       app: 'partner',
       orderId: order.id,
