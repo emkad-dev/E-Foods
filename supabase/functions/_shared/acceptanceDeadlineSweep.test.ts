@@ -31,6 +31,7 @@ if (typeof sweepUnacceptedOrders !== 'function') {
 }
 
 const { serviceClient } = await import('./client.ts');
+const { resetPushSoundChannelGateCache } = await import('./notifications.ts');
 const { loadAcceptanceDeadlineConfig } = await import('./platformSettings.ts');
 
 const DEADLINE_MINUTES = 8;
@@ -254,6 +255,7 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
 
   const findOrder = (id: unknown) => tables.CustomerOrder.rows.find((row) => row.id === id) ?? null;
 
+  resetPushSoundChannelGateCache();
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
     if (table === 'FeatureFlag') {

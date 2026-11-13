@@ -421,16 +421,37 @@ export const sendPushNotificationsToUsers = async (
   return sendExpoPushMessages(buildPushMessages(tokens, payload, deviceHasSoundChannels));
 };
 
+/** How long one isolate trusts a FeatureFlag read before asking again. Turning
+ * the flag on or off takes effect within this window. */
+const PUSH_SOUND_FLAG_TTL_MS = 60_000;
+
+let pushSoundFlagCache: { enabled: boolean; expiresAt: number } | null = null;
+
+/** Tests that change the flag between cases start each one from a fresh read. */
+export const resetPushSoundChannelGateCache = () => {
+  pushSoundFlagCache = null;
+};
+
 /**
  * Which devices get the sounded channels. Nothing stored with a push token says
  * which build it came from, so today this is one FeatureFlag for every device
- * (PUSH_SOUND_CHANNELS_FLAG, off unless set). Any read failure counts as off:
- * the legacy channel is the one every build can show.
+ * (PUSH_SOUND_CHANNELS_FLAG, off unless set).
+ *
+ * A successful read is cached per isolate for PUSH_SOUND_FLAG_TTL_MS, so a busy
+ * sweep does not add a SELECT to every send. A read failure counts as off (the
+ * legacy channel is the one every build can show) and is NOT cached, so the
+ * next send asks again rather than pinning off for a minute.
  */
-export const loadPushSoundChannelGate = async (): Promise<(token: string) => boolean> => {
+export const loadPushSoundChannelGate = async (now = Date.now()): Promise<(token: string) => boolean> => {
+  if (pushSoundFlagCache && pushSoundFlagCache.expiresAt > now) {
+    const cached = pushSoundFlagCache.enabled;
+    return () => cached;
+  }
+
   let enabled = false;
   try {
     enabled = isFeatureEnabled(await loadFeatureFlagMap(), PUSH_SOUND_CHANNELS_FLAG);
+    pushSoundFlagCache = { enabled, expiresAt: now + PUSH_SOUND_FLAG_TTL_MS };
   } catch (error) {
     logEdgeEvent('warn', 'push sound-channel flag unreadable; sending legacy channels', {
       error: error instanceof Error ? error.message : String(error),
