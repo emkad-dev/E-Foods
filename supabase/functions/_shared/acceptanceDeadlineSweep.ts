@@ -4,10 +4,10 @@
 // entry, no new secret, no new schedule to keep alive).
 //
 // It closes the path where a paid customer waits forever because a restaurant
-// never opened the app: an order that has sat 'placed' too long is first
-// escalated (admin paged, order flagged needsAttention), then - at 2x the
-// deadline - auto-cancelled with a FULL refund and the miss counted on the
-// restaurant.
+// never opened the app: an order that has sat 'placed' too long first gets the
+// restaurant ONE reminder push (at half the deadline), is then escalated (admin
+// paged, order flagged needsAttention), then - at 2x the deadline -
+// auto-cancelled with a FULL refund and the miss counted on the restaurant.
 //
 // THE SWEEP-VS-ACCEPT RACE is closed by two compare-and-swap SQL functions,
 // NOT by the status this sweep read. This function reads a candidate order,
@@ -19,6 +19,13 @@
 // holds is never trusted at write time - it only decides which CAS to attempt.
 //
 // IDEMPOTENCE:
+//   * the reminder's once-guard is timeline.acceptanceReminderSentAt, stamped by
+//     a write guarded on the raw status and updatedAt the sweep read and on the
+//     key still being absent (remindRestaurant). Only the run whose write lands
+//     sends the push; a lost guard sends nothing. It needs no SQL function: the
+//     escalation and auto-cancel functions lock and re-check status and
+//     needsAttention only - never updatedAt or timeline - so the stamp cannot
+//     make either of them skip.
 //   * escalation's once-guard is the needsAttention flag, flipped by a CAS
 //     (`where not coalesce(needsAttention, false)`): a second sweep flips
 //     nothing and pages nobody.
@@ -77,13 +84,19 @@ const ACCEPTANCE_SWEEP_LIMIT = 100;
  * re-normalizes and re-guards under a lock; this is only the coarse pre-filter. */
 const PLACED_LIKE_STATUSES = ['placed', 'pending', 'confirmed'];
 
+/** The push type of the half-deadline reminder. The app routes on routeKey, so
+ * the type only names the push (and lets channel/sound mapping pick it out). */
+export const ACCEPTANCE_REMINDER_NOTIFICATION_TYPE = 'acceptance_reminder';
+
 export type AcceptanceDeadlineSweepResult = {
+  /** Orders whose restaurant this run reminded (stamp written this run). */
+  reminded: number;
   /** Orders this run escalated (flag flipped false->true this run). */
   escalated: number;
   /** Orders this run auto-cancelled + refunded in full. */
   cancelled: number;
-  /** Candidates that produced no state change (not yet due, already escalated,
-   * raced out of 'placed', unpaid prepaid, or malformed). */
+  /** Candidates that produced no state change (not yet due, already reminded or
+   * escalated, raced out of 'placed', unpaid prepaid, or malformed). */
   skipped: number;
 };
 
@@ -94,6 +107,79 @@ const firstRpcRow = <T>(data: unknown): T | null => {
     return (data[0] as T) ?? null;
   }
   return (data as T) ?? null;
+};
+
+const minutesLabel = (minutes: number) => `${minutes} minute${minutes === 1 ? '' : 's'}`;
+
+/**
+ * Half-deadline nudge: the restaurant hears about the order once more before
+ * admin is paged and long before it is cancelled.
+ *
+ * Once-only without a column: timeline.acceptanceReminderSentAt is stamped by a
+ * write that lands only if the order still has the raw status and updatedAt this
+ * sweep read and no stamp yet, and only that winning run sends the push. A
+ * concurrent sweep, an accept, or any other write in between makes the guard
+ * miss, and a lost guard sends nothing (the next sweep re-reads and decides
+ * again). updatedAt is bumped like every timeline write on this branch, so the
+ * guarded writers that merge the timeline they read (reversal flag, admin
+ * resolve) see the change and cannot drop the stamp - which would re-remind.
+ * needsAttention is not touched: the reminder is the restaurant's, not admin's.
+ */
+const remindRestaurant = async (
+  order: CustomerOrderRow,
+  ageMs: number,
+  deadlineMs: number,
+  result: AcceptanceDeadlineSweepResult
+) => {
+  const timeline = (order.timeline ?? {}) as JsonObject;
+  if (timeline.acceptanceReminderSentAt) {
+    result.skipped += 1;
+    return;
+  }
+
+  const sentAt = nowIso();
+  let query = serviceClient
+    .from('CustomerOrder')
+    .update({ timeline: { ...timeline, acceptanceReminderSentAt: sentAt }, updatedAt: sentAt })
+    .eq('id', order.id)
+    .is('timeline->>acceptanceReminderSentAt', null);
+  query = typeof order.status === 'string' ? query.eq('status', order.status) : query.is('status', null);
+  query = typeof order.updatedAt === 'string' ? query.eq('updatedAt', order.updatedAt) : query.is('updatedAt', null);
+  const { data, error } = await query.select('id');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    result.skipped += 1;
+    return;
+  }
+
+  result.reminded += 1;
+
+  // From the real age, not the nominal half-deadline: a sweep that ran late
+  // must not promise time the kitchen no longer has. ageMs < deadlineMs here,
+  // so at least one minute remains.
+  const waitedMinutes = Math.floor(ageMs / 60_000);
+  const remainingMinutes = Math.max(1, Math.ceil((deadlineMs - ageMs) / 60_000));
+  const code = order.id.slice(-6).toUpperCase();
+
+  // The same fan-out and channel as the paid-order push (restaurant owner and
+  // linked staff, no channelId - the partner app's MAX-importance default).
+  // notifyRestaurantUsers is best-effort internally and never throws.
+  await notifyRestaurantUsers(order.restaurantId, {
+    title: 'Order waiting: accept now',
+    body:
+      `Order ${code} has waited ${minutesLabel(waitedMinutes)}. Accept it in the next ` +
+      `${minutesLabel(remainingMinutes)} or it will be cancelled and refunded.`,
+    data: buildNotificationData({
+      app: 'partner',
+      orderId: order.id,
+      routeKey: 'partner_order_detail',
+      status: ORDER_STATUS.PLACED,
+      type: ACCEPTANCE_REMINDER_NOTIFICATION_TYPE,
+    }),
+  });
 };
 
 const escalateOrder = async (order: CustomerOrderRow, result: AcceptanceDeadlineSweepResult) => {
@@ -336,15 +422,17 @@ const autoCancelOrder = async (order: CustomerOrderRow, result: AcceptanceDeadli
 };
 
 /**
- * Runs the sweep. Safe to call as often as you like: an order at deadline-1s is
- * untouched, at the deadline it escalates exactly once, at 2x it cancels +
+ * Runs the sweep. Safe to call as often as you like: an order under half the
+ * deadline is untouched, from half the deadline its restaurant is reminded
+ * exactly once, at the deadline it escalates exactly once, at 2x it cancels +
  * refunds exactly once, and an order that has left 'placed' is never touched.
  */
 export const sweepUnacceptedOrders = async (): Promise<AcceptanceDeadlineSweepResult> => {
-  const result: AcceptanceDeadlineSweepResult = { cancelled: 0, escalated: 0, skipped: 0 };
+  const result: AcceptanceDeadlineSweepResult = { cancelled: 0, escalated: 0, reminded: 0, skipped: 0 };
 
   const { acceptanceDeadlineMinutes } = await loadAcceptanceDeadlineConfig();
   const deadlineMs = acceptanceDeadlineMinutes * 60_000;
+  const reminderMs = deadlineMs / 2;
   const autoCancelMs = deadlineMs * 2;
   const now = Date.now();
 
@@ -403,6 +491,8 @@ export const sweepUnacceptedOrders = async (): Promise<AcceptanceDeadlineSweepRe
         await autoCancelOrder(order, result);
       } else if (age >= deadlineMs) {
         await escalateOrder(order, result);
+      } else if (age >= reminderMs) {
+        await remindRestaurant(order, age, deadlineMs, result);
       } else {
         result.skipped += 1;
       }

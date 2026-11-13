@@ -31,6 +31,7 @@ if (typeof sweepUnacceptedOrders !== 'function') {
 }
 
 const { serviceClient } = await import('./client.ts');
+const { loadAcceptanceDeadlineConfig } = await import('./platformSettings.ts');
 
 const DEADLINE_MINUTES = 8;
 const DEADLINE_MS = DEADLINE_MINUTES * 60_000;
@@ -151,13 +152,18 @@ const createTable = (initialRows: Row[]) => {
       // Every filter is applied together at execution, the way Postgres
       // evaluates the WHERE; `.select()` surfaces the matched rows.
       const apply = () => {
-        const matched = rows.filter((row) => filters.every(([col, val]) => readColumn(row, col) === val));
+        const matched = rows.filter((row) => filters.every(([col, val]) => (readColumn(row, col) ?? null) === val));
         for (const row of matched) Object.assign(row, payload);
         return matched.map(snapshot);
       };
       // deno-lint-ignore no-explicit-any
       const builder: any = {
         eq(col: string, val: unknown) {
+          filters.push([col, val]);
+          return builder;
+        },
+        // `.is(col, null)`: the column (or JSON key) is null or absent.
+        is(col: string, val: unknown) {
           filters.push([col, val]);
           return builder;
         },
@@ -183,7 +189,19 @@ type SweepMockOptions = {
    * order row - to simulate a restaurant's accept committing in the window
    * between the sweep's snapshot read and the CAS's locked write. */
   beforeAutoCancelCas?: (tables: Record<string, ReturnType<typeof createTable>>) => void;
+  /** The configured acceptance deadline. Defaults to DEADLINE_MINUTES. */
+  deadlineMinutes?: number;
 };
+
+// The restaurant's owner and a linked staff member, each with a partner push
+// token: the recipients loadRestaurantRecipientUserIds resolves for the
+// paid-order push, and so for the reminder.
+const RESTAURANT_USERS = [
+  { uid: 'partner-owner-1', token: 'ExponentPushToken[owner-1]' },
+  { uid: 'partner-staff-1', token: 'ExponentPushToken[staff-1]' },
+];
+
+type PushMessage = { body: string; channelId?: string; data: Row; title: string; to: string };
 
 const buildOrderRow = (overrides: Row): Row => ({
   cancellation: null,
@@ -211,15 +229,22 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
   const tables: Record<string, ReturnType<typeof createTable>> = {
     // The seeded acceptance-deadline config the loader reads. 8 minutes.
     PlatformSettings: createTable([
-      { id: 'acceptanceDeadline', data: { acceptanceDeadlineMinutes: DEADLINE_MINUTES } },
+      {
+        id: 'acceptanceDeadline',
+        data: { acceptanceDeadlineMinutes: options.deadlineMinutes ?? DEADLINE_MINUTES },
+      },
     ]),
     CustomerOrder: createTable(orders),
     RestaurantRecord: createTable([{ id: RESTAURANT_ID, ownerId: null, missedOrderCount: 0 }]),
     DeliveryEvent: createTable([]),
     OperationalAlert: createTable([]),
     PushDevice: createTable([]),
-    UserRole: createTable([]),
-    UserAccount: createTable([]),
+    UserRole: createTable(
+      RESTAURANT_USERS.map((user) => ({ restaurantId: RESTAURANT_ID, role: 'restaurant', userId: user.uid }))
+    ),
+    UserAccount: createTable(RESTAURANT_USERS.map((user) => ({ expoPushToken: user.token, uid: user.uid }))),
+    // Where an accepted push schedules its deferred receipt check.
+    queue_notifications: createTable([]),
   };
 
   const rpcCalls: Array<{ fn: string; params: Record<string, unknown> }> = [];
@@ -293,9 +318,21 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
     throw new Error(`acceptanceDeadlineSweep.test.ts: unexpected rpc "${fn}"`);
   };
 
+  // Every Expo push the sweep sends, as the messages it posted.
+  const pushes: PushMessage[] = [];
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) =>
-    Promise.resolve(new Response('{}', { status: 200 }))) as typeof fetch;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).includes('exp.host') && typeof init?.body === 'string') {
+      const body = JSON.parse(init.body);
+      if (Array.isArray(body)) {
+        pushes.push(...(body as PushMessage[]));
+        // One ok ticket per message, as Expo answers an accepted batch.
+        const tickets = body.map((_, index) => ({ id: `ticket-${pushes.length}-${index}`, status: 'ok' }));
+        return Promise.resolve(new Response(JSON.stringify({ data: tickets }), { status: 200 }));
+      }
+    }
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  }) as typeof fetch;
 
   const restore = () => {
     globalThis.fetch = originalFetch;
@@ -306,7 +343,9 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
   const events = (type: string) =>
     tables.DeliveryEvent.rows.filter((row) => row.eventType === type);
 
-  return { events, order, restaurant, restore, rpcCalls, tables };
+  const reminders = () => pushes.filter((push) => push.data?.type === 'acceptance_reminder');
+
+  return { events, order, pushes, reminders, restaurant, restore, rpcCalls, tables };
 };
 
 // ---------------------------------------------------------------------------
@@ -646,6 +685,241 @@ Deno.test('sweep: an auto-cancelled order that changed before the flag write is 
     expectEqual(adminEmailsFor(mocks, 'order-refund-lost').length, 0, 'no admin email');
     expectEqual(promoReleasesFor(mocks, 'order-refund-lost').length, 1, 'the promo slot is still released');
   } finally {
+    mocks.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The half-deadline reminder: one push to the restaurant before admin is paged.
+// ---------------------------------------------------------------------------
+const HALF_DEADLINE_MS = DEADLINE_MS / 2;
+const reminderStamp = (mocks: ReturnType<typeof installMocks>) =>
+  (mocks.order().timeline as Row | null)?.acceptanceReminderSentAt;
+
+Deno.test('reminder: at half the deadline the restaurant is reminded once, on the paid-order push path', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-abc123', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.reminded, 1, 'one reminder');
+    expectEqual(result.escalated, 0, 'not escalated yet');
+    expectEqual(typeof reminderStamp(mocks), 'string', 'the once-stamp is written');
+    expectEqual(typeof (mocks.order().timeline as Row).placedAt, 'string', 'the rest of the timeline is kept');
+    expectEqual(mocks.order().needsAttention, false, 'needsAttention untouched');
+    expectEqual(mocks.order().status, 'placed', 'still placed');
+
+    const pushes = mocks.reminders();
+    expectEqual(
+      pushes.map((push) => push.to).sort().join(','),
+      RESTAURANT_USERS.map((user) => user.token).sort().join(','),
+      'owner and staff each get it'
+    );
+    const push = pushes[0];
+    expectEqual(push.title, 'Order waiting: accept now', 'title');
+    expectEqual(
+      push.body,
+      'Order ABC123 has waited 4 minutes. Accept it in the next 4 minutes or it will be cancelled and refunded.',
+      'body computed from the 8-minute config'
+    );
+    expectEqual(push.channelId, undefined, 'same channel as the paid-order push (none named: the default)');
+    expectEqual(push.data.app, 'partner', 'addressed to the partner app');
+    expectEqual(push.data.routeKey, 'partner_order_detail', 'routes to the order');
+    expectEqual(push.data.path, '/order/order-remind-abc123', 'opens the order screen');
+    expectEqual(push.data.orderId, 'order-remind-abc123', 'carries the order id');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: not sent before half the deadline', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-early', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS - 5_000) } }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.reminded, 0, 'no reminder');
+    expectEqual(result.skipped, 1, 'counted as not yet due');
+    expectEqual(reminderStamp(mocks), undefined, 'no stamp');
+    expectEqual(mocks.reminders().length, 0, 'no push');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: not sent twice over two sweeps', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-twice', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } }),
+  ]);
+  try {
+    const first = await sweepUnacceptedOrders();
+    expectEqual(first.reminded, 1, 'first sweep reminds');
+    const stamp = reminderStamp(mocks);
+
+    const second = await sweepUnacceptedOrders();
+    expectEqual(second.reminded, 0, 'second sweep does not');
+    expectEqual(mocks.reminders().length, RESTAURANT_USERS.length, 'still one push per recipient');
+    expectEqual(reminderStamp(mocks), stamp, 'the stamp is not rewritten');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: not sent for an unpaid order', async () => {
+  const mocks = installMocks([
+    buildOrderRow({
+      id: 'order-remind-unpaid',
+      payment: { method: 'bank_transfer', status: 'pending' },
+      timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) },
+    }),
+  ]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.reminded, 0, 'no reminder');
+    expectEqual(reminderStamp(mocks), undefined, 'no stamp');
+    expectEqual(mocks.reminders().length, 0, 'no push');
+  } finally {
+    mocks.restore();
+  }
+});
+
+/** Runs `change` once, just before the reminder's guarded write is evaluated. */
+const beforeReminderWrite = (mocks: ReturnType<typeof installMocks>, change: () => void) => {
+  const update = mocks.tables.CustomerOrder.update;
+  let fired = false;
+  mocks.tables.CustomerOrder.update = (payload: Row) => {
+    if (!fired && (payload.timeline as Row | undefined)?.acceptanceReminderSentAt) {
+      fired = true;
+      change();
+    }
+    return update(payload);
+  };
+  return () => fired;
+};
+
+Deno.test('reminder: a lost guard sends nothing (another write moved updatedAt)', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-lost', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } }),
+  ]);
+  const fired = beforeReminderWrite(mocks, () => {
+    mocks.order().updatedAt = new Date(Date.now() + 60_000).toISOString();
+  });
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(fired(), true, 'the write was attempted');
+    expectEqual(result.reminded, 0, 'not counted');
+    expectEqual(reminderStamp(mocks), undefined, 'no stamp written over the newer row');
+    expectEqual(mocks.reminders().length, 0, 'no push');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: a lost guard sends nothing (a concurrent sweep stamped it first)', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-raced', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } }),
+  ]);
+  const otherStamp = new Date(Date.now() - 1_000).toISOString();
+  // The other run's stamp lands without moving updatedAt, so only the
+  // key-still-absent guard can stop this run from sending a second push.
+  beforeReminderWrite(mocks, () => {
+    mocks.order().timeline = { ...(mocks.order().timeline as Row), acceptanceReminderSentAt: otherStamp };
+  });
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.reminded, 0, 'not counted');
+    expectEqual(reminderStamp(mocks), otherStamp, 'the winning stamp stands');
+    expectEqual(mocks.reminders().length, 0, 'no push from the loser');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: a lost guard sends nothing (the restaurant accepted in between)', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-accepted', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } }),
+  ]);
+  // updatedAt is left as read, so only the status guard can stop the write.
+  beforeReminderWrite(mocks, () => {
+    mocks.order().status = 'accepted';
+  });
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.reminded, 0, 'not counted');
+    expectEqual(mocks.order().status, 'accepted', 'the accept stands');
+    expectEqual(reminderStamp(mocks), undefined, 'no stamp');
+    expectEqual(mocks.reminders().length, 0, 'no push');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('reminder: escalation at the deadline and auto-cancel at 2x still fire after a reminder', async () => {
+  const mocks = installMocks([
+    buildOrderRow({ id: 'order-remind-then-esc', timeline: { placedAt: placedAgo(HALF_DEADLINE_MS + 5_000) } }),
+  ]);
+  try {
+    const first = await sweepUnacceptedOrders();
+    expectEqual(first.reminded, 1, 'reminded at half the deadline');
+    const stamp = reminderStamp(mocks);
+
+    // The clock moves on to the deadline. The reminder bumped updatedAt and the
+    // timeline; the escalation CAS (like its SQL) keys on status and
+    // needsAttention only, so it must still act.
+    mocks.order().timeline = { ...(mocks.order().timeline as Row), placedAt: placedAgo(DEADLINE_MS + 5_000) };
+    const second = await sweepUnacceptedOrders();
+    expectEqual(second.escalated, 1, 'escalates at the deadline');
+    expectEqual(second.reminded, 0, 'no second reminder');
+    expectEqual(mocks.order().needsAttention, true, 'flagged for admin');
+    expectEqual(mocks.events('acceptance_deadline_escalated').length, 1, 'one escalation event');
+
+    mocks.order().timeline = { ...(mocks.order().timeline as Row), placedAt: placedAgo(DEADLINE_MS * 2 + 5_000) };
+    const third = await sweepUnacceptedOrders();
+    expectEqual(third.cancelled, 1, 'auto-cancels at 2x');
+    expectEqual(mocks.order().status, 'cancelled', 'cancelled');
+    expectEqual(reminderStamp(mocks), stamp, 'the cancel keeps the reminder stamp in the timeline');
+    expectEqual(mocks.reminders().length, RESTAURANT_USERS.length, 'still only the one reminder');
+  } finally {
+    mocks.restore();
+  }
+});
+
+// loadAcceptanceDeadlineConfig caches the config for 60 s at module scope, so
+// an earlier test's 8 minutes would still be served. The clock is moved past
+// that cache for this test (placedAgo reads the same clock), and afterwards the
+// 8-minute config is re-cached further ahead still so no later test inherits 20.
+Deno.test('reminder: a configured 20-minute deadline reminds at 10 minutes, not at 4', async () => {
+  const realNow = Date.now;
+  const shiftClock = (offsetMs: number) => {
+    Date.now = () => realNow() + offsetMs;
+  };
+  shiftClock(10 * 60_000);
+  const mocks = installMocks(
+    [buildOrderRow({ id: 'order-remind-twenty', timeline: { placedAt: placedAgo(4 * 60_000 + 5_000) } })],
+    { deadlineMinutes: 20 }
+  );
+  try {
+    const atFour = await sweepUnacceptedOrders();
+    expectEqual(atFour.reminded, 0, 'the default half-deadline does not apply');
+
+    mocks.order().timeline = { placedAt: placedAgo(10 * 60_000 - 5_000) };
+    const justBefore = await sweepUnacceptedOrders();
+    expectEqual(justBefore.reminded, 0, 'not at 9m55s');
+
+    mocks.order().timeline = { placedAt: placedAgo(10 * 60_000 + 5_000) };
+    const atTen = await sweepUnacceptedOrders();
+    expectEqual(atTen.reminded, 1, 'reminded at 10 minutes');
+    expectEqual(
+      mocks.reminders()[0]?.body,
+      'Order TWENTY has waited 10 minutes. Accept it in the next 10 minutes or it will be cancelled and refunded.',
+      'minutes follow the config'
+    );
+  } finally {
+    const settings = mocks.tables.PlatformSettings.rows[0];
+    settings.data = { acceptanceDeadlineMinutes: DEADLINE_MINUTES };
+    shiftClock(30 * 60_000);
+    await loadAcceptanceDeadlineConfig();
+    Date.now = realNow;
     mocks.restore();
   }
 });
