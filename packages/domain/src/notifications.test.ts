@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -315,5 +316,24 @@ for (const [app, expected] of Object.entries(APP_EXPECTATIONS)) {
       assert.ok(existsSync(appFile(app, `assets/sounds/${file}`)), `${app} assets/sounds/${file}`);
       assert.ok(existsSync(appFile(app, `android/app/src/main/res/raw/${file}`)), `${app} res/raw/${file}`);
     }
+
+    // Release builds shrink resources, and the sounds are found only by a
+    // runtime name, so res/raw/keep.xml must keep them; the config plugin
+    // writes the same file on any prebuild.
+    const keepXml = readFileSync(appFile(app, 'android/app/src/main/res/raw/keep.xml'), 'utf8');
+    assert.match(keepXml, /xmlns:tools="http:\/\/schemas\.android\.com\/tools"/, `${app} keep.xml tools namespace`);
+    assert.match(keepXml, /tools:keep="@raw\/feasty_\*"/, `${app} keep.xml keeps every feasty_ sound`);
+    assert.ok(
+      config.expo.plugins.includes('../../scripts/expo/withKeepNotificationSounds.js'),
+      `${app} app.json runs the keep.xml plugin on prebuild`
+    );
+    const require = createRequire(import.meta.url);
+    const { KEEP_XML } = require('../../../scripts/expo/withKeepNotificationSounds.js') as { KEEP_XML: string };
+    // Line endings normalised: git may check the file out with CRLF on Windows.
+    assert.equal(
+      keepXml.replace(/\r\n/g, '\n'),
+      KEEP_XML,
+      `${app} committed keep.xml matches what prebuild would write`
+    );
   });
 }

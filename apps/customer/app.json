@@ -81,6 +81,7 @@
           "sounds": ["./assets/sounds/feasty_chime.wav", "./assets/sounds/feasty_marimba.wav"]
         }
       ],
+      "../../scripts/expo/withKeepNotificationSounds.js",
       [
         "expo-image-picker",
         {
