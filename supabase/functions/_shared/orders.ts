@@ -761,6 +761,44 @@ export const markUncapturedPaymentTransactionFailed = async (
 };
 
 /**
+ * The ledger write for ONE order of a checkout being cancelled by hand (the
+ * customer, or an admin force-cancel). A multi-store checkout is one charge with
+ * one PaymentTransaction row for the whole group: while another order of the
+ * group is still open it is still waiting on that same payment, so the row is
+ * left alone. The last order of the group to close writes it. Best-effort, like
+ * the write itself: an unreadable group is logged and skipped.
+ */
+export const markUncapturedPaymentTransactionFailedForCancel = async (
+  order: CustomerOrderRow,
+  failedAt: string,
+  reason: string
+) => {
+  const groupId = sanitizeText(order.orderGroupId);
+  if (groupId) {
+    const { data: siblings, error } = await serviceClient
+      .from('CustomerOrder')
+      .select('id,status')
+      .eq('orderGroupId', groupId)
+      .neq('id', order.id)
+      .returns<Array<{ id: string; status: string | null }>>();
+    if (error) {
+      logEdgeEvent('error', 'payment transaction not marked failed: the checkout group could not be read', {
+        error: error.message,
+        orderId: order.id,
+      });
+      return;
+    }
+    const groupStillOpen = (siblings ?? []).some(
+      (sibling) => !TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus(sibling.status))
+    );
+    if (groupStillOpen) {
+      return;
+    }
+  }
+  await markUncapturedPaymentTransactionFailed(order, failedAt, reason);
+};
+
+/**
  * Cancels an uncaptured prepaid order whose payment window has run out. THE one
  * expiry path: the scheduled sweep (unpaidOrderExpirySweep.ts) and the lazy
  * check on read (maybeExpireUnpaidOrder) both come here.

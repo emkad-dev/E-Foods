@@ -45,7 +45,7 @@ import {
   isPaymentCaptured,
   loadOrderBundle,
   loadOrderRelations,
-  markUncapturedPaymentTransactionFailed,
+  markUncapturedPaymentTransactionFailedForCancel,
   ORDER_GROUP_COLUMNS,
   maybeExpireUnpaidOrder,
   normalizeOrderStatus,
@@ -2087,12 +2087,13 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
   // An unpaid checkout closed as a failed payment: its ledger row follows, so it
   // does not sit 'pending' under a cancelled order. Guarded (pending/failed ->
   // failed only), so a payment recorded meanwhile is never overwritten, and a
-  // late one still reaches the closed-order safeguard; best-effort.
+  // late one still reaches the closed-order safeguard; best-effort. A group's
+  // shared row is left alone while another order of the group still waits on it.
   if (
     storedPaymentStatus(bundle.order) !== PAYMENT_STATUS.FAILED &&
     sanitizeText(writtenPayment.status) === PAYMENT_STATUS.FAILED
   ) {
-    await markUncapturedPaymentTransactionFailed(
+    await markUncapturedPaymentTransactionFailedForCancel(
       bundle.order,
       sanitizeText(writtenPayment.failedAt, nowIso()),
       `${cancellation.actor}_cancelled`

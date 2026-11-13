@@ -597,6 +597,36 @@ Deno.test('customer cancel of a new-style unpaid checkout (capturedAmount 0, pai
   });
 });
 
+Deno.test('customer cancel of one order of an unpaid group leaves the shared ledger row while another order is open', async () => {
+  await withHarness(async () => {
+    const unpaid = { method: 'bank_transfer', provider: 'paystack', reference: REFERENCE, status: 'pending', capturedAmount: 0, paidAt: null };
+    setup(makeOrder({ status: 'placed', orderGroupId: 'group-1', payment: unpaid }));
+    db.CustomerOrder.push(makeOrder({ id: 'order-guard-2', status: 'placed', orderGroupId: 'group-1', payment: unpaid }));
+    db.PaymentTransaction[0].status = 'pending';
+
+    const response = await customerCancel();
+    assertEquals(response.status, 200);
+    assertEquals(order().status, 'cancelled');
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(db.PaymentTransaction[0].status, 'pending', 'the other restaurant is still waiting on this transfer');
+  });
+});
+
+Deno.test('customer cancel of the last open order of an unpaid group marks the shared ledger row failed', async () => {
+  await withHarness(async () => {
+    const unpaid = { method: 'bank_transfer', provider: 'paystack', reference: REFERENCE, status: 'pending', capturedAmount: 0, paidAt: null };
+    setup(makeOrder({ status: 'placed', orderGroupId: 'group-1', payment: unpaid }));
+    db.CustomerOrder.push(
+      makeOrder({ id: 'order-guard-2', status: 'cancelled', orderGroupId: 'group-1', payment: { ...unpaid, status: 'failed' } })
+    );
+    db.PaymentTransaction[0].status = 'pending';
+
+    const response = await customerCancel();
+    assertEquals(response.status, 200);
+    assertEquals(db.PaymentTransaction[0].status, 'failed');
+  });
+});
+
 Deno.test('customer cancel of a PAID order still records the refund and tells the app its amount', async () => {
   await withHarness(async () => {
     setup(makeOrder({ status: 'placed' }));
