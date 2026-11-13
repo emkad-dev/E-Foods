@@ -295,6 +295,8 @@ const loadChargeOrders = async (order: CustomerOrderRow) => {
  * verification, because the money is already captured and recorded.
  */
 const flagPaymentOnClosedOrder = async (input: {
+  /** The captured amount on this order (its own share of a group charge). */
+  amount: number;
   orderId: string;
   orderStatus: string;
   paymentReference: string;
@@ -322,7 +324,34 @@ const flagPaymentOnClosedOrder = async (input: {
     console.error(`Failed to record closed-order payment event for ${input.orderId}`, error);
   }
 
-  await capturePaymentOnClosedOrderAlert(input);
+  await capturePaymentOnClosedOrderAlert({
+    orderId: input.orderId,
+    orderStatus: input.orderStatus,
+    paymentReference: input.paymentReference,
+    restaurantId: input.restaurantId,
+  });
+
+  // The OperationalAlert alone sits unseen until someone opens the console;
+  // email is the channel admins actually read (notifyAdmins sends at most one
+  // per order per 10 minutes). Best-effort: the money is already recorded, so a
+  // failure here must not fail the verification.
+  try {
+    await notifyAdmins({
+      title: 'Payment received on a closed order',
+      body: `A payment of ${formatNairaAmount(input.amount)} arrived for order ${shortOrderCode(
+        input.orderId
+      )}, which was already closed (${(input.orderStatus || 'closed').replace(/_/g, ' ')}). The order was not reopened: return the money to the customer by hand.`,
+      data: buildNotificationData({
+        app: 'admin',
+        orderId: input.orderId,
+        restaurantId: input.restaurantId,
+        routeKey: 'admin_access',
+        type: 'payment_on_closed_order',
+      }),
+    });
+  } catch (error) {
+    console.error(`Failed to notify admins of the closed-order payment on ${input.orderId}`, error);
+  }
 };
 
 // One per order per payment: only the verification that won the payment
@@ -349,6 +378,8 @@ const recordPaymentConfirmedEvent = async (input: { amount: number; orderId: str
 };
 
 type PaymentClaim = {
+  /** What this order captured (its share of a group charge). */
+  capturedAmount: number;
   closed: boolean;
   orderId: string;
   orderStatus: string;
@@ -388,6 +419,7 @@ const claimOrderPayment = async (
     //  - 'scheduled' (and anything already in the kitchen) keeps its status;
     //  - a closed order is flagged for a human, NOT revived and NOT auto-refunded.
     const closed = !awaiting && CLOSED_ORDER_STATUSES.has(currentStatus);
+    const paidPayment = buildPaidPayment(row);
 
     const update = awaiting
       ? {
@@ -395,12 +427,12 @@ const claimOrderPayment = async (
           // status (not in ORDER_STATUSES), so it normalized to 'draft' and disabled the
           // partner's kitchen actions on paid orders.
           status: 'placed',
-          payment: buildPaidPayment(row),
+          payment: paidPayment,
           timeline: confirmedTimeline(row),
           updatedAt: nowIso,
         }
       : {
-          payment: buildPaidPayment(row),
+          payment: paidPayment,
           timeline: closed
             ? { ...(row.timeline ?? {}), paidAt: nowIso, latePaymentAt: nowIso }
             : confirmedTimeline(row),
@@ -425,7 +457,13 @@ const claimOrderPayment = async (
 
     if (Array.isArray(written) && written.length > 0) {
       return {
-        claim: { closed, orderId: row.id, orderStatus: currentStatus, restaurantId: row.restaurantId },
+        claim: {
+          capturedAmount: toNumber(paidPayment.capturedAmount, 0),
+          closed,
+          orderId: row.id,
+          orderStatus: currentStatus,
+          restaurantId: row.restaurantId,
+        },
         row,
       };
     }
@@ -506,6 +544,7 @@ const markOrderPaymentState = async (
   for (const claim of claims) {
     if (claim.closed) {
       await flagPaymentOnClosedOrder({
+        amount: claim.capturedAmount,
         orderId: claim.orderId,
         orderStatus: claim.orderStatus,
         paymentReference,

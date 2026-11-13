@@ -318,6 +318,12 @@ const events = (type: string) => db.DeliveryEvent.filter((event) => event.eventT
 const notifications = (app: string, type: string) =>
   db.queue_notifications.filter((job) => job.payload?.payload?.data?.app === app && job.payload?.payload?.data?.type === type);
 const releaseCalls = () => rpcCalls.filter((call) => call.fn === 'ebuy_release_promo_redemption');
+// notifyAdmins takes its one-email-per-order slot from this limiter right
+// before it emails, so one hit is one admin email.
+const closedOrderAdminEmails = (orderId = 'order-1') =>
+  rpcCalls.filter(
+    (call) => call.fn === 'auth_rl_hit' && call.params.p_key === `admin-alert-email:payment_on_closed_order:${orderId}`
+  );
 
 // ───────────────────────── Spec 5: one verification path ─────────────────────────
 
@@ -353,7 +359,8 @@ Deno.test('refresh: money captured on a cancelled order is recorded, flagged and
     assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_on_closed_order']);
     assertEquals(events('payment_received_on_closed_order').length, 1);
     assertEquals(events('payment_confirmed').length, 0);
-    assertEquals(db.queue_notifications.length, 0);
+    assertEquals(closedOrderAdminEmails().length, 1, 'admins are emailed once');
+    assertEquals(db.queue_notifications.length, 0, 'the customer and the restaurant are told nothing');
     assertEquals(db.PaymentTransaction[0].status, 'paid');
     // One Paystack call: the refresh hands its answer to the shared path.
     assertEquals(paystackVerifyCalls, 1);
@@ -421,7 +428,8 @@ const assertFlaggedLatePayment = () => {
   assertEquals(events('payment_received_on_closed_order').length, 1, 'alerted once');
   assertEquals(events('payment_confirmed').length, 0);
   assertEquals(notifications('partner', 'payment_confirmed').length, 0, 'the restaurant is not told to cook');
-  assertEquals(notifications('customer', 'payment_confirmed').length <= 1, true);
+  assertEquals(notifications('customer', 'payment_confirmed').length, 0, 'the customer is told nothing');
+  assertEquals(closedOrderAdminEmails().length, 1, 'admins are emailed once');
   assertEquals(db.PaymentTransaction[0].status, 'paid', 'the ledger records the captured money');
 };
 
@@ -498,9 +506,13 @@ Deno.test('webhook: a late success after a new-style unpaid customer cancel is f
     assertEquals(notifications('partner', 'payment_confirmed').length, 0);
     assertEquals(db.PaymentTransaction[0].status, 'paid');
 
+    assertEquals(closedOrderAdminEmails().length, 1, 'admins are emailed once');
+    assertEquals(db.queue_notifications.length, 0, 'the customer is told nothing');
+
     db.IdempotencyRecord = [];
     await webhook();
     assertEquals(events('payment_received_on_closed_order').length, 1, 'a redelivery alerts nobody again');
+    assertEquals(closedOrderAdminEmails().length, 1);
   });
 });
 
@@ -527,6 +539,7 @@ Deno.test('webhook: a duplicate delivery on a genuinely refunded paid order stay
     assertEquals(db.DeliveryEvent.length, 0);
     assertEquals(db.queue_notifications.length, 0);
     assertEquals(paystackVerifyCalls, 0, 'settled money is not even re-verified');
+    assertEquals(closedOrderAdminEmails().length, 0);
   });
 });
 
