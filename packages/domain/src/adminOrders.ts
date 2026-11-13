@@ -55,11 +55,15 @@ export const canAdminForceCompleteOrder = (order: {
     : ADMIN_FORCE_COMPLETE_KITCHEN_STATUSES.includes(status);
 };
 
-/** A customer problem report is open until an admin resolves it (which clears the flag). */
-export const canAdminResolveOrderReport = (order: {
-  customerIssueReportedAt?: string | null;
-  needsAttention?: boolean | null;
-}): boolean => Boolean(order.customerIssueReportedAt) && order.needsAttention === true;
+/**
+ * Every flagged order has a way out: an admin marks it resolved with a note.
+ * The flag is raised by a customer problem report, a late payment on a closed
+ * order, a refund to return by hand, or the acceptance escalation, and any of
+ * those may outlive the order's last status change. Resolving changes no
+ * status, so it applies to terminal orders too.
+ */
+export const canAdminResolveOrderReport = (order: { needsAttention?: boolean | null }): boolean =>
+  order.needsAttention === true;
 
 /**
  * The orders a human must look at. needsAttention is the only test, whatever
@@ -70,9 +74,6 @@ export const canAdminResolveOrderReport = (order: {
 export const selectAttentionOrders = <T extends { needsAttention?: boolean | null }>(orders: readonly T[]): T[] =>
   orders.filter((order) => order.needsAttention === true);
 
-/** Closed without being served: nothing is owed to the restaurant. */
-const UNSERVED_STATUSES: readonly string[] = ['cancelled', 'rejected'];
-
 const readNumber = (value: unknown): number | null => {
   const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : null;
@@ -81,18 +82,37 @@ const readNumber = (value: unknown): number | null => {
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
+/** Still moving: paid and not yet delivered, so it may still be rejected or cancelled. */
+const IN_PROGRESS_STATUSES: readonly string[] = [
+  'scheduled',
+  'placed',
+  'accepted',
+  'preparing',
+  'ready_for_pickup',
+  'picked_up',
+  'on_the_way',
+  'escalated',
+];
+
 export type RestaurantOwedEntry = {
   /** The restaurant share of the order: what the Paystack split sends, or what must be paid out by hand. */
   amount: number;
+  /** 'owed': delivered and still paid. 'pending': paid, still in progress. */
+  kind: 'owed' | 'pending';
   restaurantId: string;
   /** 'split' (paid out at source), 'manual' (the platform holds it) or null (not recorded). */
   settlementMode: 'manual' | 'split' | null;
 };
 
 /**
- * What one order owes its restaurant, or null when it owes nothing: the payment
- * is not paid (pending, failed, or refunded - a refund means the money is going
- * back to the customer) or the order was cancelled or rejected.
+ * What one order means for its restaurant's payout, or null when it counts in
+ * neither figure.
+ *   owed    - status delivered and the payment still paid.
+ *   pending - payment paid, order still in progress (it may yet be rejected or
+ *             cancelled, so it is not owed yet).
+ * Anything else counts nowhere: an unpaid or refunded payment (a refund means
+ * the money is going back to the customer), and failed_delivery, cancelled or
+ * rejected orders.
  *
  * The amount is the settlement the checkout computed: netSettlement (the
  * restaurant payable plus the delivery fee when the restaurant delivers), the
@@ -108,7 +128,12 @@ export const restaurantOwedForOrder = (order: {
 }): RestaurantOwedEntry | null => {
   const restaurantId = (order.restaurantId ?? '').trim();
   const payment = readObject(order.payment);
-  if (!restaurantId || payment.status !== 'paid' || UNSERVED_STATUSES.includes(order.status ?? '')) {
+  if (!restaurantId || payment.status !== 'paid') {
+    return null;
+  }
+  const status = order.status ?? '';
+  const kind = status === 'delivered' ? 'owed' : IN_PROGRESS_STATUSES.includes(status) ? 'pending' : null;
+  if (!kind) {
     return null;
   }
   const pricing = readObject(order.pricing);
@@ -118,7 +143,30 @@ export const restaurantOwedForOrder = (order: {
   const mode = payment.settlementMode;
   return {
     amount: Math.max(amount, 0),
+    kind,
     restaurantId,
     settlementMode: mode === 'split' || mode === 'manual' ? mode : null,
   };
+};
+
+export type PendingTotals = { amount: number; count: number };
+
+/** Count and amount of in-progress paid orders, per restaurant and platform-wide. */
+export const summarizePendingPayouts = (entries: readonly RestaurantOwedEntry[]) => {
+  const byRestaurant = new Map<string, PendingTotals>();
+  const platform: PendingTotals = { amount: 0, count: 0 };
+  const add = (totals: PendingTotals, amount: number) => {
+    totals.count += 1;
+    totals.amount = Math.round((totals.amount + amount) * 100) / 100;
+  };
+  for (const entry of entries) {
+    if (entry.kind !== 'pending') {
+      continue;
+    }
+    add(platform, entry.amount);
+    const totals = byRestaurant.get(entry.restaurantId) ?? { amount: 0, count: 0 };
+    add(totals, entry.amount);
+    byRestaurant.set(entry.restaurantId, totals);
+  }
+  return { byRestaurant, platform };
 };

@@ -25,9 +25,10 @@ import type { AdminTone } from '../theme/tones';
  * showed which restaurants were in that state, so a published restaurant could
  * take orders for weeks while its money sat with the platform.
  *
- * The figures are what each restaurant is OWED (its settlement share of paid
- * orders), not gross payments: summing the payment ledger counted the platform
- * fee, tips and refunded or rejected orders as restaurant money.
+ * The figures are what each restaurant is OWED (its settlement share of
+ * delivered, still-paid orders) and what is PENDING (paid, still in progress),
+ * not gross payments: summing the payment ledger counted the platform fee, tips
+ * and refunded or rejected orders as restaurant money.
  */
 
 const payoutTone = (status: string): AdminTone => {
@@ -125,13 +126,20 @@ export default function RestaurantsPage() {
           <KpiCard
             label={`Owed, held by platform (${windowDays}d)`}
             value={formatCurrency(data.platformSettlement.manualAmount)}
-            caption={`${formatNumber(data.platformSettlement.manualCount)} paid orders to pay out by hand`}
+            caption={`${formatNumber(data.platformSettlement.manualCount)} delivered orders to pay out by hand`}
           />
           <KpiCard
             label={`Owed, split at source (${windowDays}d)`}
             value={formatCurrency(data.platformSettlement.splitAmount)}
-            caption={`${formatNumber(data.platformSettlement.splitCount)} paid orders Paystack splits to the restaurant`}
+            caption={`${formatNumber(data.platformSettlement.splitCount)} delivered orders Paystack split to the restaurant`}
           />
+          {data.platformPending ? (
+            <KpiCard
+              label={`Pending, in progress (${windowDays}d)`}
+              value={formatCurrency(data.platformPending.amount)}
+              caption={`${formatNumber(data.platformPending.count)} paid orders not delivered yet`}
+            />
+          ) : null}
         </div>
       ) : null}
 
@@ -145,8 +153,10 @@ export default function RestaurantsPage() {
 
         {viewState === 'ready' ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            Owed is each restaurant&apos;s share of its paid orders (what the split sends, or what must be paid out
-            by hand), not the amount the customer paid. Refunded payments and cancelled or rejected orders are left out.
+            Owed is each restaurant&apos;s share of its delivered orders whose payment is still paid (what the split
+            sends, or what must be paid out by hand), not the amount the customer paid. Pending is the same share for
+            paid orders still in progress, which may yet be rejected or cancelled. Refunded, failed-delivery,
+            cancelled and rejected orders count in neither.
           </p>
         ) : null}
         {viewState === 'loading' ? (
@@ -170,6 +180,7 @@ export default function RestaurantsPage() {
                   <th>Delivery</th>
                   <th>Owed, manual ({windowDays}d)</th>
                   <th>Owed, split ({windowDays}d)</th>
+                  <th>Pending ({windowDays}d)</th>
                 </tr>
               </thead>
               <tbody>
@@ -245,6 +256,11 @@ export default function RestaurantsPage() {
                           +{formatNumber(row.settlement.unknownCount)} with no recorded mode
                         </div>
                       ) : null}
+                    </td>
+                    <td className="muted">
+                      {row.pending
+                        ? `${formatNumber(row.pending.count)} · ${formatCurrency(row.pending.amount)}`
+                        : '—'}
                     </td>
                   </tr>
                 ))}

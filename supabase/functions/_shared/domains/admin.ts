@@ -35,7 +35,12 @@ import {
 } from '../adminFleetReads.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { adminForceCancelOrder, adminForceCompleteOrder, adminResolveOrderReport } from '../adminOrderInterventions.ts';
-import { restaurantOwedForOrder, selectAttentionOrders } from '../../../../packages/domain/src/adminOrders.ts';
+import {
+  restaurantOwedForOrder,
+  selectAttentionOrders,
+  summarizePendingPayouts,
+  type RestaurantOwedEntry,
+} from '../../../../packages/domain/src/adminOrders.ts';
 import { adminGetRiderPayouts } from '../riderPayoutAccount.ts';
 import { adminSetRestaurantDeliveryProvider } from '../restaurantDeliveryProviderAdmin.ts';
 import { loadPlatformDispatchEnabled, loadRestaurantDeliveryProviders } from '../deliveryProvider.ts';
@@ -1094,11 +1099,14 @@ const adminGetRestaurantPayouts: Handler = async ({ context }) => {
   // the platform fee, the tip and a FEASTY rider's delivery fee as restaurant
   // money, and kept counting orders whose payment was later refunded (a refund
   // is recorded on the order only, the ledger row stays 'paid') or that the
-  // restaurant rejected. restaurantOwedForOrder keeps the restaurant's share of
-  // paid orders that were not cancelled or rejected; the split / manual mode the
-  // checkout stamped on the order's payment is kept so the page can still say
-  // who holds the money.
-  const transactions: PaidTransactionInput[] = [];
+  // restaurant rejected. restaurantOwedForOrder counts the restaurant's share of
+  // DELIVERED orders whose payment is still paid as owed, and paid orders still
+  // in progress as pending (shown apart: they may yet be rejected or cancelled).
+  // failed_delivery, cancelled, rejected and refunded count in neither. The
+  // split / manual mode the checkout stamped on the order's payment is kept so
+  // the page can still say who holds the money.
+  const owedEntries: PaidTransactionInput[] = [];
+  const payoutEntries: RestaurantOwedEntry[] = [];
   for (let page = 0; page < PAYOUT_MAX_PAGES; page += 1) {
     const { data, error } = await serviceClient
       .from('CustomerOrder')
@@ -1112,9 +1120,12 @@ const adminGetRestaurantPayouts: Handler = async ({ context }) => {
     }
     const rows = (data ?? []) as CustomerOrderRow[];
     for (const row of rows) {
-      const owed = restaurantOwedForOrder({ ...row, status: normalizeOrderStatus(row.status) });
-      if (owed) {
-        transactions.push(owed);
+      const entry = restaurantOwedForOrder({ ...row, status: normalizeOrderStatus(row.status) });
+      if (entry) {
+        payoutEntries.push(entry);
+        if (entry.kind === 'owed') {
+          owedEntries.push(entry);
+        }
       }
     }
     if (rows.length < PAYOUT_PAGE_SIZE) {
@@ -1124,7 +1135,8 @@ const adminGetRestaurantPayouts: Handler = async ({ context }) => {
 
   const restaurants = (restaurantsResult.data ?? []) as PayoutRestaurantInput[];
   const profiles = (payoutsResult.data ?? []) as PayoutProfileInput[];
-  const { byRestaurant, platform } = summarizeSettlement(transactions);
+  const { byRestaurant, platform } = summarizeSettlement(owedEntries);
+  const pending = summarizePendingPayouts(payoutEntries);
   const now = new Date();
   // Rider pay: who delivers each restaurant's orders. Both reads are tolerant
   // (fall back to 'restaurant' / off), so this page keeps working before the
@@ -1138,15 +1150,12 @@ const adminGetRestaurantPayouts: Handler = async ({ context }) => {
     data: {
       deliveryProviders: Object.fromEntries(deliveryProviders),
       platformDispatchEnabled,
+      platformPending: pending.platform,
       platformSettlement: platform,
-      restaurants: restaurants.map((restaurant) =>
-        buildRestaurantPayoutRow(
-          restaurant,
-          findPayoutProfile(restaurant, profiles),
-          byRestaurant.get(restaurant.id),
-          now
-        )
-      ),
+      restaurants: restaurants.map((restaurant) => ({
+        ...buildRestaurantPayoutRow(restaurant, findPayoutProfile(restaurant, profiles), byRestaurant.get(restaurant.id), now),
+        pending: pending.byRestaurant.get(restaurant.id) ?? { amount: 0, count: 0 },
+      })),
       windowDays: PAYOUT_WINDOW_DAYS,
     },
   });

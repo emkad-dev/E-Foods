@@ -196,9 +196,10 @@ export const resolveAdminOrderReport = (input: { note: string; orderId: string }
   );
 
 /**
- * Per settlement mode: how many paid orders and what the restaurant is OWED for
- * them (its settlement share, not the gross payment). Refunded payments and
- * cancelled or rejected orders are excluded server-side.
+ * Per settlement mode: how many DELIVERED orders with the payment still paid,
+ * and what the restaurant is OWED for them (its settlement share, not the gross
+ * payment). Refunded, failed_delivery, cancelled and rejected orders count in
+ * neither this nor the pending figure.
  */
 export type SettlementTotals = {
   manualAmount: number;
@@ -223,8 +224,12 @@ export type RestaurantPayoutRow = {
   /** RestaurantPayout.status, 'none' when no payout profile exists. */
   payoutStatus: string;
   payoutUpdatedAt: string | null;
+  /** Paid orders still in progress: not owed yet, they may still be rejected or cancelled. Absent on older backends. */
+  pending?: PendingPayoutTotals;
   settlement: SettlementTotals;
 };
+
+export type PendingPayoutTotals = { amount: number; count: number };
 
 /** Mirrors adminGetRestaurantPayouts (supabase/functions/_shared/domains/admin.ts). */
 export type RestaurantDeliveryProvider = 'restaurant' | 'platform';
@@ -234,6 +239,8 @@ export type AdminRestaurantPayouts = {
   deliveryProviders?: Record<string, RestaurantDeliveryProvider>;
   /** Checkout honours 'platform' only while this flag is on. */
   platformDispatchEnabled?: boolean;
+  /** Platform-wide pending (paid, in progress). Absent on older backends. */
+  platformPending?: PendingPayoutTotals;
   platformSettlement: SettlementTotals;
   restaurants: RestaurantPayoutRow[];
   windowDays: number;
