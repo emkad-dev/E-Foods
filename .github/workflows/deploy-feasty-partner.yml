@@ -15,6 +15,9 @@ on:
     branches: [ 'main' ]
     paths:
       - 'supabase/functions/feasty-partner/**'
+      # Imported through _shared/domains/orders.ts (the shared payment
+      # verification path), so a handler-only change must redeploy this too.
+      - 'supabase/functions/payment-verification/**'
       - 'supabase/functions/_shared/**'
       - 'supabase/config.toml'
       - '.github/workflows/deploy-feasty-partner.yml'
