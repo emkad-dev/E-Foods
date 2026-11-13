@@ -13,12 +13,14 @@ import { computeEtaRangeBetween, formatEtaRange, shouldShowLiveMap } from '../..
 import { useRiderPositionRealtime, type RiderPosition } from '../../../src/hooks/useRiderPositionRealtime';
 import {
   canCustomerCancelOrder,
+  describeCustomerCancelOutcome,
   formatTrackingStepLabel,
   formatPaymentMethodLabel,
   formatPaymentStatusLabel,
   getCustomerRefundPolicyLabel,
   getOrderStatusColor,
   getTrackingSteps,
+  isPhantomRefund,
   isPrepaidPaymentMethod,
   normalizeOrderStatus,
 } from '../../../src/domain/orders';
@@ -186,7 +188,10 @@ export default function OrderTracking() {
     total: restaurantTotal,
   });
   const paymentTotalLabel = groupSummary ? 'Shared checkout total' : 'Total';
-  const paymentStatus = formatPaymentStatusLabel(order.payment?.status, order.payment?.method);
+  // A refund recorded on a payment never captured (older cancels did this) is
+  // shown as what it is - an unpaid payment - with no refund line below.
+  const phantomRefund = isPhantomRefund(order.payment);
+  const paymentStatus = formatPaymentStatusLabel(phantomRefund ? 'failed' : order.payment?.status, order.payment?.method);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
   const canCancel = canCustomerCancelOrder(order.status);
   const refundPolicy = getCustomerRefundPolicyLabel(order.status);
@@ -282,11 +287,14 @@ export default function OrderTracking() {
 
           try {
             const result = await cancelCustomerOrder(order.id);
-            const refundPercent = Math.round(result.refundRate * 100);
+            // An unpaid order used to be told "Your refund policy is 100%":
+            // nothing was taken, so no refund is mentioned.
             setCancelNotice(
-              refundPercent > 0
-                ? `Order cancelled. Your refund policy is ${refundPercent}%.`
-                : 'Order cancelled. No refund was due for this cancellation.'
+              describeCustomerCancelOutcome({
+                paidWhenCancelled: hasCapturedPrepaidAmount,
+                refundAmount: result.refundAmount,
+                refundRate: result.refundRate,
+              })
             );
           } finally {
             setCancelling(false);
@@ -505,7 +513,7 @@ export default function OrderTracking() {
         <Text style={[styles.detailLine, styles.detailLineSpaced]}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
         {order.payment?.reference ? <Text style={styles.detailLine}>Reference: {order.payment.reference}</Text> : null}
-        {typeof order.payment?.refundAmount === 'number' && order.payment.refundAmount > 0 ? (
+        {!phantomRefund && typeof order.payment?.refundAmount === 'number' && order.payment.refundAmount > 0 ? (
           <Text style={styles.detailLine}>Refund amount: {formatMoney(order.payment.refundAmount)}</Text>
         ) : null}
         <Text style={styles.detailLine}>

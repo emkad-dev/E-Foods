@@ -14,6 +14,7 @@ import {
   formatPaymentStatusLabel,
   formatTrackingStepLabel,
   getOrderStatusColor,
+  isPhantomRefund,
   isTerminalOrderStatus,
   normalizeOrderStatus,
 } from '../../../src/domain/orders';
@@ -319,7 +320,11 @@ export default function OrdersList() {
             <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>
             <View style={styles.metaRow}>
               <Text style={styles.payment}>
-                {formatPaymentStatusLabel(item.payment?.status ?? 'pending', item.payment?.method)}
+                {/* An older cancel's refund on a never-paid checkout reads as unpaid. */}
+                {formatPaymentStatusLabel(
+                  isPhantomRefund(item.payment) ? 'failed' : item.payment?.status ?? 'pending',
+                  item.payment?.method
+                )}
               </Text>
               <Text style={styles.date}>{formatOrderDate(item.createdAt)}</Text>
             </View>

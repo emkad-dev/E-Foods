@@ -25,9 +25,12 @@ import {
   flattenAlpha,
 } from '../../design-system/src/tokens/contrast.ts';
 import {
+  describeCustomerCancelOutcome,
   formatTrackingStepLabel,
   getOrderStatusColor,
   getTrackingSteps,
+  hasCapturedPayment,
+  isPhantomRefund,
   LEGACY_ORDER_STATUS_MAP,
   ORDER_STATUSES,
 } from './orders.ts';
@@ -167,5 +170,45 @@ describe('tracking steps', () => {
     assert.equal(formatTrackingStepLabel('delivered', 'pickup'), 'Collected');
     assert.equal(formatTrackingStepLabel('delivered', 'delivery'), 'Delivered');
     assert.equal(formatTrackingStepLabel('ready_for_pickup', 'pickup'), 'Ready for pickup');
+  });
+});
+
+describe('refunds on payments that were never captured', () => {
+  it('money counts as captured only when paidAt or a positive capturedAmount says so', () => {
+    assert.equal(hasCapturedPayment({ status: 'paid', paidAt: '2026-11-09T10:01:00.000Z', capturedAmount: 2500 }), true);
+    assert.equal(hasCapturedPayment({ status: 'refunded', capturedAmount: 2500 }), true);
+    assert.equal(hasCapturedPayment({ status: 'refunded', paidAt: '2026-11-09T10:01:00.000Z' }), true);
+    assert.equal(hasCapturedPayment({ status: 'refunded', capturedAmount: 0, paidAt: null }), false);
+    assert.equal(hasCapturedPayment({ status: 'pending' }), false);
+    assert.equal(hasCapturedPayment(null), false);
+  });
+
+  it('a refund on a never-captured payment is a phantom; a real refund is not', () => {
+    assert.equal(isPhantomRefund({ status: 'refunded', capturedAmount: 0, paidAt: null }), true);
+    assert.equal(isPhantomRefund({ status: 'refunded' }), true);
+    assert.equal(isPhantomRefund({ status: 'refunded', capturedAmount: 2500, paidAt: '2026-11-09T10:01:00.000Z' }), false);
+    assert.equal(isPhantomRefund({ status: 'failed' }), false);
+  });
+
+  it('the cancel notice speaks of a refund only when one was recorded', () => {
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: true, refundAmount: 2500, refundRate: 1 }),
+      'Order cancelled. Your refund policy is 100%.'
+    );
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: false, refundAmount: 0, refundRate: 1 }),
+      'Order cancelled. No payment was taken, so there is nothing to refund.'
+    );
+  });
+
+  it('an older server without refundAmount falls back to whether the order was paid', () => {
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: true, refundRate: 1 }),
+      'Order cancelled. Your refund policy is 100%.'
+    );
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: false, refundRate: 1 }),
+      'Order cancelled. No payment was taken, so there is nothing to refund.'
+    );
   });
 });

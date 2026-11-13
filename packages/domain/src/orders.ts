@@ -224,6 +224,53 @@ export const getCustomerRefundPolicyLabel = (status: string | null | undefined) 
     return 'Not cancellable';
   }
 };
+
+type CapturablePayment = {
+  capturedAmount?: unknown;
+  paidAt?: unknown;
+  status?: string | null;
+} | null | undefined;
+
+/**
+ * Whether money was actually taken. Payment confirmation stamps paidAt and a
+ * positive capturedAmount together; a checkout starts with neither. The status
+ * alone cannot tell: cancels used to record 'refunded' (with a refund of the
+ * order total) on checkouts that were never paid, and those orders still exist.
+ * Mirrors isPaymentCaptured on the server.
+ */
+export const hasCapturedPayment = (payment: CapturablePayment) => {
+  if (!payment) return false;
+  if (typeof payment.paidAt === 'string' ? payment.paidAt.trim() !== '' : Boolean(payment.paidAt)) return true;
+  const captured = typeof payment.capturedAmount === 'string' ? Number.parseFloat(payment.capturedAmount) : payment.capturedAmount;
+  return typeof captured === 'number' && Number.isFinite(captured) && captured > 0;
+};
+
+/** A refund recorded on a payment that was never captured: nothing was taken,
+ * so nothing was refunded, and no screen should say otherwise. */
+export const isPhantomRefund = (payment: CapturablePayment) =>
+  payment?.status === 'refunded' && !hasCapturedPayment(payment);
+
+/**
+ * What the customer is told after cancelling. Speaks of a refund only when one
+ * was recorded: refundRate is the policy and comes back for an unpaid order
+ * too. refundAmount is absent from servers deployed before it was added; then
+ * whether the order was paid when the customer cancelled decides.
+ */
+export const describeCustomerCancelOutcome = (input: {
+  paidWhenCancelled: boolean;
+  refundAmount?: number | null;
+  refundRate: number;
+}) => {
+  const refundPercent = Math.round(input.refundRate * 100);
+  const refundRecorded =
+    typeof input.refundAmount === 'number' ? input.refundAmount > 0 : input.paidWhenCancelled && refundPercent > 0;
+  if (refundRecorded) {
+    return `Order cancelled. Your refund policy is ${refundPercent}%.`;
+  }
+  return input.paidWhenCancelled
+    ? 'Order cancelled. No refund was due for this cancellation.'
+    : 'Order cancelled. No payment was taken, so there is nothing to refund.';
+};
 /**
  * The shape this formatter needs, stated structurally rather than imported.
  *

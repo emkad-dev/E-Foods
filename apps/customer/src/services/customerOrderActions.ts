@@ -166,6 +166,9 @@ export const refreshCustomerPaymentStatus = async (orderId: string): Promise<Ref
 
 type CancelCustomerOrderResult = {
   orderId: string;
+  /** The refund actually recorded: 0 when nothing was paid. Absent from
+   * servers deployed before it was added. */
+  refundAmount?: number;
   refundRate: number;
   status: string;
 };
