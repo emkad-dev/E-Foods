@@ -40,6 +40,8 @@ import { CUSTOMER_CONFIRM_WINDOW_MS } from './customerConfirmation.ts';
 import { readOrderDeliveryProvider } from './deliveryProvider.ts';
 import { releaseDispatchAssignmentLoad } from './dispatchSelection.ts';
 import { announceManualRefund, buildManualRefundWrite } from './manualRefund.ts';
+// Same import manualRefund.ts already makes (the circular edge is documented there).
+import { buildRefundUpdate } from './domains/orders.ts';
 import {
   buildNotificationData,
   customerOrderStatusCopy,
@@ -53,7 +55,7 @@ import {
   assertOrderPaymentReadyForOperations,
   insertDeliveryEvent,
   loadOrderBundle,
-  markUncapturedPaymentTransactionFailed,
+  markUncapturedPaymentTransactionFailedForCancel,
   normalizeOrderStatus,
   releasePromoRedemption,
   storedPaymentStatus,
@@ -200,12 +202,19 @@ export const adminForceCancelOrder: Handler = async ({ context, data }) => {
   // Unpaid: nothing was captured, so nothing is recorded and the terminal write
   // clears any stale flag (an escalated, never-paid order).
   const manualRefund = buildManualRefundWrite(order, 'admin_force_cancel_full_refund');
+  // Unpaid: the same closed shape a customer cancel writes (a failed payment, no
+  // refund). Left 'pending', the cancelled order showed the customer "Pending"
+  // and a "Refresh payment status" button for an order that no longer exists.
+  const unpaidPayment = manualRefund
+    ? null
+    : (buildRefundUpdate({ order, refundRate: 1, reason: 'admin_force_cancel' }) as JsonObject);
   const cancelledAt = nowIso();
   const applied = await updateOrderRecordIfStatus(
     orderId,
     observedStatus,
     {
       ...(manualRefund ?? {}),
+      ...(unpaidPayment ? { payment: unpaidPayment } : {}),
       // Same shape the other cancellation paths write. The admin's reason is
       // kept off this record (customers read it) and goes to the audit log and
       // the order timeline event instead.
@@ -237,8 +246,9 @@ export const adminForceCancelOrder: Handler = async ({ context, data }) => {
   } else {
     // Nothing was captured: the checkout's ledger row must not sit 'pending'
     // forever on a cancelled order. Guarded (pending/failed -> failed only), so a
-    // capture recorded in the meantime is never overwritten; best-effort.
-    await markUncapturedPaymentTransactionFailed(order, cancelledAt, 'admin_force_cancel');
+    // capture recorded in the meantime is never overwritten; best-effort. A
+    // group's shared row is left while another order of the group still waits.
+    await markUncapturedPaymentTransactionFailedForCancel(order, cancelledAt, 'admin_force_cancel');
     await releasePromoRedemption(orderId);
   }
 

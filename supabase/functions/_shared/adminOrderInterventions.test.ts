@@ -368,13 +368,39 @@ Deno.test('force-cancel of an UNPAID escalated order simply cancels it: no refun
     const response = await asAdmin(forceCancel, { reason: 'Never paid' });
     assertEquals(response.status, 200);
     assertEquals(order().status, 'cancelled');
-    assertEquals(order().payment, unpaid, 'payment untouched');
+    // The same closed shape a customer cancel writes: failed, no refund. A
+    // 'pending' payment here showed the customer "Pending" and a refresh button.
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(typeof order().payment.failedAt, 'string');
+    assertEquals(order().payment.lastEvent, 'admin_force_cancel');
+    assertEquals(order().payment.reference, REFERENCE, 'the rest of the payment is kept');
+    assertEquals('refundAmount' in order().payment, false, 'no refund recorded');
+    assertEquals('refundedAt' in order().payment, false);
     assertEquals(order().needsAttention, false, 'the terminal write clears the escalation flag');
     assertEquals(order().cancellation, { actor: 'admin', reason: 'admin_force_cancel' });
     assertEquals(refundAlerts().length, 0);
     assertEquals(adminAlertEmails().length, 0);
     assertEquals(promoReleases().length, 1, 'the promo slot is still freed');
     assertEquals(audits('order_force_cancelled')[0].details.refundRecorded, false);
+  });
+});
+
+Deno.test('force-cancel of one order of an unpaid group leaves the shared ledger row while another order is open', async () => {
+  await withHarness(async () => {
+    const unpaid = { method: 'bank_transfer', provider: 'paystack', reference: REFERENCE, status: 'pending', capturedAmount: 0, paidAt: null };
+    setup(makeOrder({ status: 'placed', orderGroupId: 'group-1', payment: unpaid }));
+    db.CustomerOrder.push(makeOrder({ id: 'order-admin-2', status: 'placed', orderGroupId: 'group-1', payment: unpaid }));
+    db.PaymentTransaction[0].status = 'pending';
+    assertEquals((await asAdmin(forceCancel, { reason: 'Never paid' })).status, 200);
+    assertEquals(order().payment.status, 'failed');
+    assertEquals(db.PaymentTransaction[0].status, 'pending', 'the other order still waits on this transfer');
+
+    // Once every other order of the group has closed, the row follows.
+    setup(makeOrder({ status: 'placed', orderGroupId: 'group-1', payment: unpaid }));
+    db.CustomerOrder.push(makeOrder({ id: 'order-admin-2', status: 'cancelled', orderGroupId: 'group-1', payment: unpaid }));
+    db.PaymentTransaction[0].status = 'pending';
+    assertEquals((await asAdmin(forceCancel, { reason: 'Never paid' })).status, 200);
+    assertEquals(db.PaymentTransaction[0].status, 'failed');
   });
 });
 

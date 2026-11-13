@@ -199,8 +199,12 @@ export default function OrderTracking() {
   const scheduledSlotLabel = formatScheduledSlot(order.scheduledFor);
   const hasCapturedPrepaidAmount =
     isPrepaidPaymentMethod(order.payment?.method) && ['paid', 'refunded'].includes(order.payment?.status ?? '');
+  // Not on a closed order: there is nothing left to pay for, and older admin
+  // cancels left the payment 'pending'.
   const isPendingPrepaidPayment =
-    isPrepaidPaymentMethod(order.payment?.method) && (order.payment?.status ?? 'pending') === 'pending';
+    isPrepaidPaymentMethod(order.payment?.method) &&
+    (order.payment?.status ?? 'pending') === 'pending' &&
+    !['cancelled', 'rejected', 'failed_delivery'].includes(normalizedStatus);
   // The proof-of-delivery code is only useful (and only sent by the server)
   // while the order is out for delivery; hide it in every other state.
   const deliveryCode =
