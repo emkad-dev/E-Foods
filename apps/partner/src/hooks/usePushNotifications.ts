@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Platform, Vibration } from 'react-native';
 import {
   clearUserPushToken,
   registerBeforeSignOut,
@@ -18,7 +18,7 @@ import {
   type AppNotificationPayload,
 } from '../../../../packages/domain/src/notifications';
 import { appEnv } from '../config/env';
-import { shouldPlayPartnerPushSound } from '../domain/pushSoundPolicy';
+import { SILENCED_PUSH_VIBRATION_PATTERN, shouldPlayPartnerPushSound } from '../domain/pushSoundPolicy';
 import { isKitchenAlarmSounding } from '../services/kitchenAlarmSounding';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase/config';
@@ -41,14 +41,21 @@ const deviceTokenKey = (data: unknown) => (typeof data === 'string' ? data : JSO
 
 if (pushSupported) {
   Notifications.setNotificationHandler({
-    // A new-order or reminder push stays silent (still shown) while the kitchen
-    // alarm is already sounding; every other push plays as before.
-    handleNotification: async (notification) => ({
-      shouldPlaySound: shouldPlayPartnerPushSound(notification.request.content.data, isKitchenAlarmSounding()),
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    // A new-order or reminder push makes no sound (still shown, still buzzes)
+    // while the kitchen alarm is already playing; every other push plays as before.
+    handleNotification: async (notification) => {
+      const playSound = shouldPlayPartnerPushSound(notification.request.content.data, isKitchenAlarmSounding());
+      if (!playSound) {
+        // expo drops vibration with the sound, so vibrate here (pushSoundPolicy).
+        Vibration.vibrate(SILENCED_PUSH_VIBRATION_PATTERN);
+      }
+      return {
+        shouldPlaySound: playSound,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      };
+    },
   });
 
   registerBeforeSignOut(async () => {
