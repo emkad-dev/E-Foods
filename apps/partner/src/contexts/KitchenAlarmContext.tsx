@@ -39,6 +39,7 @@ import {
   type KitchenAlarmState,
 } from '../domain/kitchenAlarm';
 import { getStoredKitchenAlarmMuted, storeKitchenAlarmMuted } from '../services/kitchenAlarmMute';
+import { setKitchenAlarmSounding } from '../services/kitchenAlarmSounding';
 
 const KITCHEN_ALARM_REPEAT_MS = 20000;
 const KITCHEN_ALARM_KEEP_AWAKE_TAG = 'kitchen-board';
@@ -229,6 +230,18 @@ export function KitchenAlarmProvider({ children }: { children: React.ReactNode }
 
     return () => clearInterval(intervalId);
   }, [playAlarmTone, soundActive]);
+
+  // Tell the push handler (outside React) while the alarm is actually playing,
+  // so a new-order push does not play its own sound on top of it
+  // (domain/pushSoundPolicy). `soundActive` alone is only the wish to play: a
+  // refused playback (`soundBlocked`) is silent, and silencing the push then
+  // would leave the order with no sound at all. Cleared on unmount: no
+  // provider, no alarm.
+  const alarmAudible = soundActive && !soundBlocked;
+  useEffect(() => {
+    setKitchenAlarmSounding(alarmAudible);
+    return () => setKitchenAlarmSounding(false);
+  }, [alarmAudible]);
 
   // Keep-awake only while the app is foregrounded -- deactivating on cleanup covers
   // both background and unmount, so a tablet left idle overnight is not held awake.

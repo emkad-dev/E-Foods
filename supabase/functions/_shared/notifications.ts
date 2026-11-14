@@ -8,6 +8,8 @@ import {
   type ExpoPushFailure,
   type ExpoPushMessage,
 } from './expoPush.ts';
+import { buildPushMessages, PUSH_SOUND_CHANNELS_FLAG } from '../../../packages/domain/src/notifications.ts';
+import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
 import { logEdgeEvent } from './observability.ts';
 import { enqueuePushReceiptCheck, PUSH_RECEIPT_CHECK_MAX_ATTEMPTS } from './queue.ts';
 import { isRateLimitAllowed } from './rateLimit.ts';
@@ -402,33 +404,67 @@ export const sendPushNotificationsToUsers = async (
   userIds: string[],
   payload: {
     body: string;
-    channelId?: string;
     data?: JsonObject;
-    sound?: 'default' | null;
     title: string;
   }
 ) => {
   const app = sanitizeText(payload.data?.app);
   const tokens = await resolvePushTokensForUsers(userIds, app);
-  const messages = tokens.map((token) => ({
-    body: payload.body,
-    channelId: payload.channelId,
-    data: payload.data,
-    sound: payload.sound ?? 'default',
-    title: payload.title,
-    to: token,
-  }));
+  if (tokens.length === 0) {
+    return { sent: 0 };
+  }
+  // Channel and sound come only from the app, type and status the push
+  // carries (packages/domain buildPushMessages), so no caller can put a push on
+  // a channel its app never creates, and a device without the sounded
+  // channels gets exactly the legacy channel and sound.
+  const deviceHasSoundChannels = await loadPushSoundChannelGate();
+  return sendExpoPushMessages(buildPushMessages(tokens, payload, deviceHasSoundChannels));
+};
 
-  return sendExpoPushMessages(messages);
+/** How long one isolate trusts a FeatureFlag read before asking again. Turning
+ * the flag on or off takes effect within this window. */
+const PUSH_SOUND_FLAG_TTL_MS = 60_000;
+
+let pushSoundFlagCache: { enabled: boolean; expiresAt: number } | null = null;
+
+/** Tests that change the flag between cases start each one from a fresh read. */
+export const resetPushSoundChannelGateCache = () => {
+  pushSoundFlagCache = null;
+};
+
+/**
+ * Which devices get the sounded channels. Nothing stored with a push token says
+ * which build it came from, so today this is one FeatureFlag for every device
+ * (PUSH_SOUND_CHANNELS_FLAG, off unless set).
+ *
+ * A successful read is cached per isolate for PUSH_SOUND_FLAG_TTL_MS, so a busy
+ * sweep does not add a SELECT to every send. A read failure counts as off (the
+ * legacy channel is the one every build can show) and is NOT cached, so the
+ * next send asks again rather than pinning off for a minute.
+ */
+export const loadPushSoundChannelGate = async (now = Date.now()): Promise<(token: string) => boolean> => {
+  if (pushSoundFlagCache && pushSoundFlagCache.expiresAt > now) {
+    const cached = pushSoundFlagCache.enabled;
+    return () => cached;
+  }
+
+  let enabled = false;
+  try {
+    enabled = isFeatureEnabled(await loadFeatureFlagMap(), PUSH_SOUND_CHANNELS_FLAG);
+    pushSoundFlagCache = { enabled, expiresAt: now + PUSH_SOUND_FLAG_TTL_MS };
+  } catch (error) {
+    logEdgeEvent('warn', 'push sound-channel flag unreadable; sending legacy channels', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return () => enabled;
 };
 
 export const sendPushNotificationsToRoles = async (
   roles: string[],
   payload: {
     body: string;
-    channelId?: string;
     data?: JsonObject;
-    sound?: 'default' | null;
     title: string;
   }
 ) => {
@@ -456,7 +492,6 @@ export const notifyUsers = async (
   userIds: string[],
   payload: {
     body: string;
-    channelId?: string;
     data?: JsonObject;
     title: string;
   }
@@ -464,7 +499,6 @@ export const notifyUsers = async (
   await notifySafely(async () => {
     await sendPushNotificationsToUsers(userIds, {
       body: payload.body,
-      channelId: payload.channelId,
       data: payload.data ?? {},
       title: payload.title,
     });

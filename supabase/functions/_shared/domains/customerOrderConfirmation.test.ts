@@ -21,6 +21,7 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
 const { ordersDomain } = await import('./orders.ts');
 const { serviceClient } = await import('../client.ts');
+const { resetPushSoundChannelGateCache } = await import('../notifications.ts');
 
 const customerConfirmOrderReceived = ordersDomain.handlers.customerConfirmOrderReceived;
 if (typeof customerConfirmOrderReceived !== 'function') {
@@ -227,8 +228,13 @@ const installMocks = (options: MockOptions = {}) => {
   const broadcasts: string[] = [];
   const pushes: Array<{ to: string; title: string; body: string; data: Record<string, unknown> }> = [];
 
+  resetPushSoundChannelGateCache();
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
+    if (table === 'FeatureFlag') {
+      // The push sound-channel gate (loadFeatureFlagMap): no flags set, so legacy channels.
+      return { select: () => ({ returns: () => Promise.resolve({ data: [], error: null }) }) };
+    }
     const mock = (tables as Record<string, ReturnType<typeof createTable>>)[table];
     if (!mock) throw new Error(`customerOrderConfirmation.test.ts: unexpected table "${table}"`);
     return mock;

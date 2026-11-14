@@ -52,7 +52,7 @@ export const inviteStaffMember = (email: string) =>
     // optimistic row the screen renders identical to the one the next list
     // fetch returns, so the address does not visibly change case after send.
     email: email.trim().toLowerCase(),
-  });
+  }, { write: true });
 
 /**
  * Everyone who can act for this restaurant, plus every invite.
@@ -66,7 +66,7 @@ export const getPartnerStaff = () => callPartnerBackendRpc<PartnerStaffList>('pa
 
 /** Cancels an unredeemed invite. 404 once it is no longer pending. */
 export const revokeStaffInvite = (inviteId: string) =>
-  callPartnerBackendRpc<{ inviteId: string; status: string }>('partnerRevokeStaffInvite', { inviteId });
+  callPartnerBackendRpc<{ inviteId: string; status: string }>('partnerRevokeStaffInvite', { inviteId }, { write: true });
 
 /**
  * Unlinks a staff member from this restaurant and drops their role.
@@ -76,7 +76,7 @@ export const revokeStaffInvite = (inviteId: string) =>
  * 400 when targeting yourself, 404 when they are not your staff.
  */
 export const revokeStaffAccess = (targetUid: string) =>
-  callPartnerBackendRpc<{ targetUid: string }>('partnerRevokeStaffAccess', { targetUid });
+  callPartnerBackendRpc<{ targetUid: string }>('partnerRevokeStaffAccess', { targetUid }, { write: true });
 
 /**
  * Attaches the SIGNED-IN account to the restaurant that issued this code.
@@ -91,7 +91,7 @@ export const revokeStaffAccess = (targetUid: string) =>
  * try to guess which case it was.
  */
 export const redeemStaffInvite = (code: string) =>
-  callPartnerBackendRpc<RedeemStaffInviteResult>('redeemStaffInvite', { code: code.trim() });
+  callPartnerBackendRpc<RedeemStaffInviteResult>('redeemStaffInvite', { code: code.trim() }, { write: true });
 
 /* -------------------------------------------------------------------------- *
  * THE TWO PRE-AUTH CALLS
@@ -132,6 +132,9 @@ export type StaffInviteResolveResult = {
  *
  * A WRONG code costs one of five attempts. A correct one costs nothing, so
  * re-resolving the same valid code (going back a step, say) is free.
+ *
+ * Marked as a write for that reason: a wrong code sent twice by an automatic
+ * re-send would cost two attempts for one tap.
  */
 export const resolveStaffInvite = (email: string, code: string) =>
   callAnonymousBackendRpc<StaffInviteResolveResult>('staffInviteResolve', {
@@ -139,7 +142,7 @@ export const resolveStaffInvite = (email: string, code: string) =>
     // echoes back identical to the one the server matched on.
     email: email.trim().toLowerCase(),
     code: code.trim(),
-  });
+  }, { write: true });
 
 export type StaffInviteCreateAccountResult = {
   email: string;
@@ -181,4 +184,4 @@ export const createStaffInviteAccount = (input: {
     // and trimming it here would create the account with a password that does
     // not match what the person typed into the sign-in call two lines later.
     password: input.password,
-  });
+  }, { write: true });

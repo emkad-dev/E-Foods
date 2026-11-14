@@ -41,6 +41,8 @@ import {
   type CustomerOrderRow,
   insertDeliveryEvent,
   ORDER_STATUS,
+  PAYMENT_STATUS,
+  storedPaymentStatus,
   updateOrderRecordIfStatus,
 } from './orders.ts';
 import { loadScheduledOrderConfig } from './platformSettings.ts';
@@ -81,6 +83,11 @@ export const sweepScheduledOrderReleases = async (): Promise<ScheduledReleaseSwe
       .from('CustomerOrder')
       .select(CUSTOMER_ORDER_COLUMNS)
       .eq('status', ORDER_STATUS.SCHEDULED)
+      // Paid only, in the query and not just the loop: an unpaid scheduled
+      // order must never reach the kitchen, and the batch is capped, so unpaid
+      // rows left in it would starve paid ones. Unpaid orders belong to the
+      // unpaid expiry sweep.
+      .eq('payment->>status', PAYMENT_STATUS.PAID)
       .lte('scheduledFor', dueBeforeIso)
       .order('scheduledFor', { ascending: true })
       .limit(RELEASE_SWEEP_LIMIT);
@@ -105,6 +112,11 @@ export const sweepScheduledOrderReleases = async (): Promise<ScheduledReleaseSwe
         result.skipped += 1;
         continue;
       }
+      // Defensive twin of the query's paid filter.
+      if (storedPaymentStatus(order) !== PAYMENT_STATUS.PAID) {
+        result.skipped += 1;
+        continue;
+      }
 
       const releaseAt = nowIso();
       const timeline = {
@@ -118,11 +130,17 @@ export const sweepScheduledOrderReleases = async (): Promise<ScheduledReleaseSwe
       // CAS: flip only if still 'scheduled' (the raw stored value). Idempotent —
       // a second sweep, or a cancel that raced this, finds status != 'scheduled'
       // and updates nothing. Broadcasts on a real change internally.
-      const applied = await updateOrderRecordIfStatus(order.id, ORDER_STATUS.SCHEDULED, {
-        status: ORDER_STATUS.PLACED,
-        timeline,
-        updatedAt: releaseAt,
-      });
+      // ...and still paid (a payment never moves backwards, but the guard is free).
+      const applied = await updateOrderRecordIfStatus(
+        order.id,
+        ORDER_STATUS.SCHEDULED,
+        {
+          status: ORDER_STATUS.PLACED,
+          timeline,
+          updatedAt: releaseAt,
+        },
+        { expectedPaymentStatus: PAYMENT_STATUS.PAID }
+      );
 
       if (!applied) {
         result.skipped += 1;

@@ -39,13 +39,18 @@ export const useCustomerOrder = (orderId: string, customerId: string | null) => 
     orderRef.current = order;
   }, [order]);
 
+  // Every load of the order screen is fresh, the first included. Later loads come
+  // from a realtime change, the poll, a resume or a reload after an action, and
+  // exist because the order changed. The first one can follow a change made while
+  // the screen was closed, and the channel's first SUBSCRIBED does not reload, so
+  // a cached copy there would stay on screen until the next change.
   const loadOrder = useCallback(async () => {
     if (!orderId || !customerId) {
       return;
     }
 
     try {
-      const nextData = await getCustomerOrderDetail(orderId);
+      const nextData = await getCustomerOrderDetail(orderId, { fresh: true });
 
       if (!activeRef.current) {
         return;

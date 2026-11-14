@@ -24,7 +24,18 @@ import {
   contrastRatio,
   flattenAlpha,
 } from '../../design-system/src/tokens/contrast.ts';
-import { getOrderStatusColor, LEGACY_ORDER_STATUS_MAP, ORDER_STATUSES } from './orders.ts';
+import {
+  describeCustomerCancelOutcome,
+  formatCustomerPaymentStatusLabel,
+  formatTrackingStepLabel,
+  getOrderStatusColor,
+  getDisplayedRefundAmount,
+  getTrackingSteps,
+  hasCapturedPayment,
+  isPhantomRefund,
+  LEGACY_ORDER_STATUS_MAP,
+  ORDER_STATUSES,
+} from './orders.ts';
 
 /** The alpha every call site appends: `${color}20`, 0x20 = 32/255 ≈ 12.5%. */
 const TINT_ALPHA = '20';
@@ -136,5 +147,116 @@ describe('getOrderStatusColor is fill only', () => {
           `cannot be contrast-checked.`,
       );
     }
+  });
+});
+
+describe('tracking steps', () => {
+  it('pickup ends at the collected step, after ready for pickup', () => {
+    assert.deepEqual(getTrackingSteps('pickup'), ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'delivered']);
+  });
+
+  it('delivery steps are unchanged', () => {
+    assert.deepEqual(getTrackingSteps('delivery'), [
+      'placed',
+      'accepted',
+      'preparing',
+      'ready_for_pickup',
+      'picked_up',
+      'on_the_way',
+      'delivered',
+    ]);
+    assert.deepEqual(getTrackingSteps(), getTrackingSteps('delivery'));
+  });
+
+  it('labels the last pickup step Collected and the last delivery step Delivered', () => {
+    assert.equal(formatTrackingStepLabel('delivered', 'pickup'), 'Collected');
+    assert.equal(formatTrackingStepLabel('delivered', 'delivery'), 'Delivered');
+    assert.equal(formatTrackingStepLabel('ready_for_pickup', 'pickup'), 'Ready for pickup');
+  });
+});
+
+describe('refunds on payments that were never captured', () => {
+  it('money counts as captured only when paidAt or a positive capturedAmount says so', () => {
+    assert.equal(hasCapturedPayment({ status: 'paid', paidAt: '2026-11-09T10:01:00.000Z', capturedAmount: 2500 }), true);
+    assert.equal(hasCapturedPayment({ status: 'refunded', capturedAmount: 2500 }), true);
+    assert.equal(hasCapturedPayment({ status: 'refunded', paidAt: '2026-11-09T10:01:00.000Z' }), true);
+    assert.equal(hasCapturedPayment({ status: 'refunded', capturedAmount: 0, paidAt: null }), false);
+    assert.equal(hasCapturedPayment({ status: 'pending' }), false);
+    assert.equal(hasCapturedPayment(null), false);
+  });
+
+  it('a refund on a never-captured payment is a phantom; a real refund is not', () => {
+    assert.equal(isPhantomRefund({ status: 'refunded', capturedAmount: 0, paidAt: null }), true);
+    assert.equal(isPhantomRefund({ status: 'refunded' }), true);
+    assert.equal(isPhantomRefund({ status: 'refunded', capturedAmount: 2500, paidAt: '2026-11-09T10:01:00.000Z' }), false);
+    assert.equal(isPhantomRefund({ status: 'failed' }), false);
+  });
+
+  it('the cancel notice speaks of a refund only when one was recorded', () => {
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: true, refundAmount: 2500, refundRate: 1 }),
+      'Order cancelled. Your refund policy is 100%.'
+    );
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: false, refundAmount: 0, refundRate: 1 }),
+      'Order cancelled. No payment was taken, so there is nothing to refund.'
+    );
+  });
+
+  it('an older server without refundAmount falls back to whether the order was paid', () => {
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: true, refundRate: 1 }),
+      'Order cancelled. Your refund policy is 100%.'
+    );
+    assert.equal(
+      describeCustomerCancelOutcome({ paidWhenCancelled: false, refundRate: 1 }),
+      'Order cancelled. No payment was taken, so there is nothing to refund.'
+    );
+  });
+});
+
+describe('the refund line on the customer order screen', () => {
+  it('shows only a refund recorded on a captured, refunded payment', () => {
+    assert.equal(
+      getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 2500, paidAt: '2026-11-09T10:01:00.000Z', refundAmount: 2500 }),
+      2500
+    );
+    assert.equal(getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 0, paidAt: null, refundAmount: 2500 }), null);
+    assert.equal(getDisplayedRefundAmount({ status: 'failed', capturedAmount: 0, refundAmount: 2500 }), null);
+    assert.equal(getDisplayedRefundAmount({ status: 'paid', capturedAmount: 2500, refundAmount: 2500 }), null);
+    assert.equal(getDisplayedRefundAmount({ status: 'refunded', capturedAmount: 2500, refundAmount: 0 }), null);
+    assert.equal(getDisplayedRefundAmount(null), null);
+  });
+});
+
+describe('the payment label the customer sees', () => {
+  const card = (status: string, extra: Record<string, unknown> = {}) => ({ method: 'card', status, ...extra });
+
+  it('a cancelled order whose payment failed or never came reads "Not paid"', () => {
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('failed') }), 'Not paid');
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('pending') }), 'Not paid');
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'rejected', payment: card('failed') }), 'Not paid');
+    assert.equal(
+      formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('refunded', { capturedAmount: 0, paidAt: null }) }),
+      'Not paid',
+      'an older cancel refund on money never taken'
+    );
+  });
+
+  it('a live order keeps the plain label, so a failed payment still reads "Payment failed"', () => {
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'placed', payment: card('failed') }), 'Payment failed');
+    assert.equal(formatCustomerPaymentStatusLabel({ orderStatus: 'placed', payment: card('pending') }), 'Awaiting confirmation');
+  });
+
+  it('money that was taken keeps its label on a closed order', () => {
+    assert.equal(
+      formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('refunded', { capturedAmount: 2500 }) }),
+      'Refunded'
+    );
+    assert.equal(
+      formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('paid', { capturedAmount: 2500 }) }),
+      'Paid',
+      'a late payment on a cancelled order is shown as paid'
+    );
   });
 });

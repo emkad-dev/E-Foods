@@ -81,9 +81,11 @@
         "expo-notifications",
         {
           "icon": "./assets/images/android-icon-monochrome.png",
-          "color": "#E4A11B"
+          "color": "#E4A11B",
+          "sounds": ["./assets/sounds/feasty_urgent.wav", "./assets/sounds/feasty_chime.wav"]
         }
       ],
+      "../../scripts/expo/withKeepNotificationSounds.js",
       [
         "expo-splash-screen",
         {

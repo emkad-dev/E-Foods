@@ -11,8 +11,8 @@ import ScreenColumn, { screenColumn } from '../../../src/components/ScreenColumn
 import { SkeletonListRow, SkeletonScreen } from '../../../src/components/Skeleton';
 import { useAuth } from '../../../src/contexts/AuthContext';
 import {
-  formatOrderStatusLabel,
-  formatPaymentStatusLabel,
+  formatCustomerPaymentStatusLabel,
+  formatTrackingStepLabel,
   getOrderStatusColor,
   isTerminalOrderStatus,
   normalizeOrderStatus,
@@ -34,6 +34,7 @@ type Order = {
     status?: string;
   };
   status: string;
+  fulfillmentType?: 'delivery' | 'pickup' | null;
   createdAt: any;
 };
 
@@ -129,6 +130,9 @@ export default function OrdersList() {
   // Shared by the subscription effect and the visibility-gated poll, so the
   // in-flight guard has to outlive any single effect run.
   const activeRef = useRef(false);
+  // Only the first load may use the read cache; every later one is a realtime
+  // change, poll, or pull-to-refresh, which must see the current orders.
+  const hasLoadedRef = useRef(false);
 
   // 'manual' is a pull-to-refresh: it must never empty an already-visible list
   // just because one fetch failed, so only 'initial' (nothing on screen to lose
@@ -141,7 +145,9 @@ export default function OrdersList() {
       }
 
       try {
-        const nextData = await getCustomerOrders();
+        const fresh = hasLoadedRef.current || mode === 'manual';
+        hasLoadedRef.current = true;
+        const nextData = await getCustomerOrders({ fresh });
 
         if (!activeRef.current) {
           return;
@@ -305,13 +311,16 @@ export default function OrdersList() {
                 primitive already encodes.
               */}
               <View style={[styles.statusBadge, { backgroundColor: `${getOrderStatusColor(item.status)}20` }]}>
-                <Text style={styles.status}>{formatOrderStatusLabel(item.status).toUpperCase()}</Text>
+                <Text style={styles.status}>
+                  {formatTrackingStepLabel(normalizeOrderStatus(item.status), item.fulfillmentType ?? 'delivery').toUpperCase()}
+                </Text>
               </View>
             </View>
             <Text style={styles.total}>{formatMoney(item.pricing?.total ?? item.total ?? 0)}</Text>
             <View style={styles.metaRow}>
               <Text style={styles.payment}>
-                {formatPaymentStatusLabel(item.payment?.status ?? 'pending', item.payment?.method)}
+                {/* A closed order never paid for reads "Not paid", as on the detail screen. */}
+                {formatCustomerPaymentStatusLabel({ orderStatus: item.status, payment: item.payment })}
               </Text>
               <Text style={styles.date}>{formatOrderDate(item.createdAt)}</Text>
             </View>

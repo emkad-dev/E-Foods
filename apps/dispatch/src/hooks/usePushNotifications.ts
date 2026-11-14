@@ -12,6 +12,7 @@ import {
 } from '../../../../packages/auth/src';
 import {
   ANDROID_NOTIFICATION_CHANNELS,
+  NOTIFICATION_SOUNDS,
   resolveEasProjectId,
   resolveNotificationHref,
   type AppNotificationPayload,
@@ -61,22 +62,45 @@ if (pushSupported) {
 /**
  * Channels must exist BEFORE the permission prompt and before any push
  * arrives: on Android 13+ the POST_NOTIFICATIONS prompt is only shown once a
- * channel exists, and a push naming a channel the device does not have is
- * silently dropped. The server sends delivery offers on the `offers` channel.
+ * channel exists, and a push naming a channel the device does not have lands
+ * on expo's generic fallback channel instead of the one with our sound.
+ *
+ * The sound is fixed when Android first creates a channel, which is why the
+ * sounded channels are new ids (the server picks them in
+ * packages/domain resolvePushChannel). The legacy `default` and `offers`
+ * channels stay so a push already queued for them still shows.
  */
 const ensureAndroidChannels = async () => {
   if (Platform.OS !== 'android') {
     return;
   }
 
-  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.deliveryOffers, {
+    name: 'Delivery offers',
+    description: 'A delivery you can accept. Offers expire within a minute.',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 500, 100, 500],
+    lightColor: '#F5B342',
+    enableLights: true,
+    enableVibrate: true,
+    sound: NOTIFICATION_SOUNDS.urgent,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, {
     name: 'Delivery updates',
+    description: 'Assignments, orders ready for pickup, cancellations and account news.',
+    importance: Notifications.AndroidImportance.HIGH,
+    lightColor: '#E4A11B',
+    vibrationPattern: [0, 250, 250, 250],
+    sound: NOTIFICATION_SOUNDS.chime,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
+    name: 'Other notifications',
     importance: Notifications.AndroidImportance.MAX,
     lightColor: '#E4A11B',
     vibrationPattern: [0, 250, 250, 250],
   });
   await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.dispatchOffers, {
-    name: 'Delivery offers',
+    name: 'Earlier delivery offers',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 500, 100, 500],
     lightColor: '#F5B342',

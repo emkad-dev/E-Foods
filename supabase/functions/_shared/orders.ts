@@ -177,14 +177,55 @@ export const PAYMENT_STATUS = {
   REFUNDED: 'refunded',
 } as const;
 
+/**
+ * Whether money was actually taken for this payment. Every confirmation path
+ * (the webhook / refresh verification, and the older payment sync before it)
+ * stamps paidAt and a positive capturedAmount together, while a checkout is
+ * created with capturedAmount 0 and paidAt null. The stored status alone cannot
+ * tell: cancels used to write 'refunded' on payments that were never captured
+ * (production still holds such rows), and those must not read as settled money.
+ */
+export const isPaymentCaptured = (payment: JsonObject | null | undefined) => {
+  const stored = (payment ?? {}) as JsonObject;
+  if (sanitizeText(stored.paidAt)) {
+    return true;
+  }
+  const captured = typeof stored.capturedAmount === 'string' ? Number.parseFloat(stored.capturedAmount) : stored.capturedAmount;
+  return typeof captured === 'number' && Number.isFinite(captured) && captured > 0;
+};
+
 export const PAYMENT_PROVIDER_PAYSTACK = 'paystack';
 export const PAYMENT_PROVIDER_CASH = 'cash_on_delivery';
 
 export const DEFAULT_FUNCTION_ORDER_STATUS = 'placed';
 export const DEFAULT_CURRENCY = 'NGN';
 
-/** A prepaid checkout that never gets paid is cancelled after this window. */
-export const ORDER_PAYMENT_TIMEOUT_MS = 15 * 60 * 1000;
+/** A card checkout is finished within minutes or abandoned: unpaid after this
+ * window, the order is cancelled. */
+export const CARD_PAYMENT_TIMEOUT_MS = 15 * 60 * 1000;
+/** Bank transfers land late - production saw them confirmed at 9.5 and 31.5
+ * minutes - so cancelling at 15 minutes turned real payments into late payments
+ * on dead orders. */
+export const BANK_TRANSFER_PAYMENT_TIMEOUT_MS = 35 * 60 * 1000;
+
+/** The unpaid window for a payment method. Card and any other or unknown method
+ * get the card window; only a bank transfer gets the longer one. */
+export const paymentTimeoutMsForMethod = (method: unknown) =>
+  sanitizeText(method) === 'bank_transfer' ? BANK_TRANSFER_PAYMENT_TIMEOUT_MS : CARD_PAYMENT_TIMEOUT_MS;
+
+/** Stored order statuses an unpaid prepaid order sits in: it is inserted
+ * 'placed' (or 'scheduled') BEFORE payment; 'pending'/'confirmed'/'draft' are
+ * legacy spellings of the same thing. Anything past these is in the kitchen or
+ * closed and is never expired. */
+export const UNPAID_EXPIRY_ORDER_STATUSES = ['placed', 'pending', 'confirmed', 'draft', 'scheduled'];
+
+/** An expiry this long past its deadline is closed silently. The first sweep
+ * after deploy finds orders stuck since June; telling a customer "Order timed
+ * out" months later is noise, and the restaurant has long forgotten them. */
+export const SILENT_EXPIRY_AFTER_DEADLINE_MS = 24 * 60 * 60 * 1000;
+
+/** Payment states that mean no money was captured: the order may be expired. */
+export const UNCAPTURED_PAYMENT_STATUSES: string[] = [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.FAILED];
 
 export const normalizeOrderStatus = (value: unknown) => {
   const status = sanitizeText(value, 'draft');
@@ -313,23 +354,93 @@ export const insertDeliveryEvent = async (payload: JsonObject) => {
   }
 };
 
-export const updateOrderRecord = async (orderId: string, updates: JsonObject) => {
+/**
+ * True when a status write means the order no longer needs a human: the
+ * restaurant accepted it, or it reached a terminal status. needsAttention is
+ * then stale (raised by the acceptance escalation or a late payment) and must
+ * be dropped - an admin queue full of delivered orders hides the real ones.
+ */
+export const statusWriteClearsAttention = (updates: JsonObject): boolean => {
+  if (typeof updates.status !== 'string') {
+    return false;
+  }
+  // The same write raising the flag (a paid rejection, an admin force-cancel)
+  // is deliberately alerting a human: never undo it.
+  if (updates.needsAttention === true) {
+    return false;
+  }
+  const next = normalizeOrderStatus(updates.status);
+  return next === ORDER_STATUS.ACCEPTED || TERMINAL_ORDER_STATUSES.has(next);
+};
+
+// Every accept / terminal write funnels through updateOrderRecord or
+// updateOrderRecordIfStatus, so partner, dispatch, customer cancel and the
+// sweeps all get the clear from this one place. It is a second, filtered UPDATE
+// (not needsAttention:false in the main write) because a customer problem report
+// (customerIssueReportedAt) and a payment reversal (timeline.paymentReversedAt)
+// must keep the flag, and PostgREST cannot make one
+// column of an update conditional on another.
+//
+// Two guards keep it from hiding a NEWER alert: the status guard (the order has
+// not moved on) and an updatedAt guard - the status write stamps updatedAt, and
+// the clear applies only if nobody has written since (a late-payment flag set
+// between the two statements bumps updatedAt and so survives).
+const withStampedUpdatedAt = (updates: JsonObject): JsonObject =>
+  statusWriteClearsAttention(updates) && typeof updates.updatedAt !== 'string'
+    ? { ...updates, updatedAt: new Date().toISOString() }
+    : updates;
+
+// BEST-EFFORT: the status write already committed, so a failure here must not
+// fail the caller's action (the partner would see "failed" over a done accept)
+// or skip its broadcast and notifications. Logged, never thrown.
+const clearAttentionAfterStatusWrite = async (orderId: string, updates: JsonObject) => {
+  if (!statusWriteClearsAttention(updates) || typeof updates.updatedAt !== 'string') {
+    return;
+  }
+  try {
+    const { error } = await serviceClient
+      .from('CustomerOrder')
+      .update({ needsAttention: false })
+      .eq('id', orderId)
+      .eq('status', updates.status as string)
+      .eq('updatedAt', updates.updatedAt)
+      .eq('needsAttention', true)
+      .is('customerIssueReportedAt', null)
+      // A payment Paystack reversed on a live order (flagReversedPaidOrder) is
+      // still owed back whatever the kitchen does next: accepting or completing
+      // the order must not drop it from the admin attention list.
+      .is('timeline->>paymentReversedAt', null);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'needsAttention clear after status write failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+  }
+};
+
+export const updateOrderRecord = async (orderId: string, rawUpdates: JsonObject) => {
+  const updates = withStampedUpdatedAt(rawUpdates);
   const { error } = await serviceClient.from('CustomerOrder').update(updates).eq('id', orderId);
 
   if (error) {
     throw new Error(error.message);
   }
 
+  await clearAttentionAfterStatusWrite(orderId, updates);
   await broadcastOrderChanged(orderId);
 };
 
 // Task 17 (G1): free the promo-cap slot an order held once it ends
 // cancelled/refunded. THE single shared release path — the customer placement
-// handlers (on synchronous placement/init failure) and all three
-// post-placement terminal-cancel transitions (customer self-cancel,
-// unpaid-payment timeout, acceptance-deadline auto-cancel) all funnel through
-// here, so a redemption tied to an order that does not end successful is always
-// released.
+// handlers (on synchronous placement/init failure), the post-placement
+// terminal-cancel transitions (customer self-cancel, unpaid-payment timeout,
+// acceptance-deadline auto-cancel) and a paid order's rejection or failed
+// delivery (_shared/manualRefund.ts) all funnel through here, so a redemption
+// tied to an order that does not end successful is always released.
 //
 // Safe by construction:
 //   * IDEMPOTENT & no-op on the no-promo case — ebuy_release_promo_redemption
@@ -377,14 +488,27 @@ export const releasePromoRedemption = async (orderId: string): Promise<void> => 
 export const updateOrderRecordIfStatus = async (
   orderId: string,
   expectedStatus: string,
-  updates: JsonObject
+  rawUpdates: JsonObject,
+  options: {
+    /** Also require the stored payment.status to still be this RAW value (null =
+     * absent). Used where a payment confirmation racing the write must win, e.g.
+     * the unpaid expiry must not cancel an order the webhook just marked paid. */
+    expectedPaymentStatus?: string | null;
+  } = {}
 ): Promise<boolean> => {
-  const { data, error } = await serviceClient
+  const updates = withStampedUpdatedAt(rawUpdates);
+  let query = serviceClient
     .from('CustomerOrder')
     .update(updates)
     .eq('id', orderId)
-    .eq('status', expectedStatus)
-    .select('id');
+    .eq('status', expectedStatus);
+  if (options.expectedPaymentStatus !== undefined) {
+    query =
+      options.expectedPaymentStatus === null
+        ? query.is('payment->>status', null)
+        : query.eq('payment->>status', options.expectedPaymentStatus);
+  }
+  const { data, error } = await query.select('id');
 
   if (error) {
     throw new Error(error.message);
@@ -392,6 +516,7 @@ export const updateOrderRecordIfStatus = async (
 
   const applied = Array.isArray(data) && data.length > 0;
   if (applied) {
+    await clearAttentionAfterStatusWrite(orderId, updates);
     await broadcastOrderChanged(orderId);
   }
   return applied;
@@ -491,7 +616,16 @@ export const loadOrderRelations = async (orderIds: string[]) => {
   };
 };
 
-export const loadOrderBundle = async (orderId: string, includeEvents = false) => {
+export const loadOrderBundle = async (
+  orderId: string,
+  includeEvents = false,
+  options: {
+    /** False skips the lazy unpaid expiry. The payment refresh passes false: it
+     * is about to ask Paystack, and expiring first would cancel an order whose
+     * payment that very answer may confirm. */
+    expireUnpaid?: boolean;
+  } = {}
+) => {
   const { data: order, error } = await serviceClient
     .from('CustomerOrder')
     .select(CUSTOMER_ORDER_COLUMNS)
@@ -506,7 +640,7 @@ export const loadOrderBundle = async (orderId: string, includeEvents = false) =>
     return null;
   }
 
-  const normalizedOrder = await maybeExpireUnpaidOrder(order);
+  const normalizedOrder = options.expireUnpaid === false ? order : await maybeExpireUnpaidOrder(order);
   const { assignmentsByOrderId, eventsByOrderId, itemsByOrderId } = await loadOrderRelations([orderId]);
   return {
     assignment: assignmentsByOrderId.get(orderId) ?? null,
@@ -563,39 +697,144 @@ export const assertNonTerminalOrder = (order: CustomerOrderRow) => {
   }
 };
 
+/** The raw stored payment.status, or null when absent - the value a
+ * compare-and-set on the payment must name (normalizing would let the CAS match
+ * a row it did not read). */
+export const storedPaymentStatus = (order: Pick<CustomerOrderRow, 'payment'>): string | null => {
+  const status = (order.payment ?? {}).status;
+  return typeof status === 'string' ? status : null;
+};
+
 /**
- * Lazy expiry for prepaid orders that were never paid. Runs on read rather than
- * on a schedule, so any path that surfaces an order also settles its fate; the
- * returned row is the post-expiry one so callers never render a stale status.
+ * Pure: whether an order is an uncaptured prepaid checkout whose payment window
+ * has run out. A FAILED payment waits out the same window as a pending one,
+ * because Paystack reports a checkout the customer is still on as 'abandoned'
+ * (stored as failed) and a failed attempt can still be retried on the same
+ * reference until then.
  */
-export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
-  const currentStatus = normalizeOrderStatus(order.status);
-  if (TERMINAL_ORDER_STATUSES.has(currentStatus)) {
-    return order;
+export const isUnpaidOrderExpired = (order: CustomerOrderRow, nowMs: number) => {
+  if (!UNPAID_EXPIRY_ORDER_STATUSES.includes(sanitizeText(order.status))) {
+    return false;
   }
 
   const paymentMethod = sanitizeText(order.payment?.method);
   const paymentStatus = sanitizeText(order.payment?.status, PAYMENT_STATUS.PENDING);
-  if (!PAYSTACK_PAYMENT_METHODS.has(paymentMethod) || paymentStatus !== PAYMENT_STATUS.PENDING) {
-    return order;
+  if (!PAYSTACK_PAYMENT_METHODS.has(paymentMethod) || !UNCAPTURED_PAYMENT_STATUSES.includes(paymentStatus)) {
+    return false;
   }
 
   const createdAt = toSortableTimestamp(order.createdAt);
-  if (!createdAt || Date.now() - createdAt < ORDER_PAYMENT_TIMEOUT_MS) {
-    return order;
+  return Boolean(createdAt) && nowMs - createdAt >= paymentTimeoutMsForMethod(paymentMethod);
+};
+
+// The ledger row must agree with the order, or 47 transactions sit 'pending' on
+// orders the timeout cancelled long ago. Guarded on the ledger's own status
+// (pending or failed -> failed only) so a payment confirmation recorded in
+// between is never overwritten. Best-effort: the order is already cancelled, and
+// the promo release, event and notifications after this must still happen
+// exactly once. Used by the unpaid expiry and an admin force-cancel of an
+// unpaid order.
+export const markUncapturedPaymentTransactionFailed = async (
+  order: CustomerOrderRow,
+  failedAt: string,
+  reason: string
+) => {
+  const reference = sanitizeText(order.payment?.reference);
+  if (!reference) {
+    return;
+  }
+  try {
+    const { error } = await serviceClient
+      .from('PaymentTransaction')
+      .update({ failedAt, lastError: reason, status: PAYMENT_STATUS.FAILED, updatedAt: failedAt })
+      .eq('reference', reference)
+      .in('status', UNCAPTURED_PAYMENT_STATUSES);
+    if (error) {
+      throw new Error(error.message);
+    }
+  } catch (error) {
+    logEdgeEvent('error', 'payment transaction not marked failed after an unpaid cancel', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId: order.id,
+    });
+  }
+};
+
+/**
+ * The ledger write for ONE order of a checkout being cancelled by hand (the
+ * customer, or an admin force-cancel). A multi-store checkout is one charge with
+ * one PaymentTransaction row for the whole group: while another order of the
+ * group is still open it is still waiting on that same payment, so the row is
+ * left alone. The last order of the group to close writes it. Best-effort, like
+ * the write itself: an unreadable group is logged and skipped.
+ */
+export const markUncapturedPaymentTransactionFailedForCancel = async (
+  order: CustomerOrderRow,
+  failedAt: string,
+  reason: string
+) => {
+  const groupId = sanitizeText(order.orderGroupId);
+  if (groupId) {
+    const { data: siblings, error } = await serviceClient
+      .from('CustomerOrder')
+      .select('id,status')
+      .eq('orderGroupId', groupId)
+      .neq('id', order.id)
+      .returns<Array<{ id: string; status: string | null }>>();
+    if (error) {
+      logEdgeEvent('error', 'payment transaction not marked failed: the checkout group could not be read', {
+        error: error.message,
+        orderId: order.id,
+      });
+      return;
+    }
+    const groupStillOpen = (siblings ?? []).some(
+      (sibling) => !TERMINAL_ORDER_STATUSES.has(normalizeOrderStatus(sibling.status))
+    );
+    if (groupStillOpen) {
+      return;
+    }
+  }
+  await markUncapturedPaymentTransactionFailed(order, failedAt, reason);
+};
+
+/**
+ * Cancels an uncaptured prepaid order whose payment window has run out. THE one
+ * expiry path: the scheduled sweep (unpaidOrderExpirySweep.ts) and the lazy
+ * check on read (maybeExpireUnpaidOrder) both come here.
+ *
+ * The write is a compare-and-set on BOTH the stored order status and the stored
+ * payment status this caller read, so a webhook or customer refresh that marks
+ * the order paid between the read and the write wins: zero rows match and
+ * nothing else here runs. A payment that lands AFTER the cancel is caught by the
+ * verification's closed-order safeguard (needsAttention + latePaymentAt).
+ * Nothing was captured, so no refund is recorded.
+ */
+export const expireUnpaidOrder = async (
+  order: CustomerOrderRow,
+  nowMs: number = Date.now()
+): Promise<{ expired: boolean; order: CustomerOrderRow }> => {
+  if (!isUnpaidOrderExpired(order, nowMs)) {
+    return { expired: false, order };
   }
 
   const timedOutAt = nowIso();
+  const paymentFailed = sanitizeText(order.payment?.status) === PAYMENT_STATUS.FAILED;
+  const reason = paymentFailed ? 'payment_failed' : 'payment_timeout';
+  const timeoutMs = paymentTimeoutMsForMethod(order.payment?.method);
+  const timeoutMinutes = timeoutMs / 60000;
+  const silent = nowMs - (toSortableTimestamp(order.createdAt) + timeoutMs) > SILENT_EXPIRY_AFTER_DEADLINE_MS;
   const payment = {
     ...(order.payment ?? {}),
     lastEvent: 'payment_timeout',
-    failedAt: timedOutAt,
+    // A failed payment keeps the time it actually failed.
+    failedAt: sanitizeOptionalText(order.payment?.failedAt) ?? timedOutAt,
     status: PAYMENT_STATUS.FAILED,
     verifiedAt: timedOutAt,
   };
   const cancellation = {
     actor: 'system',
-    reason: 'payment_timeout',
+    reason,
     timedOutAt,
   };
   const timeline = {
@@ -604,13 +843,32 @@ export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
     paymentTimedOutAt: timedOutAt,
   };
 
-  await updateOrderRecord(order.id, {
+  const applied = await updateOrderRecordIfStatus(
+    order.id,
+    order.status as string,
+    {
+      cancellation,
+      payment,
+      status: ORDER_STATUS.CANCELLED,
+      timeline,
+      updatedAt: timedOutAt,
+    },
+    { expectedPaymentStatus: storedPaymentStatus(order) }
+  );
+  if (!applied) {
+    return { expired: false, order };
+  }
+
+  const expiredOrder: CustomerOrderRow = {
+    ...order,
     cancellation,
     payment,
     status: ORDER_STATUS.CANCELLED,
     timeline,
     updatedAt: timedOutAt,
-  });
+  };
+
+  await markUncapturedPaymentTransactionFailed(order, timedOutAt, reason);
 
   // The order is now cancelled (payment never completed): free any promo-cap
   // slot it held so a single-use code is not consumed by an order the customer
@@ -620,11 +878,17 @@ export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
   await insertDeliveryEvent({
     actorUid: null,
     details: {
-      timeoutMinutes: ORDER_PAYMENT_TIMEOUT_MS / 60000,
+      paymentStatus: paymentFailed ? PAYMENT_STATUS.FAILED : PAYMENT_STATUS.PENDING,
+      timeoutMinutes,
+      ...(silent ? { silent: true } : {}),
     },
     eventType: 'payment_timeout',
     orderId: order.id,
   });
+
+  if (silent) {
+    return { expired: true, order: expiredOrder };
+  }
 
   await notifyUsers([order.customerId], {
     title: 'Order timed out',
@@ -647,14 +911,36 @@ export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow) => {
     }),
   });
 
-  return {
-    ...order,
-    cancellation,
-    payment,
-    status: ORDER_STATUS.CANCELLED,
-    timeline,
-    updatedAt: timedOutAt,
-  };
+  return { expired: true, order: expiredOrder };
+};
+
+/**
+ * Lazy expiry on read, kept alongside the scheduled sweep so any path that
+ * surfaces an order also settles its fate; the returned row is the post-expiry
+ * one so callers never render a stale status. Same conditional write and
+ * windows as the sweep (expireUnpaidOrder). When the write loses a race the
+ * order is re-read, so a payment that just landed is what the caller sees.
+ */
+export const maybeExpireUnpaidOrder = async (order: CustomerOrderRow): Promise<CustomerOrderRow> => {
+  const nowMs = Date.now();
+  if (!isUnpaidOrderExpired(order, nowMs)) {
+    return order;
+  }
+
+  const result = await expireUnpaidOrder(order, nowMs);
+  if (result.expired) {
+    return result.order;
+  }
+
+  const { data: fresh, error } = await serviceClient
+    .from('CustomerOrder')
+    .select(CUSTOMER_ORDER_COLUMNS)
+    .eq('id', order.id)
+    .maybeSingle<CustomerOrderRow>();
+  if (error) {
+    throw new Error(error.message);
+  }
+  return fresh ?? order;
 };
 
 export const hasAssignedCourier = (assignment: DeliveryAssignmentRow | null) =>

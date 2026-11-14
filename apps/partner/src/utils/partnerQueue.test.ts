@@ -336,3 +336,15 @@ describe('partner money formatting', () => {
     assert.equal(formatPartnerMoney(-0.4, { whole: true }), '₦0');
   });
 });
+
+describe('kitchen signal wording', () => {
+  it('a collected pickup order reads Collected, a delivered delivery order reads Delivered', () => {
+    const order = (fulfillmentType: string | undefined) =>
+      ({ status: 'delivered', fulfillmentType }) as unknown as OrderDocument;
+
+    assert.equal(getKitchenSignal(order('pickup')).label, 'Collected');
+    assert.equal(getKitchenSignal(order('delivery')).label, 'Delivered');
+    assert.equal(getKitchenSignal(order(undefined)).label, 'Delivered');
+    assert.equal(getKitchenSignal(order('pickup')).tone, 'success');
+  });
+});

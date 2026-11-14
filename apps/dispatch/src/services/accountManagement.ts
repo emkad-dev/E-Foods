@@ -1,4 +1,4 @@
 import { callDispatchBackendRpc } from './backendRpc';
 
 export const deleteOwnAccount = async () =>
-  callDispatchBackendRpc<{ deleted: boolean; targetUid: string }>('deleteOwnAccount');
+  callDispatchBackendRpc<{ deleted: boolean; targetUid: string }>('deleteOwnAccount', undefined, { write: true });

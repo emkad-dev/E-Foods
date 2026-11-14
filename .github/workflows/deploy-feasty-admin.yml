@@ -19,6 +19,11 @@ on:
     branches: [ 'main' ]
     paths:
       - 'supabase/functions/feasty-admin/**'
+      # Imported through _shared/domains/orders.ts (the shared payment
+      # verification path), so a handler-only change must redeploy this too.
+      - 'supabase/functions/payment-verification/**'
+      # The admin order-action rules, imported by _shared/adminOrderInterventions.ts.
+      - 'packages/domain/src/adminOrders.ts'
       - 'supabase/functions/_shared/**'
       - 'supabase/config.toml'
       - '.github/workflows/deploy-feasty-admin.yml'

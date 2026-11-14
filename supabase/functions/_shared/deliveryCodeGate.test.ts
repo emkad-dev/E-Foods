@@ -103,6 +103,10 @@ const createTable = (initialRows: Row[]) => {
           filters.push([col, val]);
           return builder;
         },
+        // The needsAttention clear after a status write chains .is(); null-guards are irrelevant here.
+        is(_col: string, _val: unknown) {
+          return builder;
+        },
         select(_columns?: string) {
           const matched = matching();
           for (const row of matched) Object.assign(row, payload);
@@ -259,7 +263,7 @@ Deno.test('delivered with the correct deliveryCode: transitions and stamps deliv
     expectEqual(response.status, 200, 'handler succeeds');
     expectEqual(state.order().status, 'delivered', 'order delivered');
     expectEqual(typeof state.order().deliveryCodeVerifiedAt, 'string', 'verified stamp set');
-    expectEqual(state.order().deliveryCodeAttempts, 1, 'the slot was reserved before the compare');
+    expectEqual(state.order().deliveryCodeAttempts, 0, 'a correct code hands its reserved slot back');
     // The delivery code IS the customer's confirmation, so the rider path must never
     // start the restaurant-completion confirmation clock.
     expectEqual(state.order().customerConfirmDueAt ?? null, null, 'rider delivery sets no confirmation deadline');

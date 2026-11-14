@@ -4,7 +4,7 @@ const updatePartnerOrderStatus = async (orderId: string, action: string) => {
   await callPartnerBackendRpc('partnerUpdateOrderStatus', {
     action,
     orderId,
-  });
+  }, { write: true });
 };
 
 export const acceptPartnerOrder = async (orderId: string, _timeline: Record<string, unknown> | null) =>

@@ -382,3 +382,124 @@ test('a direct-URL transport failure falls back to the relay, and when the relay
     );
   });
 });
+
+/**
+ * Writes are never re-sent. A partner's "Mark collected" succeeded on the
+ * server, the reply was lost on a bad connection, the relay sent it again, and
+ * the second request earned a 412 "This order can no longer be updated" that the
+ * screen pinned over an order that HAD been collected.
+ */
+const countingRelayClient = () => {
+  const relay = { calls: 0 };
+  const supabase = {
+    auth: {
+      getSession: async () => ({ data: { session: { access_token: 'token' } } }),
+      refreshSession: async () => ({ data: { session: null }, error: null }),
+    },
+    functions: {
+      invoke: async () => {
+        relay.calls += 1;
+        return { data: { data: { via: 'relay' } }, error: null };
+      },
+    },
+  } as never;
+  return { supabase, relay };
+};
+
+const droppedConnection = async (): Promise<Response> => {
+  throw new TypeError('Failed to fetch');
+};
+
+test('a write whose direct request fails in transport is not re-sent through the relay', async () => {
+  const { supabase, relay } = countingRelayClient();
+  let directCalls = 0;
+
+  await withFetch(
+    async () => {
+      directCalls += 1;
+      return droppedConnection();
+    },
+    async () => {
+      const failure = await callBackendRpc(supabase, ENV, 'partnerUpdateOrderStatus', { action: 'delivered' }, { write: true })
+        .then(() => null)
+        .catch((error: unknown) => error as Error);
+
+      assert.equal(failure?.name, 'NetworkError', 'the transport error reaches the caller');
+    }
+  );
+
+  assert.equal(directCalls, 1, 'sent exactly once');
+  assert.equal(relay.calls, 0, 'never re-sent through the relay');
+});
+
+test('a read whose direct request fails in transport still retries through the relay', async () => {
+  const { supabase, relay } = countingRelayClient();
+
+  await withFetch(droppedConnection, async () => {
+    const result = await callBackendRpc<{ via: string }>(supabase, ENV, 'partnerGetRestaurantOrder', { orderId: 'o1' });
+    assert.deepEqual(result, { via: 'relay' });
+  });
+
+  assert.equal(relay.calls, 1);
+});
+
+test('a write still uses the relay when the relay is the only path', async () => {
+  const { supabase, relay } = countingRelayClient();
+
+  const result = await callBackendRpc<{ via: string }>(supabase, RELAY_ONLY_ENV, 'partnerUpdateOrderStatus', {}, { write: true });
+
+  assert.deepEqual(result, { via: 'relay' });
+  assert.equal(relay.calls, 1);
+});
+
+test('a server answer is never retried, for a write or a read', async () => {
+  for (const options of [{ write: true }, undefined]) {
+    const { supabase, relay } = countingRelayClient();
+    let directCalls = 0;
+
+    await withFetch(
+      async () => {
+        directCalls += 1;
+        return jsonResponse(412, { error: { message: 'This order can no longer be updated.' } });
+      },
+      async () => {
+        const failure = await callBackendRpc(supabase, ENV, 'partnerUpdateOrderStatus', {}, options)
+          .then(() => null)
+          .catch((error: unknown) => error);
+
+        assert.ok(isBackendRpcError(failure));
+        assert.equal(failure.status, 412);
+      }
+    );
+
+    assert.equal(directCalls, 1);
+    assert.equal(relay.calls, 0, `no relay retry (${options ? 'write' : 'read'})`);
+  }
+});
+
+test('a write whose direct request was never sent (malformed URL) still uses the relay', async () => {
+  const { supabase, relay } = countingRelayClient();
+  let directCalls = 0;
+
+  await withFetch(
+    async () => {
+      directCalls += 1;
+      return jsonResponse(200, { data: { via: 'direct' } });
+    },
+    async () => {
+      // `new URL` throws on this before any fetch, so nothing reached the server
+      // and sending through the relay cannot apply the write twice.
+      const result = await callBackendRpc<{ via: string }>(
+        supabase,
+        { ...ENV, backendRpcUrl: 'not a url' },
+        'partnerUpdateOrderStatus',
+        {},
+        { write: true }
+      );
+      assert.deepEqual(result, { via: 'relay' });
+    }
+  );
+
+  assert.equal(directCalls, 0, 'no direct request went out');
+  assert.equal(relay.calls, 1);
+});

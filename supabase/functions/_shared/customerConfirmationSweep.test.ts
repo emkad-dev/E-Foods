@@ -25,6 +25,7 @@ if (typeof sweepCustomerConfirmations !== 'function') {
 }
 
 const { serviceClient } = await import('./client.ts');
+const { loadPushSoundChannelGate, resetPushSoundChannelGateCache } = await import('./notifications.ts');
 
 const MINUTE_MS = 60_000;
 const CUSTOMER_ID = 'customer-confirm-1';
@@ -53,6 +54,10 @@ type MockOptions = {
   beforeUpdate?: (rows: Row[], orderId: unknown) => void;
   /** Make the candidate lookup fail. */
   failCandidateLookup?: boolean;
+  /** The push_sound_channels FeatureFlag. Absent (off) by default. */
+  soundChannels?: boolean;
+  /** Make the FeatureFlag read return an error. */
+  failFlagRead?: boolean;
 };
 
 const createOrderTable = (initialRows: Row[], options: MockOptions) => {
@@ -177,7 +182,14 @@ const createPlainTable = (initialRows: Row[]) => {
   };
 };
 
-type PushMessage = { body: string; data: Record<string, string>; title: string; to: string };
+type PushMessage = {
+  body: string;
+  channelId?: string;
+  data: Record<string, string>;
+  sound?: string | null;
+  title: string;
+  to: string;
+};
 
 const completedMinutesAgo = (minutes: number, now: Date = DAYTIME) => ({
   // dueAt = completion + 3h; the sweep derives completion back from it.
@@ -207,8 +219,20 @@ const installMocks = (orders: Row[], options: MockOptions = {}) => {
     queue_notifications: createPlainTable([]),
   };
 
+  resetPushSoundChannelGateCache();
+  let flagReads = 0;
   // deno-lint-ignore no-explicit-any
   (serviceClient as any).from = (table: string) => {
+    if (table === 'FeatureFlag') {
+      // loadFeatureFlagMap: select(...).returns<T>()
+      flagReads += 1;
+      if (options.failFlagRead) {
+        return { select: () => ({ returns: () => Promise.resolve({ data: null, error: { message: 'flag boom' } }) }) };
+      }
+      const rows =
+        options.soundChannels === undefined ? [] : [{ key: 'push_sound_channels', enabled: options.soundChannels }];
+      return { select: () => ({ returns: () => Promise.resolve({ data: rows, error: null }) }) };
+    }
     const mock = tables[table as keyof typeof tables];
     if (!mock) {
       throw new Error(`customerConfirmationSweep.test.ts: unexpected table "${table}"`);
@@ -240,8 +264,54 @@ const installMocks = (orders: Row[], options: MockOptions = {}) => {
     globalThis.fetch = originalFetch;
   };
 
-  return { broadcasts: () => broadcasts, order: (id?: string) => tables.CustomerOrder.rows.find((r) => !id || r.id === id)!, pushes, restore };
+  return {
+    broadcasts: () => broadcasts,
+    flagReads: () => flagReads,
+    order: (id?: string) => tables.CustomerOrder.rows.find((r) => !id || r.id === id)!,
+    pushes,
+    restore,
+  };
 };
+
+Deno.test('sweep: with the sound-channel flag on, confirm prompts chime on "Order updates"', async () => {
+  const mocks = installMocks([buildOrderRow({ id: 'order-snd-aaaaaa', ...completedMinutesAgo(31) })], {
+    soundChannels: true,
+  });
+  try {
+    await sweepCustomerConfirmations(DAYTIME);
+    expectEqual(mocks.pushes.length, 1, 'one push');
+    expectEqual(mocks.pushes[0].channelId, 'order_updates', 'customer order-updates channel');
+    expectEqual(mocks.pushes[0].sound, 'feasty_chime.wav', 'with the chime');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('push sound gate: one flag read serves every send for 60 seconds', async () => {
+  const mocks = installMocks([], { soundChannels: true });
+  try {
+    const start = Date.parse('2026-11-13T12:00:00.000Z');
+    expectEqual((await loadPushSoundChannelGate(start))('T[a]'), true, 'flag on');
+    expectEqual((await loadPushSoundChannelGate(start + 30_000))('T[b]'), true, 'still on, from the cache');
+    expectEqual(mocks.flagReads(), 1, 'one read inside the window');
+    await loadPushSoundChannelGate(start + 60_001);
+    expectEqual(mocks.flagReads(), 2, 'read again once the window has passed');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('push sound gate: a failed read is off and is not cached', async () => {
+  const mocks = installMocks([], { failFlagRead: true });
+  try {
+    const start = Date.parse('2026-11-13T12:00:00.000Z');
+    expectEqual((await loadPushSoundChannelGate(start))('T[a]'), false, 'failure means legacy channels');
+    expectEqual((await loadPushSoundChannelGate(start + 1_000))('T[a]'), false, 'still off');
+    expectEqual(mocks.flagReads(), 2, 'the failure was not cached: the next send asked again');
+  } finally {
+    mocks.restore();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Each stage sends once, with the right copy, and never again.
@@ -256,6 +326,11 @@ Deno.test('sweep: each reminder stage is sent exactly once, with stage-specific 
     const first = await sweepCustomerConfirmations(DAYTIME);
     expectEqual(first.reminded, 3, 'one reminder per order');
     expectEqual(mocks.pushes.length, 3, 'three pushes reached Expo');
+    for (const push of mocks.pushes) {
+      // Sound-channel flag off (the default): exactly the legacy message.
+      expectEqual(push.channelId, undefined, 'legacy: no channel');
+      expectEqual(push.sound, 'default', 'legacy: default sound');
+    }
     expectEqual(mocks.order('order-s1-aaaaaa').customerConfirmRemindersSent, 1, 'stage 1 recorded');
     expectEqual(mocks.order('order-s2-bbbbbb').customerConfirmRemindersSent, 2, 'stage 2 recorded');
     expectEqual(mocks.order('order-s3-cccccc').customerConfirmRemindersSent, 3, 'stage 3 recorded');

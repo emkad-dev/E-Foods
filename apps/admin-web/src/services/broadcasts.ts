@@ -56,10 +56,10 @@ export const previewAudience = (segment: BroadcastSegment, category: string) =>
   callAdminRpc<{ recipientCount: number }>('broadcastPreviewAudience', { segment, category });
 
 export const createBroadcast = (input: Record<string, unknown>) =>
-  callAdminRpc<{ broadcast: Broadcast }>('broadcastCreate', input);
+  callAdminRpc<{ broadcast: Broadcast }>('broadcastCreate', input, { write: true });
 
 export const scheduleBroadcast = (id: string, scheduledAt?: string) =>
-  callAdminRpc<{ broadcast: Broadcast }>('broadcastSchedule', { id, scheduledAt });
+  callAdminRpc<{ broadcast: Broadcast }>('broadcastSchedule', { id, scheduledAt }, { write: true });
 
 export const cancelBroadcast = (id: string) =>
-  callAdminRpc<{ broadcast: Broadcast }>('broadcastCancel', { id });
+  callAdminRpc<{ broadcast: Broadcast }>('broadcastCancel', { id }, { write: true });

@@ -125,6 +125,12 @@ export const ADMIN_ACTIONS = [
   // Rider pay: switch a restaurant between FEASTY riders and its own delivery
   // (RestaurantRecord.deliveryProvider), which decides who keeps the delivery fee.
   'adminSetRestaurantDeliveryProvider',
+  // The admin way out for stuck orders: cancel (refund recorded, flagged for a
+  // human), complete (the customer can still confirm or report) and close a
+  // customer problem report. Each is audited.
+  'adminForceCancelOrder',
+  'adminForceCompleteOrder',
+  'adminResolveOrderReport',
 ] as const;
 
 export const ACCOUNT_ACTIONS = [

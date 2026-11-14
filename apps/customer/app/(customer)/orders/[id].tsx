@@ -13,10 +13,13 @@ import { computeEtaRangeBetween, formatEtaRange, shouldShowLiveMap } from '../..
 import { useRiderPositionRealtime, type RiderPosition } from '../../../src/hooks/useRiderPositionRealtime';
 import {
   canCustomerCancelOrder,
-  formatOrderStatusLabel,
+  describeCustomerCancelOutcome,
+  formatTrackingStepLabel,
   formatPaymentMethodLabel,
+  formatCustomerPaymentStatusLabel,
   formatPaymentStatusLabel,
   getCustomerRefundPolicyLabel,
+  getDisplayedRefundAmount,
   getOrderStatusColor,
   getTrackingSteps,
   isPrepaidPaymentMethod,
@@ -186,15 +189,22 @@ export default function OrderTracking() {
     total: restaurantTotal,
   });
   const paymentTotalLabel = groupSummary ? 'Shared checkout total' : 'Total';
-  const paymentStatus = formatPaymentStatusLabel(order.payment?.status, order.payment?.method);
+  // A closed order that was never paid (including an older cancel's refund on
+  // money never taken) reads "Not paid", with no refund line below.
+  const paymentStatus = formatCustomerPaymentStatusLabel({ orderStatus: order.status, payment: order.payment });
+  const refundToShow = getDisplayedRefundAmount(order.payment);
   const paymentMethod = formatPaymentMethodLabel(order.payment?.method);
   const canCancel = canCustomerCancelOrder(order.status);
   const refundPolicy = getCustomerRefundPolicyLabel(order.status);
   const scheduledSlotLabel = formatScheduledSlot(order.scheduledFor);
   const hasCapturedPrepaidAmount =
     isPrepaidPaymentMethod(order.payment?.method) && ['paid', 'refunded'].includes(order.payment?.status ?? '');
+  // Not on a closed order: there is nothing left to pay for, and older admin
+  // cancels left the payment 'pending'.
   const isPendingPrepaidPayment =
-    isPrepaidPaymentMethod(order.payment?.method) && (order.payment?.status ?? 'pending') === 'pending';
+    isPrepaidPaymentMethod(order.payment?.method) &&
+    (order.payment?.status ?? 'pending') === 'pending' &&
+    !['cancelled', 'rejected', 'failed_delivery'].includes(normalizedStatus);
   // The proof-of-delivery code is only useful (and only sent by the server)
   // while the order is out for delivery; hide it in every other state.
   const deliveryCode =
@@ -282,11 +292,14 @@ export default function OrderTracking() {
 
           try {
             const result = await cancelCustomerOrder(order.id);
-            const refundPercent = Math.round(result.refundRate * 100);
+            // An unpaid order used to be told "Your refund policy is 100%":
+            // nothing was taken, so no refund is mentioned.
             setCancelNotice(
-              refundPercent > 0
-                ? `Order cancelled. Your refund policy is ${refundPercent}%.`
-                : 'Order cancelled. No refund was due for this cancellation.'
+              describeCustomerCancelOutcome({
+                paidWhenCancelled: hasCapturedPrepaidAmount,
+                refundAmount: result.refundAmount,
+                refundRate: result.refundRate,
+              })
             );
           } finally {
             setCancelling(false);
@@ -295,6 +308,11 @@ export default function OrderTracking() {
       });
     } catch (nextError) {
       setCancelError(toUserMessage(nextError, 'We could not cancel this order right now.'));
+      // The cancel is never re-sent automatically, so a lost reply can hide one
+      // that landed, and a 409/412 means the order moved on. Read the order
+      // fresh (useCustomerOrder always bypasses the read cache) so the screen
+      // shows its true state instead of a stale Cancel button.
+      void reload();
     }
   };
 
@@ -386,7 +404,9 @@ export default function OrderTracking() {
             1.64:1. The 12.5% tint keeps the hue and the label is plain `text`.
           */}
           <View style={[styles.statusBadge, { backgroundColor: `${getOrderStatusColor(order.status)}20` }]}>
-            <Text style={styles.statusBadgeText}>{formatOrderStatusLabel(order.status)}</Text>
+            <Text style={styles.statusBadgeText}>
+              {formatTrackingStepLabel(normalizeOrderStatus(order.status), order.fulfillmentType ?? 'delivery')}
+            </Text>
           </View>
         </View>
         {scheduledSlotLabel ? (
@@ -464,7 +484,7 @@ export default function OrderTracking() {
           return (
             <Animated.View key={step} entering={FadeIn.delay(index * 120)} style={styles.stepRow}>
               <View style={[styles.stepCircle, active ? styles.stepCircleActive : null, current ? styles.stepCircleCurrent : null]} />
-              <Text style={[styles.stepLabel, active ? styles.stepLabelActive : null]}>{formatOrderStatusLabel(step)}</Text>
+              <Text style={[styles.stepLabel, active ? styles.stepLabelActive : null]}>{formatTrackingStepLabel(step, fulfillmentType)}</Text>
             </Animated.View>
           );
         })}
@@ -498,8 +518,8 @@ export default function OrderTracking() {
         <Text style={[styles.detailLine, styles.detailLineSpaced]}>Payment method: {paymentMethod}</Text>
         <Text style={styles.detailLine}>Payment status: {paymentStatus}</Text>
         {order.payment?.reference ? <Text style={styles.detailLine}>Reference: {order.payment.reference}</Text> : null}
-        {typeof order.payment?.refundAmount === 'number' && order.payment.refundAmount > 0 ? (
-          <Text style={styles.detailLine}>Refund amount: {formatMoney(order.payment.refundAmount)}</Text>
+        {refundToShow !== null ? (
+          <Text style={styles.detailLine}>Refund amount: {formatMoney(refundToShow)}</Text>
         ) : null}
         <Text style={styles.detailLine}>
           {fulfillmentType === 'pickup'

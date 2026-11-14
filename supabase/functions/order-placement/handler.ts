@@ -111,6 +111,9 @@ export const handleOrderPlacement = async (job: OrderPlacementJob): Promise<Orde
             app: 'partner',
             orderId,
             routeKey: 'partner_order_detail',
+            // The order was just written as placed; naming the status is what
+            // marks this as a new order for the urgent "New orders" sound.
+            status: ORDER_STATUS.PLACED,
             type: 'order_update',
           }),
         },

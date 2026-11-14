@@ -50,16 +50,16 @@ type PartnerRestaurantProfileResult = {
 };
 
 export const savePartnerRestaurantProfile = async (input: PartnerRestaurantProfileInput) =>
-  callPartnerBackendRpc<PartnerRestaurantProfileResult>('upsertPartnerRestaurantProfile', input);
+  callPartnerBackendRpc<PartnerRestaurantProfileResult>('upsertPartnerRestaurantProfile', input, { write: true });
 
 export const linkPartnerRestaurant = async (restaurantId: string) =>
-  callPartnerBackendRpc<PartnerRestaurantProfileResult>('claimPartnerRestaurantLink', { restaurantId });
+  callPartnerBackendRpc<PartnerRestaurantProfileResult>('claimPartnerRestaurantLink', { restaurantId }, { write: true });
 
 export const savePartnerRestaurantMenu = async (restaurantId: string, menu: PartnerMenuCategoryInput[]) => {
   await callPartnerBackendRpc('upsertPartnerRestaurantMenu', {
     menu,
     restaurantId,
-  });
+  }, { write: true });
 };
 
 type SetMenuItemAvailabilityResult = {
@@ -86,7 +86,7 @@ export const setPartnerMenuItemAvailability = async (input: {
     itemId: input.itemId,
     restaurantId: input.restaurantId,
     unavailableUntil: input.unavailableUntil ?? null,
-  });
+  }, { write: true });
 
 type SetStorePauseResult = {
   paused: boolean;
@@ -105,4 +105,4 @@ export const setPartnerStorePause = async (input: {
     paused: input.paused,
     pausedUntil: input.pausedUntil ?? null,
     restaurantId: input.restaurantId,
-  });
+  }, { write: true });

@@ -85,6 +85,7 @@ import {
   type DeliveryAssignmentRow,
 } from '../orders.ts';
 import { buildRefundUpdate } from './orders.ts';
+import { announceManualRefund, buildManualRefundWrite } from '../manualRefund.ts';
 import { redactOfferSnapshot } from '../offerRedaction.ts';
 import { loadDispatchWeights } from '../platformSettings.ts';
 import { recordPolicyAcceptance, validatePolicyAcceptancePayload } from '../policyAcceptance.ts';
@@ -1466,16 +1467,53 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
       if (!codeMatches) {
         fail(400, 'That delivery code is incorrect.');
       }
+      // Only a wrong code costs an attempt. Hand the reserved slot back now,
+      // before the status write: a correct code is not a guess, and if the
+      // write then loses (a double tap whose twin already delivered: 409) the
+      // rider must not be edged towards the lockout for it. Compare-and-swap on
+      // the value this request reserved, so a concurrent wrong guess that has
+      // since taken the next slot is never erased (that rare case keeps one
+      // slot used, the safe direction). Best-effort: the slot was only a brake.
+      const { error: releaseError } = await serviceClient
+        .from('CustomerOrder')
+        .update({ deliveryCodeAttempts: attempts })
+        .eq('id', orderId)
+        .eq('deliveryCodeAttempts', attempts + 1);
+      if (releaseError) {
+        logEdgeEvent('error', 'delivery code attempt release failed', {
+          error: releaseError.message,
+          orderId,
+        });
+      }
       deliveryCodeVerifiedAt = nowIso();
     }
   }
 
   // A full refund, matching the acceptance-deadline auto-cancel's rationale: an
   // order that had to be escalated and then written off is not a customer
-  // cancellation, so the customer-cancellation rate table does not apply. Reuses
-  // buildRefundUpdate so the refund is recorded exactly as every other refund on
-  // this codebase is - no second money path.
-  if (nextState.status === ORDER_STATUS.CANCELLED) {
+  // cancellation, so the customer-cancellation rate table does not apply. A PAID
+  // write-off goes through _shared/manualRefund.ts like every other paid order
+  // an admin or restaurant closes unserved: the refund recorded with
+  // buildRefundUpdate, needsAttention raised on the same write, the promo slot
+  // freed and admins alerted so the money is returned by hand. An unpaid one
+  // keeps the plain buildRefundUpdate note it always wrote (nothing captured,
+  // so nothing is refunded).
+  const isWriteOff = nextState.status === ORDER_STATUS.CANCELLED;
+
+  // A failed delivery on a PAID order: the customer never got the food, so the
+  // full refund is recorded and the order flagged for a human in the same write
+  // (see _shared/manualRefund.ts). Riders and the load release are unchanged.
+  const manualRefund =
+    nextState.status === ORDER_STATUS.FAILED_DELIVERY
+      ? buildManualRefundWrite(bundle.order, 'failed_delivery_full_refund')
+      : isWriteOff
+        ? buildManualRefundWrite(bundle.order, 'dispatch_escalation_cancelled_full_refund')
+        : null;
+  // The refund is written once: the paid write-off carries it in manualRefund,
+  // an unpaid one keeps the plain note it always wrote (nothing is refunded).
+  if (manualRefund) {
+    Object.assign(payment, manualRefund.payment);
+  } else if (isWriteOff) {
     Object.assign(
       payment,
       buildRefundUpdate({
@@ -1501,22 +1539,38 @@ const dispatchUpdateOrderStatus: Handler = async ({ context, data }) => {
   // The 409 returns BEFORE the load release and the delivery event below: on a
   // lost CAS this request's snapshot is stale, no row changed, and firing either
   // side effect would attribute work to a transition that never happened.
-  const applied = await updateOrderRecordIfStatus(orderId, observedStatus, {
-    payment,
-    status: nextState.status,
-    timeline,
-    updatedAt: nowIso(),
-    ...(deliveryCodeVerifiedAt ? { deliveryCodeVerifiedAt } : {}),
-    // Same shape cancelCustomerOrder writes, so the admin console and any
-    // reconciliation read one cancellation record regardless of which path
-    // ended the order.
-    ...(nextState.status === ORDER_STATUS.CANCELLED
-      ? { cancellation: { actor: 'admin', reason: 'dispatch_escalation', refundRate: 1 } }
-      : {}),
-  });
+  const applied = await updateOrderRecordIfStatus(
+    orderId,
+    observedStatus,
+    {
+      payment,
+      status: nextState.status,
+      timeline,
+      updatedAt: nowIso(),
+      ...(deliveryCodeVerifiedAt ? { deliveryCodeVerifiedAt } : {}),
+      ...(manualRefund ? { needsAttention: true } : {}),
+      // Same shape cancelCustomerOrder writes, so the admin console and any
+      // reconciliation read one cancellation record regardless of which path
+      // ended the order.
+      ...(nextState.status === ORDER_STATUS.CANCELLED
+        ? { cancellation: { actor: 'admin', reason: 'dispatch_escalation', refundRate: 1 } }
+        : {}),
+    },
+    // The refund was computed from the paid payment this request read.
+    manualRefund ? { expectedPaymentStatus: PAYMENT_STATUS.PAID } : {}
+  );
 
   if (!applied) {
     fail(409, 'This order changed while you were updating it. Reload the order and try again.');
+  }
+
+  if (manualRefund) {
+    await announceManualRefund({
+      actorUid: context.uid,
+      closedStatus: nextState.status,
+      order: bundle.order,
+      payment,
+    });
   }
 
   // Routed through releaseDispatchAssignmentLoad, not the plain

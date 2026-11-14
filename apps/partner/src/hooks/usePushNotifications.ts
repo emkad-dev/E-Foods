@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Platform, Vibration } from 'react-native';
 import {
   clearUserPushToken,
   registerBeforeSignOut,
@@ -12,11 +12,14 @@ import {
 } from '../../../../packages/auth/src';
 import {
   ANDROID_NOTIFICATION_CHANNELS,
+  NOTIFICATION_SOUNDS,
   resolveEasProjectId,
   resolveNotificationHref,
   type AppNotificationPayload,
 } from '../../../../packages/domain/src/notifications';
 import { appEnv } from '../config/env';
+import { SILENCED_PUSH_VIBRATION_PATTERN, shouldPlayPartnerPushSound } from '../domain/pushSoundPolicy';
+import { isKitchenAlarmSounding } from '../services/kitchenAlarmSounding';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase/config';
 import { updateUserDocument } from '../services/supabase/profile';
@@ -38,12 +41,21 @@ const deviceTokenKey = (data: unknown) => (typeof data === 'string' ? data : JSO
 
 if (pushSupported) {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    // A new-order or reminder push makes no sound (still shown, still buzzes)
+    // while the kitchen alarm is already playing; every other push plays as before.
+    handleNotification: async (notification) => {
+      const playSound = shouldPlayPartnerPushSound(notification.request.content.data, isKitchenAlarmSounding());
+      if (!playSound) {
+        // expo drops vibration with the sound, so vibrate here (pushSoundPolicy).
+        Vibration.vibrate(SILENCED_PUSH_VIBRATION_PATTERN);
+      }
+      return {
+        shouldPlaySound: playSound,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      };
+    },
   });
 
   registerBeforeSignOut(async () => {
@@ -61,16 +73,39 @@ if (pushSupported) {
 /**
  * Channels must exist BEFORE the permission prompt and before any push
  * arrives: on Android 13+ the POST_NOTIFICATIONS prompt is only shown once a
- * channel exists, and a push naming a channel the device does not have is
- * silently dropped.
+ * channel exists, and a push naming a channel the device does not have lands
+ * on expo's generic fallback channel instead of the one with our sound.
+ *
+ * The sound is fixed when Android first creates a channel, which is why the
+ * sounded channels are new ids (the server picks them in
+ * packages/domain resolvePushChannel). The legacy `default` channel stays so
+ * a push already queued for it, from before the switch, still shows.
  */
 const ensureAndroidChannels = async () => {
   if (Platform.OS !== 'android') {
     return;
   }
 
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.newOrders, {
+    name: 'New orders',
+    description: 'A new order to accept, and the reminder when one is still waiting.',
+    importance: Notifications.AndroidImportance.MAX,
+    lightColor: '#F57C00',
+    enableLights: true,
+    enableVibrate: true,
+    vibrationPattern: [0, 500, 150, 500, 150, 500],
+    sound: NOTIFICATION_SOUNDS.urgent,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, {
+    name: 'Order updates',
+    description: 'Cancellations, customer confirmations, rider pickups and account news.',
+    importance: Notifications.AndroidImportance.HIGH,
+    lightColor: '#F57C00',
+    vibrationPattern: [0, 250, 250, 250],
+    sound: NOTIFICATION_SOUNDS.chime,
+  });
   await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
-    name: 'Order alerts',
+    name: 'Other notifications',
     importance: Notifications.AndroidImportance.MAX,
     lightColor: '#F57C00',
     vibrationPattern: [0, 250, 250, 250],

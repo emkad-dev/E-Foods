@@ -26,4 +26,4 @@ export type RiderPayoutProfile = {
 export const getRiderPayoutProfile = () => callDispatchBackendRpc<RiderPayoutProfile>('riderGetPayoutProfile');
 
 export const submitRiderPayoutBank = (input: { accountNumber: string; bankCode: string; bankName: string }) =>
-  callDispatchBackendRpc<{ recipient: RiderPayoutRecipient }>('riderSubmitPayoutBank', input);
+  callDispatchBackendRpc<{ recipient: RiderPayoutRecipient }>('riderSubmitPayoutBank', input, { write: true });

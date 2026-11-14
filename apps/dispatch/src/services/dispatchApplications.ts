@@ -24,4 +24,4 @@ export const submitDispatchApplication = async (input: DispatchApplicationInput)
     status: 'pending';
     submittedAt: string;
     targetUid: string;
-  }>('submitDispatchApplication', input);
+  }>('submitDispatchApplication', input, { write: true });

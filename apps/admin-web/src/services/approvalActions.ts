@@ -12,7 +12,7 @@ type SetRestaurantPublishedResult = {
 };
 
 export const setRestaurantPublished = (input: SetRestaurantPublishedInput) =>
-  callAdminRpc<SetRestaurantPublishedResult>('adminSetRestaurantPublished', input);
+  callAdminRpc<SetRestaurantPublishedResult>('adminSetRestaurantPublished', input, { write: true });
 
 type ReviewDispatchApplicationResult = {
   applicationId: string;
@@ -35,10 +35,10 @@ export const reviewDispatchApplication = (input: {
   applicationId: string;
   decision: 'approve' | 'reject';
   rejectionReason?: string;
-}) => callAdminRpc<ReviewDispatchApplicationResult>('adminReviewDispatchApplication', input);
+}) => callAdminRpc<ReviewDispatchApplicationResult>('adminReviewDispatchApplication', input, { write: true });
 
 export const reviewPartnerApplication = (input: {
   applicationId: string;
   decision: 'approve' | 'reject';
   rejectionReason?: string;
-}) => callAdminRpc<ReviewPartnerApplicationResult>('adminReviewPartnerApplication', input);
+}) => callAdminRpc<ReviewPartnerApplicationResult>('adminReviewPartnerApplication', input, { write: true });

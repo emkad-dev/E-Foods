@@ -22,5 +22,6 @@ export const getSupportThread = () =>
 export const sendSupportMessage = (body: string) =>
   callCustomerBackendRpc<{ conversation: SupportConversation; message: SupportMessage }>(
     'customerSendSupportMessage',
-    { body }
+    { body },
+    { write: true }
   );

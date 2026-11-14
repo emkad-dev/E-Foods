@@ -10,6 +10,13 @@ import type { AuditLogEntry } from '../lib/auditLog';
 import { callAdminRpc } from '../lib/rpc';
 
 export type AdminDashboardSnapshot = {
+  /**
+   * Every order flagged needsAttention, whatever its status (cancelled and
+   * rejected included). `orders` is the reporting feed and drops closed orders;
+   * this list must not, or a refund to return by hand on a rejected order is
+   * invisible. Absent on older backends.
+   */
+  attentionOrders?: OrderDocument[];
   dispatchProfiles: DispatchProfileDocument[];
   featureFlags: Record<string, boolean>;
   orders: OrderDocument[];
@@ -122,6 +129,11 @@ export type AdminOrderDetail = {
   } | null;
   cancellation: Record<string, unknown> | null;
   createdAt: string | null;
+  /** Customer confirmation (delivered orders the restaurant or an admin completed). */
+  customerConfirmDueAt: string | null;
+  customerConfirmedAt: string | null;
+  customerConfirmationSource: 'customer' | 'auto' | null;
+  customerIssueReportedAt: string | null;
   customer: {
     displayName: string | null;
     email: string | null;
@@ -141,6 +153,8 @@ export type AdminOrderDetail = {
   payments: AdminOrderDetailPayment[];
   pricing: {
     currency?: string;
+    /** 'platform' when a FEASTY rider delivers; absent for restaurant-run delivery and pickup. */
+    deliveryProvider?: string;
     deliveryFee?: number;
     discount?: number;
     serviceFee?: number;
@@ -160,6 +174,33 @@ export type AdminOrderDetail = {
 export const getAdminOrderDetail = (orderId: string) =>
   callAdminRpc<{ order: AdminOrderDetail }>('adminGetOrderDetail', { orderId });
 
+/* ------------------------------------------------- admin order interventions */
+// Mirror supabase/functions/_shared/adminOrderInterventions.ts. Writes: never
+// re-sent automatically, so a lost response cannot turn into a second action.
+
+export const forceCancelAdminOrder = (input: { orderId: string; reason: string }) =>
+  callAdminRpc<{ needsAttention: boolean; orderId: string; refundRecorded: boolean; status: string }>(
+    'adminForceCancelOrder',
+    input,
+    { write: true }
+  );
+
+export const forceCompleteAdminOrder = (input: { orderId: string; reason: string }) =>
+  callAdminRpc<{ orderId: string; status: string }>('adminForceCompleteOrder', input, { write: true });
+
+export const resolveAdminOrderReport = (input: { note: string; orderId: string }) =>
+  callAdminRpc<{ attentionResolvedAt: string; customerConfirmedAt: string | null; needsAttention: boolean; orderId: string }>(
+    'adminResolveOrderReport',
+    input,
+    { write: true }
+  );
+
+/**
+ * Per settlement mode: how many DELIVERED orders with the payment still paid,
+ * and what the restaurant is OWED for them (its settlement share, not the gross
+ * payment). Refunded, failed_delivery, cancelled and rejected orders count in
+ * neither this nor the pending figure.
+ */
 export type SettlementTotals = {
   manualAmount: number;
   manualCount: number;
@@ -183,8 +224,12 @@ export type RestaurantPayoutRow = {
   /** RestaurantPayout.status, 'none' when no payout profile exists. */
   payoutStatus: string;
   payoutUpdatedAt: string | null;
+  /** Paid orders still in progress: not owed yet, they may still be rejected or cancelled. Absent on older backends. */
+  pending?: PendingPayoutTotals;
   settlement: SettlementTotals;
 };
+
+export type PendingPayoutTotals = { amount: number; count: number };
 
 /** Mirrors adminGetRestaurantPayouts (supabase/functions/_shared/domains/admin.ts). */
 export type RestaurantDeliveryProvider = 'restaurant' | 'platform';
@@ -194,6 +239,8 @@ export type AdminRestaurantPayouts = {
   deliveryProviders?: Record<string, RestaurantDeliveryProvider>;
   /** Checkout honours 'platform' only while this flag is on. */
   platformDispatchEnabled?: boolean;
+  /** Platform-wide pending (paid, in progress). Absent on older backends. */
+  platformPending?: PendingPayoutTotals;
   platformSettlement: SettlementTotals;
   restaurants: RestaurantPayoutRow[];
   windowDays: number;
@@ -208,7 +255,8 @@ export const setAdminRestaurantDeliveryProvider = (input: {
 }) =>
   callAdminRpc<{ deliveryProvider: RestaurantDeliveryProvider; id: string; name: string | null; previous: RestaurantDeliveryProvider }>(
     'adminSetRestaurantDeliveryProvider',
-    input
+    input,
+    { write: true }
   );
 
 export type RiderRosterRow = {
@@ -286,7 +334,7 @@ export const upsertAdminFeatureFlag = (input: {
   description?: string | null;
   enabled: boolean;
   key: string;
-}) => callAdminRpc<AdminUpsertFeatureFlagResponse>('adminUpsertFeatureFlag', input);
+}) => callAdminRpc<AdminUpsertFeatureFlagResponse>('adminUpsertFeatureFlag', input, { write: true });
 
 /* ---------------------------------------------------------------- audit log */
 

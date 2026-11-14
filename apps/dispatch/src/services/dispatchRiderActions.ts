@@ -11,14 +11,14 @@ export type DispatchRiderDraft = {
 };
 
 export const createDispatchRider = async (draft: DispatchRiderDraft) => {
-  await callDispatchBackendRpc('upsertDispatchRiderProfile', draft);
+  await callDispatchBackendRpc('upsertDispatchRiderProfile', draft, { write: true });
 };
 
 export const updateDispatchRider = async (riderId: string, draft: DispatchRiderDraft) => {
   await callDispatchBackendRpc('upsertDispatchRiderProfile', {
     riderId,
     ...draft,
-  });
+  }, { write: true });
 };
 
 export const syncDispatchRiderLocation = async (payload: {
@@ -27,5 +27,5 @@ export const syncDispatchRiderLocation = async (payload: {
   longitude: number;
   timestamp: number;
 }) => {
-  await callDispatchBackendRpc('syncDispatchRiderLocation', payload);
+  await callDispatchBackendRpc('syncDispatchRiderLocation', payload, { write: true });
 };

@@ -18,7 +18,9 @@ export type ExpoPushMessage = {
   title: string;
   body: string;
   data?: JsonObject;
-  sound?: 'default' | null;
+  /** 'default' or a bundled file name ('feasty_chime.wav'). iOS plays it;
+   * Android plays the channel's sound and ignores this. */
+  sound?: string | null;
   channelId?: string;
   priority?: 'default' | 'normal' | 'high';
 };

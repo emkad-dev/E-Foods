@@ -10,6 +10,7 @@ import {
 } from '../../../../packages/auth/src';
 import {
   ANDROID_NOTIFICATION_CHANNELS,
+  NOTIFICATION_SOUNDS,
   resolveEasProjectId,
   resolveNotificationHref,
   type AppNotificationPayload,
@@ -73,18 +74,38 @@ if (pushSupported) {
 }
 
 /**
- * The channel must exist BEFORE the permission prompt and before any push
+ * Channels must exist BEFORE the permission prompt and before any push
  * arrives: on Android 13+ the POST_NOTIFICATIONS prompt is only shown once a
- * channel exists, and a push naming a channel the device does not have is
- * silently dropped.
+ * channel exists, and a push naming a channel the device does not have lands
+ * on expo's generic fallback channel instead of the one with our sound.
+ *
+ * The sound is fixed when Android first creates a channel, which is why the
+ * sounded channels are new ids (the server picks them in
+ * packages/domain resolvePushChannel). The legacy `default` channel stays so
+ * a push already queued for it, from before the switch, still shows.
  */
 const ensureAndroidChannels = async (Notifications: NotificationsModule) => {
   if (Platform.OS !== 'android') {
     return;
   }
 
-  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.orderUpdates, {
     name: 'Order updates',
+    description: 'Your order being accepted, ready, on the way and delivered, and payment updates.',
+    importance: Notifications.AndroidImportance.HIGH,
+    lightColor: '#FFB347',
+    vibrationPattern: [0, 250, 250, 250],
+    sound: NOTIFICATION_SOUNDS.chime,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.offersAndNews, {
+    name: 'Offers and news',
+    description: 'Deals, announcements and replies from FEASTY support.',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lightColor: '#FFB347',
+    sound: NOTIFICATION_SOUNDS.marimba,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_NOTIFICATION_CHANNELS.default, {
+    name: 'Other notifications',
     importance: Notifications.AndroidImportance.MAX,
     lightColor: '#FFB347',
     vibrationPattern: [0, 250, 250, 250],

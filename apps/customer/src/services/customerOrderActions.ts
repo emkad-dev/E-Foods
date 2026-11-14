@@ -129,7 +129,7 @@ export const initializeCustomerPayment = async ({
     // Omitted entirely for "order now", so an immediate order sends exactly the
     // payload it sent before scheduling existed.
     ...(scheduledFor ? { scheduledFor } : {}),
-  }).then((result) => {
+  }, { write: true }).then((result) => {
     clearCustomerReadCache();
     trackAnalyticsEvent('customer_payment_initialized', {
       fulfillment_type: fulfillmentType,
@@ -152,7 +152,7 @@ type RefreshCustomerPaymentStatusResult = {
 };
 
 export const refreshCustomerPaymentStatus = async (orderId: string): Promise<RefreshCustomerPaymentStatusResult> =>
-  callCustomerBackendRpc<RefreshCustomerPaymentStatusResult>('refreshCustomerPaymentStatus', { orderId }).then(
+  callCustomerBackendRpc<RefreshCustomerPaymentStatusResult>('refreshCustomerPaymentStatus', { orderId }, { write: true }).then(
     (result) => {
       clearCustomerReadCache();
       trackAnalyticsEvent('customer_payment_status_refreshed', {
@@ -166,12 +166,15 @@ export const refreshCustomerPaymentStatus = async (orderId: string): Promise<Ref
 
 type CancelCustomerOrderResult = {
   orderId: string;
+  /** The refund actually recorded: 0 when nothing was paid. Absent from
+   * servers deployed before it was added. */
+  refundAmount?: number;
   refundRate: number;
   status: string;
 };
 
 export const cancelCustomerOrder = async (orderId: string): Promise<CancelCustomerOrderResult> =>
-  callCustomerBackendRpc<CancelCustomerOrderResult>('cancelCustomerOrder', { orderId }).then((result) => {
+  callCustomerBackendRpc<CancelCustomerOrderResult>('cancelCustomerOrder', { orderId }, { write: true }).then((result) => {
     clearCustomerReadCache();
     trackAnalyticsEvent('customer_order_cancelled', {
       order_id: orderId,
@@ -194,7 +197,7 @@ type ConfirmCustomerOrderReceivedResult = {
 export const confirmCustomerOrderReceived = async (
   orderId: string
 ): Promise<ConfirmCustomerOrderReceivedResult> =>
-  callCustomerBackendRpc<ConfirmCustomerOrderReceivedResult>('customerConfirmOrderReceived', { orderId }).then(
+  callCustomerBackendRpc<ConfirmCustomerOrderReceivedResult>('customerConfirmOrderReceived', { orderId }, { write: true }).then(
     (result) => {
       clearCustomerReadCache();
       trackAnalyticsEvent('customer_order_confirmed_received', { order_id: orderId });
@@ -213,7 +216,7 @@ export const reportCustomerOrderProblem = async (
   orderId: string,
   message: string
 ): Promise<ReportCustomerOrderProblemResult> =>
-  callCustomerBackendRpc<ReportCustomerOrderProblemResult>('customerReportOrderProblem', { message, orderId }).then(
+  callCustomerBackendRpc<ReportCustomerOrderProblemResult>('customerReportOrderProblem', { message, orderId }, { write: true }).then(
     (result) => {
       clearCustomerReadCache();
       // The text itself is the customer's words to support; analytics gets only the fact.

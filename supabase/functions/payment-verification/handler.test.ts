@@ -18,10 +18,22 @@ let db: Db = {};
 // Every write the handler issues, in order, for assertions on what was NOT written.
 let writes: Array<{ table: string; op: string; payload: any; filters: string[] }> = [];
 let paystackVerifyData: Row | null = null;
+// Tables whose next upsert fails (a crash after the payment claim), one-shot.
+let failNextUpsert = new Set<string>();
+let paystackVerifyCalls = 0;
 
 const originalFrom = serviceClient.from.bind(serviceClient);
 const originalFetch = globalThis.fetch;
 const originalConsole = { error: console.error, warn: console.warn, log: console.log };
+
+// PostgREST column, including a JSON path like 'payment->>status' (text, or
+// null when absent) - the payment compare-and-set filters on one.
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = (row[base] ?? {})[key];
+  return value === undefined || value === null ? null : String(value);
+};
 
 const makeBuilder = (table: string) => {
   const filters: Array<(row: Row) => boolean> = [];
@@ -53,6 +65,10 @@ const makeBuilder = (table: string) => {
       return { data: null, error: null };
     }
     if (op === 'upsert') {
+      if (failNextUpsert.has(table)) {
+        failNextUpsert.delete(table);
+        return { data: null, error: { message: 'connection reset' } };
+      }
       const key = upsertConflict ?? 'id';
       const existing = rows.find((row) => row[key] === payload[key]);
       if (existing) Object.assign(existing, structuredClone(payload));
@@ -67,13 +83,18 @@ const makeBuilder = (table: string) => {
   const builder: any = {
     select: () => builder,
     eq: (column: string, value: unknown) => {
-      filters.push((row) => row[column] === value);
+      filters.push((row) => readColumn(row, column) === value);
       filterLabels.push(`${column}=${String(value)}`);
       return builder;
     },
     in: (column: string, values: unknown[]) => {
-      filters.push((row) => values.includes(row[column]));
+      filters.push((row) => values.includes(readColumn(row, column)));
       filterLabels.push(`${column} in (${values.join(',')})`);
+      return builder;
+    },
+    is: (column: string, value: unknown) => {
+      filters.push((row) => (readColumn(row, column) ?? null) === value);
+      filterLabels.push(`${column} is ${String(value)}`);
       return builder;
     },
     order: () => builder,
@@ -137,6 +158,8 @@ const setup = (orders: Row[], group: Row | null = null) => {
     UserAccount: [],
   };
   writes = [];
+  failNextUpsert = new Set();
+  paystackVerifyCalls = 0;
 };
 
 const orderById = (id: string) => {
@@ -151,6 +174,7 @@ const withHarness = async (work: () => Promise<void>) => {
   globalThis.fetch = ((input: unknown) => {
     const url = String(input);
     if (url.startsWith('https://api.paystack.co/transaction/verify/')) {
+      paystackVerifyCalls += 1;
       return Promise.resolve(
         new Response(JSON.stringify({ status: true, data: paystackVerifyData }), {
           status: 200,
@@ -215,7 +239,9 @@ Deno.test('single-store payment: order is placed + paid, restaurant notified, pa
       ['partner', 'customer']
     );
     assertEquals(db.OperationalAlert.length, 0);
-    assertEquals(db.DeliveryEvent.length, 0);
+    // Exactly one payment_confirmed event: this path is now shared with the
+    // customer refresh, which used to be the only one recording it.
+    assertEquals(db.DeliveryEvent.map((event) => event.eventType), ['payment_confirmed']);
     // Single-store orders carry no group, so no OrderGroup lookup for amount validation.
     assertEquals(writes.filter((w) => w.table === 'CustomerOrder').length, 1);
     // The write is exactly the pre-existing shape: these four columns, nothing else
@@ -429,7 +455,13 @@ Deno.test('multi-order group: awaiting order is placed, cancelled order is only 
     assertEquals(second.needsAttention, true);
     assertEquals(second.timeline.cancelledAt, '2026-10-19T10:15:00.000Z');
 
-    assertEquals(db.DeliveryEvent.map((e) => e.orderId), ['order-2']);
+    assertEquals(
+      db.DeliveryEvent.map((e) => [e.orderId, e.eventType]),
+      [
+        ['order-1', 'payment_confirmed'],
+        ['order-2', 'payment_received_on_closed_order'],
+      ]
+    );
     assertEquals(db.OperationalAlert.map((a) => a.subjectId), ['order-2']);
     // One Paystack charge, one transaction row, for the whole group total.
     assertEquals(db.PaymentTransaction.length, 1);
@@ -452,7 +484,7 @@ Deno.test('multi-order group: all orders awaiting are all placed and paid', asyn
     assertEquals(orderById('order-1').payment.capturedAmount, 4300);
     assertEquals(orderById('order-2').payment.capturedAmount, 8500);
     assertEquals(db.OperationalAlert.length, 0);
-    assertEquals(db.DeliveryEvent.length, 0);
+    assertEquals(db.DeliveryEvent.map((e) => e.orderId), ['order-1', 'order-2']);
   });
 });
 
@@ -477,5 +509,89 @@ Deno.test('an order cancelled between the initial read and the write is not over
     assertEquals(order.payment.status, 'paid');
     assertEquals(order.needsAttention, true);
     assertEquals(db.OperationalAlert.length, 1);
+  });
+});
+
+// ───────────────────────── a crash after the claim ─────────────────────────
+
+Deno.test('a retry after a crash before the ledger write repairs the ledger and sends nothing twice', async () => {
+  await withHarness(async () => {
+    setup([makeOrder()]);
+    // The checkout's ledger row, still pending.
+    db.PaymentTransaction.push({ id: REFERENCE, reference: REFERENCE, orderId: 'order-1', status: 'pending', amount: 2500 });
+    paystackVerifyData = successfulCharge(250000);
+    failNextUpsert = new Set(['PaymentTransaction']);
+
+    await assertRejects(() => verify('order-1'), Error, 'Failed to upsert payment transaction');
+    assertEquals(orderById('order-1').payment.status, 'paid', 'the claim committed before the crash');
+    assertEquals(db.PaymentTransaction[0].status, 'pending', 'the ledger write was lost');
+    assertEquals(db.IdempotencyRecord.length, 0, 'the crashed run recorded nothing as done');
+    const eventsBefore = db.DeliveryEvent.length;
+    const verifiesBefore = paystackVerifyCalls;
+
+    const result = await verify('order-1');
+    assertEquals(result, { success: true, orderId: 'order-1', paymentStatus: 'paid' });
+    assertEquals(db.PaymentTransaction.length, 1);
+    assertEquals(db.PaymentTransaction[0].status, 'paid', 'ledger repaired');
+    assertEquals(db.PaymentTransaction[0].amount, 2500);
+    assertEquals(db.PaymentTransaction[0].externalTransactionId, '987654', 'from the stored Paystack answer');
+    assertEquals(db.PaymentTransaction[0].paidAt, orderById('order-1').payment.paidAt, 'paid when the order was');
+    assertEquals(paystackVerifyCalls, verifiesBefore, 'no second Paystack verify for a settled lone order');
+    // The crashed run threw before any notification; the retry sends none (a
+    // lost push beats a duplicate) and records no second payment event.
+    assertEquals(db.queue_notifications.length, 0);
+    assertEquals(db.DeliveryEvent.length, eventsBefore);
+
+    // Further replays leave the repaired row alone.
+    const ledgerWrites = writes.filter((w) => w.table === 'PaymentTransaction').length;
+    await verify('order-1');
+    assertEquals(writes.filter((w) => w.table === 'PaymentTransaction').length, ledgerWrites);
+  });
+});
+
+Deno.test('a group retry claims the sibling the crashed run never reached, and notifies only that claim', async () => {
+  await withHarness(async () => {
+    const paidEarlier = '2026-10-19T10:05:00.000Z';
+    const [first, second] = groupOrders();
+    setup(
+      [
+        // order-1 was claimed by the crashed run; order-2 never was.
+        {
+          ...first,
+          payment: {
+            ...first.payment,
+            status: 'paid',
+            paidAt: paidEarlier,
+            capturedAmount: 4300,
+            paystackResponse: successfulCharge(1280000),
+          },
+          timeline: { ...first.timeline, paidAt: paidEarlier, confirmedAt: paidEarlier },
+        },
+        second,
+      ],
+      groupRow
+    );
+    db.UserRole.push({ userId: 'partner-user-2', role: 'restaurant', restaurantId: 'rest-2' });
+    db.PaymentTransaction.push({ id: REFERENCE, reference: REFERENCE, orderId: 'order-1', status: 'pending', amount: 12800 });
+    paystackVerifyData = successfulCharge(1280000);
+
+    const result = await verify('order-1');
+    assertEquals(result, { success: true, orderId: 'order-1', paymentStatus: 'paid' });
+
+    assertEquals(orderById('order-2').payment.status, 'paid', 'the sibling is claimed');
+    assertEquals(orderById('order-2').status, 'placed');
+    assertEquals(orderById('order-2').payment.capturedAmount, 8500);
+    assertEquals(orderById('order-1').payment.paidAt, paidEarlier, 'the earlier claim is not rewritten');
+    assertEquals(db.PaymentTransaction[0].status, 'paid', 'ledger written');
+    assertEquals(db.PaymentTransaction[0].amount, 12800);
+
+    // Only the claim this retry won is announced: order-2's restaurant, once.
+    // Nothing for order-1, and no customer confirmation (it belongs to order-1).
+    assertEquals(db.DeliveryEvent.map((e) => [e.orderId, e.eventType]), [['order-2', 'payment_confirmed']]);
+    assertEquals(db.queue_notifications.length, 1);
+    const job = db.queue_notifications[0].payload as { userIds: string[]; payload: { data: { app: string; orderId: string } } };
+    assertEquals(job.userIds, ['partner-user-2']);
+    assertEquals(job.payload.data.app, 'partner');
+    assertEquals(job.payload.data.orderId, 'order-2');
   });
 });

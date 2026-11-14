@@ -71,6 +71,15 @@ type UpdateHook = () => void;
 // updateOrderRecordIfStatus works, and an optional once-fired `beforeUpdate`
 // hook to simulate a concurrent write landing between a sweep's candidate read
 // and its CAS write.
+// A PostgREST column, including a JSON path like 'payment->>status' (text, or
+// null when absent): the release sweep filters and compare-and-sets on it.
+const readColumn = (row: Row, column: string): unknown => {
+  const [base, key] = column.split('->>');
+  if (key === undefined) return row[base];
+  const value = ((row[base] ?? {}) as Row)[key];
+  return value === undefined || value === null ? null : String(value);
+};
+
 const createTable = (initialRows: Row[], beforeUpdate?: UpdateHook) => {
   const rows: Row[] = initialRows.map((row) => ({ ...row }));
   const snapshot = (row: Row) => ({ ...row });
@@ -84,7 +93,7 @@ const createTable = (initialRows: Row[], beforeUpdate?: UpdateHook) => {
     // deno-lint-ignore no-explicit-any
     const builder: any = {
       eq(col: string, val: unknown) {
-        filtered = filtered.filter((row) => row[col] === val);
+        filtered = filtered.filter((row) => readColumn(row, col) === val);
         return builder;
       },
       in(col: string, vals: unknown[]) {
@@ -160,7 +169,7 @@ const createTable = (initialRows: Row[], beforeUpdate?: UpdateHook) => {
           hookFired = true;
           beforeUpdate();
         }
-        const matched = rows.filter((row) => filters.every(([col, val]) => row[col] === val));
+        const matched = rows.filter((row) => filters.every(([col, val]) => readColumn(row, col) === val));
         for (const row of matched) {
           Object.assign(row, payload);
         }
@@ -347,6 +356,80 @@ Deno.test('release sweep: the CAS does not resurrect an order that raced to canc
     const result = await sweepScheduledOrderReleases();
     expectEqual(result.released, 0, 'the raced order is not released');
     expectEqual(mocks.order().status, 'cancelled', 'the cancel stands — the sweep did not resurrect it to placed');
+  } finally {
+    mocks.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Spec 9: an unpaid scheduled order never reaches the kitchen. It stays
+// scheduled for the unpaid expiry sweep, while a paid one beside it releases.
+// ---------------------------------------------------------------------------
+Deno.test('release sweep: an unpaid scheduled order is never released (left for the unpaid expiry)', async () => {
+  const scheduledFor = new Date(Date.now() + PREP_MS - 5 * 60_000).toISOString(); // due now
+  const mocks = installMocks([
+    buildScheduledOrder({
+      id: 'order-unpaid',
+      payment: { method: 'bank_transfer', status: 'pending' },
+      scheduledFor,
+    }),
+    buildScheduledOrder({ id: 'order-failed', payment: { method: 'card', status: 'failed' }, scheduledFor }),
+    buildScheduledOrder({ id: 'order-paid', scheduledFor }),
+  ]);
+  const byId = (id: string) => mocks.tables.CustomerOrder.rows.find((row) => row.id === id)!;
+  try {
+    const result = await sweepScheduledOrderReleases();
+    expectEqual(result.released, 1, 'only the paid order releases');
+    expectEqual(byId('order-unpaid').status, 'scheduled', 'pending payment stays scheduled');
+    expectEqual(byId('order-failed').status, 'scheduled', 'failed payment stays scheduled');
+    expectEqual(byId('order-paid').status, 'placed', 'paid order released');
+    expectEqual(mocks.events('scheduled_order_released').length, 1, 'one release event, for the paid order');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('release sweep: more unpaid scheduled rows than the batch cap cannot starve a paid one', async () => {
+  // RELEASE_SWEEP_LIMIT is 100 and the batch is ordered by scheduledFor. 110
+  // unpaid rows due earlier than the paid one would fill the whole batch if the
+  // paid filter lived only in the loop; it must be in the query.
+  const dueBase = Date.now() + PREP_MS - 60 * 60_000;
+  const unpaid = Array.from({ length: 110 }, (_, index) =>
+    buildScheduledOrder({
+      id: `order-unpaid-${index}`,
+      payment: { method: 'bank_transfer', status: 'pending' },
+      scheduledFor: new Date(dueBase + index * 1000).toISOString(),
+    })
+  );
+  const paid = buildScheduledOrder({ id: 'order-paid-late', scheduledFor: new Date(Date.now() + PREP_MS - 60_000).toISOString() });
+  const mocks = installMocks([...unpaid, paid]);
+  try {
+    const result = await sweepScheduledOrderReleases();
+    expectEqual(result.released, 1, 'the paid order releases');
+    expectEqual(mocks.tables.CustomerOrder.rows.find((row) => row.id === 'order-paid-late')!.status, 'placed', 'paid order placed');
+    expectEqual(
+      mocks.tables.CustomerOrder.rows.filter((row) => row.status === 'scheduled').length,
+      110,
+      'every unpaid order is still scheduled'
+    );
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('release sweep: a payment that is no longer paid at write time is not released', async () => {
+  // Defence in depth for the write's payment guard: the candidate read saw paid,
+  // the stored payment no longer is when the CAS lands.
+  const scheduledFor = new Date(Date.now() + PREP_MS - 5 * 60_000).toISOString();
+  let order: Row | undefined;
+  const mocks = installMocks([buildScheduledOrder({ scheduledFor })], () => {
+    if (order) order.payment = { ...(order.payment as Row), status: 'refunded' };
+  });
+  order = mocks.order();
+  try {
+    const result = await sweepScheduledOrderReleases();
+    expectEqual(result.released, 0, 'not released');
+    expectEqual(mocks.order().status, 'scheduled', 'still scheduled');
   } finally {
     mocks.restore();
   }
