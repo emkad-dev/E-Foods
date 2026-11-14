@@ -5,6 +5,7 @@ import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
+import { useRefreshNavCounts } from '../contexts/NavCountsContext';
 import { formatDateTime } from '../lib/format';
 import { statusActionsFor } from '../lib/inboxActions';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
@@ -121,6 +122,9 @@ export default function InboxPage() {
   // had just pressed Close.
   const [actionError, setActionError] = useState<string | null>(null);
   const isVisible = useDocumentVisibility();
+  // The sidebar's Inbox badge counts open conversations, so a status change
+  // must nudge it or it shows the old number until its next poll.
+  const refreshNavCounts = useRefreshNavCounts();
 
   /**
    * The instant this agent last LEFT the inbox, read once on mount, so the
@@ -264,7 +268,10 @@ export default function InboxPage() {
   const onStatus = (status: SupportStatus) =>
     runThreadAction(
       `status:${status}`,
-      () => setStatus(selectedId as string, status),
+      async () => {
+        await setStatus(selectedId as string, status);
+        void refreshNavCounts();
+      },
       'Unable to update this conversation.'
     );
 

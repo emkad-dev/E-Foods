@@ -6,6 +6,8 @@ import RestaurantRating from '../components/RestaurantRating';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { partnerApproveBlockedReason, publishBlockedReason } from '../lib/approvalGates';
+import { useRefreshNavCounts } from '../contexts/NavCountsContext';
+import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatDateTime } from '../lib/format';
 import { resolveKycGate, type KycDocumentKey } from '../lib/kycReviewGate';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
@@ -131,6 +133,8 @@ const dispatchApprovalPrompt = (application: { displayName: string; email: strin
 
 export default function ApprovalsPage() {
   const { data, error, refresh } = usePolledRpc(getAdminApprovalQueue);
+  const refreshNavCounts = useRefreshNavCounts();
+  const { refresh: refreshSnapshot } = useSnapshot();
 
   /**
    * The instant this admin last LEFT this page, read once on mount. Rows that
@@ -241,6 +245,11 @@ export default function ApprovalsPage() {
     try {
       await action();
       await refresh();
+      // The sidebar's Approvals badge and the snapshot's restaurant list both
+      // count what this action just changed; without these they lagged by up
+      // to the full poll interval.
+      void refreshNavCounts();
+      void refreshSnapshot();
     } catch (nextError) {
       setActionError({ id, message: nextError instanceof Error ? nextError.message : 'The action failed. Try again.' });
     } finally {

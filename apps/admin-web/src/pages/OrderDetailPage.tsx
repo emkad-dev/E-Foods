@@ -11,6 +11,7 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
+import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatCurrency, formatDateTime, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import {
@@ -113,6 +114,7 @@ const stringify = (value: unknown): string => {
 
 export default function OrderDetailPage() {
   const { orderId = '' } = useParams<{ orderId: string }>();
+  const { refresh: refreshSnapshot } = useSnapshot();
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<InterventionKind | null>(null);
@@ -185,8 +187,12 @@ export default function OrderDetailPage() {
       );
     } finally {
       setActionBusy(false);
-      // Success or failure, show the order as it now stands.
+      // Success or failure, show the order as it now stands -- here and in the
+      // Orders list and Overview, which read the shared snapshot. Without the
+      // snapshot refresh, "Back to orders" showed the old status for up to the
+      // full poll interval, so the action looked like it had not happened.
       void load();
+      void refreshSnapshot();
     }
   };
 
