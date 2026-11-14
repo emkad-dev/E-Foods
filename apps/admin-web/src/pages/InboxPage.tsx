@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../lib/format';
+import { statusActionsFor } from '../lib/inboxActions';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
+import { useDocumentVisibility } from '../lib/useDocumentVisibility';
 import { useSupportRealtime } from '../lib/useSupportRealtime';
 import { resolveViewState } from '../lib/viewState';
 import {
@@ -36,6 +39,12 @@ const describeOwner = (assignedTo: string | null, myUid: string | undefined): st
 };
 
 const STATUS_FILTERS: Array<SupportStatus | 'all'> = ['open', 'pending', 'closed', 'all'];
+
+// Safety net under the realtime subscription, at the console's usual slow,
+// visibility-gated rate. Realtime can drop (a socket that never rejoins, a
+// laptop that slept) and nothing on screen would say so; the poll bounds how
+// long the list can be wrong.
+const POLL_INTERVAL_MS = 120000;
 
 /**
  * "Updated", not "New": `lastMessageAt` moves whenever anyone writes, so a
@@ -103,6 +112,15 @@ export default function InboxPage() {
   // error instead.
   const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
+  // Which thread action is in flight, so its button can say so and the others
+  // cannot be pressed on top of it. These buttons used to give no feedback at
+  // all, so a slow write looked like a dead button.
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  // Errors from the thread's own buttons belong next to those buttons. They
+  // used to land in the list pane's banner, out of sight of the operator who
+  // had just pressed Close.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const isVisible = useDocumentVisibility();
 
   /**
    * The instant this agent last LEFT the inbox, read once on mount, so the
@@ -161,20 +179,24 @@ export default function InboxPage() {
     // the same misattribution as above, just briefer.
     setMessages([]);
     setThreadError(null);
+    setActionError(null);
 
     if (selectedId) {
       void loadThread(selectedId);
     }
   }, [selectedId, loadThread]);
 
-  useSupportRealtime(
-    useCallback(() => {
-      void loadInbox();
-      if (selectedId) {
-        void loadThread(selectedId);
-      }
-    }, [loadInbox, loadThread, selectedId])
-  );
+  const refreshAll = () => {
+    void loadInbox();
+    if (selectedId) {
+      void loadThread(selectedId);
+    }
+  };
+
+  // Both read the latest closure through a ref, so neither resubscribes nor
+  // restarts when the selection or filter changes.
+  useSupportRealtime(refreshAll);
+  useVisiblePolling(refreshAll, POLL_INTERVAL_MS, isVisible);
 
   const selected = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedId) ?? null,
@@ -208,56 +230,53 @@ export default function InboxPage() {
       return;
     }
     setSending(true);
+    setActionError(null);
     try {
       await sendAgentReply(selectedId, reply.trim());
       setReply('');
       await loadThread(selectedId);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to send the reply.');
+      setActionError(nextError instanceof Error ? nextError.message : 'Unable to send the reply.');
     } finally {
       setSending(false);
     }
   };
 
-  // Both of these were bare awaits. A refused Close/Reopen/Assign threw past
-  // them as an unhandled rejection: no banner, and loadInbox() never ran -- so
-  // the row stayed exactly as it was and the operator could not tell a refusal
-  // from a success. onSend already had this shape; these two did not.
-  const onStatus = async (status: SupportStatus) => {
-    if (!selectedId) {
+  // One runner for the thread's header buttons: a busy flag while the write
+  // is in flight, the list reloaded afterwards, and any refusal shown in the
+  // thread pane where the button was pressed.
+  const runThreadAction = async (key: string, write: () => Promise<unknown>, failure: string) => {
+    if (!selectedId || busyAction) {
       return;
     }
+    setBusyAction(key);
+    setActionError(null);
     try {
-      await setStatus(selectedId, status);
+      await write();
       await loadInbox();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to update this conversation.');
+      setActionError(nextError instanceof Error ? nextError.message : failure);
+    } finally {
+      setBusyAction(null);
     }
   };
 
-  const onAssignMe = async () => {
-    if (!selectedId) {
-      return;
-    }
-    try {
-      await assignConversation(selectedId, 'me');
-      await loadInbox();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to assign this conversation.');
-    }
-  };
+  const onStatus = (status: SupportStatus) =>
+    runThreadAction(
+      `status:${status}`,
+      () => setStatus(selectedId as string, status),
+      'Unable to update this conversation.'
+    );
 
-  const onUnassign = async () => {
-    if (!selectedId) {
-      return;
-    }
-    try {
-      await assignConversation(selectedId, null);
-      await loadInbox();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to unassign this conversation.');
-    }
-  };
+  const onAssignMe = () =>
+    runThreadAction('assign', () => assignConversation(selectedId as string, 'me'), 'Unable to assign this conversation.');
+
+  const onUnassign = () =>
+    runThreadAction(
+      'unassign',
+      () => assignConversation(selectedId as string, null),
+      'Unable to unassign this conversation.'
+    );
 
   return (
     <section className="page inbox-page">
@@ -353,28 +372,37 @@ export default function InboxPage() {
                 <div className="muted">Owner: {describeOwner(selected.assignedTo, myUid)}</div>
               </div>
               <div className="inbox-actions">
-                <button type="button" className="btn btn-ghost" onClick={() => void onAssignMe()}>
-                  Assign to me
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={busyAction !== null || selected.assignedTo === myUid}
+                  onClick={() => void onAssignMe()}
+                >
+                  {busyAction === 'assign' ? 'Assigning…' : 'Assign to me'}
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  disabled={!selected.assignedTo}
+                  disabled={busyAction !== null || !selected.assignedTo}
                   onClick={() => void onUnassign()}
                 >
-                  Unassign
+                  {busyAction === 'unassign' ? 'Unassigning…' : 'Unassign'}
                 </button>
-                <button type="button" className="btn btn-ghost" onClick={() => void onStatus('pending')}>
-                  Pending
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => void onStatus('closed')}>
-                  Close
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => void onStatus('open')}>
-                  Reopen
-                </button>
+                {statusActionsFor(selected.status).map((action) => (
+                  <button
+                    key={action.status}
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busyAction !== null}
+                    onClick={() => void onStatus(action.status)}
+                  >
+                    {busyAction === `status:${action.status}` ? 'Saving…' : action.label}
+                  </button>
+                ))}
               </div>
             </header>
+
+            {actionError ? <ErrorBanner message={actionError} /> : null}
 
             {threadError ? (
               <ErrorBanner message={threadError} onRetry={() => void loadThread(selected.id)} />
