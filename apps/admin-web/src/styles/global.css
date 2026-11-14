@@ -630,6 +630,14 @@ button {
   gap: 12px;
 }
 
+/* An action's refusal, printed inside the row whose button caused it, so it
+   is read where the operator is already looking rather than in a banner at
+   the top of a long page. */
+.row-error {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
 .empty-state {
   text-align: center;
   padding: 28px 16px;
