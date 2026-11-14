@@ -59,7 +59,7 @@ const sortRows = (rows: RestaurantPayoutRow[]) =>
   });
 
 export default function RestaurantsPage() {
-  const { data, error, refresh, loading } = usePolledRpc(getAdminRestaurantPayouts);
+  const { data, error, refresh, refreshing } = usePolledRpc(getAdminRestaurantPayouts);
   const viewState = resolveViewState({ hasData: data !== null, error });
 
   const rows = useMemo(() => sortRows(data?.restaurants ?? []), [data]);
@@ -149,8 +149,8 @@ export default function RestaurantsPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-title-row">
           <h3 className="card-title">Restaurant payouts</h3>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading}>
-            Refresh
+          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
 

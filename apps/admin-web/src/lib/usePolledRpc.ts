@@ -14,10 +14,15 @@ export function usePolledRpc<T>(fetcher: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // True while any read is in flight, the first one included. `loading` only
+  // covers the first read and never goes back to true, so Refresh buttons
+  // disabled on it gave no feedback at all and looked dead.
+  const [refreshing, setRefreshing] = useState(false);
   const activeRef = useRef(true);
   const isVisible = useDocumentVisibility();
 
   const refresh = useCallback(async () => {
+    setRefreshing(true);
     try {
       const next = await fetcher();
 
@@ -36,6 +41,7 @@ export function usePolledRpc<T>(fetcher: () => Promise<T>) {
     } finally {
       if (activeRef.current) {
         setLoading(false);
+        setRefreshing(false);
       }
     }
   }, [fetcher]);
@@ -53,5 +59,5 @@ export function usePolledRpc<T>(fetcher: () => Promise<T>) {
   // immediate catch-up read.
   useVisiblePolling(() => void refresh(), POLL_INTERVAL_MS, isVisible);
 
-  return { data, loading, error, refresh };
+  return { data, loading, error, refresh, refreshing };
 }
