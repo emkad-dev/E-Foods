@@ -1716,6 +1716,46 @@ const broadcastCreate: Handler = async ({ context, data }) => {
   return json(200, { data: { broadcast } });
 };
 
+const BROADCAST_STATUS_WORDS: Record<string, string> = {
+  canceled: 'already canceled',
+  draft: 'still a draft',
+  failed: 'marked as failed',
+  scheduled: 'scheduled',
+  sending: 'already sending',
+  sent: 'already sent',
+};
+
+/**
+ * Answers a schedule or cancel whose conditional update matched no row.
+ *
+ * Both writes are conditional on the status they expect, because the
+ * broadcast runner moves rows on its own (scheduled -> sending -> sent). The
+ * list in the console can be minutes old, so "Cancel" on a row the runner has
+ * already sent is an ordinary race, not a fault. It used to reach `.single()`
+ * with zero rows and surface PostgREST's raw message as a 500. This reads the
+ * row once more, on the failure path only, to say what it actually is.
+ */
+const refuseBroadcastInWrongStatus = async (broadcastId: string, attempted: 'schedule' | 'cancel'): Promise<never> => {
+  const { data: current, error } = await serviceClient
+    .from('Broadcast')
+    .select('id,status')
+    .eq('id', broadcastId)
+    .maybeSingle<{ id: string; status: string }>();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!current) {
+    fail(404, 'The selected broadcast could not be found.');
+  }
+  const state = BROADCAST_STATUS_WORDS[current.status] ?? current.status;
+  return fail(
+    412,
+    attempted === 'cancel'
+      ? `Only a scheduled broadcast can be canceled, and this one is ${state}. Refresh to see its current status.`
+      : `This broadcast is ${state}, so it cannot be sent or scheduled again. Refresh to see its current status.`
+  );
+};
+
 const broadcastSchedule: Handler = async ({ context, data }) => {
   ensureRole(context.role, ['admin']);
   const broadcastId = sanitizeText(data.id);
@@ -1733,9 +1773,12 @@ const broadcastSchedule: Handler = async ({ context, data }) => {
     .eq('id', broadcastId)
     .in('status', ['draft', 'scheduled', 'canceled', 'failed'])
     .select('*')
-    .single<BroadcastRow>();
-  if (error || !broadcast) {
-    throw new Error(error?.message ?? 'Failed to schedule the broadcast.');
+    .maybeSingle<BroadcastRow>();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!broadcast) {
+    return await refuseBroadcastInWrongStatus(broadcastId, 'schedule');
   }
   return json(200, { data: { broadcast } });
 };
@@ -1752,9 +1795,12 @@ const broadcastCancel: Handler = async ({ context, data }) => {
     .eq('id', broadcastId)
     .eq('status', 'scheduled')
     .select('*')
-    .single<BroadcastRow>();
-  if (error || !broadcast) {
-    throw new Error(error?.message ?? 'Only a scheduled broadcast can be canceled.');
+    .maybeSingle<BroadcastRow>();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!broadcast) {
+    return await refuseBroadcastInWrongStatus(broadcastId, 'cancel');
   }
   return json(200, { data: { broadcast } });
 };

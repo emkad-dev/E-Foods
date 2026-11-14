@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { formatDateTime } from '../lib/format';
+import { useDocumentVisibility } from '../lib/useDocumentVisibility';
 import { resolveViewState } from '../lib/viewState';
 import {
   broadcastTone,
@@ -51,6 +53,14 @@ const describeSegment = (segment: BroadcastSegment | null | undefined): string =
 
 const SEGMENT_ROLES = ['customer', 'restaurant', 'dispatch'] as const;
 
+// The runner moves broadcasts on its own (scheduled -> sending -> sent), so a
+// list read once on mount went stale: a sent row kept saying "scheduled" and
+// kept offering Cancel. Same slow, visibility-gated rate as the rest of the
+// console.
+const POLL_INTERVAL_MS = 120000;
+
+type ActionError = { area: 'compose' | 'list'; message: string };
+
 export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +98,12 @@ export default function BroadcastsPage() {
   const [viewing, setViewing] = useState<Broadcast | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const [viewLoadingId, setViewLoadingId] = useState<string | null>(null);
+  // Kept apart from `error` (the list read's own failure) because every action
+  // now reloads the list on failure, and that reload's success clears `error`.
+  // Sharing one slot would wipe the refusal the operator needs to read.
+  const [actionError, setActionError] = useState<ActionError | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const isVisible = useDocumentVisibility();
 
   const load = useCallback(async () => {
     try {
@@ -103,6 +119,25 @@ export default function BroadcastsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useVisiblePolling(() => void load(), POLL_INTERVAL_MS, isVisible);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Whatever the failure, the list may no longer match the server (the runner
+  // may have sent the row, or the write may have landed before the reply was
+  // lost), so every action error reloads it.
+  const failAction = async (area: ActionError['area'], nextError: unknown, fallback: string) => {
+    setActionError({ area, message: nextError instanceof Error ? nextError.message : fallback });
+    await load();
+  };
 
   const buildSegment = (): BroadcastSegment => ({
     roles,
@@ -153,9 +188,11 @@ export default function BroadcastsPage() {
     try {
       const res = await previewAudience(buildSegment(), category);
       setPreviewCount(res.recipientCount);
-      setError(null);
+      setActionError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Preview failed.');
+      // A read, so nothing to reload; it goes in the action slot so the next
+      // poll's successful list read cannot clear it.
+      setActionError({ area: 'compose', message: nextError instanceof Error ? nextError.message : 'Preview failed.' });
     } finally {
       setBusy(false);
     }
@@ -175,10 +212,10 @@ export default function BroadcastsPage() {
         pushBody,
       });
       setSelected(broadcast);
-      setError(null);
+      setActionError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Create failed.');
+      await failAction('compose', nextError, 'Create failed.');
     } finally {
       setBusy(false);
     }
@@ -189,9 +226,10 @@ export default function BroadcastsPage() {
     try {
       await scheduleBroadcast(broadcast.id);
       setSelected(null);
+      setActionError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Send failed.');
+      await failAction('compose', nextError, 'Send failed.');
     } finally {
       setBusy(false);
       setSendConfirm(null);
@@ -206,9 +244,10 @@ export default function BroadcastsPage() {
     try {
       await scheduleBroadcast(selected.id, new Date(schedAt).toISOString());
       setSelected(null);
+      setActionError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Schedule failed.');
+      await failAction('compose', nextError, 'Schedule failed.');
     } finally {
       setBusy(false);
     }
@@ -232,9 +271,10 @@ export default function BroadcastsPage() {
     setBusy(true);
     try {
       await cancelBroadcast(broadcast.id);
+      setActionError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Cancel failed.');
+      await failAction('list', nextError, 'Cancel failed.');
     } finally {
       setBusy(false);
     }
@@ -244,10 +284,10 @@ export default function BroadcastsPage() {
     <section className="page broadcasts-page">
       <div className="broadcast-compose card">
         <h3>New broadcast</h3>
-        {/* This page reads once on mount and never polls, so without a retry
-            a failed first load left the list permanently blank with a full
-            browser reload as the only way out. */}
+        {/* The retry is still the quickest way back from a failed first
+            load; the poll would otherwise take up to two minutes. */}
         {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
+        {actionError?.area === 'compose' ? <ErrorBanner message={actionError.message} /> : null}
         <div className="field">
           <label htmlFor="bc-title">Title</label>
           <input id="bc-title" value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -385,7 +425,18 @@ export default function BroadcastsPage() {
       </div>
 
       <div className="broadcast-list card">
-        <h3>Broadcasts</h3>
+        <div className="card-title-row">
+          <h3>Broadcasts</h3>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={refreshing}
+            onClick={() => void onRefresh()}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+        {actionError?.area === 'list' ? <ErrorBanner message={actionError.message} /> : null}
         {/* Same stacked-loading defect AccessPage had: the skeleton rendered
             above the table rather than instead of it, so a first load drew
             shimmer bars on top of a complete header row with an empty body
