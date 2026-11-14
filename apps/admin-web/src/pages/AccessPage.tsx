@@ -6,6 +6,7 @@ import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
 import type { AppRole, UserDocument } from '../../../../packages/domain/src';
+import { canRestoreAccess, ENABLE_UNAVAILABLE_REASON } from '../lib/accessActions';
 import { canDeleteAdminAccess, canDeleteUserAccountOnRequest } from '../lib/adminOffboarding';
 import { formatDateTime } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
@@ -397,14 +398,20 @@ export default function AccessPage() {
                       <td>
                         <div className="row-actions">
                           {user.accountDisabled ? (
-                            <button
-                              type="button"
-                              className="btn btn-success btn-sm"
-                              disabled={busy || isSelf}
-                              onClick={() => void runAction(user.uid, () => enableUserAccess(user.uid))}
-                            >
-                              Enable
-                            </button>
+                            canRestoreAccess(user.lastPrivilegedRole) ? (
+                              <button
+                                type="button"
+                                className="btn btn-success btn-sm"
+                                disabled={busy || isSelf}
+                                onClick={() => void runAction(user.uid, () => enableUserAccess(user.uid))}
+                              >
+                                Enable
+                              </button>
+                            ) : (
+                              <span className="muted" style={{ fontSize: 12 }}>
+                                {ENABLE_UNAVAILABLE_REASON}
+                              </span>
+                            )
                           ) : (
                             <button
                               type="button"
