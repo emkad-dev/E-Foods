@@ -14,6 +14,7 @@ import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatCurrency, formatDateTime, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import {
   forceCancelAdminOrder,
   forceCompleteAdminOrder,
@@ -183,7 +184,12 @@ export default function OrderDetailPage() {
       // says why the action no longer applies. The dialog stays open with the
       // typed reason so the admin can retry or back out without retyping it.
       setActionError(
-        nextError instanceof Error ? nextError.message : 'The action failed. Reload the order and try again.'
+        await describeWriteFailure(nextError, {
+          fallback: 'The action failed. Reload the order and try again.',
+          // The finally block below reloads the order and the snapshot on
+          // every outcome, so there is nothing extra to reload here.
+          reload: () => undefined,
+        })
       );
     } finally {
       setActionBusy(false);

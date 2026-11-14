@@ -6,6 +6,7 @@ import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { formatDateTime } from '../lib/format';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { useDocumentVisibility } from '../lib/useDocumentVisibility';
 import { resolveViewState } from '../lib/viewState';
 import {
@@ -135,8 +136,16 @@ export default function BroadcastsPage() {
   // may have sent the row, or the write may have landed before the reply was
   // lost), so every action error reloads it.
   const failAction = async (area: ActionError['area'], nextError: unknown, fallback: string) => {
-    setActionError({ area, message: nextError instanceof Error ? nextError.message : fallback });
-    await load();
+    let reloaded = false;
+    const reload = async () => {
+      reloaded = true;
+      await load();
+    };
+    const message = await describeWriteFailure(nextError, { fallback, reload });
+    if (!reloaded) {
+      await load();
+    }
+    setActionError({ area, message });
   };
 
   const buildSegment = (): BroadcastSegment => ({

@@ -8,6 +8,7 @@ import StatusBadge from '../components/StatusBadge';
 import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import {
   getAdminRestaurantPayouts,
   setAdminRestaurantDeliveryProvider,
@@ -88,7 +89,9 @@ export default function RestaurantsPage() {
       setPendingProvider(null);
       refresh();
     } catch (changeError) {
-      setProviderError(changeError instanceof Error ? changeError.message : 'Could not change who delivers.');
+      setProviderError(
+        await describeWriteFailure(changeError, { fallback: 'Could not change who delivers.', reload: refresh })
+      );
       setPendingProvider(null);
     } finally {
       setProviderBusy(false);

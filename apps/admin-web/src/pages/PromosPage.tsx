@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import { formatCurrency, formatDateTime } from '../lib/format';
 import { formatCtr, readPromoStats } from '../lib/promoStats';
 import { resolveViewState } from '../lib/viewState';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 import { uploadPromoAsset } from '../services/promoAssetUpload';
 
@@ -125,7 +126,7 @@ export default function PromosPage() {
       setError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Create failed.');
+      setError(await describeWriteFailure(nextError, { fallback: 'Create failed.', reload: load }));
     } finally {
       setBusy(false);
     }
@@ -156,7 +157,7 @@ export default function PromosPage() {
       setError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Update failed.');
+      setError(await describeWriteFailure(nextError, { fallback: 'Update failed.', reload: load }));
     } finally {
       setBusy(false);
     }

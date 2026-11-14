@@ -9,6 +9,7 @@ import { partnerApproveBlockedReason, publishBlockedReason } from '../lib/approv
 import { useRefreshNavCounts } from '../contexts/NavCountsContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatDateTime } from '../lib/format';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { resolveKycGate, type KycDocumentKey } from '../lib/kycReviewGate';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
 import { usePolledRpc } from '../lib/usePolledRpc';
@@ -251,7 +252,10 @@ export default function ApprovalsPage() {
       void refreshNavCounts();
       void refreshSnapshot();
     } catch (nextError) {
-      setActionError({ id, message: nextError instanceof Error ? nextError.message : 'The action failed. Try again.' });
+      setActionError({
+        id,
+        message: await describeWriteFailure(nextError, { fallback: 'The action failed. Try again.', reload: refresh }),
+      });
     } finally {
       setPendingId(null);
     }

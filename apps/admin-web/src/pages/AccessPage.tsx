@@ -9,6 +9,7 @@ import type { AppRole, UserDocument } from '../../../../packages/domain/src';
 import { canRestoreAccess, ENABLE_UNAVAILABLE_REASON } from '../lib/accessActions';
 import { canDeleteAdminAccess, canDeleteUserAccountOnRequest } from '../lib/adminOffboarding';
 import { formatDateTime } from '../lib/format';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
 import {
@@ -74,7 +75,7 @@ export default function AccessPage() {
       await action();
       await refresh();
     } catch (nextError) {
-      setActionError(nextError instanceof Error ? nextError.message : 'The action failed. Try again.');
+      setActionError(await describeWriteFailure(nextError, { fallback: 'The action failed. Try again.', reload: refresh }));
     } finally {
       setPendingUid(null);
     }
@@ -128,7 +129,7 @@ export default function AccessPage() {
       setProvisionRestaurantId('');
       await refresh();
     } catch (nextError) {
-      setActionError(nextError instanceof Error ? nextError.message : 'Provisioning failed. Try again.');
+      setActionError(await describeWriteFailure(nextError, { fallback: 'Provisioning failed. Try again.', reload: refresh }));
     } finally {
       setProvisioning(false);
     }

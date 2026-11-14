@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatCurrency, formatDateTime } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import {
   createPromoCode,
   listPromoCodes,
@@ -134,7 +135,7 @@ export default function PromoCodesPage() {
       setError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Create failed.');
+      setError(await describeWriteFailure(nextError, { fallback: 'Create failed.', reload: load }));
     } finally {
       setBusy(false);
     }
@@ -147,7 +148,7 @@ export default function PromoCodesPage() {
       setError(null);
       await load();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Update failed.');
+      setError(await describeWriteFailure(nextError, { fallback: 'Update failed.', reload: load }));
     } finally {
       setBusy(false);
     }

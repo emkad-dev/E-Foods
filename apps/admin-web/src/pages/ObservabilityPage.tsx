@@ -6,6 +6,7 @@ import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
 import { alertsAfterResolve, isAlertResolved } from '../lib/alertResolution';
 import { formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { useDocumentVisibility } from '../lib/useDocumentVisibility';
 import { resolveViewState } from '../lib/viewState';
 import {
@@ -128,8 +129,18 @@ export default function ObservabilityPage() {
       const { alert } = await resolveAdminOperationalAlert(alertId);
       setAlerts((current) => alertsAfterResolve(current, alert, showResolved));
     } catch (nextError) {
-      setResolveError(nextError instanceof Error ? nextError.message : 'Unable to resolve this alert.');
-      await refresh();
+      let reloaded = false;
+      const message = await describeWriteFailure(nextError, {
+        fallback: 'Unable to resolve this alert.',
+        reload: async () => {
+          reloaded = true;
+          await refresh();
+        },
+      });
+      if (!reloaded) {
+        await refresh();
+      }
+      setResolveError(message);
     } finally {
       setResolvingId(null);
     }
@@ -161,7 +172,7 @@ export default function ObservabilityPage() {
       });
       await refresh();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Unable to update feature flag.');
+      setError(await describeWriteFailure(nextError, { fallback: 'Unable to update feature flag.', reload: refresh }));
     } finally {
       setBusy(false);
     }

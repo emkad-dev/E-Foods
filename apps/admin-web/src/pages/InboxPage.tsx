@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useRefreshNavCounts } from '../contexts/NavCountsContext';
 import { formatDateTime } from '../lib/format';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { statusActionsFor } from '../lib/inboxActions';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
 import { useDocumentVisibility } from '../lib/useDocumentVisibility';
@@ -240,7 +241,14 @@ export default function InboxPage() {
       setReply('');
       await loadThread(selectedId);
     } catch (nextError) {
-      setActionError(nextError instanceof Error ? nextError.message : 'Unable to send the reply.');
+      // A lost reply may still have been sent: reload the thread rather than
+      // invite a second send of the same message.
+      setActionError(
+        await describeWriteFailure(nextError, {
+          fallback: 'Unable to send the reply.',
+          reload: () => loadThread(selectedId),
+        })
+      );
     } finally {
       setSending(false);
     }
@@ -259,7 +267,7 @@ export default function InboxPage() {
       await write();
       await loadInbox();
     } catch (nextError) {
-      setActionError(nextError instanceof Error ? nextError.message : failure);
+      setActionError(await describeWriteFailure(nextError, { fallback: failure, reload: loadInbox }));
     } finally {
       setBusyAction(null);
     }
