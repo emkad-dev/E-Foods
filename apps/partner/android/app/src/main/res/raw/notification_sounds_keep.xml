@@ -3,6 +3,7 @@
   Keeps the FEASTY notification sounds through release resource shrinking:
   they are looked up only by a runtime name (expo-notifications SoundResolver),
   so the shrinker cannot see they are used. Written by
-  scripts/expo/withKeepNotificationSounds.js; not packaged into the app.
+  scripts/expo/withKeepNotificationSounds.js. Not named keep.xml on purpose:
+  React Native's release bundling generates its own res/raw/keep.xml.
 -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@raw/feasty_*" />

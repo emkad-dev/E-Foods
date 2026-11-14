@@ -362,9 +362,16 @@ for (const [app, expected] of Object.entries(APP_EXPECTATIONS)) {
     }
 
     // Release builds shrink resources, and the sounds are found only by a
-    // runtime name, so res/raw/keep.xml must keep them; the config plugin
-    // writes the same file on any prebuild.
-    const keepXml = readFileSync(appFile(app, 'android/app/src/main/res/raw/keep.xml'), 'utf8');
+    // runtime name, so a tools:keep file in res/raw must keep them; the config
+    // plugin writes the same file on any prebuild. It must NOT be named
+    // keep.xml: React Native's release bundling generates its own
+    // res/raw/keep.xml, which wins the merge and drops ours (vc20/vc19 shipped
+    // without the sounds that way).
+    assert.ok(
+      !existsSync(appFile(app, 'android/app/src/main/res/raw/keep.xml')),
+      `${app} has no res/raw/keep.xml of its own (React Native's generated one overrides it)`
+    );
+    const keepXml = readFileSync(appFile(app, 'android/app/src/main/res/raw/notification_sounds_keep.xml'), 'utf8');
     assert.match(keepXml, /xmlns:tools="http:\/\/schemas\.android\.com\/tools"/, `${app} keep.xml tools namespace`);
     assert.match(keepXml, /tools:keep="@raw\/feasty_\*"/, `${app} keep.xml keeps every feasty_ sound`);
     assert.ok(
