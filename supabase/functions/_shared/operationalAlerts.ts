@@ -13,6 +13,8 @@ export const OPERATIONAL_ALERT_COLUMNS = [
   'metadata',
   'createdAt',
   'updatedAt',
+  'resolvedAt',
+  'resolvedBy',
 ].join(',');
 
 export const OPERATIONAL_ALERT_SEVERITIES = ['low', 'medium', 'high'] as const;
@@ -30,6 +32,9 @@ export type OperationalAlertRow = {
   subjectType: string;
   title: string;
   updatedAt: string;
+  /** Set by an admin's "Mark resolved"; null while the alert is open. */
+  resolvedAt: string | null;
+  resolvedBy: string | null;
 };
 
 export type RecordOperationalAlertInput = {
@@ -45,6 +50,8 @@ export type RecordOperationalAlertInput = {
 
 export type LoadOperationalAlertsInput = {
   alertType?: string | null;
+  /** Resolved alerts are left out unless this is true. */
+  includeResolved?: boolean | null;
   limit?: number | string | null;
   offset?: number | string | null;
   severity?: OperationalAlertSeverity | string | null;
@@ -62,6 +69,7 @@ type AlertWindow = {
 type OperationalAlertClient = {
   from: (table: string) => {
     select?: (...args: any[]) => any;
+    update?: (...args: any[]) => any;
     upsert: (...args: any[]) => any;
   };
 };
@@ -103,6 +111,8 @@ const normalizeOperationalAlertRow = (row: unknown): OperationalAlertRow | null 
     subjectType: sanitizeText(record.subjectType),
     title: sanitizeText(record.title),
     updatedAt: sanitizeText(record.updatedAt, sanitizeText(record.createdAt, nowIso())),
+    resolvedAt: sanitizeOptionalText(record.resolvedAt),
+    resolvedBy: sanitizeOptionalText(record.resolvedBy),
   };
 };
 
@@ -145,6 +155,12 @@ const buildAlert = (input: RecordOperationalAlertInput): OperationalAlertUpsertR
     subjectType: sanitizeText(input.subjectType),
     title: sanitizeText(input.title),
     updatedAt: now,
+    // Every writer upserts on dedupeKey, so a condition that comes back after
+    // an admin resolved it lands on the resolved row. Clearing the resolution
+    // in the same upsert re-opens it as a fresh alert (createdAt is reset
+    // above too) instead of updating a row the console now hides.
+    resolvedAt: null,
+    resolvedBy: null,
   };
 };
 
@@ -180,6 +196,11 @@ export const loadOperationalAlerts = async (
   const offset = Math.max(0, parseInteger(input.offset, 0));
   const limit = Math.max(1, parseInteger(input.limit, 25));
 
+  // Open alerts only, by default: a resolved alert has been dealt with, and
+  // listing it forever buried the ones that had not.
+  if (input.includeResolved !== true) {
+    query = query.is('resolvedAt', null);
+  }
   if (alertType) {
     query = query.eq('alertType', alertType);
   }
@@ -203,6 +224,53 @@ export const loadOperationalAlerts = async (
   );
 
   return rows.slice(offset, offset + limit);
+};
+
+export type ResolveOperationalAlertResult = {
+  alert: OperationalAlertRow;
+  /** True when someone had already resolved it; nothing was written. */
+  alreadyResolved: boolean;
+};
+
+/**
+ * Marks one alert resolved. Conditional on it still being open, so two admins
+ * (or a retried request) cannot overwrite who resolved it first; a repeat is
+ * answered with the row as it stands rather than an error, because the
+ * outcome the caller asked for is already true. Returns null for an unknown id.
+ *
+ * updatedAt is left alone: it records the last time the condition was seen,
+ * which is what the list sorts on.
+ */
+export const resolveOperationalAlert = async (
+  input: { alertId: string; resolvedBy: string },
+  client: OperationalAlertClient = serviceClient
+): Promise<ResolveOperationalAlertResult | null> => {
+  const table = client.from('OperationalAlert') as any;
+  const { data: updated, error } = await table
+    .update({ resolvedAt: nowIso(), resolvedBy: input.resolvedBy })
+    .eq('id', input.alertId)
+    .is('resolvedAt', null)
+    .select(OPERATIONAL_ALERT_COLUMNS)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const resolved = normalizeOperationalAlertRow(updated);
+  if (resolved) {
+    return { alert: resolved, alreadyResolved: false };
+  }
+
+  const { data: current, error: readError } = await (client.from('OperationalAlert') as any)
+    .select(OPERATIONAL_ALERT_COLUMNS)
+    .eq('id', input.alertId)
+    .maybeSingle();
+  if (readError) {
+    throw new Error(readError.message);
+  }
+
+  const existing = normalizeOperationalAlertRow(current);
+  return existing ? { alert: existing, alreadyResolved: true } : null;
 };
 
 const buildSeverity = (count: number, medium: number, high: number): OperationalAlertSeverity | null => {

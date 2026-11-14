@@ -131,6 +131,8 @@ export const ADMIN_ACTIONS = [
   'adminForceCancelOrder',
   'adminForceCompleteOrder',
   'adminResolveOrderReport',
+  // Closes an operational alert once a human has dealt with it. Audited.
+  'adminResolveOperationalAlert',
 ] as const;
 
 export const ACCOUNT_ACTIONS = [

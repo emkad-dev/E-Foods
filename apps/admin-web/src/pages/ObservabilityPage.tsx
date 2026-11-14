@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useVisiblePolling } from '../../../../packages/runtime/src';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
+import { alertsAfterResolve, isAlertResolved } from '../lib/alertResolution';
 import { formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
+import { useDocumentVisibility } from '../lib/useDocumentVisibility';
 import { resolveViewState } from '../lib/viewState';
 import {
   getAdminOperationalAlerts,
   listAdminFeatureFlags,
+  resolveAdminOperationalAlert,
   upsertAdminFeatureFlag,
   type FeatureFlagRecord,
   type OperationalAlertRecord,
@@ -51,6 +55,10 @@ const ALERT_PAGE_SIZE = 50;
  */
 const ALERT_PROBE_LIMIT = ALERT_PAGE_SIZE + 1;
 
+// The page read once on mount, so a new alert never appeared without a manual
+// Refresh. Same slow, visibility-gated rate as the rest of the console.
+const POLL_INTERVAL_MS = 120000;
+
 const hasMetadata = (metadata: Record<string, unknown> | null) => Boolean(metadata && Object.keys(metadata).length > 0);
 
 const formatMetadata = (metadata: Record<string, unknown> | null) => {
@@ -73,12 +81,19 @@ export default function ObservabilityPage() {
   const [loaded, setLoaded] = useState(false);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   const [alertsTruncated, setAlertsTruncated] = useState(false);
+  // Open alerts only by default; resolved ones are a history, not a queue.
+  const [showResolved, setShowResolved] = useState(false);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  // Shown in the detail panel beside Mark resolved, not in the page banner,
+  // and kept apart from `error` so the next successful read cannot wipe it.
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const isVisible = useDocumentVisibility();
 
   const refresh = useCallback(async () => {
     setBusy(true);
     try {
       const [alertResponse, flagResponse] = await Promise.all([
-        getAdminOperationalAlerts({ limit: ALERT_PROBE_LIMIT, offset: 0 }),
+        getAdminOperationalAlerts({ limit: ALERT_PROBE_LIMIT, offset: 0, includeResolved: showResolved }),
         listAdminFeatureFlags(),
       ]);
 
@@ -94,11 +109,31 @@ export default function ObservabilityPage() {
       setBusy(false);
       setLoading(false);
     }
-  }, []);
+  }, [showResolved]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useVisiblePolling(() => void refresh(), POLL_INTERVAL_MS, isVisible);
+
+  useEffect(() => {
+    setResolveError(null);
+  }, [selectedAlertId]);
+
+  const onResolve = async (alertId: string) => {
+    setResolvingId(alertId);
+    setResolveError(null);
+    try {
+      const { alert } = await resolveAdminOperationalAlert(alertId);
+      setAlerts((current) => alertsAfterResolve(current, alert, showResolved));
+    } catch (nextError) {
+      setResolveError(nextError instanceof Error ? nextError.message : 'Unable to resolve this alert.');
+      await refresh();
+    } finally {
+      setResolvingId(null);
+    }
+  };
 
   useEffect(() => {
     if (selectedAlertId && alerts.some((alert) => alert.id === selectedAlertId)) {
@@ -153,6 +188,7 @@ export default function ObservabilityPage() {
   // operator whether anything is wrong -- an unreachable alert queue rendered
   // as an all-clear, which is the worst answer this page could give.
   const alertCountLabel = loaded ? `${alerts.length}${alertsTruncated ? '+' : ''}` : '—';
+  const alertCountNoun = showResolved ? 'alerts' : 'open';
   const alertCountTitle = !loaded
     ? 'The alert queue has not loaded, so no count can be shown.'
     : alertsTruncated
@@ -178,7 +214,7 @@ export default function ObservabilityPage() {
             {busy ? 'Refreshing...' : 'Refresh'}
           </button>
           <span className="badge badge-neutral" title={alertCountTitle}>
-            {alertCountLabel} alerts
+            {alertCountLabel} {alertCountNoun}
           </span>
           <span className="badge badge-primary">{flagCountLabel} flags</span>
         </div>
@@ -191,8 +227,18 @@ export default function ObservabilityPage() {
         <div className="card observability-alerts-card">
           <div className="card-title-row">
             <h3 className="card-title">Operational alerts</h3>
-            <span className="badge badge-warning" title={alertCountTitle}>
-              {alertCountLabel} queued
+            <span className="flex items-center gap-2">
+              <button
+                type="button"
+                className={`btn btn-ghost btn-sm ${showResolved ? 'active' : ''}`}
+                aria-pressed={showResolved}
+                onClick={() => setShowResolved((value) => !value)}
+              >
+                {showResolved ? 'Hide resolved' : 'Show resolved'}
+              </button>
+              <span className="badge badge-warning" title={alertCountTitle}>
+                {alertCountLabel} {showResolved ? 'shown' : 'open'}
+              </span>
             </span>
           </div>
 
@@ -204,8 +250,12 @@ export default function ObservabilityPage() {
 
           {alertsState === 'empty' ? (
             <EmptyState
-              title="No alerts queued"
-              body="Nothing has crossed a dispatch, payment or acceptance threshold. Alerts are raised automatically, so an empty queue is the healthy state rather than a switched-off one."
+              title={showResolved ? 'No alerts recorded' : 'No open alerts'}
+              body={
+                showResolved
+                  ? 'Nothing has crossed a dispatch, payment or acceptance threshold. Alerts are raised automatically, so an empty queue is the healthy state rather than a switched-off one.'
+                  : 'Nothing open has crossed a dispatch, payment or acceptance threshold. Resolved alerts are hidden; use Show resolved to see them. An alert that is raised again after being resolved comes back here.'
+              }
             />
           ) : alertsState !== 'ready' ? null : (
             <div className="risk-signals-list">
@@ -233,6 +283,7 @@ export default function ObservabilityPage() {
                       <p className="risk-signals-reason">{alert.details}</p>
                     </div>
                     <div className="risk-signals-item-meta">
+                      {isAlertResolved(alert) ? <span className="badge badge-neutral">Resolved</span> : null}
                       <StatusBadge label={alert.severity} tone={getSeverityTone(alert.severity)} />
                       <span className="badge badge-neutral">{formatFlagLabel(alert.title)}</span>
                     </div>
@@ -267,6 +318,24 @@ export default function ObservabilityPage() {
                 </div>
                 <div className="badge badge-neutral">{formatDateTime(selectedAlert.updatedAt)}</div>
               </div>
+
+              {/* Resolving says "a human has dealt with this". If the same
+                  condition is raised again the alert re-opens on its own. */}
+              {isAlertResolved(selectedAlert) ? (
+                <div className="muted">Resolved {formatDateTime(selectedAlert.resolvedAt as string)}.</div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={resolvingId !== null}
+                    onClick={() => void onResolve(selectedAlert.id)}
+                  >
+                    {resolvingId === selectedAlert.id ? 'Resolving…' : 'Mark resolved'}
+                  </button>
+                </div>
+              )}
+              {resolveError ? <ErrorBanner message={resolveError} /> : null}
 
               <div className="risk-signals-detail-grid">
                 <div>

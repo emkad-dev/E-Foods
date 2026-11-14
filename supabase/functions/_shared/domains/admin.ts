@@ -82,7 +82,7 @@ import {
   broadcastSupportThreadChanged,
 } from '../realtime.ts';
 import { listFeatureFlags, loadFeatureFlagMap, upsertFeatureFlag } from '../featureFlags.ts';
-import { loadOperationalAlerts } from '../operationalAlerts.ts';
+import { loadOperationalAlerts, resolveOperationalAlert } from '../operationalAlerts.ts';
 import {
   DEFAULT_DELIVERY_TIME,
   RESTAURANT_APPROVAL_COLUMNS,
@@ -1428,6 +1428,7 @@ const adminGetOperationalAlerts: Handler = async ({ context, data }) => {
     severity: sanitizeOptionalText(data.severity),
     subjectId: sanitizeOptionalText(data.subjectId),
     subjectType: sanitizeOptionalText(data.subjectType),
+    includeResolved: data.includeResolved === true,
   });
 
   return json(200, {
@@ -1435,6 +1436,35 @@ const adminGetOperationalAlerts: Handler = async ({ context, data }) => {
       operationalAlerts,
     },
   });
+};
+
+/**
+ * Closes an operational alert. Alerts had no resolution at all, so an alert
+ * raised in October was still listed weeks after the problem was fixed. If the
+ * same condition is raised again later, the writer's upsert on dedupeKey
+ * re-opens the row (see buildAlert in operationalAlerts.ts).
+ */
+const adminResolveOperationalAlert: Handler = async ({ context, data }) => {
+  ensureRole(context.role, ['admin']);
+  const alertId = sanitizeText(data.alertId);
+  if (!alertId) {
+    fail(400, 'An alert id is required.');
+  }
+
+  const result = await resolveOperationalAlert({ alertId, resolvedBy: context.uid });
+  if (!result) {
+    fail(404, 'The selected alert could not be found.');
+  }
+
+  if (!result.alreadyResolved) {
+    await createAuditEntry(context.uid, 'operational_alert_resolved', 'operational_alert', alertId, {
+      alertType: result.alert.alertType,
+      dedupeKey: result.alert.dedupeKey,
+      title: result.alert.title,
+    });
+  }
+
+  return json(200, { data: result });
 };
 
 const supportGetInbox: Handler = async ({ context, data }) => {
@@ -2230,6 +2260,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminForceCancelOrder,
     adminForceCompleteOrder,
     adminResolveOrderReport,
+    adminResolveOperationalAlert,
     adminGetAccessOverview,
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,
