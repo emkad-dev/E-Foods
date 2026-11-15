@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVisiblePolling } from '../../../../packages/runtime/src';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
@@ -89,14 +89,23 @@ export default function ObservabilityPage() {
   // and kept apart from `error` so the next successful read cannot wipe it.
   const [resolveError, setResolveError] = useState<string | null>(null);
   const isVisible = useDocumentVisibility();
+  // Bumped per read so a response that predates the latest Show-resolved toggle
+  // (or a newer read) is dropped instead of overwriting the list.
+  const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    requestRef.current += 1;
+    const requestId = requestRef.current;
     setBusy(true);
     try {
       const [alertResponse, flagResponse] = await Promise.all([
         getAdminOperationalAlerts({ limit: ALERT_PROBE_LIMIT, offset: 0, includeResolved: showResolved }),
         listAdminFeatureFlags(),
       ]);
+
+      if (requestId !== requestRef.current) {
+        return;
+      }
 
       const alertPage = alertResponse.operationalAlerts ?? [];
       setAlertsTruncated(alertPage.length > ALERT_PAGE_SIZE);
@@ -105,10 +114,16 @@ export default function ObservabilityPage() {
       setError(null);
       setLoaded(true);
     } catch (nextError) {
+      if (requestId !== requestRef.current) {
+        return;
+      }
+
       setError(nextError instanceof Error ? nextError.message : 'Unable to load observability data.');
     } finally {
-      setBusy(false);
-      setLoading(false);
+      if (requestId === requestRef.current) {
+        setBusy(false);
+        setLoading(false);
+      }
     }
   }, [showResolved]);
 
@@ -117,10 +132,6 @@ export default function ObservabilityPage() {
   }, [refresh]);
 
   useVisiblePolling(() => void refresh(), POLL_INTERVAL_MS, isVisible);
-
-  useEffect(() => {
-    setResolveError(null);
-  }, [selectedAlertId]);
 
   const onResolve = async (alertId: string) => {
     setResolvingId(alertId);
@@ -279,7 +290,12 @@ export default function ObservabilityPage() {
                     type="button"
                     className={`risk-signals-item ${isSelected ? 'selected' : ''}`}
                     aria-pressed={isSelected}
-                    onClick={() => setSelectedAlertId(alert.id)}
+                    onClick={() => {
+                      // Cleared on the user's pick only: a reload that moves the
+                      // selection must not wipe an error they have not read.
+                      setResolveError(null);
+                      setSelectedAlertId(alert.id);
+                    }}
                   >
                     <div className="risk-signals-item-main">
                       <div className="risk-signals-item-head">
