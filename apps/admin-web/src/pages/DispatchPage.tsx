@@ -11,7 +11,7 @@ import type { AdminTone } from '../theme/tones';
 const ID_STYLE: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px' };
 
 export default function DispatchPage() {
-  const { data, error, refresh, loading } = usePolledRpc(getAdminDispatchOpsView);
+  const { data, error, refresh, refreshing } = usePolledRpc(getAdminDispatchOpsView);
   // A separate read: a failed roster must not blank the assignments/SOS panels
   // (and vice versa), so each carries its own view state.
   const roster = usePolledRpc(getAdminRiderRoster);
@@ -26,8 +26,8 @@ export default function DispatchPage() {
       <div className="card">
         <div className="card-title-row">
           <h3 className="card-title">Active assignments</h3>
-          <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading}>
-            Refresh
+          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
 
@@ -101,8 +101,8 @@ export default function DispatchPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-title-row">
           <h3 className="card-title">Rider roster</h3>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={roster.refresh} disabled={roster.loading}>
-            Refresh
+          <button type="button" className="btn btn-ghost btn-sm" onClick={roster.refresh} disabled={roster.refreshing}>
+            {roster.refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
 
@@ -186,8 +186,8 @@ function RiderPayoutsCard() {
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card-title-row">
         <h3 className="card-title">Rider payouts</h3>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={payouts.refresh} disabled={payouts.loading}>
-          Refresh
+        <button type="button" className="btn btn-ghost btn-sm" onClick={payouts.refresh} disabled={payouts.refreshing}>
+          {payouts.refreshing ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 

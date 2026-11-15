@@ -5,7 +5,11 @@ import PartnerOnboardingReview from '../components/PartnerOnboardingReview';
 import RestaurantRating from '../components/RestaurantRating';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import { partnerApproveBlockedReason, publishBlockedReason } from '../lib/approvalGates';
+import { useRefreshNavCounts } from '../contexts/NavCountsContext';
+import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatDateTime } from '../lib/format';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import { resolveKycGate, type KycDocumentKey } from '../lib/kycReviewGate';
 import { countNewSince, isNewSince, useLastVisit } from '../lib/lastVisit';
 import { usePolledRpc } from '../lib/usePolledRpc';
@@ -84,6 +88,14 @@ const NewSinceMarker = ({ label }: { label: string }) => (
   </span>
 );
 
+/** The error from the last action on THIS row, if any. */
+const RowActionError = ({ id, error }: { id: string; error: { id: string; message: string } | null }) =>
+  error?.id === id ? (
+    <div className="list-row-sub row-error" role="alert">
+      {error.message}
+    </div>
+  ) : null;
+
 /**
  * Warning tone only when the number means work.
  *
@@ -122,6 +134,8 @@ const dispatchApprovalPrompt = (application: { displayName: string; email: strin
 
 export default function ApprovalsPage() {
   const { data, error, refresh } = usePolledRpc(getAdminApprovalQueue);
+  const refreshNavCounts = useRefreshNavCounts();
+  const { refresh: refreshSnapshot } = useSnapshot();
 
   /**
    * The instant this admin last LEFT this page, read once on mount. Rows that
@@ -149,7 +163,10 @@ export default function ApprovalsPage() {
   }, [data]);
 
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  // Keyed to the row the action came from, and rendered inside that row. A
+  // single page-level banner sat at the top of the page while the button that
+  // caused it could be a long scroll below, so a refusal looked like nothing.
+  const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
 
   /**
@@ -229,8 +246,16 @@ export default function ApprovalsPage() {
     try {
       await action();
       await refresh();
+      // The sidebar's Approvals badge and the snapshot's restaurant list both
+      // count what this action just changed; without these they lagged by up
+      // to the full poll interval.
+      void refreshNavCounts();
+      void refreshSnapshot();
     } catch (nextError) {
-      setActionError(nextError instanceof Error ? nextError.message : 'The action failed. Try again.');
+      setActionError({
+        id,
+        message: await describeWriteFailure(nextError, { fallback: 'The action failed. Try again.', reload: refresh }),
+      });
     } finally {
       setPendingId(null);
     }
@@ -281,7 +306,6 @@ export default function ApprovalsPage() {
   return (
     <div className="page">
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-      {actionError ? <ErrorBanner message={actionError} /> : null}
       {reviewNotice ? (
         <div className="card">
           <p className="muted" style={{ margin: 0 }}>
@@ -333,6 +357,8 @@ export default function ApprovalsPage() {
                 );
 
                 const isNew = isNewSince(previousVisit, application.submittedAt);
+                const payoutBlockedReason = partnerApproveBlockedReason(application);
+                const approveBlockedReason = payoutBlockedReason ?? kycGate.blockedReason;
 
                 return (
                   <div key={application.id} className="list-row">
@@ -370,14 +396,16 @@ export default function ApprovalsPage() {
                       <div className="list-row-sub">
                         {kycGate.blockedReason ? `${kycGate.blockedReason} ${kycGate.note}` : kycGate.note}
                       </div>
+                      {payoutBlockedReason ? <div className="list-row-sub">{payoutBlockedReason}</div> : null}
+                      <RowActionError id={application.id} error={actionError} />
                     </div>
                     <div className="row-actions">
                       <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
                       <button
                         type="button"
                         className="btn btn-success btn-sm"
-                        disabled={pendingId === application.id || kycGate.blockedReason !== undefined}
-                        title={kycGate.blockedReason}
+                        disabled={pendingId === application.id || approveBlockedReason !== undefined}
+                        title={approveBlockedReason}
                         onClick={() =>
                           approveWithConfirmation(application.id, partnerApprovalPrompt(application), () =>
                             reviewPartnerApplication({ applicationId: application.id, decision: 'approve' })
@@ -442,6 +470,7 @@ export default function ApprovalsPage() {
                       {application.licenceFrontPath && application.licenceBackPath ? 'captured' : 'missing'}
                     </div>
                     <div className="list-row-sub">Submitted {formatDateTime(application.submittedAt)}</div>
+                    <RowActionError id={application.id} error={actionError} />
                   </div>
                   <div className="row-actions">
                     <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
@@ -489,56 +518,63 @@ export default function ApprovalsPage() {
                 note={queueFreshness}
               />
             ) : (
-              restaurants.map((restaurant) => (
-                <div key={restaurant.id} className="list-row">
-                  <div>
-                    <div className="list-row-title">{restaurant.name}</div>
-                    <div className="list-row-sub">{restaurant.address ?? 'Address pending'}</div>
-                    {/* Publish and Unpublish are judgements about whether this
-                        restaurant should be in front of customers, and the
-                        customers who have already eaten there have been
-                        answering that question into a void -- the aggregate
-                        moved on every order rated and no operator surface read
-                        it. It belongs next to the button, not a query away. */}
-                    <div className="restaurant-rating-line">
-                      <RestaurantRating restaurant={restaurant} />
+              restaurants.map((restaurant) => {
+                const publishBlocked = restaurant.isPublished === true ? undefined : publishBlockedReason(restaurant);
+
+                return (
+                  <div key={restaurant.id} className="list-row">
+                    <div>
+                      <div className="list-row-title">{restaurant.name}</div>
+                      <div className="list-row-sub">{restaurant.address ?? 'Address pending'}</div>
+                      {/* Publish and Unpublish are judgements about whether this
+                          restaurant should be in front of customers, and the
+                          customers who have already eaten there have been
+                          answering that question into a void -- the aggregate
+                          moved on every order rated and no operator surface read
+                          it. It belongs next to the button, not a query away. */}
+                      <div className="restaurant-rating-line">
+                        <RestaurantRating restaurant={restaurant} />
+                      </div>
+                      {publishBlocked ? <div className="list-row-sub">{publishBlocked}</div> : null}
+                      <RowActionError id={restaurant.id} error={actionError} />
+                    </div>
+                    <div className="row-actions">
+                      <StatusBadge
+                        label={restaurant.approvalStatus ?? (restaurant.isPublished === true ? 'approved' : 'pending')}
+                        tone={getApprovalTone(restaurant.approvalStatus, restaurant.isPublished)}
+                      />
+                      {restaurant.isPublished === true ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={pendingId === restaurant.id}
+                          onClick={() =>
+                            void runAction(restaurant.id, () =>
+                              setRestaurantPublished({ restaurantId: restaurant.id, isPublished: false })
+                            )
+                          }
+                        >
+                          Unpublish
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-success btn-sm"
+                          disabled={pendingId === restaurant.id || publishBlocked !== undefined}
+                          title={publishBlocked}
+                          onClick={() =>
+                            void runAction(restaurant.id, () =>
+                              setRestaurantPublished({ restaurantId: restaurant.id, isPublished: true })
+                            )
+                          }
+                        >
+                          Publish
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="row-actions">
-                    <StatusBadge
-                      label={restaurant.approvalStatus ?? (restaurant.isPublished === true ? 'approved' : 'pending')}
-                      tone={getApprovalTone(restaurant.approvalStatus, restaurant.isPublished)}
-                    />
-                    {restaurant.isPublished === true ? (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={pendingId === restaurant.id}
-                        onClick={() =>
-                          void runAction(restaurant.id, () =>
-                            setRestaurantPublished({ restaurantId: restaurant.id, isPublished: false })
-                          )
-                        }
-                      >
-                        Unpublish
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-success btn-sm"
-                        disabled={pendingId === restaurant.id}
-                        onClick={() =>
-                          void runAction(restaurant.id, () =>
-                            setRestaurantPublished({ restaurantId: restaurant.id, isPublished: true })
-                          )
-                        }
-                      >
-                        Publish
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </>

@@ -114,7 +114,7 @@ test('offline with an expired token is a network error, and does not wait out a 
 
   const failure = await failureOf(supabase);
 
-  assert.equal(failure?.name, 'NetworkError');
+  assert.equal(failure?.name, 'SessionRefreshError');
   assert.notEqual(failure?.message, SESSION_EXPIRED_ERROR_MESSAGE);
   assert.notEqual(toUserMessage(failure), SESSION_EXPIRED_ERROR_MESSAGE);
   assert.equal(counts.refreshSession, 0);
@@ -129,7 +129,7 @@ test('a transient failure from the refresh itself is a network error, sent once'
 
   const failure = await failureOf(supabase);
 
-  assert.equal(failure?.name, 'NetworkError');
+  assert.equal(failure?.name, 'SessionRefreshError');
   assert.equal(counts.refreshSession, 1);
   assert.equal(counts.removed, 0);
 });
@@ -148,7 +148,7 @@ test('a refresh that rejects outright with a network failure is a network error 
 
   const failure = await failureOf(supabase);
 
-  assert.equal(failure?.name, 'NetworkError');
+  assert.equal(failure?.name, 'SessionRefreshError');
   assert.equal(counts.refreshSession, 1);
 });
 

@@ -8,6 +8,7 @@ import StatusBadge from '../components/StatusBadge';
 import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
+import { describeWriteFailure } from '../lib/writeOutcome';
 import {
   getAdminRestaurantPayouts,
   setAdminRestaurantDeliveryProvider,
@@ -58,7 +59,7 @@ const sortRows = (rows: RestaurantPayoutRow[]) =>
   });
 
 export default function RestaurantsPage() {
-  const { data, error, refresh, loading } = usePolledRpc(getAdminRestaurantPayouts);
+  const { data, error, refresh, refreshing } = usePolledRpc(getAdminRestaurantPayouts);
   const viewState = resolveViewState({ hasData: data !== null, error });
 
   const rows = useMemo(() => sortRows(data?.restaurants ?? []), [data]);
@@ -88,7 +89,9 @@ export default function RestaurantsPage() {
       setPendingProvider(null);
       refresh();
     } catch (changeError) {
-      setProviderError(changeError instanceof Error ? changeError.message : 'Could not change who delivers.');
+      setProviderError(
+        await describeWriteFailure(changeError, { fallback: 'Could not change who delivers.', reload: refresh })
+      );
       setPendingProvider(null);
     } finally {
       setProviderBusy(false);
@@ -146,8 +149,8 @@ export default function RestaurantsPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-title-row">
           <h3 className="card-title">Restaurant payouts</h3>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={loading}>
-            Refresh
+          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
 

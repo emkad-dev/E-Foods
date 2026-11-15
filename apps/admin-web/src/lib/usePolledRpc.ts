@@ -14,10 +14,19 @@ export function usePolledRpc<T>(fetcher: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // True while any read is in flight, the first one included. `loading` only
+  // covers the first read and never goes back to true, so Refresh buttons
+  // disabled on it gave no feedback at all and looked dead.
+  const [refreshing, setRefreshing] = useState(false);
   const activeRef = useRef(true);
+  // Reads in flight: `refreshing` clears only when the last one finishes, not
+  // when whichever finishes first (a poll tick can overlap a manual Refresh).
+  const inFlightRef = useRef(0);
   const isVisible = useDocumentVisibility();
 
   const refresh = useCallback(async () => {
+    inFlightRef.current += 1;
+    setRefreshing(true);
     try {
       const next = await fetcher();
 
@@ -34,8 +43,10 @@ export function usePolledRpc<T>(fetcher: () => Promise<T>) {
 
       setError(nextError instanceof Error ? nextError.message : 'Unable to load data right now.');
     } finally {
+      inFlightRef.current = Math.max(0, inFlightRef.current - 1);
       if (activeRef.current) {
         setLoading(false);
+        setRefreshing(inFlightRef.current > 0);
       }
     }
   }, [fetcher]);
@@ -53,5 +64,5 @@ export function usePolledRpc<T>(fetcher: () => Promise<T>) {
   // immediate catch-up read.
   useVisiblePolling(() => void refresh(), POLL_INTERVAL_MS, isVisible);
 
-  return { data, loading, error, refresh };
+  return { data, loading, error, refresh, refreshing };
 }

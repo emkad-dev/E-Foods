@@ -174,6 +174,18 @@ const networkError = (message: string): Error => {
   return error;
 };
 
+/**
+ * A failure to refresh the session before any request was sent. Still a
+ * transport-class failure (transientNetworkFailure and toUserMessage treat it
+ * like NetworkError), but distinct so a caller can tell that nothing reached
+ * the server: a write that fails this way definitely did not land.
+ */
+const sessionRefreshError = (message: string): Error => {
+  const error = new Error(message);
+  error.name = 'SessionRefreshError';
+  return error;
+};
+
 const parseRetryAfterSeconds = (header: string | null) => {
   const seconds = Number(header?.trim());
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
@@ -330,7 +342,7 @@ const callBackendRpcInternal = async <T>(
     // only wait out the same failure, and the "no session" below would then tell
     // a user who is still signed in that their session expired.
     if (isTransientNetworkFailure(sessionError)) {
-      throw networkError(`Backend RPC ${action} could not refresh the session: ${sessionError?.message}`);
+      throw sessionRefreshError(`Backend RPC ${action} could not refresh the session: ${sessionError?.message}`);
     }
 
     const refreshResult = await supabase.auth.refreshSession().catch((error) => ({ error, data: null }));
@@ -346,7 +358,7 @@ const callBackendRpcInternal = async <T>(
     }
 
     if (isTransientNetworkFailure(refreshResult?.error)) {
-      throw networkError(`Backend RPC ${action} could not refresh the session: ${refreshResult?.error?.message}`);
+      throw sessionRefreshError(`Backend RPC ${action} could not refresh the session: ${refreshResult?.error?.message}`);
     }
 
     return session;

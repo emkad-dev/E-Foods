@@ -55,6 +55,15 @@ const EMPTY_COUNTS: NavCounts = { approvals: null, inbox: null };
 
 const NavCountsContext = createContext<NavCounts>(EMPTY_COUNTS);
 
+/**
+ * Re-reads the counts now. Separate from the counts themselves so pages that
+ * only need to nudge the badges after a write (an approval, a closed
+ * conversation) do not re-render on every count change. Without it the badge
+ * kept the old number for up to the full poll interval after the queue moved.
+ * Outside the provider it is a no-op, matching useNavCounts' tolerance.
+ */
+const NavCountsRefreshContext = createContext<() => Promise<void>>(async () => undefined);
+
 export function NavCountsProvider({ children }: { children: ReactNode }) {
   const { role } = useAuth();
   const isVisible = useDocumentVisibility();
@@ -125,7 +134,11 @@ export function NavCountsProvider({ children }: { children: ReactNode }) {
     [approvals, canReadApprovals, inbox]
   );
 
-  return <NavCountsContext.Provider value={value}>{children}</NavCountsContext.Provider>;
+  return (
+    <NavCountsRefreshContext.Provider value={refresh}>
+      <NavCountsContext.Provider value={value}>{children}</NavCountsContext.Provider>
+    </NavCountsRefreshContext.Provider>
+  );
 }
 
 /**
@@ -135,4 +148,8 @@ export function NavCountsProvider({ children }: { children: ReactNode }) {
  */
 export function useNavCounts(): NavCounts {
   return useContext(NavCountsContext);
+}
+
+export function useRefreshNavCounts(): () => Promise<void> {
+  return useContext(NavCountsRefreshContext);
 }

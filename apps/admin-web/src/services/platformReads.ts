@@ -50,14 +50,26 @@ export type OperationalAlertRecord = {
   subjectType: string;
   title: string;
   updatedAt: string;
+  /** Null while the alert is open. Older servers omit both fields. */
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
 };
 
 export type AdminOperationalAlertsResponse = {
   operationalAlerts: OperationalAlertRecord[];
 };
 
+/** Resolved alerts are left out unless `includeResolved` is true. */
 export const getAdminOperationalAlerts = (input?: Record<string, unknown>) =>
   callAdminRpc<AdminOperationalAlertsResponse>('adminGetOperationalAlerts', input);
+
+export type ResolveOperationalAlertResult = {
+  alert: OperationalAlertRecord;
+  alreadyResolved: boolean;
+};
+
+export const resolveAdminOperationalAlert = (alertId: string) =>
+  callAdminRpc<ResolveOperationalAlertResult>('adminResolveOperationalAlert', { alertId }, { write: true });
 
 export type DispatchAssignmentRecord = {
   orderId: string;
