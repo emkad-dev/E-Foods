@@ -49,7 +49,7 @@ const isTimeoutSignal = (error: unknown) => {
   // (the raw fetch message). No message pattern covers all of those wordings.
   // 'TimeoutError' is its overall-deadline expiry. Browsers also use both names
   // for dropped and timed-out requests.
-  if (name === 'AbortError' || name === 'AuthRetryableFetchError' || name === 'NetworkError' || name === 'TimeoutError') {
+  if (name === 'AbortError' || name === 'AuthRetryableFetchError' || name === 'NetworkError' || name === 'SessionRefreshError' || name === 'TimeoutError') {
     return true;
   }
 

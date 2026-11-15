@@ -96,7 +96,7 @@ const isUnparseableServerFailure = (message: string | null): boolean => {
   return HTML_BODY_PATTERN.test(message) || RPC_HTTP_FALLBACK_PATTERN.test(message);
 };
 
-const TRANSPORT_FAILURE_NAMES = new Set(['FunctionsFetchError', 'FunctionsRelayError', 'NetworkError']);
+const TRANSPORT_FAILURE_NAMES = new Set(['FunctionsFetchError', 'FunctionsRelayError', 'NetworkError', 'SessionRefreshError']);
 const TRANSPORT_FAILURE_MESSAGE_PATTERN =
   /network request failed|failed to fetch|failed to send a request|load failed|network ?error|timed? ?out|ECONNRESET|ENOTFOUND/i;
 

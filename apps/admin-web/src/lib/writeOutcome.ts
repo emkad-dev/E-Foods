@@ -14,6 +14,12 @@
 export const UNCONFIRMED_WRITE_MESSAGE =
   'We could not confirm this saved. The page has been reloaded, so check the row.';
 
+export const SESSION_EXPIRED_WRITE_MESSAGE = 'Your session expired. Sign in again.';
+
+// backendRpc could not refresh the session, so nothing was sent: the write
+// definitely did not land, and "could not confirm" would be wrong.
+const SESSION_REFRESH_ERROR_NAME = 'SessionRefreshError';
+
 const TRANSPORT_ERROR_NAMES = new Set(['NetworkError', 'TimeoutError', 'AbortError']);
 
 // The browsers' own words for a fetch that never got an answer, for anything
@@ -28,6 +34,10 @@ const TRANSPORT_MESSAGE = /failed to fetch|networkerror when attempting|load fai
  */
 export const isUnconfirmedWrite = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  if ((error as { name?: unknown }).name === SESSION_REFRESH_ERROR_NAME) {
     return false;
   }
 
@@ -55,6 +65,10 @@ export const describeWriteFailure = async (
   error: unknown,
   options: { fallback: string; reload: () => Promise<unknown> | unknown }
 ): Promise<string> => {
+  if (error instanceof Error && error.name === SESSION_REFRESH_ERROR_NAME) {
+    return SESSION_EXPIRED_WRITE_MESSAGE;
+  }
+
   if (isUnconfirmedWrite(error)) {
     try {
       await options.reload();

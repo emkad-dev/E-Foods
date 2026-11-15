@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { UNCONFIRMED_WRITE_MESSAGE, describeWriteFailure, isUnconfirmedWrite } from './writeOutcome.ts';
+import { SESSION_EXPIRED_WRITE_MESSAGE, UNCONFIRMED_WRITE_MESSAGE, describeWriteFailure, isUnconfirmedWrite } from './writeOutcome.ts';
 
 const named = (name: string, message = 'x') => Object.assign(new Error(message), { name });
 const withStatus = (status: number, message = 'refused') => Object.assign(new Error(message), { status });
@@ -50,5 +50,20 @@ test('a refusal keeps the server message and does not reload', async () => {
   };
   assert.equal(await describeWriteFailure(withStatus(412, 'No payout details'), { fallback: 'f', reload }), 'No payout details');
   assert.equal(await describeWriteFailure({}, { fallback: 'fallback', reload }), 'fallback');
+  assert.equal(reloads, 0);
+});
+
+test('a session-refresh failure says the session expired, not that the save is unconfirmed', async () => {
+  let reloads = 0;
+  const error = named('SessionRefreshError', 'Backend RPC x could not refresh the session');
+  assert.equal(isUnconfirmedWrite(error), false);
+  const message = await describeWriteFailure(error, {
+    fallback: 'fallback',
+    reload: () => {
+      reloads += 1;
+    },
+  });
+  assert.equal(message, SESSION_EXPIRED_WRITE_MESSAGE);
+  assert.equal(message, 'Your session expired. Sign in again.');
   assert.equal(reloads, 0);
 });
