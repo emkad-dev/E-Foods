@@ -88,13 +88,6 @@ const NewSinceMarker = ({ label }: { label: string }) => (
   </span>
 );
 
-/**
- * Warning tone only when the number means work.
- *
- * Amber is the console saying "look at this". A queue at zero is the opposite
- * of that, and rendering it amber spends the operator's attention on good
- * news -- which makes the amber that DOES matter worth less.
- */
 /** The error from the last action on THIS row, if any. */
 const RowActionError = ({ id, error }: { id: string; error: { id: string; message: string } | null }) =>
   error?.id === id ? (
@@ -103,6 +96,13 @@ const RowActionError = ({ id, error }: { id: string; error: { id: string; messag
     </div>
   ) : null;
 
+/**
+ * Warning tone only when the number means work.
+ *
+ * Amber is the console saying "look at this". A queue at zero is the opposite
+ * of that, and rendering it amber spends the operator's attention on good
+ * news -- which makes the amber that DOES matter worth less.
+ */
 const countBadgeClass = (count: number) => `badge ${count > 0 ? 'badge-warning' : 'badge-neutral'}`;
 
 /**

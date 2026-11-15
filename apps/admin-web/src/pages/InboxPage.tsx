@@ -121,7 +121,9 @@ export default function InboxPage() {
   // Errors from the thread's own buttons belong next to those buttons. They
   // used to land in the list pane's banner, out of sight of the operator who
   // had just pressed Close.
-  const [actionError, setActionError] = useState<string | null>(null);
+  // Tagged with the conversation it belongs to: a write that fails after the
+  // operator has moved to another thread must not show its error there.
+  const [actionError, setActionError] = useState<{ conversationId: string; message: string } | null>(null);
   const isVisible = useDocumentVisibility();
   // The sidebar's Inbox badge counts open conversations, so a status change
   // must nudge it or it shows the old number until its next poll.
@@ -243,12 +245,13 @@ export default function InboxPage() {
     } catch (nextError) {
       // A lost reply may still have been sent: reload the thread rather than
       // invite a second send of the same message.
-      setActionError(
-        await describeWriteFailure(nextError, {
+      setActionError({
+        conversationId: selectedId,
+        message: await describeWriteFailure(nextError, {
           fallback: 'Unable to send the reply.',
           reload: () => loadThread(selectedId),
-        })
-      );
+        }),
+      });
     } finally {
       setSending(false);
     }
@@ -261,13 +264,17 @@ export default function InboxPage() {
     if (!selectedId || busyAction) {
       return;
     }
+    const conversationId = selectedId;
     setBusyAction(key);
     setActionError(null);
     try {
       await write();
       await loadInbox();
     } catch (nextError) {
-      setActionError(await describeWriteFailure(nextError, { fallback: failure, reload: loadInbox }));
+      setActionError({
+        conversationId,
+        message: await describeWriteFailure(nextError, { fallback: failure, reload: loadInbox }),
+      });
     } finally {
       setBusyAction(null);
     }
@@ -417,7 +424,9 @@ export default function InboxPage() {
               </div>
             </header>
 
-            {actionError ? <ErrorBanner message={actionError} /> : null}
+            {actionError && actionError.conversationId === selected.id ? (
+              <ErrorBanner message={actionError.message} />
+            ) : null}
 
             {threadError ? (
               <ErrorBanner message={threadError} onRetry={() => void loadThread(selected.id)} />
