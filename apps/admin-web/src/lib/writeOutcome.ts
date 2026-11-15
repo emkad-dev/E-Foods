@@ -14,7 +14,7 @@
 export const UNCONFIRMED_WRITE_MESSAGE =
   'We could not confirm this saved. The page has been reloaded, so check the row.';
 
-export const SESSION_EXPIRED_WRITE_MESSAGE = 'Your session expired. Sign in again.';
+export const SESSION_EXPIRED_WRITE_MESSAGE = 'Nothing was saved: your sign-in could not be refreshed. Check your connection and try again, or sign in again if it keeps happening.';
 
 // backendRpc could not refresh the session, so nothing was sent: the write
 // definitely did not land, and "could not confirm" would be wrong.

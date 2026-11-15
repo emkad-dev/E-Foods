@@ -64,6 +64,6 @@ test('a session-refresh failure says the session expired, not that the save is u
     },
   });
   assert.equal(message, SESSION_EXPIRED_WRITE_MESSAGE);
-  assert.equal(message, 'Your session expired. Sign in again.');
+  assert.equal(message, 'Nothing was saved: your sign-in could not be refreshed. Check your connection and try again, or sign in again if it keeps happening.');
   assert.equal(reloads, 0);
 });
