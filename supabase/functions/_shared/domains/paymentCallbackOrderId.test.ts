@@ -60,6 +60,7 @@ const originalFetch = globalThis.fetch;
 
 const installMocks = () => {
   const paystackBodies: Row[] = [];
+  const inserts: { payload: unknown; table: string }[] = [];
 
   client.from = (table: string) => {
     let restaurantId: string | null = null;
@@ -76,7 +77,11 @@ const installMocks = () => {
         return builder;
       };
     }
-    for (const method of ['insert', 'upsert', 'update', 'delete']) {
+    builder.insert = (payload: unknown) => {
+      inserts.push({ payload, table });
+      return builder;
+    };
+    for (const method of ['upsert', 'update', 'delete']) {
       builder[method] = () => builder;
     }
     const single = async () => ({
@@ -108,6 +113,7 @@ const installMocks = () => {
   }) as typeof fetch;
 
   return {
+    inserts,
     paystackBodies,
     restore: () => {
       client.from = originalFrom;
@@ -173,14 +179,29 @@ Deno.test('initializeCustomerPayment: grouped checkout callback_url carries the 
     });
 
     expectEqual(mocks.paystackBodies.length, 1, 'one Paystack initialize call for the whole group');
-    const callback = callbackOf(mocks.paystackBodies[0]);
-    expectEqual(callback.searchParams.get('orderId'), result.orderId, 'group orderId on the callback');
+    const callbackOrderId = callbackOf(mocks.paystackBodies[0]).searchParams.get('orderId');
+    expectEqual(callbackOrderId, result.orderId, 'group orderId on the callback');
+
+    const firstOrderInsert = mocks.inserts.find((entry) => entry.table === 'CustomerOrder')?.payload as
+      | Row
+      | undefined;
+    const groupInsert = mocks.inserts.find((entry) => entry.table === 'OrderGroup')?.payload as Row | undefined;
+    if (!firstOrderInsert || !groupInsert) {
+      throw new Error('Expected a CustomerOrder insert and an OrderGroup insert for the grouped checkout.');
+    }
+    expectEqual(
+      mocks.inserts.filter((entry) => entry.table === 'CustomerOrder').length,
+      2,
+      'one CustomerOrder per restaurant'
+    );
+    expectEqual(callbackOrderId, firstOrderInsert.id, 'callback orderId is the first (primary) order id');
+    expectEqual(callbackOrderId, groupInsert.primaryOrderId, 'callback orderId is OrderGroup.primaryOrderId');
   } finally {
     mocks.restore();
   }
 });
 
-Deno.test('initializeCustomerPayment: an attacker-supplied callback falls back to the configured URL, still with orderId', async () => {
+Deno.test('initializeCustomerPayment: a callback on a path other than /payment/callback falls back to the configured URL, and the server orderId replaces the client one', async () => {
   const mocks = installMocks();
   try {
     const result = await initialize({
