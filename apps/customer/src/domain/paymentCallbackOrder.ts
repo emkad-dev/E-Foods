@@ -93,9 +93,10 @@ export const forgetPaymentHandoff = (storage: StorageLike | null) => {
 };
 
 /**
- * The remembered orderId for this return, or ''. When both the handoff and the
- * return carry a reference they must agree, so a handoff left over from an
- * earlier checkout never sends the customer to the wrong order.
+ * The remembered orderId for this return, or ''. Used only when the return has
+ * a reference and the handoff stored that same reference, so a handoff left
+ * over from an earlier checkout (or one stored without a reference) never
+ * sends the customer to the wrong order.
  */
 export const readPaymentHandoffOrderId = (storage: StorageLike | null, returnedReference: string): string => {
   let raw: string | null = null;
@@ -124,7 +125,7 @@ export const readPaymentHandoffOrderId = (storage: StorageLike | null, returnedR
   const storedReference = clean((parsed as Record<string, unknown>).reference);
   const returned = clean(returnedReference);
 
-  if (!orderId || (storedReference && returned && storedReference !== returned)) {
+  if (!orderId || !returned || storedReference !== returned) {
     return '';
   }
 

@@ -98,10 +98,16 @@ test('a handoff from an earlier checkout (different reference) is ignored', () =
   assert.equal(readPaymentHandoffOrderId(storage, REF), '');
 });
 
-test('a handoff is used when the return carries no reference to compare', () => {
+test('a handoff is not used when the return carries no reference to compare', () => {
   const storage = memoryStorage();
   rememberPaymentHandoff(storage, { orderId: 'order-b', reference: REF });
-  assert.equal(readPaymentHandoffOrderId(storage, ''), 'order-b');
+  assert.equal(readPaymentHandoffOrderId(storage, ''), '');
+});
+
+test('a handoff stored without a reference is never used', () => {
+  const storage = memoryStorage();
+  rememberPaymentHandoff(storage, { orderId: 'order-b', reference: '' });
+  assert.equal(readPaymentHandoffOrderId(storage, REF), '');
 });
 
 test('nothing is remembered without an orderId, and forget clears it', () => {

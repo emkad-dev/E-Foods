@@ -121,6 +121,7 @@ export default function PaymentCallbackScreen() {
       }
 
       if (isTerminalFailure(status)) {
+        forgetPaymentHandoff(getSessionStorage());
         setPaymentStatus('failed');
         setGatewayStatus(status);
         return;
@@ -170,6 +171,7 @@ export default function PaymentCallbackScreen() {
         }
 
         if (result.paymentStatus === 'failed') {
+          forgetPaymentHandoff(getSessionStorage());
           setRefreshError('The payment was not completed successfully.');
         }
       } catch (nextError) {
