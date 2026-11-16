@@ -16,6 +16,11 @@ interface BreakdownCardProps {
   colorFor: (name: string, index: number) => string;
   emptyTitle: string;
   emptyBody: string;
+  /**
+   * Says where the header link goes. It read "more ->" on every card, which
+   * names neither the destination nor what there is more of.
+   */
+  moreLabel?: string;
 }
 
 /**
@@ -29,6 +34,7 @@ export default function BreakdownCard({
   colorFor,
   emptyTitle,
   emptyBody,
+  moreLabel = 'View details',
 }: BreakdownCardProps) {
   return (
     <div className="card">
@@ -37,7 +43,7 @@ export default function BreakdownCard({
         {/* `card-more-link` is what carries this link over the 24x24 target
             floor; as bare inline text it measured 45x17. See global.css. */}
         <Link to={moreHref} className="muted text-[13px] card-more-link">
-          more →
+          {moreLabel}
         </Link>
       </div>
 

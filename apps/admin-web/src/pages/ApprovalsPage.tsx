@@ -5,6 +5,7 @@ import PartnerOnboardingReview from '../components/PartnerOnboardingReview';
 import RestaurantRating from '../components/RestaurantRating';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import WinLabel from '../components/WinLabel';
 import { partnerApproveBlockedReason, publishBlockedReason } from '../lib/approvalGates';
 import { useRefreshNavCounts } from '../contexts/NavCountsContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
@@ -412,7 +413,9 @@ export default function ApprovalsPage() {
                           )
                         }
                       >
-                        Approve
+                        {/* A new partner joining is the platform's biggest
+                            win, so this one gets the flourish. See WinLabel. */}
+                        <WinLabel idle="Approve" win="Welcome aboard" />
                       </button>
                       <button
                         type="button"
@@ -484,7 +487,7 @@ export default function ApprovalsPage() {
                         )
                       }
                     >
-                      Approve
+                      <WinLabel idle="Approve" win="Welcome aboard" />
                     </button>
                     <button
                       type="button"
@@ -568,7 +571,7 @@ export default function ApprovalsPage() {
                             )
                           }
                         >
-                          Publish
+                          <WinLabel idle="Publish" win="Go live" />
                         </button>
                       )}
                     </div>

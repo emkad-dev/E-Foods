@@ -13,16 +13,33 @@ interface KpiCardProps {
    * windowed one. Three cards on Overview are labelled "(30d)" and carry no
    * `previous`, so they fell through to this slot and contradicted their own
    * labels: a thirty-day total captioned as a live count.
+   *
+   * `null` drops the line entirely, for cards that sit under a heading which
+   * already says what the caption would ("Right now" over three live counts
+   * made three "Live count" captions pure repetition).
    */
-  caption?: string;
+  caption?: string | null;
+  /**
+   * Marks a figure that represents work waiting for a person -- the approvals
+   * queue with anything in it. It takes the warning hue because it IS an
+   * attention state; the number still carries the meaning on its own.
+   */
+  attention?: boolean;
 }
 
-export default function KpiCard({ label, value, current, previous, caption = 'Live count' }: KpiCardProps) {
+export default function KpiCard({
+  label,
+  value,
+  current,
+  previous,
+  caption = 'Live count',
+  attention = false,
+}: KpiCardProps) {
   const delta =
     typeof current === 'number' && typeof previous === 'number' ? formatDeltaPercent(current, previous) : null;
 
   return (
-    <div className="kpi-card">
+    <div className={attention ? 'kpi-card is-attention' : 'kpi-card'}>
       <span className="kpi-label">{label}</span>
       <span className="kpi-value">{value}</span>
       {delta ? (
@@ -30,7 +47,7 @@ export default function KpiCard({ label, value, current, previous, caption = 'Li
           {delta.direction === 'up' ? '▲ ' : delta.direction === 'down' ? '▼ ' : ''}
           {delta.label}
         </span>
-      ) : (
+      ) : caption === null ? null : (
         <span className="kpi-delta flat">{caption}</span>
       )}
     </div>
