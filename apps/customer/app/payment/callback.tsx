@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BusyLabel, radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
+import { getCustomerOrders } from '../../src/services/customerReadModel';
+import { findOrderIdForPaymentReference } from '../../src/domain/paymentCallbackOrder';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { customerTheme } from '../../src/theme/palette';
 import { pageTitleTextStyle } from '../../src/theme/screenChrome';
@@ -22,6 +24,9 @@ const normalizeStatus = (value: string) => value.trim().toLowerCase();
 
 const isTerminalFailure = (status: string) => ['failed', 'cancelled', 'abandoned', 'error'].includes(status);
 
+const ORDER_NOT_FOUND_MESSAGE =
+  'We could not find the order for this payment. If you paid, it will appear in Orders shortly.';
+
 export default function PaymentCallbackScreen() {
   const router = useRouter();
   const { clearCart } = useCart();
@@ -30,36 +35,77 @@ export default function PaymentCallbackScreen() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<string>('pending');
   const [gatewayStatus, setGatewayStatus] = useState<string>('');
+  // Set when the return carried no orderId and the order was found another way.
+  const [resolvedOrderId, setResolvedOrderId] = useState('');
+  const resolvedOrderIdRef = useRef('');
+  const [orderNotFound, setOrderNotFound] = useState(false);
 
   const orderId = useMemo(() => firstParam(params.orderId).trim(), [params.orderId]);
   const reference = useMemo(() => firstParam(params.reference).trim(), [params.reference]);
   const transactionRef = useMemo(() => firstParam(params.trxref).trim(), [params.trxref]);
   const status = useMemo(() => normalizeStatus(firstParam(params.status)), [params.status]);
+  const paymentReference = reference || transactionRef;
+  const activeOrderId = orderId || resolvedOrderId;
 
-  useEffect(() => {
-    let active = true;
+  // The server puts orderId on the Paystack callback URL, but a payment started
+  // before that deploy (or any return that lost it) arrives with only the
+  // reference. Every order the customer can read carries that reference on
+  // `payment`, so the order is found from their own list instead of giving up.
+  const resolveOrderId = useCallback(async (): Promise<string> => {
+    if (orderId) {
+      return orderId;
+    }
 
-    const confirmPayment = async () => {
-      if (!orderId) {
-        if (active) {
-          setRefreshing(false);
-          setRefreshError('We could not confirm this payment because the order id is missing.');
+    if (resolvedOrderIdRef.current) {
+      return resolvedOrderIdRef.current;
+    }
+
+    if (!paymentReference) {
+      return '';
+    }
+
+    const { orders } = await getCustomerOrders({ fresh: true });
+    return findOrderIdForPaymentReference(orders, paymentReference);
+  }, [orderId, paymentReference]);
+
+  const confirmPayment = useCallback(
+    async (isActive: () => boolean) => {
+      setRefreshError(null);
+      setOrderNotFound(false);
+
+      let targetOrderId = '';
+      try {
+        targetOrderId = await resolveOrderId();
+      } catch (nextError) {
+        if (isActive()) {
+          setRefreshError(toUserMessage(nextError, 'We could not look up this payment right now.'));
         }
         return;
       }
 
+      if (!isActive()) {
+        return;
+      }
+
+      if (!targetOrderId) {
+        setOrderNotFound(true);
+        return;
+      }
+
+      if (targetOrderId !== orderId) {
+        resolvedOrderIdRef.current = targetOrderId;
+        setResolvedOrderId(targetOrderId);
+      }
+
       if (isTerminalFailure(status)) {
-        if (active) {
-          setPaymentStatus('failed');
-          setGatewayStatus(status);
-          setRefreshing(false);
-        }
+        setPaymentStatus('failed');
+        setGatewayStatus(status);
         return;
       }
 
       try {
-        const result = await refreshCustomerPaymentStatus(orderId);
-        if (!active) {
+        const result = await refreshCustomerPaymentStatus(targetOrderId);
+        if (!isActive()) {
           return;
         }
 
@@ -68,7 +114,7 @@ export default function PaymentCallbackScreen() {
 
         if (result.paymentStatus === 'paid') {
           clearCart();
-          router.replace(`/orders/${orderId}`);
+          router.replace(`/orders/${targetOrderId}`);
           return;
         }
 
@@ -76,65 +122,61 @@ export default function PaymentCallbackScreen() {
           setRefreshError('The payment was not completed successfully.');
         }
       } catch (nextError) {
-        if (active) {
+        if (isActive()) {
           setRefreshError(toUserMessage(nextError, 'We could not verify this payment right now.'));
         }
-      } finally {
-        if (active) {
-          setRefreshing(false);
-        }
       }
-    };
+    },
+    [clearCart, orderId, resolveOrderId, router, status]
+  );
 
-    void confirmPayment();
+  useEffect(() => {
+    let active = true;
+    setRefreshing(true);
+
+    void confirmPayment(() => active).finally(() => {
+      if (active) {
+        setRefreshing(false);
+      }
+    });
 
     return () => {
       active = false;
     };
-  }, [clearCart, orderId, router, status]);
+  }, [confirmPayment]);
 
   const handleRetry = async () => {
-    if (!orderId || refreshing) {
+    if (refreshing) {
       return;
     }
 
     setRefreshing(true);
-    setRefreshError(null);
-
     try {
-      const result = await refreshCustomerPaymentStatus(orderId);
-      setPaymentStatus(result.paymentStatus);
-      setGatewayStatus(result.gatewayStatus);
-
-      if (result.paymentStatus === 'paid') {
-        clearCart();
-        router.replace(`/orders/${orderId}`);
-        return;
-      }
-
-      if (result.paymentStatus === 'failed') {
-        setRefreshError('The payment was not completed successfully.');
-      }
-    } catch (nextError) {
-      setRefreshError(toUserMessage(nextError, 'We could not verify this payment right now.'));
+      await confirmPayment(() => true);
     } finally {
       setRefreshing(false);
     }
   };
 
+  const failed = isTerminalFailure(status) || paymentStatus === 'failed';
+
   const headline =
     paymentStatus === 'paid'
       ? 'Payment confirmed'
-      : isTerminalFailure(status) || paymentStatus === 'failed'
+      : failed
         ? 'Payment not completed'
-        : 'Confirming payment';
+        : orderNotFound
+          ? 'Order not found yet'
+          : 'Confirming payment';
 
   const body =
     paymentStatus === 'paid'
       ? 'Your order is confirmed and we are sending you to the order details screen.'
-      : isTerminalFailure(status) || paymentStatus === 'failed'
+      : failed
         ? 'The payment was cancelled or failed. You can go back to checkout and try again.'
-        : 'We are checking with Paystack and the backend before continuing.';
+        : orderNotFound
+          ? ORDER_NOT_FOUND_MESSAGE
+          : 'We are checking with Paystack and the backend before continuing.';
 
   return (
     <View style={styles.container}>
@@ -145,13 +187,13 @@ export default function PaymentCallbackScreen() {
 
         <View style={styles.metaBox}>
           <Text style={styles.metaLabel}>Order</Text>
-          <Text style={styles.metaValue}>{orderId ? `#${orderId.slice(-6)}` : 'Unknown'}</Text>
+          <Text style={styles.metaValue}>{activeOrderId ? `#${activeOrderId.slice(-6)}` : 'Unknown'}</Text>
         </View>
 
         <View style={styles.metaBox}>
           <Text style={styles.metaLabel}>Reference</Text>
           <Text style={styles.metaValue} numberOfLines={1}>
-            {reference || transactionRef || 'Pending confirmation'}
+            {paymentReference || 'Pending confirmation'}
           </Text>
         </View>
 
@@ -172,6 +214,12 @@ export default function PaymentCallbackScreen() {
         {paymentStatus !== 'paid' ? (
           <Pressable accessibilityRole="button" onPress={handleRetry} style={styles.button} disabled={refreshing}>
             <BusyLabel busy={refreshing} label="Check again" busyLabel="Checking..." textStyle={styles.buttonText} />
+          </Pressable>
+        ) : null}
+
+        {orderNotFound && paymentStatus !== 'paid' ? (
+          <Pressable accessibilityRole="button" onPress={() => router.replace('/orders')} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Go to Orders</Text>
           </Pressable>
         ) : null}
 
