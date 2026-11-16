@@ -37,6 +37,11 @@ const ORDER_NOT_FOUND_MESSAGE =
 export default function PaymentCallbackScreen() {
   const router = useRouter();
   const { clearCart } = useCart();
+  // Held in a ref so a CartProvider re-render (a new clearCart identity) does
+  // not re-run the confirm effect, cancel the lookup in flight and repeat the
+  // reads.
+  const clearCartRef = useRef(clearCart);
+  clearCartRef.current = clearCart;
   const params = useLocalSearchParams<CallbackParams>();
   const [refreshing, setRefreshing] = useState(true);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -165,7 +170,7 @@ export default function PaymentCallbackScreen() {
 
         if (result.paymentStatus === 'paid') {
           forgetPaymentHandoff(getSessionStorage());
-          clearCart();
+          clearCartRef.current();
           router.replace(`/orders/${targetOrderId}`);
           return;
         }
@@ -180,7 +185,7 @@ export default function PaymentCallbackScreen() {
         }
       }
     },
-    [clearCart, findOrderIdWithoutParam, orderId, resolveOrderId, router, status]
+    [findOrderIdWithoutParam, orderId, resolveOrderId, router, status]
   );
 
   useEffect(() => {
