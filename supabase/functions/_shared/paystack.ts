@@ -49,6 +49,32 @@ export const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
   return getPaystackCallbackUrl();
 };
 
+/**
+ * The callback URL handed to Paystack for one checkout: the allow-listed URL
+ * above with `orderId=<id>` added. The client builds its callback before the
+ * order exists, and Paystack returns with only `reference`/`trxref`, so without
+ * this the web callback screen had no order to confirm. Paystack appends its
+ * own params to an existing query string correctly. `set` (not `append`)
+ * replaces any orderId the client put on the URL.
+ */
+export const buildPaystackCallbackUrlForOrder = (callbackUrl: unknown, orderId: string) => {
+  const normalized = getNormalizedPaystackCallbackUrl(callbackUrl);
+  const safeOrderId = sanitizeText(orderId);
+  if (!safeOrderId) {
+    return normalized;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    parsed.searchParams.set('orderId', safeOrderId);
+    return parsed.toString();
+  } catch {
+    // A configured callback that is not a parseable URL is passed through as
+    // before rather than failing checkout.
+    return normalized;
+  }
+};
+
 export const assertPaystackConfigured = () => {
   if (!getPaystackSecretKey() || !getPaystackPublicKey()) {
     fail(
