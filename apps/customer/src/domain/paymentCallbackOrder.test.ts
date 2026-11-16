@@ -6,6 +6,7 @@ import { test } from 'node:test';
 
 import {
   PAYMENT_HANDOFF_STORAGE_KEY,
+  acceptOrderIdParam,
   findOrderIdForPaymentReference,
   forgetPaymentHandoff,
   readPaymentHandoffOrderId,
@@ -126,4 +127,14 @@ test('storage that throws, or no storage at all, never throws to the caller', ()
   assert.equal(readPaymentHandoffOrderId(throwingStorage, REF), '');
   assert.doesNotThrow(() => rememberPaymentHandoff(null, { orderId: 'order-b', reference: REF }));
   assert.equal(readPaymentHandoffOrderId(null, REF), '');
+});
+
+test('only a UUID-shaped orderId param is accepted', () => {
+  assert.equal(acceptOrderIdParam('5e1dc1d4-44a8-449e-a895-998fba8f6f95'), '5e1dc1d4-44a8-449e-a895-998fba8f6f95');
+  assert.equal(acceptOrderIdParam(' 5E1DC1D4-44A8-449E-A895-998FBA8F6F95 '), '5E1DC1D4-44A8-449E-A895-998FBA8F6F95');
+  assert.equal(acceptOrderIdParam('undefined'), '');
+  assert.equal(acceptOrderIdParam('5e1dc1d4-44a8-449e-a895'), '');
+  assert.equal(acceptOrderIdParam('5e1dc1d4-44a8-449e-a895-998fba8f6f95/../x'), '');
+  assert.equal(acceptOrderIdParam(''), '');
+  assert.equal(acceptOrderIdParam(undefined), '');
 });

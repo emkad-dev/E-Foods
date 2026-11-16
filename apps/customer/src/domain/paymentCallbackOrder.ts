@@ -13,6 +13,18 @@ type OrderWithPaymentReference = {
 
 const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The orderId query param, only when it is UUID-shaped (every order id is a
+ * server-generated UUID). Anything else is ignored, so a mangled or hand-edited
+ * URL falls through to the reference lookup instead of a doomed refresh.
+ */
+export const acceptOrderIdParam = (value: unknown): string => {
+  const candidate = clean(value);
+  return UUID_PATTERN.test(candidate) ? candidate : '';
+};
+
 /**
  * The id of the customer's order paid with `reference`, or '' when none match.
  * A grouped checkout shares one reference across its member orders; the one to

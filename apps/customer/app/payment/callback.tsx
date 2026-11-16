@@ -5,7 +5,9 @@ import { BusyLabel, radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
 import { getCustomerOrders } from '../../src/services/customerReadModel';
+import { isBackendRpcError } from '../../../../packages/auth/src';
 import {
+  acceptOrderIdParam,
   findOrderIdForPaymentReference,
   forgetPaymentHandoff,
   getSessionStorage,
@@ -45,40 +47,49 @@ export default function PaymentCallbackScreen() {
   const resolvedOrderIdRef = useRef('');
   const [orderNotFound, setOrderNotFound] = useState(false);
 
-  const orderId = useMemo(() => firstParam(params.orderId).trim(), [params.orderId]);
+  const orderId = useMemo(() => acceptOrderIdParam(firstParam(params.orderId)), [params.orderId]);
   const reference = useMemo(() => firstParam(params.reference).trim(), [params.reference]);
   const transactionRef = useMemo(() => firstParam(params.trxref).trim(), [params.trxref]);
   const status = useMemo(() => normalizeStatus(firstParam(params.status)), [params.status]);
   const paymentReference = reference || transactionRef;
-  const activeOrderId = orderId || resolvedOrderId;
+  const activeOrderId = orderNotFound ? '' : resolvedOrderId || orderId;
 
   // The server puts orderId on the Paystack callback URL, but a payment started
   // before that deploy (or any return that lost it) arrives with only the
   // reference. Every order the customer can read carries that reference on
   // `payment`, so the order is found from their own list instead of giving up.
-  const resolveOrderId = useCallback(async (): Promise<string> => {
-    if (orderId) {
-      return orderId;
-    }
+  // `excludeOrderId` is an id that already 404'd, so it is never handed back.
+  const findOrderIdWithoutParam = useCallback(
+    async (excludeOrderId = ''): Promise<string> => {
+      // Second fallback: what the web payment screen remembered before it sent
+      // this window to Paystack. Checked first because it needs no network.
+      const handoffOrderId = readPaymentHandoffOrderId(getSessionStorage(), paymentReference);
+      if (handoffOrderId && handoffOrderId !== excludeOrderId) {
+        return handoffOrderId;
+      }
 
+      if (!paymentReference) {
+        return '';
+      }
+
+      const { orders } = await getCustomerOrders({ fresh: true });
+      const found = findOrderIdForPaymentReference(orders, paymentReference);
+      return found === excludeOrderId ? '' : found;
+    },
+    [paymentReference]
+  );
+
+  const resolveOrderId = useCallback(async (): Promise<string> => {
     if (resolvedOrderIdRef.current) {
       return resolvedOrderIdRef.current;
     }
 
-    // Second fallback: what the web payment screen remembered before it sent
-    // this window to Paystack. Checked first because it needs no network.
-    const handoffOrderId = readPaymentHandoffOrderId(getSessionStorage(), paymentReference);
-    if (handoffOrderId) {
-      return handoffOrderId;
+    if (orderId) {
+      return orderId;
     }
 
-    if (!paymentReference) {
-      return '';
-    }
-
-    const { orders } = await getCustomerOrders({ fresh: true });
-    return findOrderIdForPaymentReference(orders, paymentReference);
-  }, [orderId, paymentReference]);
+    return findOrderIdWithoutParam();
+  }, [findOrderIdWithoutParam, orderId]);
 
   const confirmPayment = useCallback(
     async (isActive: () => boolean) => {
@@ -116,7 +127,34 @@ export default function PaymentCallbackScreen() {
       }
 
       try {
-        const result = await refreshCustomerPaymentStatus(targetOrderId);
+        let result: Awaited<ReturnType<typeof refreshCustomerPaymentStatus>>;
+        try {
+          result = await refreshCustomerPaymentStatus(targetOrderId);
+        } catch (refreshError) {
+          // An orderId the server does not know (404): try the reference
+          // lookup once before giving up on this return.
+          if (!isBackendRpcError(refreshError) || refreshError.status !== 404) {
+            throw refreshError;
+          }
+
+          const fallbackOrderId = await findOrderIdWithoutParam(targetOrderId);
+          if (!isActive()) {
+            return;
+          }
+
+          if (!fallbackOrderId) {
+            resolvedOrderIdRef.current = '';
+            setResolvedOrderId('');
+            setOrderNotFound(true);
+            return;
+          }
+
+          targetOrderId = fallbackOrderId;
+          resolvedOrderIdRef.current = fallbackOrderId;
+          setResolvedOrderId(fallbackOrderId);
+          result = await refreshCustomerPaymentStatus(fallbackOrderId);
+        }
+
         if (!isActive()) {
           return;
         }
@@ -140,7 +178,7 @@ export default function PaymentCallbackScreen() {
         }
       }
     },
-    [clearCart, orderId, resolveOrderId, router, status]
+    [clearCart, findOrderIdWithoutParam, orderId, resolveOrderId, router, status]
   );
 
   useEffect(() => {
