@@ -603,7 +603,7 @@ export default function CartScreen() {
         tipAmount: safeTipAmount,
       };
 
-      const { authorizationUrl, orderId } = await initializeCustomerPayment(checkoutPayload);
+      const { authorizationUrl, orderId, reference } = await initializeCustomerPayment(checkoutPayload);
       trackAnalyticsEvent('customer_payment_redirect_requested', {
         order_id: orderId,
         payment_method: paymentMethod,
@@ -613,6 +613,8 @@ export default function CartScreen() {
         params: {
           authorizationUrl,
           orderId,
+          // Remembered by the web handoff so the callback can match the return.
+          reference,
         },
       } as never);
     } catch (error) {

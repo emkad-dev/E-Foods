@@ -5,7 +5,12 @@ import { BusyLabel, radius } from '@feasty/design-system';
 import { useCart } from '../../src/contexts/CartContext';
 import { refreshCustomerPaymentStatus } from '../../src/services/customerOrderActions';
 import { getCustomerOrders } from '../../src/services/customerReadModel';
-import { findOrderIdForPaymentReference } from '../../src/domain/paymentCallbackOrder';
+import {
+  findOrderIdForPaymentReference,
+  forgetPaymentHandoff,
+  getSessionStorage,
+  readPaymentHandoffOrderId,
+} from '../../src/domain/paymentCallbackOrder';
 import { toUserMessage } from '../../../../packages/observability/src/userMessage';
 import { customerTheme } from '../../src/theme/palette';
 import { pageTitleTextStyle } from '../../src/theme/screenChrome';
@@ -58,6 +63,13 @@ export default function PaymentCallbackScreen() {
 
     if (resolvedOrderIdRef.current) {
       return resolvedOrderIdRef.current;
+    }
+
+    // Second fallback: what the web payment screen remembered before it sent
+    // this window to Paystack. Checked first because it needs no network.
+    const handoffOrderId = readPaymentHandoffOrderId(getSessionStorage(), paymentReference);
+    if (handoffOrderId) {
+      return handoffOrderId;
     }
 
     if (!paymentReference) {
@@ -113,6 +125,7 @@ export default function PaymentCallbackScreen() {
         setGatewayStatus(result.gatewayStatus);
 
         if (result.paymentStatus === 'paid') {
+          forgetPaymentHandoff(getSessionStorage());
           clearCart();
           router.replace(`/orders/${targetOrderId}`);
           return;
