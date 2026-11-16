@@ -16,6 +16,7 @@ import { BusyLabel, MIN_TAP_TARGET, radius, space } from '@feasty/design-system'
 import { customerTheme } from '../../src/theme/palette';
 import { screenTitleTextStyle } from '../../src/theme/screenChrome';
 import { normalizeCustomerPaymentCallbackPath } from '../../src/services/paymentRouting';
+import { getSessionStorage, rememberPaymentHandoff } from '../../src/domain/paymentCallbackOrder';
 import { formatMoney } from '../../src/utils/formatting';
 import {
   describeExternalLinkFailure,
@@ -26,6 +27,7 @@ type PaymentParams = {
   amount?: string | string[];
   authorizationUrl?: string | string[];
   orderId?: string | string[];
+  reference?: string | string[];
 };
 
 const firstParam = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] ?? '' : value ?? '');
@@ -76,6 +78,7 @@ export default function PaymentScreen() {
 
   const authorizationUrl = useMemo(() => normalizeUrl(firstParam(params.authorizationUrl)), [params.authorizationUrl]);
   const orderId = useMemo(() => firstParam(params.orderId), [params.orderId]);
+  const reference = useMemo(() => firstParam(params.reference), [params.reference]);
 
   // Shown only when a caller forwards it. An amount is never derived or guessed
   // here: a wrong number on the screen that hands the customer to a real charge
@@ -97,6 +100,16 @@ export default function PaymentScreen() {
       setError('Payment could not be started.');
     }
   }, [authorizationUrl, orderId]);
+
+  // WEB ONLY. This window leaves for Paystack (by the button or the plain
+  // link), and the return may carry only reference/trxref. Remember the order
+  // so the callback screen can pick it up without a lookup. Native forwards
+  // orderId from this screen's own params instead.
+  useEffect(() => {
+    if (Platform.OS === 'web' && authorizationUrl && orderId) {
+      rememberPaymentHandoff(getSessionStorage(), { orderId, reference });
+    }
+  }, [authorizationUrl, orderId, reference]);
 
   const forwardToCallback = (url: string) => {
     const { queryParams } = readUrlParts(url);

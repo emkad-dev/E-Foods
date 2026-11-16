@@ -10,7 +10,7 @@ import { parseNumber, roundCurrency, sanitizeOptionalText, sanitizeText } from '
 import { fail } from './rpc/respond.ts';
 
 const PAYSTACK_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_PAYSTACK_CALLBACK_URL = 'https://feasty.com/payment/callback';
+const DEFAULT_PAYSTACK_CALLBACK_URL = 'https://app.feasty.com.ng/payment/callback';
 
 export const getPaystackSecretKey = () => sanitizeText(Deno.env.get('PAYSTACK_SECRET_KEY'));
 export const getPaystackPublicKey = () => sanitizeText(Deno.env.get('PAYSTACK_PUBLIC_KEY'));
@@ -18,10 +18,30 @@ export const getPaystackPublicKey = () => sanitizeText(Deno.env.get('PAYSTACK_PU
 const getPaystackCallbackUrl = () =>
   sanitizeOptionalText(Deno.env.get('PAYSTACK_CALLBACK_URL')) ?? DEFAULT_PAYSTACK_CALLBACK_URL;
 
+// Hosts (exact, so no non-default port) whose /payment/callback we serve.
+const ALLOWED_CALLBACK_HOSTS = new Set(['app.feasty.com.ng', 'feasty.com.ng', 'www.feasty.com.ng']);
+// Local development, on any port.
+const LOCAL_DEV_CALLBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
+
+const isAllowedCallbackHost = (parsed: URL) => {
+  const host = parsed.host.toLowerCase();
+  if (ALLOWED_CALLBACK_HOSTS.has(host) || LOCAL_DEV_CALLBACK_HOSTNAMES.has(parsed.hostname.toLowerCase())) {
+    return true;
+  }
+
+  try {
+    return host === new URL(getPaystackCallbackUrl()).host.toLowerCase();
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Client-supplied callback URLs are only honoured when they point at the one
- * path we own, on a scheme we recognise. Anything else falls back to the
- * configured URL — a Paystack callback is an open-redirect surface otherwise.
+ * path we own, on a scheme we recognise, and (for http/https) on a host we
+ * serve: the configured callback's host, the FEASTY web hosts, or localhost.
+ * Anything else falls back to the configured URL — a Paystack callback is an
+ * open-redirect surface otherwise.
  */
 export const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
   const rawCallbackUrl = sanitizeOptionalText(callbackUrl);
@@ -35,7 +55,7 @@ export const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
     const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
     const pathname = parsed.pathname.replace(/^\/+|\/+$/g, '');
 
-    if ((scheme === 'http' || scheme === 'https') && pathname === 'payment/callback') {
+    if ((scheme === 'http' || scheme === 'https') && pathname === 'payment/callback' && isAllowedCallbackHost(parsed)) {
       return parsed.toString();
     }
 
@@ -47,6 +67,32 @@ export const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
   }
 
   return getPaystackCallbackUrl();
+};
+
+/**
+ * The callback URL handed to Paystack for one checkout: the allow-listed URL
+ * above with `orderId=<id>` added. The client builds its callback before the
+ * order exists, and Paystack returns with only `reference`/`trxref`, so without
+ * this the web callback screen had no order to confirm. Paystack appends its
+ * own params to an existing query string correctly. `set` (not `append`)
+ * replaces any orderId the client put on the URL.
+ */
+export const buildPaystackCallbackUrlForOrder = (callbackUrl: unknown, orderId: string) => {
+  const normalized = getNormalizedPaystackCallbackUrl(callbackUrl);
+  const safeOrderId = sanitizeText(orderId);
+  if (!safeOrderId) {
+    return normalized;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    parsed.searchParams.set('orderId', safeOrderId);
+    return parsed.toString();
+  } catch {
+    // A configured callback that is not a parseable URL is passed through as
+    // before rather than failing checkout.
+    return normalized;
+  }
 };
 
 export const assertPaystackConfigured = () => {

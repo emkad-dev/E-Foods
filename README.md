@@ -103,7 +103,7 @@ Set:
 BOOTSTRAP_ADMIN_EMAILS=admin@example.com
 PAYSTACK_SECRET_KEY=sk_test_your_secret_key_here
 PAYSTACK_PUBLIC_KEY=pk_test_your_public_key_here
-PAYSTACK_CALLBACK_URL=https://feasty.com/payment/callback
+PAYSTACK_CALLBACK_URL=https://app.feasty.com.ng/payment/callback
 ```
 
 Then sign in with the allowed Supabase Auth account and call `bootstrapFirstAdmin` once. After the first admin exists, use normal admin-managed role assignment.
@@ -164,7 +164,7 @@ into Supabase secrets:
 BOOTSTRAP_ADMIN_EMAILS=admin@example.com
 PAYSTACK_SECRET_KEY=sk_test_your_secret_key_here
 PAYSTACK_PUBLIC_KEY=pk_test_your_public_key_here
-PAYSTACK_CALLBACK_URL=https://feasty.com/payment/callback
+PAYSTACK_CALLBACK_URL=https://app.feasty.com.ng/payment/callback
 ```
 
 The checked-in example lives in [`functions/.env.example`](functions/.env.example).
