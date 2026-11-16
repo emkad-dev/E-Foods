@@ -9,6 +9,7 @@ import { resolveViewState } from '../lib/viewState';
 import { describeWriteFailure } from '../lib/writeOutcome';
 import { createPromo, listPromos, setPromoActive, type Promo } from '../services/promos';
 import { uploadPromoAsset } from '../services/promoAssetUpload';
+import WinLabel from '../components/WinLabel';
 
 const isLive = (promo: Promo): boolean => {
   if (!promo.active) {
@@ -263,7 +264,9 @@ export default function PromosPage() {
           />
         </div>
         <button type="button" className="btn btn-primary" disabled={!canSubmit} onClick={() => void onCreate()}>
-          {busy ? 'Sending…' : 'Send promo'}
+          {/* "Reach customers", not "Go live": a promo can be scheduled to
+              start later, and the win line must stay true either way. */}
+          {busy ? 'Sending…' : <WinLabel idle="Send promo" win="Reach customers" />}
         </button>
       </div>
 

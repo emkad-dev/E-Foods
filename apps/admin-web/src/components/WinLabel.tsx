@@ -20,9 +20,15 @@
  *    because every one of these buttons sits beside a destructive one, and a
  *    control that shifts its neighbour on hover invites a mis-click.
  *
- * Never use it on a destructive or remedial action. Reject, Delete, Disable
- * and Enable (restoring a suspended account) are not wins, and a cheerful
- * hover line on them would be tone-deaf at best.
+ * Where it is used (each an owner decision): Approve a partner and Approve a
+ * rider ("Welcome aboard"), Publish a restaurant ("Go live"), Send promo
+ * ("Reach customers"), Send now on a broadcast ("Get the word out") and Mark
+ * resolved on an alert ("Case closed"). The broadcast send goes to every user
+ * and cannot be undone, so its confirm dialog keeps the plain "Send now".
+ *
+ * Never use it on a destructive action -- Reject, Delete, Disable -- or on
+ * Enable, which restores a suspended account. A cheerful hover line on those
+ * would be tone-deaf at best.
  */
 export default function WinLabel({ idle, win }: { idle: string; win: string }) {
   return (

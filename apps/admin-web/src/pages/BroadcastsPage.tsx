@@ -20,6 +20,7 @@ import {
   type Broadcast,
   type BroadcastSegment,
 } from '../services/broadcasts';
+import WinLabel from '../components/WinLabel';
 
 type ActivityChoice = 'none' | 'active30' | 'lapsed60';
 
@@ -418,7 +419,10 @@ export default function BroadcastsPage() {
           <div className="broadcast-send">
             <p className="muted">Draft “{selected.title}” selected. Send it:</p>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => setSendConfirm(selected)}>
-              Send now
+              {/* Opens the confirm dialog, whose button keeps the plain "Send
+                  now": this goes to every user and cannot be undone, so the
+                  moment of commitment stays serious. */}
+              <WinLabel idle="Send now" win="Get the word out" />
             </button>
             <input type="datetime-local" value={schedAt} onChange={(event) => setSchedAt(event.target.value)} />
             <button

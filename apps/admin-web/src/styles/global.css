@@ -22,20 +22,42 @@
   --color-accent: #2e7d32;
   --color-accent-strong: #1b5e20;
   --color-accent-soft: #c8e6c9;
+  --color-action: #15171a;
   --color-surface: #ffffff;
-  --color-surface-muted: #edf3f1;
-  --color-ink: #0d1522;
-  --color-ink-muted: #54626f;
-  --color-hairline: #dde7e3;
+  --color-surface-muted: #efedea;
+  --color-ink: #15171a;
+  --color-ink-muted: #5a5f66;
+  --color-hairline: #e4e1dc;
 }
 
 :root {
-  --background: #f3f7f6;
+  /*
+   * COLOUR MEANS STATE. The console's one job is showing an operator what
+   * needs attention, which only works if a saturated colour always means the
+   * same thing. It did not: --accent was #2e7d32, and that single green was
+   * the BRAND (wordmark), the PRIMARY ACTION (buttons, active nav) and
+   * SUCCESS (badges) simultaneously -- .badge-primary and .badge-success were
+   * all but the same rule. A green pill therefore told the reader nothing.
+   *
+   * The split now is:
+   *   brand   -- --brand-green / --brand-orange, the wordmark ONLY
+   *   action  -- --action, ink. Carries no hue, so it can never be read as
+   *              a status, and the one primary button per view is still the
+   *              darkest thing on screen.
+   *   status  -- success / warning / danger / info, the ONLY saturated fills
+   *              on the page. Untouched below: each soft/text pair is already
+   *              measured and passing, and this change deliberately does not
+   *              disturb them.
+   *
+   * The field moves off the mint-tinted greys to a warm neutral so those
+   * status fills read as the only colour present.
+   */
+  --background: #f1efeb;
   --surface: #ffffff;
-  --surface-muted: #edf3f1;
-  --border: #dde7e3;
-  --border-strong: #c2d0ca;
-  --text: #0d1522;
+  --surface-muted: #efedea;
+  --border: #e4e1dc;
+  --border-strong: #cfcac2;
+  --text: #15171a;
   /*
    * ONE secondary grey, not two. These were #5b6978 and #6a7d76, and both
    * failed AA somewhere: #6a7d76 measured 4.37:1 on white, 4.04:1 on the page
@@ -49,16 +71,19 @@
    * as `text.secondary` for exactly this problem in the mobile apps, where its
    * comment rejects BOTH of these legacy greys by name. Admin cannot import
    * that package, so the value and the reasoning are copied, not the token.
-   * Measured here on every surface this stylesheet actually paints it on:
-   *   #ffffff 6.26:1 · --background 5.80:1 · --surface-muted 5.57:1
-   *   --accent-soft 4.66:1 · --warning-soft 4.94:1 · --danger-soft 4.94:1
-   *   --info-soft 5.35:1
+   * Re-measured when the field moved to the warm neutral above. The value
+   * moved with it (#54626f -> #5a5f66): on the new surfaces it is the better
+   * of the two everywhere, so the floor RISES rather than regressing --
+   * worst case 4.79:1, where #54626f scored 4.66:1.
+   *   #ffffff 6.43:1 · --background 5.60:1 · --surface-muted 5.51:1
+   *   --accent-soft 4.79:1 · --warning-soft 5.07:1 · --danger-soft 5.08:1
+   *   --info-soft 5.50:1
    * Both names are kept so the ~20 call sites stay put and the roles can
    * diverge again later, but any new value for either must clear 4.5:1 on all
    * seven surfaces above.
    */
-  --text-muted: #54626f;
-  --text-soft: #54626f;
+  --text-muted: #5a5f66;
+  --text-soft: #5a5f66;
   --brand-green: #2e7d32;
   --brand-orange: #f57c00;
   --accent: #2e7d32;
@@ -98,8 +123,23 @@
   --danger: #c54a43;
   --danger-soft: #f8dfdc;
   --danger-text: #a83b35;
-  --shadow: 0 10px 30px rgba(9, 15, 29, 0.06);
-  --radius: 16px;
+  /*
+   * Action ink. A primary button is the darkest thing in the view and the
+   * only near-black fill, so "the dark one" is always the main action.
+   */
+  --action: #15171a;
+  --action-hover: #2f343b;
+  --action-ink: #ffffff;
+  /*
+   * Flat console: hierarchy comes from spacing and type, not from stacking a
+   * shadowed box inside another shadowed box. The shadow token is kept (the
+   * dialog and other lifted surfaces still want one) but no longer sits under
+   * every card, and the radius drops from a 16px marketing curve to something
+   * an instrument panel would use.
+   */
+  --shadow: 0 16px 40px rgba(16, 18, 22, 0.14);
+  --radius: 10px;
+  --radius-sm: 7px;
 }
 
 * {
@@ -114,10 +154,29 @@ body,
 
 body {
   margin: 0;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   background: var(--background);
   color: var(--text);
   font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * NUMBERS ARE DATA. Proportional digits make a column of money or counts
+ * ragged, because a 1 is narrower than a 0 -- on a console whose whole job
+ * is comparing figures down a column that is a legibility bug, not a
+ * nicety. Applied where figures actually live rather than to body, where
+ * tabular digits inside a sentence look mechanical.
+ */
+.kpi-value,
+.kpi-delta,
+.data-table td,
+.cell-amount,
+.audit-entry-when,
+.promo-item-stats {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
 }
 
 button {
@@ -131,33 +190,12 @@ button {
   min-height: 100vh;
 }
 
-/*
- * THE FRAME. The sidebar and top bar carry the redesign on every page; the
- * pages themselves do not, except the Dashboard (see the .dashboard block at
- * the end of this file). These tokens are scoped to the two frame elements so
- * the new palette reaches them without leaking into page content.
- *
- * `color` is set here, not inherited: body resolves var(--text) once, at
- * body, so a descendant that redefines --text still inherits the OLD computed
- * colour unless it sets `color` itself.
- */
-.sidebar,
-.topbar {
-  --surface-muted: #efedea;
-  --border: #e4e1dc;
-  --border-strong: #cfcac2;
-  --text: #15171a;
-  --text-muted: #5a5f66;
-  --text-soft: #5a5f66;
-  --action: #15171a;
-  --radius-sm: 7px;
-  color: var(--text);
-}
-
 .sidebar {
   width: 224px;
   flex-shrink: 0;
-  /* White and edgeless: no ring or rule marks where the shell ends. */
+  /* White and edgeless. With the topbar also white, the two frame the warm
+     content canvas by fill alone, so no rule is needed to mark where the
+     shell ends. */
   background: var(--surface);
   display: flex;
   flex-direction: column;
@@ -172,8 +210,10 @@ button {
   align-items: center;
   display: flex;
   /* Was 40px with -2px tracking: the loudest thing in the console was its
-     own logo. The wordmark keeps its italic weight and both brand colours at
-     a size that signs the page instead of shouting over it. */
+     own logo, competing with the data for the operator's eye all day. The
+     wordmark keeps its italic weight and both brand colours -- this is the
+     one place brand colour is allowed -- at a size that signs the page
+     instead of shouting over it. */
   font-size: 21px;
   font-style: italic;
   font-weight: 900;
@@ -196,8 +236,12 @@ button {
   color: var(--brand-orange);
 }
 
-/* Group heading in the sidebar (AppLayout groups the links). Sentence case:
-   caps cost legibility at 11px, and this is a quiet signpost. */
+/*
+ * Group heading in the sidebar. Sentence case, not the tracked-out all-caps
+ * this was: caps cost legibility at 11px, and the label is a quiet signpost
+ * rather than a banner. Defined but never rendered until AppLayout started
+ * grouping the ten nav links.
+ */
 .nav-section-label {
   font-size: 11.5px;
   font-weight: 600;
@@ -215,6 +259,7 @@ button {
   text-decoration: none;
   font-weight: 500;
   margin-bottom: 1px;
+  position: relative;
 }
 
 .nav-link:hover {
@@ -222,8 +267,11 @@ button {
   color: var(--text);
 }
 
-/* "The page you are on" is structure, not status, so it is a filled chip in
-   ink -- never the success green it used to be, and no edge stripe. */
+/*
+ * Active means "the page you are on", which is structure, not status -- so
+ * it is said in ink and surface, never in a hue. The green pill this
+ * replaced spent the success colour on "you are here".
+ */
 .nav-link.active {
   background: var(--surface-muted);
   color: var(--text);
@@ -242,21 +290,23 @@ button {
   flex-direction: column;
 }
 
-/* A divider under the bar separates "where you are" from the page's own
-   controls. Side padding matches .page (32px) so the title lines up with
-   every page's content. */
+/*
+ * A rule under the bar, not a floating heading: it separates "where you are"
+ * from the page's own controls, which previously ran together because the
+ * filters sat directly beneath an unseparated title.
+ */
 .topbar {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 32px 14px;
+  padding: 16px 28px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
-/* Names the section (AppLayout resolves it from the route). 18px, not
-   24px/800: the page's data, not its heading, is what the operator reads. */
+/* 18px, not 24px/800. This names the section; the data below it is what the
+   operator is here to read, and the heading should not outweigh it. */
 .topbar-title {
   font-size: 18px;
   font-weight: 650;
@@ -272,26 +322,11 @@ button {
   font-size: 12.5px;
 }
 
-/* The signed-in email is identity, not status: a neutral chip with no ring,
-   rather than the green pill that made it read as a success. */
-.topbar .badge-primary {
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  border-color: transparent;
-  font-weight: 600;
-}
-
-/* Sign out: a faint fill instead of an outline. */
-.sidebar .btn-ghost {
-  background: rgba(21, 23, 26, 0.06);
-  border-color: transparent;
-}
-
 .page {
-  padding: 20px 32px 40px;
+  padding: 20px 28px 48px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .page-header {
@@ -304,12 +339,24 @@ button {
 
 /* ---------- Cards ---------- */
 
+/*
+ * NO BEZELS. Nothing in the console draws a ring around an element: cards,
+ * badges, buttons and panels are told apart by fill alone. The only lines
+ * left are dividers BETWEEN content (table rows, list rows, section breaks),
+ * the keyboard focus ring, which is an accessibility floor rather than
+ * decoration, and the edges of text fields (see .field input), which a person
+ * needs in order to find where to type.
+ *
+ * Removing a ring means `border: 1px solid transparent`, never deleting the
+ * declaration, wherever the element is a native control (select, button,
+ * dialog). With no border rule at all the browser's own default border comes
+ * back -- the range <select> measured rgb(118,118,118) when this was missed --
+ * and the transparent 1px also keeps each box exactly the size it was.
+ */
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 20px;
+  padding: 18px;
 }
 
 .card-title-row {
@@ -352,32 +399,49 @@ button {
   border-radius: 8px;
 }
 
+/*
+ * Fixed four across on a desktop console rather than auto-fit: auto-fit let
+ * the eight overview cards reflow to five-and-three, leaving a ragged hole
+ * in the second row and re-flowing the grid every time a card was added.
+ */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1240px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .kpi-card {
   background: var(--surface);
-  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 18px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
 }
 
 .kpi-label {
   color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 500;
 }
 
 .kpi-value {
-  font-size: 26px;
-  font-weight: 800;
+  font-size: 27px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .kpi-delta {
@@ -397,6 +461,89 @@ button {
 
 .kpi-delta.flat {
   color: var(--text-soft);
+}
+
+/* ---------- Dashboard sections ---------- */
+
+/*
+ * The overview is three sections ordered by urgency, each grouping the
+ * figures and lists that answer the same question. It used to be one
+ * undivided run of nine cards and four panels under a date picker that
+ * actually governed fewer than half of them.
+ */
+.dash-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A rule and room between sections, so the grouping is visible rather than
+   left to the headings alone. */
+.dash-section + .dash-section {
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 22px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+
+.section-note {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  margin: 2px 0 0;
+}
+
+/* Two classes on purpose: this has to outrank the single-class .kpi-grid
+   breakpoints above whatever order the file ends up in. */
+.kpi-grid.kpi-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 680px) {
+  .kpi-grid.kpi-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Work waiting for a person. An attention state, so it may use the warning
+   hue; the figure still carries the meaning and the tint only draws the eye.
+   A tint rather than an edge stripe, because nothing here wears a bezel.
+   Muted text measures 5.78:1 on it. */
+.kpi-card.is-attention {
+  background: #fff1dc;
+}
+
+/* Two peers side by side, such as the two breakdown charts. */
+.grid-even {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .grid-even {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kpi-unavailable {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  margin: 0;
 }
 
 .grid-2 {
@@ -423,22 +570,32 @@ button {
   border-collapse: collapse;
 }
 
+/*
+ * Sentence case, not caps. Caps cost scanning speed at 12px and made the
+ * header the loudest text in a table whose job is to let the eye drop
+ * straight to the rows.
+ */
 .data-table th {
   text-align: left;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-strong);
   white-space: nowrap;
 }
 
 .data-table td {
-  padding: 12px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+}
+
+/* Figures align down the column; a header marked .num follows its cells. */
+.data-table th.num,
+.data-table td.num,
+.data-table .cell-amount {
+  text-align: right;
 }
 
 .data-table tbody tr:hover {
@@ -453,9 +610,14 @@ button {
   font-weight: 700;
 }
 
+/*
+ * Ink, not green. Money is not a success state -- painting every total in
+ * the success colour made a refunded or cancelled order's figure read as
+ * healthy. Weight and tabular alignment carry the emphasis instead.
+ */
 .cell-amount {
-  font-weight: 700;
-  color: var(--accent-strong);
+  font-weight: 650;
+  color: var(--text);
   white-space: nowrap;
 }
 
@@ -472,10 +634,16 @@ button {
   white-space: nowrap;
 }
 
+/*
+ * Identity, not status: what the signed-in email and similar neutral facts
+ * wear. It was --accent-soft with --accent-strong text, which made it
+ * indistinguishable from .badge-success below -- an operator's own address
+ * rendered as though something had succeeded.
+ */
 .badge-primary {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  border-color: #a5d6a7;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 /* Each badge writes with the -text counterpart of its fill, never the fill
@@ -484,31 +652,26 @@ button {
 .badge-success {
   background: var(--success-soft);
   color: var(--accent-strong);
-  border-color: #a5d6a7;
 }
 
 .badge-warning {
   background: var(--warning-soft);
   color: var(--warning-text);
-  border-color: #ffcc80;
 }
 
 .badge-danger {
   background: var(--danger-soft);
   color: var(--danger-text);
-  border-color: #fecaca;
 }
 
 .badge-info {
   background: var(--info-soft);
   color: var(--info-text);
-  border-color: #99f6e4;
 }
 
 .badge-neutral {
   background: var(--surface-muted);
   color: var(--text-soft);
-  border-color: var(--border);
 }
 
 /* ---------- Buttons & forms ---------- */
@@ -536,14 +699,130 @@ button {
   filter: brightness(0.95);
 }
 
+/* Ink -- see the --action note. The main action is the darkest control in
+   the view and carries no hue that could be mistaken for a status. */
 .btn-primary {
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--action);
+  color: var(--action-ink);
+  border-color: var(--action);
 }
 
+.btn-primary:not(:disabled):hover {
+  background: var(--action-hover);
+  border-color: var(--action-hover);
+  filter: none;
+}
+
+/*
+ * Ink, same as .btn-primary -- NOT the success green it used to be.
+ *
+ * All four call sites (ApprovalsPage's Approve x3, AccessPage's Enable) are
+ * the affirmative PRIMARY action of their row, so they should look like the
+ * primary action. Filling them with --success instead said "this succeeded"
+ * about a button that has not been pressed yet, and put a second loud solid
+ * next to the real primary wherever both appeared.
+ *
+ * Green now occurs in exactly two places in the console, both of which are
+ * genuine states: .badge-success and .kpi-delta.up.
+ *
+ * The class is kept rather than swapped out at the call sites so the markup
+ * keeps naming the INTENT of the button ("the affirmative one"), which is
+ * worth more than four identical class attributes.
+ */
 .btn-success {
-  background: var(--success);
-  color: #ffffff;
+  background: var(--action);
+  color: var(--action-ink);
+  border-color: var(--action);
+}
+
+.btn-success:not(:disabled):hover {
+  background: var(--action-hover);
+  border-color: var(--action-hover);
+  filter: none;
+}
+
+/*
+ * The win buttons -- any .btn carrying a WinLabel (see components/WinLabel.tsx
+ * for the list) -- lift a pixel on hover and press back down on click, a small
+ * physical acknowledgement for the platform's good moments. Scoped with
+ * :has(.win-label) rather than given to a button class: Access's Enable
+ * restores a suspended account, which is remedial, not a win, and routine
+ * actions need no ceremony. Destructive ones never get it.
+ */
+.btn:has(.win-label) {
+  transition:
+    background-color 140ms ease,
+    transform 200ms cubic-bezier(0.2, 0.9, 0.25, 1.2),
+    box-shadow 200ms ease;
+}
+
+.btn:has(.win-label):not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -6px rgba(21, 23, 26, 0.55);
+}
+
+.btn:has(.win-label):not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: none;
+  transition-duration: 60ms;
+}
+
+/*
+ * WinLabel (components/WinLabel.tsx): the plain label and the win line share
+ * one grid cell. On hover or keyboard focus the plain label rolls up and out
+ * while the win line rolls up into place with a slight overshoot. Because
+ * both lines live in the same cell, the button is always as wide as the
+ * longer one, so nothing beside it moves.
+ */
+.win-label {
+  display: inline-grid;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.win-label > span {
+  grid-area: 1 / 1;
+  text-align: center;
+  white-space: nowrap;
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1.2),
+    opacity 180ms ease;
+}
+
+.win-label-win {
+  opacity: 0;
+  transform: translateY(90%);
+}
+
+.btn:not(:disabled):hover .win-label-idle,
+.btn:not(:disabled):focus-visible .win-label-idle {
+  opacity: 0;
+  transform: translateY(-90%);
+}
+
+.btn:not(:disabled):hover .win-label-win,
+.btn:not(:disabled):focus-visible .win-label-win {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Reduced motion: the words still change, by crossfade, with no travel and no
+   lift. Kept directly after the rules it overrides so that source order can
+   never quietly undo it. */
+@media (prefers-reduced-motion: reduce) {
+  .btn:has(.win-label),
+  .win-label > span {
+    transition: opacity 120ms ease;
+  }
+
+  .btn:has(.win-label):not(:disabled):hover,
+  .win-label-win,
+  .btn:not(:disabled):hover .win-label-idle,
+  .btn:not(:disabled):focus-visible .win-label-idle,
+  .btn:not(:disabled):hover .win-label-win,
+  .btn:not(:disabled):focus-visible .win-label-win {
+    transform: none;
+  }
 }
 
 .btn-danger {
@@ -562,10 +841,11 @@ button {
 }
 
 .btn-ghost {
-  /* The quietest button in the app, which is what "ghost" has to mean. */
-  background: transparent;
+  /* The quietest button in the app, which is what "ghost" has to mean. A
+     faint translucent fill instead of an outline, so it still reads as a
+     button on a white card or the warm canvas, with no ring around it. */
+  background: rgba(21, 23, 26, 0.06);
   color: var(--text);
-  border-color: var(--border-strong);
 }
 
 .btn-sm {
@@ -656,9 +936,9 @@ button {
 }
 
 .select-pill {
-  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: var(--surface);
+  background: rgba(21, 23, 26, 0.06);
+  border: 1px solid transparent;
   padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
@@ -670,7 +950,6 @@ button {
 
 .error-banner {
   background: var(--danger-soft);
-  border: 1px solid #fecaca;
   /* The fill red on its own tint was 3.74:1 -- the one message on the page
      that has to be read was the hardest to read. --danger-text is 4.96:1. */
   color: var(--danger-text);
@@ -877,7 +1156,7 @@ button {
 .inbox-item {
   text-align: left;
   background: var(--surface-muted);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 12px;
   padding: 10px 12px;
   cursor: pointer;
@@ -885,11 +1164,10 @@ button {
 }
 
 .inbox-item:hover {
-  border-color: var(--border-strong);
+  background: #e9e6e1;
 }
 
 .inbox-item.selected {
-  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -1150,7 +1428,6 @@ button {
 .promo-item {
   align-items: flex-start;
   background: var(--surface-muted);
-  border: 1px solid var(--border);
   border-radius: 14px;
   display: flex;
   gap: 14px;
@@ -1223,9 +1500,9 @@ button {
 .risk-signals-item {
   text-align: left;
   width: 100%;
-  border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface-muted);
+  border: 1px solid transparent;
   padding: 12px;
   cursor: pointer;
   display: flex;
@@ -1236,12 +1513,11 @@ button {
 }
 
 .risk-signals-item:hover {
-  border-color: var(--border-strong);
+  background: #e9e6e1;
   transform: translateY(-1px);
 }
 
 .risk-signals-item.selected {
-  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
@@ -1306,7 +1582,6 @@ button {
 
 .risk-signals-reason-panel {
   background: var(--surface-muted);
-  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
   color: var(--text);
@@ -1315,8 +1590,7 @@ button {
 
 .risk-signals-json {
   margin: 0;
-  background: #f8faf9;
-  border: 1px solid var(--border);
+  background: var(--surface-muted);
   border-radius: 12px;
   padding: 12px 14px;
   color: var(--text);
@@ -1375,7 +1649,6 @@ button {
 .feature-flag-row {
   align-items: center;
   background: var(--surface-muted);
-  border: 1px solid var(--border);
   border-radius: 14px;
   display: flex;
   gap: 14px;
@@ -1404,7 +1677,6 @@ button {
 
 .code-line {
   background: var(--surface-muted);
-  border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text);
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
@@ -1464,8 +1736,8 @@ button {
   padding: 0;
   width: min(440px, calc(100vw - 32px));
   background: var(--surface);
+  border: 1px solid transparent;
   color: var(--text);
-  border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
@@ -1511,7 +1783,6 @@ button {
 .confirm-dialog-cancel {
   background: var(--surface-muted);
   color: var(--text);
-  border-color: var(--border-strong);
 }
 
 .confirm-dialog-confirm {
@@ -1540,7 +1811,6 @@ button {
 
 .audit-note {
   background: var(--surface-muted);
-  border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text-muted);
   font-size: 13px;
@@ -1652,7 +1922,7 @@ button {
   padding: 3px 8px;
   margin: -3px 0;
   background: var(--surface-muted);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 8px;
   color: var(--accent-strong);
   cursor: pointer;
@@ -1663,7 +1933,7 @@ button {
 }
 
 .audit-target-id:hover {
-  border-color: var(--border-strong);
+  background: #e9e6e1;
 }
 
 .audit-entry-no-target {
@@ -1799,284 +2069,4 @@ button {
   color: var(--text-muted);
   font-size: 13px;
   font-style: italic;
-}
-
-/* ---------- Win hover (Approvals page) ---------- */
-
-/*
- * WinLabel (components/WinLabel.tsx): on hover or keyboard focus the plain
- * label rolls up and out while a win line rolls into place, and the button
- * lifts a pixel. Scoped with :has(.win-label) so it touches only the buttons
- * that carry one -- the three Approve/Publish actions -- and no other
- * .btn-success anywhere. The button keeps its normal colour.
- *
- * Both lines share one grid cell, so the button is always as wide as the
- * longer line and the Reject button beside it never moves.
- */
-.btn-success:has(.win-label) {
-  transition:
-    filter 120ms ease,
-    transform 200ms cubic-bezier(0.2, 0.9, 0.25, 1.2),
-    box-shadow 200ms ease;
-}
-
-.btn-success:has(.win-label):not(:disabled):hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 14px -6px rgba(27, 94, 32, 0.55);
-}
-
-.btn-success:has(.win-label):not(:disabled):active {
-  transform: translateY(0);
-  box-shadow: none;
-  transition-duration: 60ms;
-}
-
-.win-label {
-  display: inline-grid;
-  overflow: hidden;
-  vertical-align: top;
-}
-
-.win-label > span {
-  grid-area: 1 / 1;
-  text-align: center;
-  white-space: nowrap;
-  transition:
-    transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1.2),
-    opacity 180ms ease;
-}
-
-.win-label-win {
-  opacity: 0;
-  transform: translateY(90%);
-}
-
-.btn:not(:disabled):hover .win-label-idle,
-.btn:not(:disabled):focus-visible .win-label-idle {
-  opacity: 0;
-  transform: translateY(-90%);
-}
-
-.btn:not(:disabled):hover .win-label-win,
-.btn:not(:disabled):focus-visible .win-label-win {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* Reduced motion: the words still change, by crossfade, with no travel and
-   no lift. Kept directly after the rules it overrides. */
-@media (prefers-reduced-motion: reduce) {
-  .btn-success:has(.win-label),
-  .win-label > span {
-    transition: opacity 120ms ease;
-  }
-
-  .btn-success:has(.win-label):not(:disabled):hover,
-  .win-label-win,
-  .btn:not(:disabled):hover .win-label-idle,
-  .btn:not(:disabled):focus-visible .win-label-idle,
-  .btn:not(:disabled):hover .win-label-win,
-  .btn:not(:disabled):focus-visible .win-label-win {
-    transform: none;
-  }
-}
-
-/* ---------- Dashboard (OverviewPage) ---------- */
-
-/*
- * EVERYTHING BELOW IS SCOPED TO .dashboard, the class on OverviewPage's root.
- * The Dashboard is the one page carrying the redesign; no rule here can match
- * on any other page.
- *
- * COLOUR MEANS STATE. The single green used to be the brand, the primary
- * action and "success" all at once, so a green pill told the reader nothing.
- * Here the field is a warm neutral and the status fills (success / warning /
- * danger / info) are the only saturated colour present. Those status pairs
- * are deliberately NOT redefined: each is already measured and passing.
- *
- * NO BEZELS. Nothing draws a ring around an element: cards, badges and the
- * range picker are told apart by fill alone. The only lines left are dividers
- * between content (table rows, list rows, section breaks).
- *
- * Contrast, re-measured for these surfaces (muted text #5a5f66):
- *   #ffffff 6.43:1 · canvas #f1efeb 5.60:1 · --surface-muted 5.51:1
- *   --accent-soft 4.79:1 · --warning-soft 5.07:1 · --danger-soft 5.08:1
- *   --info-soft 5.50:1 · attention tint #fff1dc 5.78:1
- */
-.dashboard {
-  --background: #f1efeb;
-  --surface: #ffffff;
-  --surface-muted: #efedea;
-  --border: #e4e1dc;
-  --border-strong: #cfcac2;
-  --text: #15171a;
-  --text-muted: #5a5f66;
-  --text-soft: #5a5f66;
-  --radius: 10px;
-  background: var(--background);
-  color: var(--text);
-  line-height: 1.45;
-  /* Fill the rest of .main (a flex column), so the warm canvas reaches the
-     bottom of the window on a short page instead of stopping at the content. */
-  flex: 1;
-}
-
-/* Numbers are data: tabular figures, so a column of money or counts aligns. */
-.dashboard .kpi-value,
-.dashboard .kpi-delta,
-.dashboard .data-table td,
-.dashboard .cell-amount {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-}
-
-/* Sections: four groups, separated by a rule and room. */
-.dashboard .dash-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.dashboard .dash-section + .dash-section {
-  border-top: 1px solid var(--border);
-  margin-top: 10px;
-  padding-top: 22px;
-}
-
-.dashboard .section-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.dashboard .section-title {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.005em;
-  margin: 0;
-}
-
-.dashboard .section-note {
-  color: var(--text-muted);
-  font-size: 12.5px;
-  margin: 2px 0 0;
-}
-
-.dashboard .kpi-unavailable {
-  color: var(--text-muted);
-  font-size: 12.5px;
-  margin: 0;
-}
-
-/* Cards: flat and edgeless; white on the warm canvas. */
-.dashboard .card {
-  border: 0;
-  box-shadow: none;
-  padding: 18px;
-}
-
-/* KPI grid: fixed four across rather than auto-fit, which reflowed eight
-   cards into five-and-three and left a ragged hole. */
-.dashboard .kpi-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.dashboard .kpi-grid.kpi-grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-@media (max-width: 1240px) {
-  .dashboard .kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 680px) {
-  .dashboard .kpi-grid,
-  .dashboard .kpi-grid.kpi-grid-3 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.dashboard .kpi-card {
-  border: 0;
-  box-shadow: none;
-  padding: 14px 16px;
-  gap: 3px;
-}
-
-.dashboard .kpi-label {
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.dashboard .kpi-value {
-  font-size: 27px;
-  font-weight: 680;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-}
-
-/* Work waiting for a person (Pending approvals above zero): a warning tint,
-   not an edge stripe. The figure still carries the meaning. */
-.dashboard .kpi-card.is-attention {
-  background: #fff1dc;
-}
-
-/* Two peers side by side: the two breakdown charts. */
-.dashboard .grid-even {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  align-items: start;
-}
-
-@media (max-width: 1100px) {
-  .dashboard .grid-even {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* Tables: sentence-case headers, tighter rows, figures right-aligned in ink. */
-.dashboard .data-table th {
-  font-weight: 600;
-  text-transform: none;
-  letter-spacing: 0;
-  padding: 8px 12px;
-  border-bottom-color: var(--border-strong);
-}
-
-.dashboard .data-table td {
-  padding: 9px 12px;
-}
-
-.dashboard .data-table th.num,
-.dashboard .data-table td.num,
-.dashboard .data-table .cell-amount {
-  text-align: right;
-}
-
-/* Ink, not green: money is not a success state, and a refunded order's total
-   painted in the success colour read as healthy. */
-.dashboard .cell-amount {
-  font-weight: 650;
-  color: var(--text);
-}
-
-/* Badges keep their measured soft fill and text; only the ring goes. */
-.dashboard .badge {
-  border-color: transparent;
-}
-
-/* The range picker and the error banner, without rings. */
-.dashboard .select-pill {
-  background: rgba(21, 23, 26, 0.06);
-  border-color: transparent;
-}
-
-.dashboard .error-banner {
-  border-color: transparent;
 }

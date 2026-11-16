@@ -17,6 +17,7 @@ import {
   type FeatureFlagRecord,
   type OperationalAlertRecord,
 } from '../services/platformReads';
+import WinLabel from '../components/WinLabel';
 
 const formatFlagLabel = (value: string) =>
   value
@@ -358,7 +359,10 @@ export default function ObservabilityPage() {
                     disabled={resolvingId !== null}
                     onClick={() => void onResolve(selectedAlert.id)}
                   >
-                    {resolvingId === selectedAlert.id ? 'Resolving…' : 'Mark resolved'}
+                    {/* "Case closed", not "All clear": marking resolved is a
+                        person's call, not the system confirming the fault is
+                        gone (the alert re-opens if the condition recurs). */}
+                    {resolvingId === selectedAlert.id ? 'Resolving…' : <WinLabel idle="Mark resolved" win="Case closed" />}
                   </button>
                 </div>
               )}

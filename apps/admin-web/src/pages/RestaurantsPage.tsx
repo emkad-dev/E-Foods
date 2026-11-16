@@ -120,30 +120,45 @@ export default function RestaurantsPage() {
       ) : null}
 
       {viewState === 'ready' && data ? (
-        <div className="kpi-grid">
-          <KpiCard
-            label="Published, not splitting"
-            value={formatNumber(notSplittingCount)}
-            caption="Platform holds their money"
-          />
-          <KpiCard
-            label={`Owed, held by platform (${windowDays}d)`}
-            value={formatCurrency(data.platformSettlement.manualAmount)}
-            caption={`${formatNumber(data.platformSettlement.manualCount)} delivered orders to pay out by hand`}
-          />
-          <KpiCard
-            label={`Owed, split at source (${windowDays}d)`}
-            value={formatCurrency(data.platformSettlement.splitAmount)}
-            caption={`${formatNumber(data.platformSettlement.splitCount)} delivered orders Paystack split to the restaurant`}
-          />
-          {data.platformPending ? (
+        <section className="dash-section" aria-labelledby="restaurants-owed">
+          <div className="section-head">
+            <h2 id="restaurants-owed" className="section-title">
+              Money owed to restaurants
+            </h2>
+          </div>
+          {/* Money first, and each figure beside what explains it.
+              "Published, not splitting" is the CAUSE of "Owed, held by
+              platform": a restaurant with no Paystack subaccount has every
+              payment land with the platform, which then owes it by hand. So
+              the two sit together, and the count turns amber whenever it is
+              above zero, because each of those restaurants is a payout someone
+              has to make manually. */}
+          <div className="kpi-grid">
             <KpiCard
-              label={`Pending, in progress (${windowDays}d)`}
-              value={formatCurrency(data.platformPending.amount)}
-              caption={`${formatNumber(data.platformPending.count)} paid orders not delivered yet`}
+              label={`Owed, held by platform (${windowDays}d)`}
+              value={formatCurrency(data.platformSettlement.manualAmount)}
+              caption={`${formatNumber(data.platformSettlement.manualCount)} delivered orders to pay out by hand`}
             />
-          ) : null}
-        </div>
+            <KpiCard
+              label="Published, not splitting"
+              value={formatNumber(notSplittingCount)}
+              caption="Platform holds their money"
+              attention={notSplittingCount > 0}
+            />
+            <KpiCard
+              label={`Owed, split at source (${windowDays}d)`}
+              value={formatCurrency(data.platformSettlement.splitAmount)}
+              caption={`${formatNumber(data.platformSettlement.splitCount)} delivered orders Paystack split to the restaurant`}
+            />
+            {data.platformPending ? (
+              <KpiCard
+                label={`Pending, in progress (${windowDays}d)`}
+                value={formatCurrency(data.platformPending.amount)}
+                caption={`${formatNumber(data.platformPending.count)} paid orders not delivered yet`}
+              />
+            ) : null}
+          </div>
+        </section>
       ) : null}
 
       <div className="card" style={{ marginTop: 16 }}>

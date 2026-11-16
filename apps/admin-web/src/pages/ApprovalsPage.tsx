@@ -323,6 +323,10 @@ export default function ApprovalsPage() {
           said "nothing here". Seen by looking at it; no measurement finds this. */}
       {dataState === 'ready' ? (
         <>
+          {/* Pipeline order. An approved partner application becomes a
+              restaurant to publish, so those two steps of one pipeline sit
+              together; rider applications are a separate pipeline and come
+              last. Each queue already shows its size in its heading. */}
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Partner applications</h3>
@@ -438,77 +442,6 @@ export default function ApprovalsPage() {
 
           <div className="card">
             <div className="card-title-row">
-              <h3 className="card-title">Dispatch applications</h3>
-              <span className="flex items-center gap-2">
-                {newDispatchCount > 0 ? <NewSinceMarker label={`${newDispatchCount} new`} /> : null}
-                <span className={countBadgeClass(dispatchApplications.length)}>{dispatchApplications.length} pending</span>
-              </span>
-            </div>
-            {dispatchApplications.length === 0 ? (
-              <EmptyState
-                title="You're caught up on dispatch applications"
-                body="Every rider application that has reached the console has been reviewed. New ones arrive here as riders sign up."
-                note={queueFreshness}
-              />
-            ) : (
-              dispatchApplications.map((application) => (
-                <div key={application.id} className="list-row">
-                  <div>
-                    <div className="list-row-title">
-                      {application.displayName}
-                      {isNewSince(previousVisit, application.submittedAt) ? (
-                        <>
-                          {' '}
-                          <NewSinceMarker label="New" />
-                        </>
-                      ) : null}
-                    </div>
-                    <div className="list-row-sub">
-                      {application.email} · {application.phoneNumber} · {application.vehicleType} ·{' '}
-                      {application.region} / {application.lga}
-                    </div>
-                    <div className="list-row-sub">{formatVehicleLine(application)}</div>
-                    <div className="list-row-sub">
-                      Licence {application.licenseNumber ?? 'pending'} · Docs{' '}
-                      {application.licenceFrontPath && application.licenceBackPath ? 'captured' : 'missing'}
-                    </div>
-                    <div className="list-row-sub">Submitted {formatDateTime(application.submittedAt)}</div>
-                    <RowActionError id={application.id} error={actionError} />
-                  </div>
-                  <div className="row-actions">
-                    <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
-                    <button
-                      type="button"
-                      className="btn btn-success btn-sm"
-                      disabled={pendingId === application.id}
-                      onClick={() =>
-                        approveWithConfirmation(application.id, dispatchApprovalPrompt(application), () =>
-                          reviewDispatchApplication({ applicationId: application.id, decision: 'approve' })
-                        )
-                      }
-                    >
-                      <WinLabel idle="Approve" win="Welcome aboard" />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      disabled={pendingId === application.id}
-                      onClick={() =>
-                        rejectWithReason(application.id, (rejectionReason) =>
-                          reviewDispatchApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
-                        )
-                      }
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="card">
-            <div className="card-title-row">
               <h3 className="card-title">Restaurant publishing</h3>
               <span className={countBadgeClass(unpublishedCount)}>
                 {unpublishedCount} unpublished
@@ -578,6 +511,77 @@ export default function ApprovalsPage() {
                   </div>
                 );
               })
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-title-row">
+              <h3 className="card-title">Dispatch applications</h3>
+              <span className="flex items-center gap-2">
+                {newDispatchCount > 0 ? <NewSinceMarker label={`${newDispatchCount} new`} /> : null}
+                <span className={countBadgeClass(dispatchApplications.length)}>{dispatchApplications.length} pending</span>
+              </span>
+            </div>
+            {dispatchApplications.length === 0 ? (
+              <EmptyState
+                title="You're caught up on dispatch applications"
+                body="Every rider application that has reached the console has been reviewed. New ones arrive here as riders sign up."
+                note={queueFreshness}
+              />
+            ) : (
+              dispatchApplications.map((application) => (
+                <div key={application.id} className="list-row">
+                  <div>
+                    <div className="list-row-title">
+                      {application.displayName}
+                      {isNewSince(previousVisit, application.submittedAt) ? (
+                        <>
+                          {' '}
+                          <NewSinceMarker label="New" />
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="list-row-sub">
+                      {application.email} · {application.phoneNumber} · {application.vehicleType} ·{' '}
+                      {application.region} / {application.lga}
+                    </div>
+                    <div className="list-row-sub">{formatVehicleLine(application)}</div>
+                    <div className="list-row-sub">
+                      Licence {application.licenseNumber ?? 'pending'} · Docs{' '}
+                      {application.licenceFrontPath && application.licenceBackPath ? 'captured' : 'missing'}
+                    </div>
+                    <div className="list-row-sub">Submitted {formatDateTime(application.submittedAt)}</div>
+                    <RowActionError id={application.id} error={actionError} />
+                  </div>
+                  <div className="row-actions">
+                    <StatusBadge label={application.status} tone={getApplicationTone(application.status)} />
+                    <button
+                      type="button"
+                      className="btn btn-success btn-sm"
+                      disabled={pendingId === application.id}
+                      onClick={() =>
+                        approveWithConfirmation(application.id, dispatchApprovalPrompt(application), () =>
+                          reviewDispatchApplication({ applicationId: application.id, decision: 'approve' })
+                        )
+                      }
+                    >
+                      <WinLabel idle="Approve" win="Welcome aboard" />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={pendingId === application.id}
+                      onClick={() =>
+                        rejectWithReason(application.id, (rejectionReason) =>
+                          reviewDispatchApplication({ applicationId: application.id, decision: 'reject', rejectionReason })
+                        )
+                      }
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </>

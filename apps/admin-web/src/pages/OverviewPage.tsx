@@ -112,7 +112,7 @@ export default function OverviewPage() {
   const dataState = resolveViewState({ hasData, error });
 
   return (
-    <div className="page dashboard">
+    <div className="page">
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
       {dataState === 'loading' ? <SkeletonRows count={4} /> : null}
 

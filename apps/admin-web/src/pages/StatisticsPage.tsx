@@ -166,7 +166,7 @@ export default function StatisticsPage() {
             ) : (
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={dailySeries}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#dde7e3" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e1dc" />
                   <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 12 }} width={80} />
                   <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0), currency)} />
@@ -176,133 +176,157 @@ export default function StatisticsPage() {
             )}
           </div>
 
-          <div className="grid-2">
-            <div className="card">
-              <div className="card-title-row">
-                <h3 className="card-title">Orders by status</h3>
-                {/* `buildStatusBreakdown` even pins a display slot for
-                    'cancelled', but the feed can never deliver one. Saying so
-                    is the difference between "no cancellations" and "no
-                    cancellations visible here". */}
-                <span className="muted">Cancelled not in this feed</span>
-              </div>
-              {statusBreakdown.length === 0 ? (
-                <EmptyState title="No orders" body="Status breakdown appears once orders exist in this window." />
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <PieChart>
-                    <Pie data={statusBreakdown} dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} paddingAngle={3}>
-                      {statusBreakdown.map((slice, index) => (
-                        <Cell key={slice.name} fill={getStatusChartColor(slice.name, index)} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
+          {/* Grouped by kind. Each row used to pair a status donut with an
+              unrelated daily bar chart; now the two daily trends sit
+              together and the two mixes sit together. Every chart here
+              follows the date picker at the top. */}
+          <section className="dash-section" aria-labelledby="stats-trends">
+            <div className="section-head">
+              <h2 id="stats-trends" className="section-title">
+                Daily trends
+              </h2>
             </div>
-
-            <div className="card">
-              <div className="card-title-row">
-                <h3 className="card-title">Orders per day</h3>
+            <div className="grid-even">
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Orders per day</h3>
+                </div>
+                {!hasOrders ? (
+                  <EmptyState title="No orders" body="Daily volume appears once orders exist in this window." />
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={dailySeries}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e4e1dc" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
+                      <Tooltip formatter={(value) => [formatNumber(Number(value ?? 0)), 'Orders']} />
+                      <Bar dataKey="orders" fill="#f57c00" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
-              {!hasOrders ? (
-                <EmptyState title="No orders" body="Daily volume appears once orders exist in this window." />
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={dailySeries}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#dde7e3" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
-                    <Tooltip formatter={(value) => [formatNumber(Number(value ?? 0)), 'Orders']} />
-                    <Bar dataKey="orders" fill="#f57c00" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Problem transactions per day</h3>
+                  {/* Two of this chart's three series can never plot a bar. The
+                      snapshot RPC filters every order through
+                      `isOrderCleanForReporting`, which drops cancelled orders and
+                      unpaid prepaid ones, and every `payment.status = 'failed'`
+                      write path is a Paystack one that also cancels the order. An
+                      empty chart titled "problem transactions" reads as "no
+                      problems", so it has to say which problems it cannot see. */}
+                  <span className="muted">Failed and cancelled are not in this feed</span>
+                </div>
+                {!hasOrders ? (
+                  <EmptyState
+                    title="No orders"
+                    body="Pending-payment activity appears once orders exist in this window."
+                  />
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={problemSeries}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e4e1dc" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
+                      <Tooltip
+                        formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]}
+                      />
+                      <Bar dataKey="failed" name="Failed payments" stackId="problems" fill="#c54a43" />
+                      <Bar dataKey="pending" name="Pending payments" stackId="problems" fill="#f57c00" />
+                      <Bar dataKey="cancelled" name="Cancelled orders" stackId="problems" fill="#5b6978" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
             </div>
-          </div>
+          </section>
 
-          <div className="grid-2">
-            <div className="card">
-              <div className="card-title-row">
-                <h3 className="card-title">Payments by status</h3>
-                {/* Same exclusion: a failed payment is always a prepaid,
-                    cancelled order, so this breakdown can only ever show paid
-                    and (cash) pending. Without the note, an operator reads a
-                    failure-free pie as a failure-free platform. */}
-                <span className="muted">Failed not in this feed</span>
+          {/* The same two charts appear on the Dashboard, where they cover
+              ALL orders. Here they follow the selected period, and the note
+              says so, so two charts with one name are never read as one. */}
+          <section className="dash-section" aria-labelledby="stats-mix">
+            <div className="section-head">
+              <div>
+                <h2 id="stats-mix" className="section-title">
+                  Order and payment mix
+                </h2>
+                <p className="section-note">For the selected period.</p>
               </div>
-              {paymentBreakdown.length === 0 ? (
-                <EmptyState title="No payments" body="Payment breakdown appears once orders exist in this window." />
-              ) : (
-                <>
-                  <ResponsiveContainer width="100%" height={220}>
+            </div>
+            <div className="grid-even">
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Orders by status</h3>
+                  {/* `buildStatusBreakdown` even pins a display slot for
+                      'cancelled', but the feed can never deliver one. Saying so
+                      is the difference between "no cancellations" and "no
+                      cancellations visible here". */}
+                  <span className="muted">Cancelled not in this feed</span>
+                </div>
+                {statusBreakdown.length === 0 ? (
+                  <EmptyState title="No orders" body="Status breakdown appears once orders exist in this window." />
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
                     <PieChart>
-                      <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95} paddingAngle={3}>
-                        {paymentBreakdown.map((slice, index) => (
-                          <Cell key={slice.name} fill={getPaymentChartColor(slice.name, index)} />
+                      <Pie data={statusBreakdown} dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} paddingAngle={3}>
+                        {statusBreakdown.map((slice, index) => (
+                          <Cell key={slice.name} fill={getStatusChartColor(slice.name, index)} />
                         ))}
                       </Pie>
                       <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div>
-                    {paymentBreakdown.map((slice, index) => (
-                      <div key={slice.name} className="list-row">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span
-                            style={{
-                              width: 10,
-                              height: 10,
-                              borderRadius: 999,
-                              background: getPaymentChartColor(slice.name, index),
-                              display: 'inline-block',
-                            }}
-                          />
-                          {humanizeStatus(slice.name)}
-                        </span>
-                        <span className="cell-strong">{formatNumber(slice.value)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="card">
-              <div className="card-title-row">
-                <h3 className="card-title">Problem transactions per day</h3>
-                {/* Two of this chart's three series can never plot a bar. The
-                    snapshot RPC filters every order through
-                    `isOrderCleanForReporting`, which drops cancelled orders and
-                    unpaid prepaid ones, and every `payment.status = 'failed'`
-                    write path is a Paystack one that also cancels the order. An
-                    empty chart titled "problem transactions" reads as "no
-                    problems", so it has to say which problems it cannot see. */}
-                <span className="muted">Failed and cancelled are not in this feed</span>
+                )}
               </div>
-              {!hasOrders ? (
-                <EmptyState
-                  title="No orders"
-                  body="Pending-payment activity appears once orders exist in this window."
-                />
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={problemSeries}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#dde7e3" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
-                    <Tooltip
-                      formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]}
-                    />
-                    <Bar dataKey="failed" name="Failed payments" stackId="problems" fill="#c54a43" />
-                    <Bar dataKey="pending" name="Pending payments" stackId="problems" fill="#f57c00" />
-                    <Bar dataKey="cancelled" name="Cancelled orders" stackId="problems" fill="#5b6978" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Payments by status</h3>
+                  {/* Same exclusion: a failed payment is always a prepaid,
+                      cancelled order, so this breakdown can only ever show paid
+                      and (cash) pending. Without the note, an operator reads a
+                      failure-free pie as a failure-free platform. */}
+                  <span className="muted">Failed not in this feed</span>
+                </div>
+                {paymentBreakdown.length === 0 ? (
+                  <EmptyState title="No payments" body="Payment breakdown appears once orders exist in this window." />
+                ) : (
+                  <>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie data={paymentBreakdown} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95} paddingAngle={3}>
+                          {paymentBreakdown.map((slice, index) => (
+                            <Cell key={slice.name} fill={getPaymentChartColor(slice.name, index)} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value, name) => [formatNumber(Number(value ?? 0)), humanizeStatus(String(name))]} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div>
+                      {paymentBreakdown.map((slice, index) => (
+                        <div key={slice.name} className="list-row">
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span
+                              style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: 999,
+                                background: getPaymentChartColor(slice.name, index),
+                                display: 'inline-block',
+                              }}
+                            />
+                            {humanizeStatus(slice.name)}
+                          </span>
+                          <span className="cell-strong">{formatNumber(slice.value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+          </section>
 
           <div className="card">
             <div className="card-title-row">

@@ -10,6 +10,7 @@ import { getOrderDate, type RangeDays } from '../lib/analytics';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import { getOrderTone, getPaymentTone } from '../theme/tones';
+import KpiCard from '../components/KpiCard';
 
 export default function OrdersPage() {
   const { snapshot, error, hasData, refresh } = useSnapshot();
@@ -100,6 +101,20 @@ export default function OrdersPage() {
 
   const currency = filteredOrders.find((order) => order.pricing?.currency)?.pricing?.currency ?? 'NGN';
 
+  // Same predicate as the Dashboard's "Pending payments" (computeProblemCounts
+  // in lib/analytics.ts). In this feed a payment is still 'pending' only on a
+  // cash order -- the snapshot drops prepaid orders that are not paid -- so
+  // these are cash orders a rider or the restaurant has not collected yet.
+  const uncollected = useMemo(() => {
+    const pending = filteredOrders.filter(
+      (order) => (order.payment?.status ?? '').toString().toLowerCase() === 'pending'
+    );
+    return {
+      count: pending.length,
+      amount: pending.reduce((total, order) => total + (order.pricing?.total ?? 0), 0),
+    };
+  }, [filteredOrders]);
+
   // Every flagged order, whatever its status and outside the date range: the
   // table below is the reporting feed and has no cancelled or rejected rows, so
   // a refund to return by hand on a rejected order would never appear in it.
@@ -149,173 +164,231 @@ export default function OrdersPage() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div className="filters-row">
-          <RangePicker value={rangeDays} onChange={setRangeDays} />
-          <select
-            className="select-pill"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            aria-label="Status filter"
-          >
-            <option value="all">All statuses</option>
-            {statusOptions.map((status) => (
-              <option key={status} value={status}>
-                {humanizeStatus(status)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-pill"
-            value={paymentFilter}
-            onChange={(event) => setPaymentFilter(event.target.value)}
-            aria-label="Payment filter"
-          >
-            <option value="all">All payments</option>
-            {paymentOptions.map((status) => (
-              <option key={status} value={status}>
-                {humanizeStatus(status)}
-              </option>
-            ))}
-          </select>
-        </div>
-        {/* A count and a money total are claims about the business, so they may
-            only be made about data that actually arrived. Ungated, this read
-            "0 orders · NGN 0" during every load and permanently after a failed
-            fetch, because SnapshotContext keeps its EMPTY_SNAPSHOT on the catch
-            path. Same defect the three dashboard screens had. */}
-        {hasData ? (
-          <div className="muted">
-            {formatNumber(filteredOrders.length)} orders · {formatCurrency(totalValue, currency)}
-          </div>
-        ) : null}
-      </div>
-
-      <form className="filters-row" onSubmit={handleLookup}>
-        <input
-          className="select-pill"
-          value={lookupValue}
-          onChange={(event) => setLookupValue(event.target.value)}
-          placeholder="Look up an order by id (includes cancelled / failed)"
-          aria-label="Order id"
-          style={{ minWidth: 320 }}
-        />
-        <button type="submit" className="btn btn-ghost btn-sm" disabled={lookupValue.trim() === ''}>
-          Open order
-        </button>
-      </form>
-
       {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
-      {hasData && attentionOrders.length > 0 ? (
-        <div className="card">
-          <div className="card-title-row">
-            <h3 className="card-title">Needs attention ({formatNumber(attentionOrders.length)})</h3>
-            <span className="muted">Flagged orders of any status, cancelled and rejected included</span>
+      {/*
+        Three sections, in the order the Dashboard set: money first, then what
+        needs a person, then the rows themselves.
+
+        The period and the two filters sit with the totals at the top because
+        they govern BOTH the totals and the order list at the bottom. "Needs
+        attention" sits between them and is NOT filtered by any of them -- it is
+        built from snapshot.attentionOrders, not filteredOrders -- so it says
+        so, the same way the Dashboard's charts say they ignore its date range.
+        Before this, the filters sat directly above that list and read as
+        though they narrowed it.
+      */}
+      <section className="dash-section" aria-labelledby="orders-totals">
+        <div className="section-head">
+          <div>
+            <h2 id="orders-totals" className="section-title">
+              Totals
+            </h2>
+            <p className="section-note">For the period and filters chosen here. They also filter the order list below.</p>
           </div>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Order id</th>
-                  <th>Restaurant</th>
-                  <th>Status</th>
-                  <th>Payment</th>
-                  <th>Date &amp; time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attentionOrders.map((order) => (
-                  <tr key={order.id}>
-                    <td className="cell-strong">
-                      <Link to={`/orders/${encodeURIComponent(order.id)}`}>
-                        #{String(order.id).slice(-8).toUpperCase()}
-                      </Link>
-                    </td>
-                    <td>{order.restaurantName || 'Unknown restaurant'}</td>
-                    <td>
-                      <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
-                      {order.customerIssueReportedAt ? (
-                        <span className="badge badge-warning">Problem reported</span>
-                      ) : null}
-                    </td>
-                    <td>
-                      <StatusBadge
-                        label={order.payment?.status ?? 'unknown'}
-                        tone={getPaymentTone(order.payment?.status?.toString())}
-                      />
-                    </td>
-                    <td className="muted">{formatDateTime(order.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="filters-row">
+            <RangePicker value={rangeDays} onChange={setRangeDays} />
+            <select
+              className="select-pill"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Status filter"
+            >
+              <option value="all">All statuses</option>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {humanizeStatus(status)}
+                </option>
+              ))}
+            </select>
+            <select
+              className="select-pill"
+              value={paymentFilter}
+              onChange={(event) => setPaymentFilter(event.target.value)}
+              aria-label="Payment filter"
+            >
+              <option value="all">All payments</option>
+              {paymentOptions.map((status) => (
+                <option key={status} value={status}>
+                  {humanizeStatus(status)}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-      ) : null}
 
-      <div className="card">
-        {/* The skeleton belongs INSIDE the card, in place of the table. As a
-            sibling above it, a first load painted shimmer bars and a complete
-            empty table at the same time: two loading metaphors, one of which
-            reads as an answer. */}
-        {ordersState === 'loading' ? <SkeletonRows count={8} /> : null}
-        {ordersState === 'empty' ? <EmptyState {...emptyOrdersCopy} /> : null}
-        {ordersState === 'ready' ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Order id</th>
-                  <th>Restaurant</th>
-                  <th>Fulfillment</th>
-                  <th>Status</th>
-                  <th>Payment</th>
-                  <th>Date &amp; time</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredOrders.map((order) => (
-                  <tr key={order.id}>
-                    <td className="cell-strong">
-                      <Link to={`/orders/${encodeURIComponent(order.id)}`}>
-                        #{String(order.id).slice(-8).toUpperCase()}
-                      </Link>
-                    </td>
-                    <td>{order.restaurantName || 'Unknown restaurant'}</td>
-                    <td className="muted">{humanizeStatus(order.fulfillmentType)}</td>
-                    <td>
-                      <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
-                      {/* An escalated order stays `placed` -- the acceptance
-                          sweep raises this flag instead of moving the status,
-                          so `status` alone cannot tell the operator that the
-                          restaurant's clock already ran out. The flag is also
-                          raised by a late payment, a refund to return by hand
-                          and a customer problem report. */}
-                      {order.needsAttention === true ? (
-                        <span className="badge badge-warning" title="Flagged for an admin. Open the order to see why.">
-                          Needs attention
-                        </span>
-                      ) : null}
-                    </td>
-                    <td>
-                      <StatusBadge
-                        label={order.payment?.status ?? 'unknown'}
-                        tone={getPaymentTone(order.payment?.status?.toString())}
-                      />
-                    </td>
-                    <td className="muted">{formatDateTime(order.createdAt)}</td>
-                    <td className="cell-amount">
-                      {formatCurrency(order.pricing?.total ?? 0, order.pricing?.currency ?? currency)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* A count and a money total are claims about the business, so they may
+            only be made about data that actually arrived. Ungated, the old
+            "0 orders · NGN 0" line read that way during every load and
+            permanently after a failed fetch, because SnapshotContext keeps its
+            EMPTY_SNAPSHOT on the catch path. Same defect the three dashboard
+            screens had.
+
+            No deltas against an earlier period: with a status or payment
+            filter applied, the earlier window is a different slice of the
+            business, and a percentage between the two would measure the filter
+            as much as the trend. */}
+        {hasData ? (
+          <div className="kpi-grid kpi-grid-3">
+            <KpiCard label="Orders" value={formatNumber(filteredOrders.length)} caption={`In the last ${rangeDays} days`} />
+            <KpiCard
+              label="Order value"
+              value={formatCurrency(totalValue, currency)}
+              caption="Customer totals, delivery and tips included"
+            />
+            <KpiCard
+              label="Uncollected cash"
+              value={formatCurrency(uncollected.amount, currency)}
+              caption={`${formatNumber(uncollected.count)} cash orders not yet collected`}
+            />
           </div>
         ) : null}
-      </div>
+      </section>
+
+      {hasData && attentionOrders.length > 0 ? (
+        <section className="dash-section" aria-labelledby="orders-attention">
+          <div className="section-head">
+            <div>
+              <h2 id="orders-attention" className="section-title">
+                Needs attention ({formatNumber(attentionOrders.length)})
+              </h2>
+              <p className="section-note">
+                Flagged orders of any status, cancelled and rejected included. Not filtered by the choices above.
+              </p>
+            </div>
+          </div>
+          <div className="card">
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Order id</th>
+                    <th>Restaurant</th>
+                    <th>Status</th>
+                    <th>Payment</th>
+                    <th>Date &amp; time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attentionOrders.map((order) => (
+                    <tr key={order.id}>
+                      <td className="cell-strong">
+                        <Link to={`/orders/${encodeURIComponent(order.id)}`}>
+                          #{String(order.id).slice(-8).toUpperCase()}
+                        </Link>
+                      </td>
+                      <td>{order.restaurantName || 'Unknown restaurant'}</td>
+                      <td>
+                        <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
+                        {order.customerIssueReportedAt ? (
+                          <span className="badge badge-warning">Problem reported</span>
+                        ) : null}
+                      </td>
+                      <td>
+                        <StatusBadge
+                          label={order.payment?.status ?? 'unknown'}
+                          tone={getPaymentTone(order.payment?.status?.toString())}
+                        />
+                      </td>
+                      <td className="muted">{formatDateTime(order.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="dash-section" aria-labelledby="orders-list">
+        <div className="section-head">
+          <div>
+            <h2 id="orders-list" className="section-title">
+              All orders
+            </h2>
+            <p className="section-note">Matching the period and filters above.</p>
+          </div>
+          {/* Opening one order by id belongs with the list: it is how you find
+              a row, including the cancelled and failed ones this feed leaves
+              out (see handleLookup). */}
+          <form className="filters-row" onSubmit={handleLookup}>
+            <input
+              className="select-pill"
+              value={lookupValue}
+              onChange={(event) => setLookupValue(event.target.value)}
+              placeholder="Look up an order by id (includes cancelled / failed)"
+              aria-label="Order id"
+              style={{ minWidth: 320 }}
+            />
+            <button type="submit" className="btn btn-ghost btn-sm" disabled={lookupValue.trim() === ''}>
+              Open order
+            </button>
+          </form>
+        </div>
+
+        <div className="card">
+          {/* The skeleton belongs INSIDE the card, in place of the table. As a
+              sibling above it, a first load painted shimmer bars and a complete
+              empty table at the same time: two loading metaphors, one of which
+              reads as an answer. */}
+          {ordersState === 'loading' ? <SkeletonRows count={8} /> : null}
+          {ordersState === 'empty' ? <EmptyState {...emptyOrdersCopy} /> : null}
+          {ordersState === 'ready' ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Order id</th>
+                    <th>Restaurant</th>
+                    <th>Fulfillment</th>
+                    <th>Status</th>
+                    <th>Payment</th>
+                    <th>Date &amp; time</th>
+                    <th className="num">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((order) => (
+                    <tr key={order.id}>
+                      <td className="cell-strong">
+                        <Link to={`/orders/${encodeURIComponent(order.id)}`}>
+                          #{String(order.id).slice(-8).toUpperCase()}
+                        </Link>
+                      </td>
+                      <td>{order.restaurantName || 'Unknown restaurant'}</td>
+                      <td className="muted">{humanizeStatus(order.fulfillmentType)}</td>
+                      <td>
+                        <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
+                        {/* An escalated order stays `placed` -- the acceptance
+                            sweep raises this flag instead of moving the status,
+                            so `status` alone cannot tell the operator that the
+                            restaurant's clock already ran out. The flag is also
+                            raised by a late payment, a refund to return by hand
+                            and a customer problem report. */}
+                        {order.needsAttention === true ? (
+                          <span className="badge badge-warning" title="Flagged for an admin. Open the order to see why.">
+                            Needs attention
+                          </span>
+                        ) : null}
+                      </td>
+                      <td>
+                        <StatusBadge
+                          label={order.payment?.status ?? 'unknown'}
+                          tone={getPaymentTone(order.payment?.status?.toString())}
+                        />
+                      </td>
+                      <td className="muted">{formatDateTime(order.createdAt)}</td>
+                      <td className="cell-amount">
+                        {formatCurrency(order.pricing?.total ?? 0, order.pricing?.currency ?? currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      </section>
     </div>
   );
 }
