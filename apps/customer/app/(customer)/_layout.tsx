@@ -206,6 +206,9 @@ export default function CustomerLayout() {
             options={{
               href: null,
               headerShown: false,
+              // The address screen has its own bottom action buttons; the tab
+              // bar sat on top of them.
+              tabBarStyle: { display: 'none' },
             }}
           />
           <Tabs.Screen
