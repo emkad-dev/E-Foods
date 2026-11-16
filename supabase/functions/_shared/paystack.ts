@@ -18,10 +18,30 @@ export const getPaystackPublicKey = () => sanitizeText(Deno.env.get('PAYSTACK_PU
 const getPaystackCallbackUrl = () =>
   sanitizeOptionalText(Deno.env.get('PAYSTACK_CALLBACK_URL')) ?? DEFAULT_PAYSTACK_CALLBACK_URL;
 
+// Hosts (exact, so no non-default port) whose /payment/callback we serve.
+const ALLOWED_CALLBACK_HOSTS = new Set(['app.feasty.com.ng', 'feasty.com.ng', 'www.feasty.com.ng']);
+// Local development, on any port.
+const LOCAL_DEV_CALLBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
+
+const isAllowedCallbackHost = (parsed: URL) => {
+  const host = parsed.host.toLowerCase();
+  if (ALLOWED_CALLBACK_HOSTS.has(host) || LOCAL_DEV_CALLBACK_HOSTNAMES.has(parsed.hostname.toLowerCase())) {
+    return true;
+  }
+
+  try {
+    return host === new URL(getPaystackCallbackUrl()).host.toLowerCase();
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Client-supplied callback URLs are only honoured when they point at the one
- * path we own, on a scheme we recognise. Anything else falls back to the
- * configured URL — a Paystack callback is an open-redirect surface otherwise.
+ * path we own, on a scheme we recognise, and (for http/https) on a host we
+ * serve: the configured callback's host, the FEASTY web hosts, or localhost.
+ * Anything else falls back to the configured URL — a Paystack callback is an
+ * open-redirect surface otherwise.
  */
 export const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
   const rawCallbackUrl = sanitizeOptionalText(callbackUrl);
@@ -35,7 +55,7 @@ export const getNormalizedPaystackCallbackUrl = (callbackUrl: unknown) => {
     const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
     const pathname = parsed.pathname.replace(/^\/+|\/+$/g, '');
 
-    if ((scheme === 'http' || scheme === 'https') && pathname === 'payment/callback') {
+    if ((scheme === 'http' || scheme === 'https') && pathname === 'payment/callback' && isAllowedCallbackHost(parsed)) {
       return parsed.toString();
     }
 
