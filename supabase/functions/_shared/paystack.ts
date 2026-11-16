@@ -10,7 +10,7 @@ import { parseNumber, roundCurrency, sanitizeOptionalText, sanitizeText } from '
 import { fail } from './rpc/respond.ts';
 
 const PAYSTACK_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_PAYSTACK_CALLBACK_URL = 'https://feasty.com/payment/callback';
+const DEFAULT_PAYSTACK_CALLBACK_URL = 'https://app.feasty.com.ng/payment/callback';
 
 export const getPaystackSecretKey = () => sanitizeText(Deno.env.get('PAYSTACK_SECRET_KEY'));
 export const getPaystackPublicKey = () => sanitizeText(Deno.env.get('PAYSTACK_PUBLIC_KEY'));
