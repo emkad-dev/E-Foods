@@ -1764,8 +1764,9 @@ const initializeCustomerPayment: Handler = async ({ context, data }) => {
         restaurantId: orderDraft.restaurantId,
         source: 'ebuy_customer_checkout',
       },
-      // Same orderId the response returns (the group id for a grouped
-      // checkout), so the web callback can confirm without client state.
+      // Same orderId the response returns: the primary order's id, which is
+      // also the group id (in a grouped checkout), so the web callback can
+      // confirm without client state.
       callbackUrl: buildPaystackCallbackUrlForOrder(data.callbackUrl, orderId),
     });
 
