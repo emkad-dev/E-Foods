@@ -369,7 +369,8 @@ const onRefundProcessed = async (order: CustomerOrderRow, execution: RefundExecu
       app: 'customer',
       orderId,
       routeKey: 'customer_order_detail',
-      type: 'refund_processed',
+      // The existing customer push type (its channel and sound are mapped).
+      type: 'order_update',
     }),
   });
 };
