@@ -200,6 +200,19 @@ export const forceCancelAdminOrder = (input: { orderId: string; reason: string }
 export const forceCompleteAdminOrder = (input: { orderId: string; reason: string }) =>
   callAdminRpc<{ orderId: string; status: string }>('adminForceCompleteOrder', input, { write: true });
 
+/**
+ * Sends the order's recorded refund through Paystack. Mirrors
+ * supabase/functions/_shared/adminOrderRefund.ts. 'failed' means Paystack
+ * refused it (nothing sent, a retry is allowed); 'unconfirmed' means no
+ * readable answer (check the Paystack dashboard first).
+ */
+export const sendAdminOrderRefund = (input: { note: string; orderId: string }) =>
+  callAdminRpc<{
+    orderId: string;
+    outcome: 'sent' | 'failed' | 'unconfirmed';
+    refundExecution: Record<string, unknown> | null;
+  }>('adminSendOrderRefund', input, { write: true });
+
 export const resolveAdminOrderReport = (input: { note: string; orderId: string }) =>
   callAdminRpc<{ attentionResolvedAt: string; customerConfirmedAt: string | null; needsAttention: boolean; orderId: string }>(
     'adminResolveOrderReport',

@@ -6,6 +6,12 @@ import {
   canAdminForceCompleteOrder,
   canAdminResolveOrderReport,
 } from '../../../../packages/domain/src/adminOrders';
+import { hasCapturedPayment } from '../../../../packages/domain/src/orders';
+import {
+  assessPaystackRefund,
+  describeRefundExecutionStatus,
+  readRefundExecution,
+} from '../../../../packages/domain/src/refundExecution';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
@@ -20,6 +26,7 @@ import {
   forceCompleteAdminOrder,
   getAdminOrderDetail,
   resolveAdminOrderReport,
+  sendAdminOrderRefund,
   type AdminOrderDetail,
 } from '../services/platformReads';
 import { getOrderTone, getPaymentTone } from '../theme/tones';
@@ -41,7 +48,7 @@ import { getOrderTone, getPaymentTone } from '../theme/tones';
  * dialog before anything is sent.
  */
 
-type InterventionKind = 'cancel' | 'complete' | 'resolve';
+type InterventionKind = 'cancel' | 'complete' | 'resolve' | 'refund';
 
 const INTERVENTION_COPY: Record<
   InterventionKind,
@@ -68,6 +75,20 @@ const INTERVENTION_COPY: Record<
     fieldLabel: 'Resolution note',
     title: 'Mark this order resolved?',
   },
+  refund: {
+    busyLabel: 'Sending…',
+    // The amount is added where the button renders.
+    buttonLabel: 'Refund via Paystack',
+    confirmLabel: 'Send the refund',
+    fieldLabel: 'Note',
+    title: 'Refund via Paystack?',
+  },
+};
+
+/** The refund the server would send now, or null when the button must not show. */
+const sendableRefund = (order: AdminOrderDetail) => {
+  const eligibility = assessPaystackRefund(order.payment, hasCapturedPayment(order.payment));
+  return eligibility.ok ? eligibility.amount : null;
 };
 
 /** What the dialog says will happen, before the admin commits. */
@@ -77,8 +98,18 @@ const describeIntervention = (kind: InterventionKind, order: AdminOrderDetail, c
       ? `The customer paid. A full refund of ${formatCurrency(
           Number(order.payment.capturedAmount ?? order.total),
           currency
-        )} will be recorded on the order and it will be flagged for attention. No money moves: return it to the customer by hand. The customer and the restaurant are told the order was cancelled.`
+        )} will be recorded on the order and it will be flagged for attention. No money moves yet: send it afterwards with Refund via Paystack, or return it by hand. The customer and the restaurant are told the order was cancelled.`
       : 'No payment was captured, so nothing is refunded. The customer and the restaurant are told the order was cancelled.';
+  }
+  if (kind === 'refund') {
+    const amount = formatCurrency(sendableRefund(order) ?? 0, currency);
+    const customer = order.customer.displayName ?? order.customer.email ?? order.customer.uid;
+    const lastAttempt = readRefundExecution(order.payment);
+    const retryNote =
+      lastAttempt?.status === 'failed'
+        ? ` The last attempt failed${lastAttempt.lastError ? `: ${lastAttempt.lastError}` : ''}. Nothing left FEASTY for it.`
+        : '';
+    return `${amount} goes back to ${customer} through Paystack. It is paid from FEASTY's Paystack balance (pending payouts first), not by the restaurant, and it cannot be undone once sent. Paystack keeps its original transaction fee.${retryNote}`;
   }
   if (kind === 'complete') {
     return 'The order is marked delivered. The customer gets 3 hours to confirm they received it or report a problem, and the restaurant is told FEASTY support completed it.';
@@ -164,8 +195,18 @@ export default function OrderDetailPage() {
         const result = await forceCancelAdminOrder({ orderId: order.id, reason: note });
         setActionNotice(
           result.refundRecorded
-            ? 'Order cancelled. A full refund is recorded and the order is flagged: no money has moved, so return it to the customer by hand.'
+            ? 'Order cancelled. A full refund is recorded and the order is flagged: no money has moved yet. Send it with Refund via Paystack below, or return it by hand.'
             : 'Order cancelled. No payment was captured, so nothing was refunded.'
+        );
+      } else if (pendingAction === 'refund') {
+        const result = await sendAdminOrderRefund({ orderId: order.id, note });
+        const execution = readRefundExecution({ refundExecution: result.refundExecution });
+        setActionNotice(
+          result.outcome === 'sent'
+            ? `Refund sent to Paystack (${describeRefundExecutionStatus(execution?.status ?? 'requested').toLowerCase()}). The customer is told when Paystack finishes it.`
+            : result.outcome === 'failed'
+              ? `Paystack refused the refund${execution?.lastError ? `: ${execution.lastError}` : ''}. Nothing was sent, so you can try again.`
+              : 'Paystack did not confirm the refund. Check the Paystack dashboard before trying again or refunding by hand.'
         );
       } else if (pendingAction === 'complete') {
         await forceCompleteAdminOrder({ orderId: order.id, reason: note });
@@ -213,9 +254,12 @@ export default function OrderDetailPage() {
     ? [
         ...(canAdminForceCompleteOrder(order) ? (['complete'] as const) : []),
         ...(canAdminResolveOrderReport(order) ? (['resolve'] as const) : []),
+        ...(sendableRefund(order) !== null ? (['refund'] as const) : []),
         ...(canAdminForceCancelOrder(order) ? (['cancel'] as const) : []),
       ]
     : [];
+  const refundAmount = order ? sendableRefund(order) : null;
+  const refundExecution = order ? readRefundExecution(order.payment) : null;
 
   return (
     <div className="page">
@@ -302,7 +346,9 @@ export default function OrderDetailPage() {
                     disabled={actionBusy}
                     onClick={() => openAction(kind)}
                   >
-                    {INTERVENTION_COPY[kind].buttonLabel}
+                    {kind === 'refund' && refundAmount !== null
+                      ? `${INTERVENTION_COPY.refund.buttonLabel} (${formatCurrency(refundAmount, currency)})`
+                      : INTERVENTION_COPY[kind].buttonLabel}
                   </button>
                 ))}
               </div>
@@ -408,6 +454,38 @@ export default function OrderDetailPage() {
                 {humanizeStatus(stringify(order.payment.status))}
               </span>
             </div>
+            {refundExecution ? (
+              <dl className="audit-detail-grid" style={{ marginBottom: 14 }}>
+                <Field label="Paystack refund">
+                  <StatusBadge
+                    label={describeRefundExecutionStatus(refundExecution.status)}
+                    tone={
+                      refundExecution.status === 'processed'
+                        ? 'success'
+                        : refundExecution.status === 'failed' || refundExecution.status === 'needs_attention'
+                          ? 'danger'
+                          : 'warning'
+                    }
+                  />
+                </Field>
+                <Field label="Refund amount sent">
+                  {refundExecution.amount !== null ? formatCurrency(refundExecution.amount, currency) : null}
+                </Field>
+                <Field label="Requested">
+                  {refundExecution.requestedAt
+                    ? `${formatDateTime(refundExecution.requestedAt)} by ${
+                        refundExecution.requestedBy === 'auto' ? 'automatic refund' : 'an admin'
+                      } (attempt ${refundExecution.attempt})`
+                    : null}
+                </Field>
+                {refundExecution.processedAt ? (
+                  <Field label="Processed">{formatDateTime(refundExecution.processedAt)}</Field>
+                ) : null}
+                {refundExecution.failedAt ? <Field label="Failed">{formatDateTime(refundExecution.failedAt)}</Field> : null}
+                {refundExecution.lastError ? <Field label="Reason">{refundExecution.lastError}</Field> : null}
+                <Field label="Refund reference">{refundExecution.reference}</Field>
+              </dl>
+            ) : null}
             {order.payments.length === 0 ? (
               <EmptyState
                 title="No payment transactions"

@@ -35,6 +35,7 @@ import {
 } from '../adminFleetReads.ts';
 import { createAuditEntry } from '../auditLog.ts';
 import { adminForceCancelOrder, adminForceCompleteOrder, adminResolveOrderReport } from '../adminOrderInterventions.ts';
+import { adminSendOrderRefund } from '../adminOrderRefund.ts';
 import {
   restaurantOwedForOrder,
   selectAttentionOrders,
@@ -951,6 +952,9 @@ const ADMIN_ORDER_PAYMENT_KEYS = [
   'refundAmount',
   'refundedAt',
   'paidAt',
+  // The Paystack refund's progress (status, attempt, Paystack's reason on a
+  // failure): what the order page shows next to "Refund via Paystack".
+  'refundExecution',
 ] as const;
 
 // Event `details` are free-form JSON written by many call sites. Drop anything
@@ -2261,6 +2265,7 @@ export const adminDomain = defineRpcDomain<AuthenticatedRequestContext>({
     adminForceCompleteOrder,
     adminResolveOrderReport,
     adminResolveOperationalAlert,
+    adminSendOrderRefund,
     adminGetAccessOverview,
     adminGetApprovalQueue,
     adminGetDashboardSnapshot,

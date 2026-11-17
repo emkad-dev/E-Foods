@@ -24,6 +24,8 @@ const { applyRefundWebhook, isAutoRefundEnabled, sendOrderRefund, startAutomatic
   './paystackRefund.ts'
 );
 const { initiatePaystackRefund } = await import('./paystack.ts');
+const { adminDomain } = await import('./domains/admin.ts');
+const sendRefundRpc = adminDomain.handlers.adminSendOrderRefund;
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
@@ -44,6 +46,9 @@ let rpcCalls: Array<{ fn: string; params: Row }> = [];
 let fetchBodies: Array<{ body: string; url: string }> = [];
 let updateHook: { when: (table: string, payload: Row) => boolean; run: () => void } | null = null;
 let failAllReads = false;
+// What api.paystack.co answers when the real transport is used.
+let paystackResponder: () => Response = () =>
+  new Response(JSON.stringify({ status: true, data: { id: 77, status: 'pending' } }), { status: 200 });
 
 // A PostgREST column with JSON paths: '->' keeps JSON, a final '->>' gives text.
 const readColumn = (row: Row, column: string): unknown => {
@@ -195,6 +200,9 @@ const setup = (...orders: Row[]) => {
   fetchBodies = [];
   updateHook = null;
   failAllReads = false;
+  paystackResponder = () =>
+    new Response(JSON.stringify({ status: true, data: { id: 77, status: 'pending' } }), { status: 200 });
+  db.AdminAuditLog = [];
 };
 
 const withHarness = async (work: () => Promise<void>) => {
@@ -207,6 +215,7 @@ const withHarness = async (work: () => Promise<void>) => {
   };
   globalThis.fetch = ((input: Request | URL | string, init?: RequestInit) => {
     fetchBodies.push({ body: String(init?.body ?? ''), url: String(input) });
+    if (String(input).startsWith('https://api.paystack.co/')) return Promise.resolve(paystackResponder());
     return Promise.resolve(new Response('{"data":[]}', { status: 200 }));
   }) as typeof fetch;
   console.error = () => {};
@@ -722,5 +731,116 @@ Deno.test('an event without our reference matches by Paystack id, or by an unamb
     assertEquals(execution()?.status, 'processing');
     await applyRefundWebhook(event('processed', { paystackRefundId: null, refundReference: null }));
     assertEquals(execution()?.status, 'processed');
+  });
+});
+
+// ───────────────────── the admin RPC ─────────────────────
+
+const rpcContext = (uid: string, role: string) => ({
+  email: `${uid}@example.test`,
+  role,
+  token: 'fake-token',
+  uid,
+  userProfile: { uid, email: `${uid}@example.test`, role, accountDisabled: false },
+});
+
+const callRpc = (role: string, data: Row) =>
+  // deno-lint-ignore no-explicit-any
+  (sendRefundRpc as any)({
+    context: rpcContext(role === 'admin' ? ADMIN_UID : 'someone', role),
+    data: { orderId: ORDER_ID, ...data },
+    request: new Request('https://example.test/rpc', { method: 'POST' }),
+  });
+
+const rpcFailure = async (run: () => Promise<unknown>) => {
+  try {
+    await run();
+  } catch (error) {
+    return error as { status?: number; message?: string };
+  }
+  throw new Error('expected the RPC to fail, but it succeeded');
+};
+
+const paystackRefundCalls = () => fetchBodies.filter((call) => call.url === 'https://api.paystack.co/refund');
+
+Deno.test('adminSendOrderRefund: admin only, a note required, nothing sent otherwise', async () => {
+  await withHarness(async () => {
+    for (const role of ['restaurant', 'dispatch', 'customer']) {
+      setup(makeOrder());
+      const error = await rpcFailure(() => callRpc(role, { note: 'refund it' }));
+      assertEquals(error.status, 403, role);
+    }
+    setup(makeOrder());
+    const noNote = await rpcFailure(() => callRpc('admin', { note: '  ' }));
+    assertEquals(noNote.status, 400);
+    assertEquals(paystackRefundCalls().length, 0);
+    assertEquals(execution(), undefined);
+  });
+});
+
+Deno.test('adminSendOrderRefund sends once, audits it, and a second click is refused', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    const response = await callRpc('admin', { note: 'Customer called, restaurant closed early' });
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.data.outcome, 'sent');
+    assertEquals(body.data.refundExecution.status, 'pending');
+    assertEquals(body.data.refundExecution.requestedBy, `admin:${ADMIN_UID}`);
+    assertEquals(paystackRefundCalls().length, 1);
+    assertEquals(JSON.parse(paystackRefundCalls()[0].body).amount, CAPTURED * 100);
+    const audit = db.AdminAuditLog.filter((entry) => entry.action === 'order_refund_sent');
+    assertEquals(audit.length, 1);
+    assertEquals(audit[0].details.note, 'Customer called, restaurant closed early');
+    assertEquals(events('admin_refund_sent').length, 1);
+    assertEquals(events('admin_refund_sent')[0].note, 'Customer called, restaurant closed early');
+
+    const again = await rpcFailure(() => callRpc('admin', { note: 'again' }));
+    assertEquals(again.status, 412);
+    assertEquals(paystackRefundCalls().length, 1, 'still one refund');
+  });
+});
+
+Deno.test('adminSendOrderRefund: two simultaneous clicks, one refund and one 409', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    const outcomes = await Promise.allSettled([
+      callRpc('admin', { note: 'first' }),
+      callRpc('admin', { note: 'second' }),
+    ]);
+    const statuses = outcomes
+      .map((outcome) => (outcome.status === 'fulfilled' ? outcome.value.status : (outcome.reason as { status?: number }).status))
+      .sort();
+    assertEquals(statuses, [200, 409]);
+    assertEquals(paystackRefundCalls().length, 1);
+  });
+});
+
+Deno.test('adminSendOrderRefund refuses an unrecorded or uncaptured refund with 412', async () => {
+  for (const payment of [refundedPayment({ status: 'paid' }), refundedPayment({ capturedAmount: 0, paidAt: null })]) {
+    await withHarness(async () => {
+      setup(makeOrder({ payment }));
+      const error = await rpcFailure(() => callRpc('admin', { note: 'refund' }));
+      assertEquals(error.status, 412);
+      assertEquals(paystackRefundCalls().length, 0);
+    });
+  }
+});
+
+Deno.test('adminSendOrderRefund reports a Paystack refusal as failed, audited, retryable', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    paystackResponder = () => new Response(JSON.stringify({ status: false, message: 'Insufficient balance' }), { status: 400 });
+    const response = await callRpc('admin', { note: 'refund' });
+    const body = await response.json();
+    assertEquals(body.data.outcome, 'failed');
+    assertEquals(body.data.refundExecution.lastError, 'Insufficient balance');
+    assertEquals(db.AdminAuditLog.length, 1);
+
+    paystackResponder = () =>
+      new Response(JSON.stringify({ status: true, data: { id: 78, status: 'processing' } }), { status: 200 });
+    const retry = await callRpc('admin', { note: 'topped up the balance' });
+    assertEquals((await retry.json()).data.refundExecution.attempt, 2);
+    assertEquals(paystackRefundCalls().length, 2);
   });
 });

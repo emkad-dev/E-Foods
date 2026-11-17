@@ -133,6 +133,9 @@ export const ADMIN_ACTIONS = [
   'adminResolveOrderReport',
   // Closes an operational alert once a human has dealt with it. Audited.
   'adminResolveOperationalAlert',
+  // Sends the recorded refund of an order through Paystack (money leaves the FEASTY
+  // balance). One per order, audited.
+  'adminSendOrderRefund',
 ] as const;
 
 export const ACCOUNT_ACTIONS = [
