@@ -8,6 +8,7 @@ import { SkeletonRows } from '../components/Skeleton';
 import RangePicker from '../components/RangePicker';
 import RestaurantRating from '../components/RestaurantRating';
 import StatusBadge from '../components/StatusBadge';
+import { useNavCounts } from '../contexts/NavCountsContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import {
   buildPaymentBreakdown,
@@ -32,6 +33,9 @@ import { getApprovalTone, getOrderTone, getPaymentChartColor, getStatusChartColo
 
 export default function OverviewPage() {
   const { snapshot, error, hasData, refresh } = useSnapshot();
+  // The sidebar's SOS count, read once for the whole console: the tile costs
+  // no extra request. null means "not known", never "none".
+  const { sos: sosCount } = useNavCounts();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
 
   const kpis = useMemo(
@@ -208,16 +212,34 @@ export default function OverviewPage() {
             </div>
 
             {/* caption={null}: the section heading already says these figures
-                are live, so a "Live count" line under each repeated it three
-                times. */}
-            <div className="kpi-grid kpi-grid-3">
-              <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} caption={null} />
-              <KpiCard label="Dispatch online" value={formatNumber(kpis.dispatchOnline)} caption={null} />
+                are live, so a "Live count" line under each repeated it.
+
+                Every tile is a link to the page where you act on it. SOS is
+                last in the row but the loudest when it fires: the danger tint
+                and a red figure whenever any rider has raised one in the last
+                24 hours. An unknown count reads "—" with a caption, never 0,
+                because a zero here would claim no rider is in trouble. */}
+            <div className="kpi-grid">
+              <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} caption={null} href="/orders" />
+              <KpiCard
+                label="Dispatch online"
+                value={formatNumber(kpis.dispatchOnline)}
+                caption={null}
+                href="/dispatch"
+              />
               <KpiCard
                 label="Pending approvals"
                 value={formatNumber(kpis.pendingApprovals)}
                 caption={null}
                 attention={kpis.pendingApprovals > 0}
+                href="/approvals"
+              />
+              <KpiCard
+                label="SOS (24h)"
+                value={sosCount === null ? '—' : formatNumber(sosCount)}
+                caption={sosCount === null ? 'Count unavailable' : null}
+                alert={sosCount !== null && sosCount > 0}
+                href="/dispatch"
               />
             </div>
           </section>

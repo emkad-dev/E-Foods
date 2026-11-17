@@ -101,3 +101,15 @@ test('inbox counts open threads only, whatever the server sends back', () => {
   );
   assert.equal(countOpenConversations([]), 0);
 });
+
+test('a count that is not a queue names its own unit', () => {
+  // The SOS badge on Dispatch counts alerts, not waiting work, so its
+  // accessible name must not say "waiting".
+  assert.equal(
+    describeNavCount('Dispatch', 2, 99, 'SOS alerts in the last 24 hours'),
+    'Dispatch, 2 SOS alerts in the last 24 hours'
+  );
+  assert.equal(describeNavCount('Dispatch', 0, 99, 'SOS alerts in the last 24 hours'), undefined);
+  // Queues keep their default wording.
+  assert.equal(describeNavCount('Approvals', 3), 'Approvals, 3 waiting');
+});

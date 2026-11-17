@@ -154,7 +154,10 @@ body,
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* IBM Plex Sans (loaded in index.html): built for technical interfaces,
+     with tabular figures. The system stack behind it takes over if the font
+     cannot load. */
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   background: var(--background);
   color: var(--text);
   font-size: 14px;
@@ -179,7 +182,12 @@ body {
   font-feature-settings: 'tnum' 1;
 }
 
-button {
+/* Form controls do not inherit the page font by default; without this every
+   field and select stayed in the system font beside Plex text. */
+button,
+input,
+select,
+textarea {
   font-family: inherit;
 }
 
@@ -214,6 +222,9 @@ button {
      wordmark keeps its italic weight and both brand colours -- this is the
      one place brand colour is allowed -- at a size that signs the page
      instead of shouting over it. */
+  /* The wordmark keeps the system face: it is drawn at weight 900, and IBM
+     Plex Sans stops at 700, so in Plex the brand mark would thin out. */
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 21px;
   font-style: italic;
   font-weight: 900;
@@ -526,6 +537,30 @@ button {
   background: #fff1dc;
 }
 
+/* An alarm (a rider SOS): the danger tint, and the figure itself in dark red.
+   Muted text measures 5.08:1 on --danger-soft, the red figure 4.96:1. */
+.kpi-card.is-alert {
+  background: var(--danger-soft);
+}
+
+.kpi-card.is-alert .kpi-value {
+  color: var(--danger-text);
+}
+
+/* A tile that links to the page where you act on it. Interactive things must
+   look interactive: a pointer, and a fill that darkens on hover. The global
+   :focus-visible ring covers keyboard users. */
+.kpi-card-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.kpi-card-link:hover {
+  filter: brightness(0.97);
+}
+
 /* Two peers side by side, such as the two breakdown charts. */
 .grid-even {
   display: grid;
@@ -825,17 +860,32 @@ button {
   }
 }
 
+/*
+ * SOFT RED, LOUD CONFIRM. A destructive button that only OPENS a second step
+ * -- Reject (asks for a reason), Force cancel, Delete admin, Delete account on
+ * request (each opens a confirm dialog) -- is a pale red fill with dark red
+ * text: clearly destructive, but no longer louder than the ink primary action
+ * beside it. The point of no return keeps the alarm: .confirm-dialog-confirm
+ * stays solid red.
+ *
+ * Dark red on the pale tint measures 4.96:1 (--danger-text on
+ * --danger-soft). Earlier these bodies were once swapped with .btn-ghost,
+ * which made every routine action the most alarming control on the page; the
+ * fix for that still holds -- ghost stays quiet, danger stays red.
+ */
 .btn-danger {
-  /* Solid, because this is the loud one. These two rule bodies were swapped:
-     .btn-ghost carried the solid --danger fill and .btn-danger the pale tint,
-     so every routine action in the console (Retry, Sign out, Save, Refresh,
-     Close, Assign to me) rendered as the most alarming control on the page
-     while Reject, Disable and Delete rendered as the quietest. */
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  border-color: transparent;
+}
+
+/*
+ * A destructive button that acts IMMEDIATELY, with no second step, IS the
+ * point of no return, so it keeps the solid red. Today that is Access's
+ * Disable. White on --danger is 4.74:1.
+ */
+.btn-danger-now {
   background: var(--danger);
-  /* White, not --danger-soft: the pale tint on the red fill measured 3.74:1,
-     so the loudest button in the console had the least legible label. White
-     on --danger is 4.74:1, and is what .confirm-dialog-confirm -- the dialog
-     this button opens -- already used. */
   color: #ffffff;
   border-color: var(--danger);
 }

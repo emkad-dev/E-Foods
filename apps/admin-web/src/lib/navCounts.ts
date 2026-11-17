@@ -28,7 +28,8 @@ export const NAV_COUNT_CAP = 99;
 export type NavCount = number | null | undefined;
 
 /** The two queues where a human must act. Nothing else gets a badge. */
-export type NavCountKey = 'approvals' | 'inbox';
+// 'sos' is the rider SOS alerts of the last 24 hours, badged on Dispatch.
+export type NavCountKey = 'approvals' | 'inbox' | 'sos';
 
 export type NavCounts = Record<NavCountKey, number | null>;
 
@@ -67,7 +68,10 @@ export function formatNavCount(count: NavCount, cap: number = NAV_COUNT_CAP): st
 export function describeNavCount(
   label: string,
   count: NavCount,
-  cap: number = NAV_COUNT_CAP
+  cap: number = NAV_COUNT_CAP,
+  // What the number counts. "waiting" fits a queue; an SOS count is not a
+  // queue, so its link says "SOS alerts in the last 24 hours" instead.
+  unit: string = 'waiting'
 ): string | undefined {
   if (formatNavCount(count, cap) === null) {
     return undefined;
@@ -76,7 +80,7 @@ export function describeNavCount(
   const whole = Math.floor(count as number);
 
   // "99+ waiting" is a glyph, not a phrase; say the comparison out loud.
-  return whole > cap ? `${label}, more than ${cap} waiting` : `${label}, ${whole} waiting`;
+  return whole > cap ? `${label}, more than ${cap} ${unit}` : `${label}, ${whole} ${unit}`;
 }
 
 /**
