@@ -9,6 +9,8 @@ import { recordOperationalAlert } from '../_shared/operationalAlerts.ts';
 import { settleRiderPayout } from '../_shared/riderPayouts.ts';
 import { resolveWebhookOrderIdForReference } from './invariants.ts';
 import { handleRiderTransferWebhook, isTransferEvent } from './transfers.ts';
+import { applyRefundWebhook } from '../_shared/paystackRefund.ts';
+import { isRefundEvent, parseRefundWebhook } from './refunds.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -91,6 +93,32 @@ Deno.serve(async (req) => {
 
   const eventType = normalizeText(payload.event);
   const eventData = (payload.data && typeof payload.data === 'object' ? payload.data : null) as JsonObject | null;
+
+  // Refund events carry transaction_reference / refund_reference, not
+  // `reference`, so they are routed before the missing-reference check below.
+  // A thrown error answers 500 so Paystack retries (applying an event is
+  // idempotent, so a retry is always safe).
+  if (isRefundEvent(eventType)) {
+    const refundInput = parseRefundWebhook(eventType, eventData);
+    try {
+      const result = await applyRefundWebhook(refundInput);
+      return new Response(
+        JSON.stringify({ received: true, event: eventType, reference: refundInput.transactionReference, result }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } catch (error) {
+      logEdgeEvent('error', 'Paystack refund webhook processing failed', {
+        event: eventType,
+        reference: refundInput.transactionReference,
+        error: error instanceof Error ? { message: error.message, name: error.name } : String(error),
+      });
+      return new Response(
+        JSON.stringify({ received: true, processed: false, error: 'Webhook processing failed' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+
   const reference = normalizeText(eventData?.reference);
 
   if (!reference) {
