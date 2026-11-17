@@ -235,6 +235,8 @@ export interface OrderPaymentSummary extends DocumentData {
   lastEvent?: string | null;
   paidAt?: unknown | null;
   refundedAt?: unknown | null;
+  /** The Paystack refund's progress (packages/domain/src/refundExecution.ts). */
+  refundExecution?: { status?: string | null } | null;
 }
 
 export interface OrderAssignmentSummary extends DocumentData {

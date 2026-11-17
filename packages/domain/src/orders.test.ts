@@ -251,12 +251,29 @@ describe('the payment label the customer sees', () => {
   it('money that was taken keeps its label on a closed order', () => {
     assert.equal(
       formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('refunded', { capturedAmount: 2500 }) }),
-      'Refunded'
+      'Refund being arranged'
     );
     assert.equal(
       formatCustomerPaymentStatusLabel({ orderStatus: 'cancelled', payment: card('paid', { capturedAmount: 2500 }) }),
       'Paid',
       'a late payment on a cancelled order is shown as paid'
     );
+  });
+
+  it('a refund reads "on its way" only once Paystack is processing or has processed it', () => {
+    const refunded = (executionStatus?: string) =>
+      formatCustomerPaymentStatusLabel({
+        orderStatus: 'rejected',
+        payment: card('refunded', {
+          capturedAmount: 2500,
+          ...(executionStatus ? { refundExecution: { status: executionStatus } } : {}),
+        }),
+      });
+    assert.equal(refunded(), 'Refund being arranged');
+    for (const status of ['requested', 'pending', 'needs_attention', 'failed']) {
+      assert.equal(refunded(status), 'Refund being arranged', status);
+    }
+    assert.equal(refunded('processing'), 'Refund on its way');
+    assert.equal(refunded('processed'), 'Refund on its way');
   });
 });

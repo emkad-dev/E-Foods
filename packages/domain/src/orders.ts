@@ -272,13 +272,22 @@ const CLOSED_UNSERVED_ORDER_STATUSES = ['cancelled', 'rejected', 'failed_deliver
  */
 export const formatCustomerPaymentStatusLabel = (input: {
   orderStatus: string | null | undefined;
-  payment: (CapturablePayment & { method?: string | null }) | null | undefined;
+  payment: (CapturablePayment & { method?: string | null; refundExecution?: unknown }) | null | undefined;
 }) => {
   const status = input.payment?.status ?? 'pending';
   const closed = CLOSED_UNSERVED_ORDER_STATUSES.includes(normalizeOrderStatus(input.orderStatus));
   const unpaid = status === 'pending' || status === 'failed' || isPhantomRefund(input.payment);
   if (closed && unpaid) {
     return 'Not paid';
+  }
+  if (status === 'refunded' && !isPhantomRefund(input.payment)) {
+    // A recorded refund is not money returned. "On its way" only once Paystack
+    // has the refund (processing) or finished it (processed); see
+    // refundExecution.ts (isRefundOnItsWay).
+    const execution = input.payment?.refundExecution;
+    const executionStatus =
+      execution && typeof execution === 'object' ? (execution as { status?: unknown }).status : undefined;
+    return executionStatus === 'processing' || executionStatus === 'processed' ? 'Refund on its way' : 'Refund being arranged';
   }
   return formatPaymentStatusLabel(isPhantomRefund(input.payment) ? 'failed' : status, input.payment?.method);
 };
