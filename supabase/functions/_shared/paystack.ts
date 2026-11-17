@@ -377,6 +377,60 @@ export const initiatePaystackTransfer = ({
 export const verifyPaystackTransfer = (reference: string): Promise<PaystackCallOutcome> =>
   callPaystack({ method: 'GET', path: `/transfer/verify/${encodeURIComponent(reference)}` });
 
+// ── Refunds ────────────────────────────────────────────────────────────────
+//
+// POST /refund (https://paystack.com/docs/api/refund/). Money leaves FEASTY's
+// Paystack payout/balance, so this reports the same three outcomes as a
+// transfer. Our own `reference` makes the request idempotent at Paystack: a
+// reused reference is answered 409 and creates nothing
+// (https://paystack.com/docs/payments/refunds/#use-your-own-refund-reference).
+
+/** Paystack refund references: 8-64 letters, digits, '_' and '-', case-insensitive. */
+export const isValidRefundReference = (reference: string) => /^[A-Za-z0-9_-]{8,64}$/.test(reference);
+
+/** One reference per order and attempt: `feasty_rf_<order id without dashes>_<attempt>`. */
+export const buildRefundReference = (orderId: string, attempt: number) =>
+  `feasty_rf_${orderId.replace(/[^A-Za-z0-9]/g, '').slice(0, 40).toLowerCase()}_${attempt}`;
+
+export const initiatePaystackRefund = ({
+  amountKobo,
+  customerNote,
+  merchantNote,
+  reference,
+  transactionReference,
+}: {
+  amountKobo: number;
+  customerNote: string;
+  merchantNote: string;
+  reference: string;
+  transactionReference: string;
+}): Promise<PaystackCallOutcome> => {
+  if (!Number.isInteger(amountKobo) || amountKobo <= 0) {
+    throw new Error('Refund amount must be a positive whole number of kobo.');
+  }
+  if (!isValidRefundReference(reference)) {
+    throw new Error('Refund reference is not a valid Paystack refund reference.');
+  }
+  if (!sanitizeText(transactionReference)) {
+    throw new Error('A transaction reference is required to refund.');
+  }
+  return callPaystack({
+    method: 'POST',
+    path: '/refund',
+    body: {
+      // Always explicit: without `amount` Paystack refunds the WHOLE
+      // transaction, which for a multi-restaurant checkout is more than this
+      // order's share.
+      amount: amountKobo,
+      currency: DEFAULT_CURRENCY,
+      customer_note: customerNote,
+      merchant_note: merchantNote,
+      reference,
+      transaction: transactionReference,
+    },
+  });
+};
+
 export const verifyPaystackTransaction = async (reference: string) =>
   (await fetchPaystackJson({
     method: 'GET',
