@@ -42,13 +42,19 @@ const PARTNER_UID = 'partner-user-1';
 const RIDER_UID = 'rider-guard-1';
 const CUSTOMER_UID = 'cust-guard-1';
 
-// A PostgREST column, including a JSON path like 'payment->>status' (text, or
-// null when absent).
+// A PostgREST column, including JSON paths like 'payment->>status' or
+// 'payment->refundExecution->>status': '->' keeps JSON, a final '->>' gives
+// text (null when absent).
 const readColumn = (row: Row, column: string): unknown => {
-  const [base, key] = column.split('->>');
-  if (key === undefined) return row[base];
-  const value = (row[base] ?? {})[key];
-  return value === undefined || value === null ? null : String(value);
+  const textMode = column.includes('->>');
+  const [base, ...path] = column.split(/->>|->/);
+  let value: unknown = row[base];
+  for (const key of path) {
+    value = value && typeof value === 'object' ? (value as Row)[key] : undefined;
+  }
+  if (path.length === 0) return value;
+  if (value === undefined || value === null) return null;
+  return textMode ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : value;
 };
 
 const makeBuilder = (table: string) => {
@@ -691,5 +697,98 @@ Deno.test('delivery code: a concurrent wrong guess that took the next slot is ne
     const response = await dispatchAction('delivered', { deliveryCode: '1234' });
     assertEquals(response.status, 200);
     assertEquals(order().deliveryCodeAttempts, 2);
+  });
+});
+
+// ───────────────────────── automatic Paystack refunds (auto_refunds flag) ─────────────────────────
+
+const PAYSTACK_REFUND_URL = 'https://api.paystack.co/refund';
+
+/** Routes api.paystack.co to `paystack` and records every Paystack refund request body. */
+const stubPaystack = (paystack: () => Response) => {
+  const refundBodies: Row[] = [];
+  globalThis.fetch = ((input: Request | URL | string, init?: RequestInit) => {
+    if (String(input) === PAYSTACK_REFUND_URL) {
+      refundBodies.push(JSON.parse(String(init?.body ?? '{}')));
+      return Promise.resolve(paystack());
+    }
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  }) as typeof fetch;
+  return refundBodies;
+};
+
+const paystackAccepts = () => new Response(JSON.stringify({ status: true, data: { id: 501, status: 'pending' } }), { status: 200 });
+
+const autoRefundsOn = () => {
+  db.FeatureFlag = [{ key: 'auto_refunds', enabled: true }];
+};
+
+Deno.test('auto_refunds off (the default): a paid rejection records the refund and sends nothing to Paystack', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'accepted' }));
+    Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+    Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+    const refundBodies = stubPaystack(paystackAccepts);
+    const response = await partnerAction('reject');
+    assertEquals(response.status, 200);
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(refundBodies.length, 0, 'no Paystack call with the flag off');
+    assertEquals(order().payment.refundExecution, undefined);
+    assertEquals(String(refundAlerts()[0].details).includes('Refund via Paystack'), true, 'the alert points at the button');
+  });
+});
+
+Deno.test('auto_refunds on: a paid rejection is refunded through Paystack once, for the recorded amount', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'accepted' }));
+    autoRefundsOn();
+    Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+    Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+    const refundBodies = stubPaystack(paystackAccepts);
+    const response = await partnerAction('reject');
+    assertEquals(response.status, 200);
+    assertEquals(order().status, 'rejected');
+    assertEquals(refundBodies.length, 1);
+    assertEquals(refundBodies[0].amount, CAPTURED * 100);
+    assertEquals(refundBodies[0].transaction, REFERENCE);
+    assertEquals(order().payment.refundExecution.status, 'pending');
+    assertEquals(order().payment.refundExecution.requestedBy, 'auto');
+    assertEquals(String(refundAlerts()[0].details).includes('automatically'), true, 'admins are told not to refund by hand');
+  });
+});
+
+Deno.test('auto_refunds on but Paystack refuses: the rejection still succeeds and the manual alert path stays', async () => {
+  for (const paystack of [
+    () => new Response(JSON.stringify({ status: false, message: 'Insufficient balance' }), { status: 400 }),
+    () => new Response('gateway down', { status: 502 }),
+  ]) {
+    await withHarness(async () => {
+      setup(makeOrder({ status: 'accepted' }));
+      autoRefundsOn();
+      Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+      Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+      stubPaystack(paystack);
+      const response = await partnerAction('reject');
+      assertEquals(response.status, 200, 'the reject is never turned into an error');
+      assertEquals(order().status, 'rejected');
+      assertEquals(order().payment.status, 'refunded', 'the refund record stands');
+      assertEquals(order().needsAttention, true);
+      assertEquals(refundAlerts().length, 1, 'the manual refund alert is still raised');
+      const followUp = db.OperationalAlert.filter(
+        (alert) => alert.alertType === 'refund_failed' || alert.alertType === 'refund_needs_attention'
+      );
+      assertEquals(followUp.length, 1, 'and the failure has its own alert');
+    });
+  }
+});
+
+Deno.test('auto_refunds on: an unpaid (cash) rejection never reaches Paystack', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'accepted', payment: { method: 'cash', provider: 'cash_on_delivery', status: 'pending' } }));
+    autoRefundsOn();
+    const refundBodies = stubPaystack(paystackAccepts);
+    const response = await partnerAction('reject');
+    assertEquals(response.status, 200);
+    assertEquals(refundBodies.length, 0);
   });
 });

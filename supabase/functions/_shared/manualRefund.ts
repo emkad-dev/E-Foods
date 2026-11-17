@@ -9,7 +9,11 @@
 // for the admin console, and the admin push/email. The promo-cap slot the order
 // held is freed, as on every other paid order that ends without being served.
 //
-// Recorded only: no money moves here and the customer copy is unchanged.
+// Recorded only: no money moves here. The money is sent either by an admin
+// ("Refund via Paystack", adminSendOrderRefund) or, for the clear-cut cases and
+// only while the auto_refunds flag is on, by the caller right after this
+// announcement (startAutomaticRefund in paystackRefund.ts); the wording below
+// says which, so nobody refunds by hand while Paystack is already sending it.
 
 import { buildRefundUpdate } from './domains/orders.ts';
 import { formatNairaAmount, shortOrderCode } from './email.ts';
@@ -80,6 +84,8 @@ const describeClosure = (closedStatus: string, cancelledBy: ManualRefundCancelle
  */
 export const announceManualRefund = async (input: {
   actorUid: string;
+  /** The caller will send this refund through Paystack automatically right after. */
+  autoRefund?: boolean;
   /** Only read when closedStatus is cancelled; defaults to an admin. */
   cancelledBy?: ManualRefundCancelledBy;
   closedStatus: string;
@@ -98,14 +104,21 @@ export const announceManualRefund = async (input: {
     // buildRefundUpdate records nothing for a payment it cannot refund (not a
     // prepaid method, or no captured amount). Say so rather than claim a refund.
     const refundRecorded = payment.status === PAYMENT_STATUS.REFUNDED && refundAmount !== null;
-    const details = refundRecorded
+    const autoRefund = input.autoRefund === true && refundRecorded;
+    const details = autoRefund
       ? `Order ${order.id} ${closure.verb} after payment. A refund of ${formatNairaAmount(
           refundAmount
-        )} is recorded on the order but no money has moved: return it to the customer by hand.`
-      : `Order ${order.id} ${closure.verb} after payment. No refund could be recorded automatically: check the payment and return the money to the customer by hand.`;
-    const adminBody = refundRecorded
-      ? `Order ${code} ${closure.verb} after payment. The refund is recorded but must be paid back by hand.`
-      : `Order ${code} ${closure.verb} after payment. No refund could be recorded automatically; check the payment by hand.`;
+        )} is recorded and FEASTY is sending it through Paystack automatically: do not refund by hand unless a "Refund failed" or "Refund needs attention" alert follows.`
+      : refundRecorded
+        ? `Order ${order.id} ${closure.verb} after payment. A refund of ${formatNairaAmount(
+            refundAmount
+          )} is recorded on the order but no money has moved: send it with "Refund via Paystack" on the order, or return it to the customer by hand.`
+        : `Order ${order.id} ${closure.verb} after payment. No refund could be recorded automatically: check the payment and return the money to the customer by hand.`;
+    const adminBody = autoRefund
+      ? `Order ${code} ${closure.verb} after payment. The refund is being sent through Paystack automatically.`
+      : refundRecorded
+        ? `Order ${code} ${closure.verb} after payment. The refund is recorded: send it with "Refund via Paystack" or pay it back by hand.`
+        : `Order ${code} ${closure.verb} after payment. No refund could be recorded automatically; check the payment by hand.`;
 
     await recordOperationalAlert({
       alertType: MANUAL_REFUND_ALERT_TYPE,
@@ -113,6 +126,7 @@ export const announceManualRefund = async (input: {
       details,
       metadata: {
         actorUid,
+        autoRefund,
         closedStatus,
         paymentReference: typeof payment.reference === 'string' ? payment.reference : null,
         refundAmount,
@@ -121,7 +135,7 @@ export const announceManualRefund = async (input: {
       severity: 'high',
       subjectId: order.id,
       subjectType: 'order',
-      title: `Refund needed: ${closure.short}`,
+      title: autoRefund ? `Refund sending: ${closure.short}` : `Refund needed: ${closure.short}`,
     });
 
     await notifyAdmins({
@@ -133,7 +147,7 @@ export const announceManualRefund = async (input: {
         routeKey: 'admin_access',
         type: MANUAL_REFUND_ALERT_TYPE,
       }),
-      title: `Refund needed: ${closure.short}`,
+      title: autoRefund ? `Refund sending: ${closure.short}` : `Refund needed: ${closure.short}`,
     });
   } catch (error) {
     logEdgeEvent('error', 'manual refund alert failed', {

@@ -1259,8 +1259,9 @@ const createOrderGroupWithItems = async ({
 // Exported so the acceptance-deadline sweep (Task 14 / E3) can issue its full
 // refund through the SAME recorded-only mechanism cancelCustomerOrder uses,
 // rather than inventing a second one: it writes the refund into the order's
-// payment ledger (refundAmount / refundedAt / status = 'refunded'); there is no
-// separate Paystack execution step here, and the sweep must not add one.
+// payment ledger (refundAmount / refundedAt / status = 'refunded'). It is the
+// RECORD only: the money is sent separately, from this record, by
+// _shared/paystackRefund.ts (the admin button, or the auto_refunds flag).
 export const buildRefundUpdate = ({
   order,
   refundRate,

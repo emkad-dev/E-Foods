@@ -43,6 +43,7 @@
 
 import { buildRefundUpdate } from './domains/orders.ts';
 import { announceManualRefund } from './manualRefund.ts';
+import { isAutoRefundEnabled, startAutomaticRefund } from './paystackRefund.ts';
 import {
   buildNotificationData,
   notifyAdmins,
@@ -291,13 +292,20 @@ const flagAutoCancelledRefund = async (snapshot: CustomerOrderRow): Promise<bool
       return false;
     }
 
+    // An auto-cancel of a paid order is a clear-cut refund: with auto_refunds
+    // on it is sent through Paystack after the alert. Never throws.
+    const autoRefund = await isAutoRefundEnabled();
     await announceManualRefund({
       actorUid: ACCEPTANCE_DEADLINE_SWEEP_ACTOR,
+      autoRefund,
       cancelledBy: 'acceptance_timeout',
       closedStatus: ORDER_STATUS.CANCELLED,
       order,
       payment,
     });
+    if (autoRefund) {
+      await startAutomaticRefund(orderId);
+    }
     return true;
   } catch (error) {
     logEdgeEvent('error', 'acceptance auto-cancel refund flag failed', {
@@ -404,7 +412,7 @@ const autoCancelOrder = async (order: CustomerOrderRow, result: AcceptanceDeadli
 
   await notifyUsers([order.customerId], {
     title: 'Order cancelled and refunded',
-    body: `Order ${order.id.slice(-6).toUpperCase()} was cancelled because the restaurant did not accept it in time. You have been fully refunded.`,
+    body: `Order ${order.id.slice(-6).toUpperCase()} was cancelled because the restaurant did not accept it in time. Your full refund is being arranged.`,
     data: buildNotificationData({
       app: 'customer',
       orderId: order.id,

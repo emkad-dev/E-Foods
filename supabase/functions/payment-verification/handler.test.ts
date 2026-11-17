@@ -28,11 +28,18 @@ const originalConsole = { error: console.error, warn: console.warn, log: console
 
 // PostgREST column, including a JSON path like 'payment->>status' (text, or
 // null when absent) - the payment compare-and-set filters on one.
+// JSON paths too ('payment->refundExecution->>status'): '->' keeps JSON, a
+// final '->>' gives text.
 const readColumn = (row: Row, column: string): unknown => {
-  const [base, key] = column.split('->>');
-  if (key === undefined) return row[base];
-  const value = (row[base] ?? {})[key];
-  return value === undefined || value === null ? null : String(value);
+  const textMode = column.includes('->>');
+  const [base, ...path] = column.split(/->>|->/);
+  let value: unknown = row[base];
+  for (const key of path) {
+    value = value && typeof value === 'object' ? (value as Row)[key] : undefined;
+  }
+  if (path.length === 0) return value;
+  if (value === undefined || value === null) return null;
+  return textMode ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : value;
 };
 
 const makeBuilder = (table: string) => {
@@ -393,6 +400,45 @@ Deno.test('cancelled order that receives a payment: recorded as paid, NOT revive
     // The money is still recorded.
     assertEquals(db.PaymentTransaction.length, 1);
     assertEquals(db.PaymentTransaction[0].status, 'paid');
+  });
+});
+
+Deno.test('auto_refunds on: money on a cancelled order is recorded as a refund and sent through Paystack once', async () => {
+  await withHarness(async () => {
+    setup([
+      makeOrder({
+        status: 'cancelled',
+        payment: { method: 'card', provider: 'paystack', reference: REFERENCE, status: 'failed' },
+        cancellation: { actor: 'system', reason: 'payment_timeout' },
+      }),
+    ]);
+    db.FeatureFlag = [{ key: 'auto_refunds', enabled: true }];
+    Deno.env.set('PAYSTACK_SECRET_KEY', Deno.env.get('PAYSTACK_SECRET_KEY') ?? 'sk_test_not_real');
+    Deno.env.set('PAYSTACK_PUBLIC_KEY', Deno.env.get('PAYSTACK_PUBLIC_KEY') ?? 'pk_test_not_real');
+    paystackVerifyData = successfulCharge(250000);
+    const refundBodies: Row[] = [];
+    const verifyFetch = globalThis.fetch;
+    globalThis.fetch = ((input: unknown, init?: RequestInit) => {
+      if (String(input) === 'https://api.paystack.co/refund') {
+        refundBodies.push(JSON.parse(String(init?.body ?? '{}')) as Row);
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: true, data: { id: 42, status: 'pending' } }), { status: 200 })
+        );
+      }
+      return verifyFetch(input as string, init);
+    }) as typeof fetch;
+
+    await verify('order-1');
+    await verify('order-1'); // a redelivered webhook
+
+    const order = orderById('order-1');
+    assertEquals(order.status, 'cancelled');
+    assertEquals(order.payment.status, 'refunded');
+    assertEquals(order.payment.refundAmount, 2500);
+    assertEquals(order.payment.refundExecution.status, 'pending');
+    assertEquals(refundBodies.length, 1);
+    assertEquals(refundBodies[0].amount, 250000);
+    assertEquals(order.needsAttention, true, 'still flagged until Paystack reports the refund processed');
   });
 });
 

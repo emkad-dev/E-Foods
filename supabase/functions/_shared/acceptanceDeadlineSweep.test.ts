@@ -64,11 +64,18 @@ const normalizeStatus = (value: unknown) => {
 // stale-read gap the compare-and-swap exists to close.
 // A PostgREST column, including a JSON path like 'payment->>status' (text, or
 // null when absent) - the candidate query filters to paid orders on one.
+// Nested paths too ('payment->refundExecution->>status'): '->' keeps JSON, a
+// final '->>' gives text.
 const readColumn = (row: Row, column: string): unknown => {
-  const [base, key] = column.split('->>');
-  if (key === undefined) return row[base];
-  const value = ((row[base] ?? {}) as Row)[key];
-  return value === undefined || value === null ? null : String(value);
+  const textMode = column.includes('->>');
+  const [base, ...path] = column.split(/->>|->/);
+  let value: unknown = row[base];
+  for (const key of path) {
+    value = value && typeof value === 'object' ? (value as Row)[key] : undefined;
+  }
+  if (path.length === 0) return value;
+  if (value === undefined || value === null) return null;
+  return textMode ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : value;
 };
 
 const createTable = (initialRows: Row[]) => {
@@ -91,7 +98,7 @@ const createTable = (initialRows: Row[]) => {
         return builder;
       },
       is(col: string, val: unknown) {
-        filtered = filtered.filter((row) => (row[col] ?? null) === val);
+        filtered = filtered.filter((row) => (readColumn(row, col) ?? null) === val);
         return builder;
       },
       order(col: string, opts?: { ascending?: boolean }) {
@@ -194,6 +201,10 @@ type SweepMockOptions = {
   deadlineMinutes?: number;
   /** The push_sound_channels FeatureFlag. Absent (off) by default. */
   soundChannels?: boolean;
+  /** The auto_refunds FeatureFlag. Absent (off) by default. */
+  autoRefunds?: boolean;
+  /** What api.paystack.co/refund answers. */
+  paystackRefund?: () => Response;
 };
 
 // The restaurant's owner and a linked staff member, each with a partner push
@@ -260,8 +271,10 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
   (serviceClient as any).from = (table: string) => {
     if (table === 'FeatureFlag') {
       // loadFeatureFlagMap: select(...).returns<T>()
-      const rows =
-        options.soundChannels === undefined ? [] : [{ key: 'push_sound_channels', enabled: options.soundChannels }];
+      const rows = [
+        ...(options.soundChannels === undefined ? [] : [{ key: 'push_sound_channels', enabled: options.soundChannels }]),
+        ...(options.autoRefunds === undefined ? [] : [{ key: 'auto_refunds', enabled: options.autoRefunds }]),
+      ];
       return { select: () => ({ returns: () => Promise.resolve({ data: rows, error: null }) }) };
     }
     const mock = tables[table];
@@ -330,8 +343,17 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
 
   // Every Expo push the sweep sends, as the messages it posted.
   const pushes: PushMessage[] = [];
+  // Every Paystack refund request body (never a live call).
+  const paystackRefunds: Row[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    if (String(input) === 'https://api.paystack.co/refund') {
+      paystackRefunds.push(JSON.parse(String(init?.body ?? '{}')));
+      return Promise.resolve(
+        options.paystackRefund?.() ??
+          new Response(JSON.stringify({ status: true, data: { id: 901, status: 'pending' } }), { status: 200 })
+      );
+    }
     if (String(input).includes('exp.host') && typeof init?.body === 'string') {
       const body = JSON.parse(init.body);
       if (Array.isArray(body)) {
@@ -355,7 +377,7 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
 
   const reminders = () => pushes.filter((push) => push.data?.type === 'acceptance_reminder');
 
-  return { events, order, pushes, reminders, restaurant, restore, rpcCalls, tables };
+  return { events, order, paystackRefunds, pushes, reminders, restaurant, restore, rpcCalls, tables };
 };
 
 // ---------------------------------------------------------------------------
@@ -950,6 +972,77 @@ Deno.test('reminder: a configured 20-minute deadline reminds at 10 minutes, not 
     shiftClock(30 * 60_000);
     await loadAcceptanceDeadlineConfig();
     Date.now = realNow;
+    mocks.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// auto_refunds: the paid auto-cancel's recorded refund is sent through
+// Paystack only when the flag is on, and a Paystack failure never undoes the
+// cancel or the manual alert.
+// ---------------------------------------------------------------------------
+const paystackOrder = (id: string) =>
+  buildOrderRow({
+    id,
+    payment: {
+      capturedAmount: CAPTURED_AMOUNT,
+      method: 'card',
+      paidAt: placedAgo(DEADLINE_MS * 2 + 5_000),
+      provider: 'paystack',
+      reference: `FEASTY-CRD-${id}`,
+      status: 'paid',
+    },
+    timeline: { placedAt: placedAgo(DEADLINE_MS * 2 + 5_000) },
+  });
+
+Deno.test('sweep: auto_refunds off (default) sends nothing to Paystack', async () => {
+  Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+  Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+  const mocks = installMocks([paystackOrder('order-auto-off')]);
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.cancelled, 1, 'cancelled');
+    expectEqual(mocks.paystackRefunds.length, 0, 'no Paystack refund');
+    expectEqual((mocks.order().payment as Row).refundExecution, undefined, 'no execution');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('sweep: auto_refunds on sends the recorded refund once, across repeated sweeps', async () => {
+  Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+  Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+  const mocks = installMocks([paystackOrder('order-auto-on')], { autoRefunds: true });
+  try {
+    await sweepUnacceptedOrders();
+    await sweepUnacceptedOrders();
+    expectEqual(mocks.paystackRefunds.length, 1, 'one Paystack refund');
+    expectEqual(mocks.paystackRefunds[0].amount, CAPTURED_AMOUNT * 100, 'the recorded amount in kobo');
+    expectEqual(((mocks.order().payment as Row).refundExecution as Row).status, 'pending', 'execution recorded');
+    expectEqual(refundAlertsFor(mocks).length, 1, 'the manual alert is still raised');
+  } finally {
+    mocks.restore();
+  }
+});
+
+Deno.test('sweep: auto_refunds on and Paystack refuses: the cancel stands, flagged, with a refund_failed alert', async () => {
+  Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+  Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+  const mocks = installMocks([paystackOrder('order-auto-fail')], {
+    autoRefunds: true,
+    paystackRefund: () => new Response(JSON.stringify({ status: false, message: 'Insufficient balance' }), { status: 400 }),
+  });
+  try {
+    const result = await sweepUnacceptedOrders();
+    expectEqual(result.cancelled, 1, 'the cancel committed');
+    expectEqual(mocks.order().status, 'cancelled', 'cancelled');
+    expectEqual(mocks.order().needsAttention, true, 'flagged');
+    expectEqual(
+      mocks.tables.OperationalAlert.rows.filter((row) => row.alertType === 'refund_failed').length,
+      1,
+      'refund_failed alert'
+    );
+  } finally {
     mocks.restore();
   }
 });

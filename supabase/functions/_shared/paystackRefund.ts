@@ -29,6 +29,7 @@ import {
   type RefundExecutionStatus,
 } from '../../../packages/domain/src/refundExecution.ts';
 import { serviceClient } from './client.ts';
+import { buildRefundUpdate } from './domains/orders.ts';
 import { formatNairaAmount, shortOrderCode } from './email.ts';
 import { isFeatureEnabled, loadFeatureFlagMap } from './featureFlags.ts';
 import { MANUAL_REFUND_ALERT_TYPE } from './manualRefund.ts';
@@ -591,6 +592,8 @@ export const applyRefundWebhook = async (input: RefundWebhookInput): Promise<Ref
 
 // ── Automatic refunds ──────────────────────────────────────────────────────
 
+const CLOSED_UNSERVED_STATUSES = new Set(['cancelled', 'rejected', 'failed_delivery']);
+
 /** The auto_refunds flag. Fails safe: an unreadable FeatureFlag table means off. */
 export const isAutoRefundEnabled = async (
   loadFlags: typeof loadFeatureFlagMap = loadFeatureFlagMap
@@ -629,6 +632,62 @@ export const startAutomaticRefund = async (
     return result;
   } catch (error) {
     logEdgeEvent('error', 'automatic refund failed', {
+      error: error instanceof Error ? error.message : String(error),
+      orderId,
+    });
+    return null;
+  }
+};
+
+/**
+ * Money that landed on an order that was already closed (the payment
+ * verification's closed-order path, which records it 'paid' and flags it).
+ * With auto_refunds on, the caller calls this: it first writes the refund
+ * RECORD exactly as a cancellation does (buildRefundUpdate, full rate), as a
+ * compare-and-set on the payment still being 'paid' on that closed order, and
+ * only then sends it. Best-effort: never throws; null when nothing was sent.
+ */
+export const refundPaymentOnClosedOrder = async (
+  orderId: string,
+  deps: PaystackRefundDeps = defaultDeps
+): Promise<SendOrderRefundResult | null> => {
+  try {
+    const order = await loadOrder(orderId);
+    if (!order) return null;
+    const observedStatus = sanitizeText(order.status);
+    const payment = paymentOf(order);
+    if (!CLOSED_UNSERVED_STATUSES.has(observedStatus) || payment.status !== 'paid' || !isPaymentCaptured(payment)) {
+      return null;
+    }
+    const recorded = buildRefundUpdate({
+      order,
+      refundRate: 1,
+      reason: 'payment_on_closed_order_full_refund',
+    }) as JsonObject;
+    if (recorded.status !== 'refunded') {
+      return null;
+    }
+
+    let write = serviceClient
+      .from('CustomerOrder')
+      .update({ payment: recorded, updatedAt: nowIso() })
+      .eq('id', orderId)
+      .eq('status', observedStatus)
+      .eq('payment->>status', 'paid');
+    if (typeof order.updatedAt === 'string') {
+      write = write.eq('updatedAt', order.updatedAt);
+    }
+    const { data: written, error } = await write.select('id');
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!Array.isArray(written) || written.length === 0) {
+      logEdgeEvent('warn', 'closed-order refund record lost a race; not sending', { orderId });
+      return null;
+    }
+    return await startAutomaticRefund(orderId, deps);
+  } catch (error) {
+    logEdgeEvent('error', 'closed-order automatic refund failed', {
       error: error instanceof Error ? error.message : String(error),
       orderId,
     });

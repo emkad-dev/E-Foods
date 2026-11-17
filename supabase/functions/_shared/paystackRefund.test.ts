@@ -20,7 +20,7 @@ Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
 import { assertEquals } from 'jsr:@std/assert';
 
 const { serviceClient } = await import('./client.ts');
-const { applyRefundWebhook, isAutoRefundEnabled, sendOrderRefund, startAutomaticRefund } = await import(
+const { applyRefundWebhook, isAutoRefundEnabled, refundPaymentOnClosedOrder, sendOrderRefund, startAutomaticRefund } = await import(
   './paystackRefund.ts'
 );
 const { initiatePaystackRefund } = await import('./paystack.ts');
@@ -842,5 +842,69 @@ Deno.test('adminSendOrderRefund reports a Paystack refusal as failed, audited, r
     const retry = await callRpc('admin', { note: 'topped up the balance' });
     assertEquals((await retry.json()).data.refundExecution.attempt, 2);
     assertEquals(paystackRefundCalls().length, 2);
+  });
+});
+
+// ───────────────────── money on a closed order ─────────────────────
+
+const latePaid = (overrides: Row = {}) =>
+  makeOrder({
+    status: 'cancelled',
+    payment: {
+      method: 'bank_transfer',
+      provider: 'paystack',
+      reference: TX_REFERENCE,
+      status: 'paid',
+      capturedAmount: CAPTURED,
+      paidAt: '2026-11-17T09:40:00.000Z',
+      paystackResponse: { amount: CAPTURED * 100 },
+    },
+    ...overrides,
+  });
+
+Deno.test('a payment on a closed order: the refund is recorded first, then sent once', async () => {
+  await withHarness(async () => {
+    setup(latePaid());
+    const paystack = fakePaystack(accepted());
+    const result = await refundPaymentOnClosedOrder(ORDER_ID, paystack.deps);
+    assertEquals(result?.kind, 'sent');
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(order().payment.refundAmount, CAPTURED);
+    assertEquals(order().payment.lastEvent, 'payment_on_closed_order_full_refund');
+    assertEquals(paystack.calls.length, 1);
+    assertEquals(paystack.calls[0].amountKobo, CAPTURED * 100);
+
+    // A second call (a redelivered webhook) records and sends nothing.
+    assertEquals(await refundPaymentOnClosedOrder(ORDER_ID, paystack.deps), null);
+    assertEquals(paystack.calls.length, 1);
+  });
+});
+
+Deno.test('a payment on a closed order: a live order, an unpaid one, or a lost race is never refunded', async () => {
+  const cases: Array<[string, Row]> = [
+    ['live order', latePaid({ status: 'accepted' })],
+    ['delivered order', latePaid({ status: 'delivered' })],
+    ['not captured', latePaid({ payment: { ...latePaid().payment, capturedAmount: 0, paidAt: null } })],
+  ];
+  for (const [label, row] of cases) {
+    await withHarness(async () => {
+      setup(row);
+      const paystack = fakePaystack(accepted());
+      assertEquals(await refundPaymentOnClosedOrder(ORDER_ID, paystack.deps), null, label);
+      assertEquals(paystack.calls.length, 0, label);
+      assertEquals(order().payment.status, 'paid', label);
+    });
+  }
+  await withHarness(async () => {
+    setup(latePaid());
+    const paystack = fakePaystack(accepted());
+    updateHook = {
+      when: (table) => table === 'CustomerOrder',
+      run: () => {
+        order().updatedAt = '2026-11-17T11:00:00.000Z';
+      },
+    };
+    assertEquals(await refundPaymentOnClosedOrder(ORDER_ID, paystack.deps), null, 'lost race');
+    assertEquals(paystack.calls.length, 0);
   });
 });
