@@ -716,8 +716,24 @@ const MAX_WEBHOOK_WRITE_ATTEMPTS = 3;
 const sameReference = (a: string | null, b: string | null) =>
   Boolean(a && b && a.toLowerCase() === b.toLowerCase());
 
-/** The order (of possibly several sharing one charge) this refund event is about. */
-const findRefundOrder = async (input: RefundWebhookInput): Promise<CustomerOrderRow | null> => {
+export const REFUND_WEBHOOK_UNMATCHED_ALERT_TYPE = 'refund_webhook_unmatched';
+
+type RefundMatch = {
+  /** The orders of this charge that have a refund in flight (not processed or failed). */
+  openOnCharge: CustomerOrderRow[];
+  /** The matched order and the reference of the attempt it was matched to. */
+  match: { matchedReference: string | null; row: CustomerOrderRow } | null;
+};
+
+const isOpenExecution = (execution: RefundExecution) => execution.status !== 'processed' && execution.status !== 'failed';
+
+/**
+ * The order (of possibly several sharing one charge) this refund event is
+ * about, tried in order: our refund reference, then Paystack's refund id, then
+ * - only for an event with no reference at all, and only against an attempt
+ * that has no Paystack id yet - an unambiguous amount.
+ */
+const findRefundOrder = async (input: RefundWebhookInput): Promise<RefundMatch> => {
   const { data, error } = await serviceClient
     .from('CustomerOrder')
     .select(CUSTOMER_ORDER_COLUMNS)
@@ -729,26 +745,31 @@ const findRefundOrder = async (input: RefundWebhookInput): Promise<CustomerOrder
   const withExecution = rows
     .map((row) => ({ execution: readRefundExecution(paymentOf(row)), row }))
     .filter((entry): entry is { execution: RefundExecution; row: CustomerOrderRow } => entry.execution !== null);
+  const openOnCharge = withExecution.filter((entry) => isOpenExecution(entry.execution)).map((entry) => entry.row);
+  const found = (entry: { execution: RefundExecution; row: CustomerOrderRow } | undefined): RefundMatch => ({
+    match: entry ? { matchedReference: entry.execution.reference, row: entry.row } : null,
+    openOnCharge,
+  });
 
   if (input.refundReference) {
-    // Our reference names the order and the attempt: an event for an older,
-    // failed attempt does not touch a newer one.
-    return withExecution.find((entry) => sameReference(entry.execution.reference, input.refundReference))?.row ?? null;
+    const byReference = withExecution.find((entry) => sameReference(entry.execution.reference, input.refundReference));
+    if (byReference) return found(byReference);
   }
   if (input.paystackRefundId) {
     const byId = withExecution.find((entry) => entry.execution.paystackRefundId === input.paystackRefundId);
-    if (byId) return byId.row;
+    if (byId) return found(byId);
   }
-  // No reference and no known id: only an unambiguous match on amount counts.
-  const open = withExecution.filter(
-    (entry) =>
-      entry.execution.status !== 'processed' &&
-      entry.execution.status !== 'failed' &&
-      entry.execution.amount !== null &&
-      input.amountKobo !== null &&
-      toKoboAmount(entry.execution.amount) === input.amountKobo
-  );
-  return open.length === 1 ? open[0].row : null;
+  if (!input.refundReference && input.amountKobo !== null) {
+    const byAmount = withExecution.filter(
+      (entry) =>
+        isOpenExecution(entry.execution) &&
+        !entry.execution.paystackRefundId &&
+        entry.execution.amount !== null &&
+        toKoboAmount(entry.execution.amount) === input.amountKobo
+    );
+    if (byAmount.length === 1) return found(byAmount[0]);
+  }
+  return found(undefined);
 };
 
 /**
@@ -769,14 +790,43 @@ export const applyRefundWebhook = async (input: RefundWebhookInput): Promise<Ref
     return { ignored: true, reason: 'missing_reference' };
   }
 
-  let order = await findRefundOrder(input);
-  if (!order) {
+  const { match, openOnCharge } = await findRefundOrder(input);
+  if (!match) {
+    // A refund on a charge where FEASTY has one in flight, that matches none
+    // of ours (a dashboard refund, an older attempt): a human must look.
+    if (openOnCharge.length > 0) {
+      await recordOperationalAlert({
+        alertType: REFUND_WEBHOOK_UNMATCHED_ALERT_TYPE,
+        dedupeKey: `ops:${REFUND_WEBHOOK_UNMATCHED_ALERT_TYPE}:${input.transactionReference}:${
+          input.refundReference ?? input.paystackRefundId ?? 'unknown'
+        }`,
+        details: `Paystack sent ${input.status} for a refund on charge ${input.transactionReference} (refund reference ${
+          input.refundReference ?? 'none'
+        }, Paystack id ${input.paystackRefundId ?? 'none'}) that matches no FEASTY refund, while order(s) ${openOnCharge
+          .map((row) => row.id)
+          .join(', ')} have one in flight. The customer may be refunded twice: check Paystack.`,
+        metadata: {
+          amountKobo: input.amountKobo,
+          orderIds: openOnCharge.map((row) => row.id),
+          paystackRefundId: input.paystackRefundId,
+          refundReference: input.refundReference,
+          status: input.status,
+          transactionReference: input.transactionReference,
+        },
+        severity: 'high',
+        subjectId: openOnCharge[0].id,
+        subjectType: 'order',
+        title: 'Unmatched Paystack refund',
+      });
+    }
     return { ignored: true, reason: 'not_our_refund' };
   }
+  let order = match.row;
 
   for (let attempt = 0; attempt < MAX_WEBHOOK_WRITE_ATTEMPTS; attempt += 1) {
     const current = readRefundExecution(paymentOf(order));
-    if (!current || (input.refundReference && !sameReference(current.reference, input.refundReference))) {
+    // Still the attempt the event was matched to (a retry may have replaced it).
+    if (!current || current.reference !== match.matchedReference) {
       return { ignored: true, reason: 'not_our_refund' };
     }
     if (

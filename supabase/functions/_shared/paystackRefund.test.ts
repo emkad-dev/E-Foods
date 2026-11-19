@@ -708,12 +708,12 @@ Deno.test('a refund FEASTY did not start, or an older attempt, is ignored', asyn
   await withHarness(async () => {
     setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ attempt: 2, reference: REF_2 }) }) }));
     // The failed first attempt's late event must not touch the second attempt.
-    assertEquals(await applyRefundWebhook(event('processed', { refundReference: REF_1 })), {
+    assertEquals(await applyRefundWebhook(event('processed', { paystackRefundId: '111', refundReference: REF_1 })), {
       ignored: true,
       reason: 'not_our_refund',
     });
     // A refund made by hand from the Paystack dashboard.
-    assertEquals(await applyRefundWebhook(event('processed', { refundReference: 'dashboard-made-ref' })), {
+    assertEquals(await applyRefundWebhook(event('processed', { paystackRefundId: '222', refundReference: 'dashboard-made-ref' })), {
       ignored: true,
       reason: 'not_our_refund',
     });
@@ -749,6 +749,7 @@ Deno.test('an event without our reference matches by Paystack id, or by an unamb
     setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution() }) }));
     await applyRefundWebhook(event('processing', { refundReference: null }));
     assertEquals(execution()?.status, 'processing');
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ paystackRefundId: null }) }) }));
     await applyRefundWebhook(event('processed', { paystackRefundId: null, refundReference: null }));
     assertEquals(execution()?.status, 'processed');
   });
@@ -1089,5 +1090,71 @@ Deno.test('a Paystack refund event on an order marked refunded by hand raises a 
     await applyRefundWebhook(event('processed'));
     assertEquals(db.OperationalAlert.filter((alert) => alert.dedupeKey === `ops:refund_paid_twice:${ORDER_ID}`).length, 1);
     assertEquals(customerPushes().length, 0);
+  });
+});
+
+// ───────────────────── unmatched refund webhooks ─────────────────────
+
+const unmatchedAlerts = () => alerts('refund_webhook_unmatched');
+
+Deno.test('a reference miss falls through to the Paystack refund id', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution() }) }));
+    const result = await applyRefundWebhook(event('processed', { refundReference: 'FEASTY-something-else' }));
+    assertEquals(result, { changed: true, ignored: false, orderId: ORDER_ID, status: 'processed' });
+    assertEquals(unmatchedAlerts().length, 0);
+  });
+});
+
+Deno.test('the amount fallback is used only with no reference and no Paystack id stored yet', async () => {
+  await withHarness(async () => {
+    // Our attempt already has a Paystack id: a reference-less event with another id must not match on amount.
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution() }) }));
+    const result = await applyRefundWebhook(event('processed', { paystackRefundId: '999', refundReference: null }));
+    assertEquals(result, { ignored: true, reason: 'not_our_refund' });
+    assertEquals(execution()?.status, 'pending');
+    assertEquals(unmatchedAlerts().length, 1);
+  });
+  await withHarness(async () => {
+    // An event carrying some other reference never matches on amount.
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ paystackRefundId: null }) }) }));
+    const result = await applyRefundWebhook(event('processed', { paystackRefundId: null, refundReference: 'dashboard-ref' }));
+    assertEquals(result, { ignored: true, reason: 'not_our_refund' });
+    assertEquals(execution()?.status, 'pending');
+  });
+  await withHarness(async () => {
+    // No reference, no stored id, the same amount: matched.
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ paystackRefundId: null }) }) }));
+    const result = await applyRefundWebhook(event('processing', { paystackRefundId: '42', refundReference: null }));
+    assertEquals(result.ignored, false);
+    assertEquals(execution()?.status, 'processing');
+    assertEquals(execution()?.paystackRefundId, '42');
+  });
+});
+
+Deno.test('an unmatched refund on a charge with a refund in flight raises refund_webhook_unmatched, once per refund', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution() }) }));
+    for (let delivery = 0; delivery < 2; delivery += 1) {
+      const result = await applyRefundWebhook(event('processed', { paystackRefundId: '7777', refundReference: 'dashboard-ref' }));
+      assertEquals(result, { ignored: true, reason: 'not_our_refund' }, 'answered 200, ignored');
+    }
+    assertEquals(unmatchedAlerts().length, 1, 'deduplicated');
+    const alert = unmatchedAlerts()[0];
+    assertEquals(alert.metadata.refundReference, 'dashboard-ref');
+    assertEquals(alert.metadata.paystackRefundId, '7777');
+    assertEquals(alert.metadata.status, 'processed');
+    assertEquals(alert.subjectId, ORDER_ID);
+    assertEquals(execution()?.status, 'pending');
+  });
+});
+
+Deno.test('an unmatched refund on a charge with nothing in flight is ignored quietly', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ status: 'processed' }) }) }));
+    await applyRefundWebhook(event('processed', { paystackRefundId: '7777', refundReference: 'dashboard-ref' }));
+    setup(makeOrder());
+    await applyRefundWebhook(event('processed', { paystackRefundId: '7777', refundReference: 'dashboard-ref' }));
+    assertEquals(unmatchedAlerts().length, 0);
   });
 });
