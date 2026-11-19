@@ -22,6 +22,7 @@
 
 import {
   assessPaystackRefund,
+  canMarkRefundedManually,
   mapPaystackRefundStatus,
   readRefundExecution,
   shouldApplyRefundStatus,
@@ -37,7 +38,13 @@ import { buildNotificationData, notifyAdmins, notifyUsers } from './notification
 import { logEdgeEvent } from './observability.ts';
 import { recordOperationalAlert } from './operationalAlerts.ts';
 import { CUSTOMER_ORDER_COLUMNS, insertDeliveryEvent, isPaymentCaptured, type CustomerOrderRow } from './orders.ts';
-import { buildRefundReference, initiatePaystackRefund, toKoboAmount, type PaystackCallOutcome } from './paystack.ts';
+import {
+  buildRefundReference,
+  initiatePaystackRefund,
+  listPaystackRefunds,
+  toKoboAmount,
+  type PaystackCallOutcome,
+} from './paystack.ts';
 import { broadcastOrderChanged } from './realtime.ts';
 import { nowIso, sanitizeText, type JsonObject } from './rpc/coercion.ts';
 
@@ -55,6 +62,8 @@ export type SendOrderRefundResult =
   | { execution: RefundExecution; kind: 'failed' }
   /** No usable answer: the refund may exist. A human checks Paystack. */
   | { execution: RefundExecution; kind: 'unconfirmed' }
+  /** Paystack already holds a refund on this charge that FEASTY did not send. Nothing sent. */
+  | { execution: RefundExecution; kind: 'blocked' }
   /** Not eligible; nothing was sent. */
   | { kind: 'refused'; reason: string }
   | { kind: 'not_found' }
@@ -63,9 +72,121 @@ export type SendOrderRefundResult =
 
 export type PaystackRefundDeps = {
   initiate: typeof initiatePaystackRefund;
+  listRefunds: typeof listPaystackRefunds;
 };
 
-const defaultDeps: PaystackRefundDeps = { initiate: initiatePaystackRefund };
+const defaultDeps: PaystackRefundDeps = { initiate: initiatePaystackRefund, listRefunds: listPaystackRefunds };
+
+// ── Refunds already at Paystack ─────────────────────────────────────────────
+//
+// Before sending, FEASTY looks at the refunds Paystack already holds on the
+// charge: an owner who refunded from the Paystack dashboard (or before this
+// feature existed) must never be refunded a second time by us.
+
+export type ExistingRefund = { id: string | null; reference: string | null; status: string };
+
+export type ExistingRefundLookup = { kind: 'ok'; refunds: ExistingRefund[] } | { kind: 'error'; message: string };
+
+const REFUND_LIST_PAGE_SIZE = 100;
+const MAX_REFUND_LIST_PAGES = 10;
+
+const idText = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : sanitizeText(value) || null;
+
+/** Paystack's numeric id for the charge, from the stored verify answer. */
+const transactionIdOf = (payment: JsonObject): string | null => {
+  const response = payment.paystackResponse;
+  if (!response || typeof response !== 'object' || Array.isArray(response)) return null;
+  return idText((response as JsonObject).id);
+};
+
+/**
+ * Every refund Paystack holds on one charge. Lists by date from the day before
+ * the payment (a documented filter) and matches the charge itself, by its id
+ * or reference, so it does not depend on the ambiguous `reference` filter.
+ * Anything it cannot establish (no stored charge id or payment date, a failed
+ * or unreadable page, more pages than the cap) is an error: the caller then
+ * does not send.
+ */
+export const findPaystackRefundsForCharge = async (
+  input: { paidAt: string | null; transactionId: string | null; transactionReference: string },
+  list: typeof listPaystackRefunds = listPaystackRefunds
+): Promise<ExistingRefundLookup> => {
+  if (!input.transactionId) {
+    return { kind: 'error', message: 'The Paystack transaction id is not stored on this payment.' };
+  }
+  const paidMs = input.paidAt ? Date.parse(input.paidAt) : NaN;
+  if (!Number.isFinite(paidMs)) {
+    return { kind: 'error', message: 'The payment date is not stored on this payment.' };
+  }
+  const from = new Date(paidMs - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const reference = input.transactionReference.toLowerCase();
+  const refunds: ExistingRefund[] = [];
+
+  for (let page = 1; page <= MAX_REFUND_LIST_PAGES; page += 1) {
+    const outcome = await list({ from, page, perPage: REFUND_LIST_PAGE_SIZE });
+    if (outcome.kind !== 'ok') {
+      return { kind: 'error', message: outcome.message };
+    }
+    if (!Array.isArray(outcome.data)) {
+      return { kind: 'error', message: 'Paystack returned an unreadable refund list.' };
+    }
+    const rows = outcome.data as unknown[];
+    for (const raw of rows) {
+      if (!raw || typeof raw !== 'object') continue;
+      const row = raw as JsonObject;
+      const transaction = row.transaction;
+      const transactionObject =
+        transaction && typeof transaction === 'object' && !Array.isArray(transaction) ? (transaction as JsonObject) : null;
+      const rowTransactionId = transactionObject ? idText(transactionObject.id) : idText(transaction);
+      const rowTransactionReference = (
+        sanitizeText(transactionObject?.reference) || sanitizeText(row.transaction_reference)
+      ).toLowerCase();
+      if (rowTransactionId !== input.transactionId && rowTransactionReference !== reference) continue;
+      refunds.push({
+        id: idText(row.id),
+        reference: sanitizeText(row.reference) || sanitizeText(row.refund_reference) || null,
+        status: sanitizeText(row.status).toLowerCase(),
+      });
+    }
+    const pageCount = Number((outcome.meta ?? {}).pageCount);
+    const lastPage = Number.isFinite(pageCount) ? page >= pageCount : rows.length < REFUND_LIST_PAGE_SIZE;
+    if (lastPage) {
+      return { kind: 'ok', refunds };
+    }
+  }
+  return { kind: 'error', message: 'Too many Paystack refunds to check since this payment.' };
+};
+
+export type ExistingRefundVerdict =
+  | { kind: 'clear' }
+  /** This exact attempt already exists at Paystack (a resend): adopt it. */
+  | { kind: 'ours'; refund: ExistingRefund }
+  /** A live refund FEASTY did not send for this attempt: never send another. */
+  | { kind: 'foreign'; refund: ExistingRefund };
+
+/**
+ * Failed refunds credit the money back and are ignored. A live refund carrying
+ * this attempt's reference is ours. Another order's FEASTY refund on the same
+ * (multi-restaurant) charge is fine. Anything else - no reference, a reference
+ * FEASTY did not make, or an earlier attempt of THIS order still alive - is
+ * foreign.
+ */
+export const judgeExistingRefunds = (
+  refunds: ExistingRefund[],
+  input: { orderId: string; reference: string }
+): ExistingRefundVerdict => {
+  const ours = input.reference.toLowerCase();
+  const thisOrderPrefix = ours.replace(/_\d+$/, '_');
+  for (const refund of refunds) {
+    if (refund.status === 'failed') continue;
+    const reference = refund.reference?.toLowerCase() ?? '';
+    if (reference === ours) return { kind: 'ours', refund };
+    if (reference.startsWith('feasty_rf_') && !reference.startsWith(thisOrderPrefix)) continue;
+    return { kind: 'foreign', refund };
+  }
+  return { kind: 'clear' };
+};
 
 const loadOrder = async (orderId: string): Promise<CustomerOrderRow | null> => {
   const { data, error } = await serviceClient
@@ -125,6 +246,10 @@ export const sendOrderRefund = async (
   if (!eligibility.ok) {
     return { kind: 'refused', reason: eligibility.reason };
   }
+  if (eligibility.resume) {
+    // Resuming a stuck attempt is not supported yet: nothing is sent.
+    return { kind: 'refused', reason: 'already_started' };
+  }
 
   const amountKobo = toKoboAmount(eligibility.amount);
   const transactionKobo = transactionAmountKobo(payment);
@@ -141,12 +266,14 @@ export const sendOrderRefund = async (
     attempt,
     failedAt: null,
     lastError: null,
+    manual: false,
     paystackRefundId: null,
     processedAt: null,
     reference,
     requestedAt,
     requestedBy: input.requestedBy,
     status: 'requested',
+    unconfirmed: false,
   };
 
   // THE claim. Also guarded on payment.status (the record must still exist)
@@ -166,6 +293,56 @@ export const sendOrderRefund = async (
   }
   if (!Array.isArray(claimedRows) || claimedRows.length === 0) {
     return { kind: 'changed' };
+  }
+
+  // Never refund a charge Paystack already refunded some other way.
+  let lookup: ExistingRefundLookup;
+  try {
+    lookup = await findPaystackRefundsForCharge(
+      {
+        paidAt: sanitizeText(payment.paidAt) || null,
+        transactionId: transactionIdOf(payment),
+        transactionReference: eligibility.transactionReference,
+      },
+      deps.listRefunds
+    );
+  } catch (error) {
+    lookup = { kind: 'error', message: error instanceof Error ? error.message : String(error) };
+  }
+  if (lookup.kind === 'error') {
+    // Nothing was sent, so resending this same reference later is safe.
+    const next: RefundExecution = {
+      ...claimed,
+      lastError: `Could not check Paystack for an existing refund on this payment (${lookup.message}). Nothing was sent.`,
+      status: 'needs_attention',
+      unconfirmed: true,
+    };
+    const recorded = await recordExecutionTransition(order.id, claimed, next);
+    return { execution: recorded ?? next, kind: 'unconfirmed' };
+  }
+  const verdict = judgeExistingRefunds(lookup.refunds, { orderId: order.id, reference });
+  if (verdict.kind === 'foreign') {
+    const next: RefundExecution = {
+      ...claimed,
+      lastError: `A refund already exists on this payment in Paystack${
+        verdict.refund.reference ? ` (reference ${verdict.refund.reference}, ${verdict.refund.status})` : ` (${verdict.refund.status})`
+      }. Nothing was sent.`,
+      status: 'needs_attention',
+    };
+    const recorded = await recordExecutionTransition(order.id, claimed, next);
+    return { execution: recorded ?? next, kind: 'blocked' };
+  }
+  if (verdict.kind === 'ours') {
+    // This very attempt already reached Paystack: adopt it instead of resending.
+    const status = mapPaystackRefundStatus(verdict.refund.status) ?? 'pending';
+    const next: RefundExecution = {
+      ...claimed,
+      paystackRefundId: verdict.refund.id,
+      status,
+      ...(status === 'processed' ? { processedAt: nowIso() } : {}),
+    };
+    const recorded = await recordExecutionTransition(order.id, claimed, next);
+    return { execution: recorded ?? next, kind: 'sent' };
   }
 
   let outcome: PaystackCallOutcome;
@@ -213,6 +390,7 @@ export const sendOrderRefund = async (
       ...claimed,
       lastError: `${outcome.message} Paystack did not confirm this refund: check the Paystack dashboard before refunding again.`,
       status: 'needs_attention',
+      unconfirmed: true,
     };
     kind = 'unconfirmed';
   }
@@ -323,6 +501,8 @@ const amountLabel = (execution: RefundExecution) =>
 
 const onRefundProcessed = async (order: CustomerOrderRow, execution: RefundExecution) => {
   const orderId = order.id;
+  // Marked refunded by hand: no Paystack refund, so no "on its way" push.
+  const manual = execution.manual;
   // The same rules as the status-write clear (orders.ts): a customer problem
   // report or a payment Paystack reversed still needs a human, so the flag
   // stays. Guarded on the execution still being processed.
@@ -352,6 +532,10 @@ const onRefundProcessed = async (order: CustomerOrderRow, execution: RefundExecu
       .is('resolvedAt', null);
     if (error) throw new Error(error.message);
   });
+
+  if (manual) {
+    return;
+  }
 
   await safely('refund event insert failed', orderId, () =>
     insertDeliveryEvent({
@@ -389,7 +573,7 @@ const onRefundFailed = async (order: CustomerOrderRow, execution: RefundExecutio
   await recordOperationalAlert({
     alertType: REFUND_FAILED_ALERT_TYPE,
     dedupeKey: `ops:${REFUND_FAILED_ALERT_TYPE}:${orderId}`,
-    details: `The Paystack refund of ${amountLabel(execution)} for order ${orderId} failed: ${reason} No money left FEASTY for this attempt. Retry with "Refund via Paystack" on the order, or return it by hand.`,
+    details: `The Paystack refund of ${amountLabel(execution)} for order ${orderId} failed: ${reason} No money left FEASTY for this attempt. Use "Refund via Paystack" on the order page to retry, or mark it refunded by hand there.`,
     metadata: {
       amount: execution.amount,
       attempt: execution.attempt,
@@ -425,7 +609,7 @@ const onRefundNeedsAttention = async (order: CustomerOrderRow, execution: Refund
   await recordOperationalAlert({
     alertType: REFUND_NEEDS_ATTENTION_ALERT_TYPE,
     dedupeKey: `ops:${REFUND_NEEDS_ATTENTION_ALERT_TYPE}:${orderId}`,
-    details: `The Paystack refund of ${amountLabel(execution)} for order ${orderId} needs attention. ${detail} Do not refund by hand until you have checked Paystack.`,
+    details: `The Paystack refund of ${amountLabel(execution)} for order ${orderId} needs attention. ${detail} Check Paystack first; if the customer was refunded there, mark it refunded by hand on the order page.`,
     metadata: {
       amount: execution.amount,
       attempt: execution.attempt,
@@ -449,6 +633,66 @@ const onRefundNeedsAttention = async (order: CustomerOrderRow, execution: Refund
       type: REFUND_NEEDS_ATTENTION_ALERT_TYPE,
     }),
   });
+};
+
+// ── Refunded by hand ───────────────────────────────────────────────────────
+
+export type MarkRefundedManuallyResult =
+  | { execution: RefundExecution; kind: 'marked' }
+  | { kind: 'refused'; reason: 'already_started' | 'not_captured' | 'not_recorded' }
+  | { kind: 'not_found' }
+  | { kind: 'changed' };
+
+/**
+ * An admin returned the recorded refund outside FEASTY (Paystack dashboard,
+ * bank transfer): the execution becomes processed + manual, which closes the
+ * door to any Paystack refund of this order. Allowed only when nothing is in
+ * flight at Paystack. Clears the manual-refund flag with the same rules as a
+ * processed refund and resolves its alerts; the customer gets no push.
+ */
+export const markOrderRefundedManually = async (input: {
+  adminUid: string;
+  orderId: string;
+}): Promise<MarkRefundedManuallyResult> => {
+  const order = await loadOrder(input.orderId);
+  if (!order) return { kind: 'not_found' };
+  const payment = paymentOf(order);
+  if (payment.status !== 'refunded') return { kind: 'refused', reason: 'not_recorded' };
+  if (!isPaymentCaptured(payment)) return { kind: 'refused', reason: 'not_captured' };
+  const previous = readRefundExecution(payment);
+  if (!canMarkRefundedManually(previous)) return { kind: 'refused', reason: 'already_started' };
+
+  const at = nowIso();
+  const refundAmount = typeof payment.refundAmount === 'number' ? payment.refundAmount : null;
+  const next: RefundExecution = {
+    amount: previous?.amount ?? refundAmount,
+    attempt: previous?.attempt ?? 1,
+    failedAt: previous?.failedAt ?? null,
+    lastError: null,
+    manual: true,
+    paystackRefundId: previous?.paystackRefundId ?? null,
+    processedAt: at,
+    reference: previous?.reference ?? null,
+    requestedAt: at,
+    requestedBy: `admin:${input.adminUid}`,
+    status: 'processed',
+    unconfirmed: false,
+  };
+  let write = serviceClient
+    .from('CustomerOrder')
+    .update({ payment: { ...payment, refundExecution: toStoredExecution(next) }, updatedAt: at })
+    .eq('id', order.id)
+    .eq('payment->>status', 'refunded');
+  write = whereExecutionIs(write, previous);
+  if (typeof order.updatedAt === 'string') {
+    write = write.eq('updatedAt', order.updatedAt);
+  }
+  const { data: written, error } = await write.select('id');
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(written) || written.length === 0) return { kind: 'changed' };
+
+  await runTransitionSideEffects(order, next);
+  return { execution: next, kind: 'marked' };
 };
 
 // ── Refund webhooks ────────────────────────────────────────────────────────
@@ -545,6 +789,22 @@ export const applyRefundWebhook = async (input: RefundWebhookInput): Promise<Ref
         paystackAmountKobo: input.amountKobo,
         sentAmountKobo: toKoboAmount(current.amount),
       });
+    }
+    if (current.manual && nextStatus !== 'failed') {
+      // Marked refunded by hand, yet Paystack is moving a refund for it too.
+      await recordOperationalAlert({
+        alertType: REFUND_NEEDS_ATTENTION_ALERT_TYPE,
+        dedupeKey: `ops:refund_paid_twice:${order.id}`,
+        details: `Order ${order.id} was marked refunded by hand, but Paystack reports a refund on it as ${nextStatus}${
+          input.refundReference ? ` (reference ${input.refundReference})` : ''
+        }. The customer may be refunded twice: check Paystack now.`,
+        metadata: { paystackRefundId: input.paystackRefundId, refundReference: input.refundReference, status: nextStatus },
+        severity: 'high',
+        subjectId: order.id,
+        subjectType: 'order',
+        title: 'Refund may be paid twice',
+      });
+      return { changed: false, ignored: false, orderId: order.id, status: current.status };
     }
     if (!shouldApplyRefundStatus(current.status, nextStatus)) {
       return { changed: false, ignored: false, orderId: order.id, status: current.status };

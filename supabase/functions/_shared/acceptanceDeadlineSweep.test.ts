@@ -347,6 +347,9 @@ const installMocks = (orders: Row[], options: SweepMockOptions = {}) => {
   const paystackRefunds: Row[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).startsWith('https://api.paystack.co/refund?')) {
+      return Promise.resolve(new Response(JSON.stringify({ status: true, data: [], meta: { pageCount: 1 } }), { status: 200 }));
+    }
     if (String(input) === 'https://api.paystack.co/refund') {
       paystackRefunds.push(JSON.parse(String(init?.body ?? '{}')));
       return Promise.resolve(
@@ -988,6 +991,7 @@ const paystackOrder = (id: string) =>
       capturedAmount: CAPTURED_AMOUNT,
       method: 'card',
       paidAt: placedAgo(DEADLINE_MS * 2 + 5_000),
+      paystackResponse: { amount: CAPTURED_AMOUNT * 100, id: 8001 },
       provider: 'paystack',
       reference: `FEASTY-CRD-${id}`,
       status: 'paid',

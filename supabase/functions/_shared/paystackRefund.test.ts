@@ -165,7 +165,7 @@ const refundedPayment = (overrides: Row = {}): Row => ({
   paidAt: '2026-11-17T09:00:00.000Z',
   refundAmount: CAPTURED,
   refundedAt: '2026-11-17T09:30:00.000Z',
-  paystackResponse: { amount: CAPTURED * 100, reference: TX_REFERENCE },
+  paystackResponse: { amount: CAPTURED * 100, id: 555000, reference: TX_REFERENCE },
   ...overrides,
 });
 
@@ -215,6 +215,9 @@ const withHarness = async (work: () => Promise<void>) => {
   };
   globalThis.fetch = ((input: Request | URL | string, init?: RequestInit) => {
     fetchBodies.push({ body: String(init?.body ?? ''), url: String(input) });
+    if (String(input).startsWith('https://api.paystack.co/refund?')) {
+      return Promise.resolve(new Response(JSON.stringify({ status: true, data: [], meta: { pageCount: 1 } }), { status: 200 }));
+    }
     if (String(input).startsWith('https://api.paystack.co/')) return Promise.resolve(paystackResponder());
     return Promise.resolve(new Response('{"data":[]}', { status: 200 }));
   }) as typeof fetch;
@@ -239,18 +242,32 @@ const withHarness = async (work: () => Promise<void>) => {
 };
 
 /** An injected Paystack transport that records every request. */
-const fakePaystack = (outcome: PaystackOutcome | (() => PaystackOutcome | Promise<PaystackOutcome>)) => {
+const fakePaystack = (
+  outcome: PaystackOutcome | (() => PaystackOutcome | Promise<PaystackOutcome>),
+  // What GET /refund lists (the existing-refund check). Empty by default.
+  listing: PaystackOutcome | (() => PaystackOutcome) = { data: [], kind: 'ok', meta: { pageCount: 1 } }
+) => {
   const calls: InitiateInput[] = [];
+  const listCalls: Array<{ from: string; page: number; perPage: number }> = [];
   return {
     calls,
+    listCalls,
     deps: {
       initiate: async (input: InitiateInput) => {
         calls.push(input);
         return typeof outcome === 'function' ? await outcome() : outcome;
       },
+      listRefunds: (input: { from: string; page: number; perPage: number }) => {
+        listCalls.push(input);
+        return Promise.resolve(typeof listing === 'function' ? listing() : listing);
+      },
     },
   };
 };
+
+/** A refund row as GET /refund lists it, on this order's charge (id 555000). */
+const listedRefund = (fields: Row): Row => ({ id: 1, transaction: 555000, status: 'processed', ...fields });
+const listing = (rows: Row[]): PaystackOutcome => ({ data: rows as unknown as Row, kind: 'ok', meta: { pageCount: 1 } });
 
 const accepted = (status = 'pending', id = 3018284): PaystackOutcome => ({
   data: { id, reference: REF_1, status },
@@ -400,7 +417,7 @@ Deno.test('a refund above what the order captured, or above the Paystack charge,
 Deno.test('a group share refunds only its own captured share', async () => {
   await withHarness(async () => {
     // One 10,000 charge split across two orders: this order captured 4,300.
-    setup(makeOrder({ payment: refundedPayment({ paystackResponse: { amount: 1_000_000 } }) }));
+    setup(makeOrder({ payment: refundedPayment({ paystackResponse: { amount: 1_000_000, id: 555000 } }) }));
     const paystack = fakePaystack(accepted());
     await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
     assertEquals(paystack.calls[0].amountKobo, CAPTURED * 100);
@@ -459,6 +476,9 @@ Deno.test('the real transport posts amount, our reference and the transaction to
     setup(makeOrder());
     globalThis.fetch = ((input: Request | URL | string, init?: RequestInit) => {
       fetchBodies.push({ body: String(init?.body ?? ''), url: String(input) });
+      if (String(input).startsWith('https://api.paystack.co/refund?')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: true, data: [], meta: { pageCount: 1 } }), { status: 200 }));
+      }
       if (String(input).startsWith('https://api.paystack.co/')) {
         return Promise.resolve(
           new Response(JSON.stringify({ status: true, message: 'Refund has been queued for processing', data: { id: 77, status: 'pending' } }), {
@@ -857,7 +877,7 @@ const latePaid = (overrides: Row = {}) =>
       status: 'paid',
       capturedAmount: CAPTURED,
       paidAt: '2026-11-17T09:40:00.000Z',
-      paystackResponse: { amount: CAPTURED * 100 },
+      paystackResponse: { amount: CAPTURED * 100, id: 555000 },
     },
     ...overrides,
   });
@@ -906,5 +926,168 @@ Deno.test('a payment on a closed order: a live order, an unpaid one, or a lost r
     };
     assertEquals(await refundPaymentOnClosedOrder(ORDER_ID, paystack.deps), null, 'lost race');
     assertEquals(paystack.calls.length, 0);
+  });
+});
+
+// ───────────────────── refunds already at Paystack (never refund twice) ─────────────────────
+
+Deno.test('a refund made by hand in the Paystack dashboard blocks ours: nothing is sent', async () => {
+  for (const handRefund of [
+    listedRefund({ reference: 'dashboard-ref-123', status: 'processed' }),
+    listedRefund({ status: 'pending' }), // no reference at all
+    listedRefund({ transaction: { id: 555000, reference: TX_REFERENCE }, reference: null, status: 'needs-attention' }),
+  ]) {
+    await withHarness(async () => {
+      setup(makeOrder({ needsAttention: false }));
+      const paystack = fakePaystack(accepted(), listing([handRefund]));
+      const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: `admin:${ADMIN_UID}` }, paystack.deps);
+      assertEquals(result.kind, 'blocked', JSON.stringify(handRefund));
+      assertEquals(paystack.calls.length, 0, 'no refund POST');
+      assertEquals(execution()?.status, 'needs_attention');
+      assertEquals(String(execution()?.lastError).startsWith('A refund already exists on this payment in Paystack'), true);
+      assertEquals(execution()?.unconfirmed, false, 'not resendable');
+      assertEquals(order().needsAttention, true);
+      assertEquals(alerts('refund_needs_attention').length, 1);
+    });
+  }
+});
+
+Deno.test('only failed refunds, or another order FEASTY refund on the same charge, do not block', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    const paystack = fakePaystack(
+      accepted(),
+      listing([
+        listedRefund({ reference: 'dashboard-ref-123', status: 'failed' }),
+        listedRefund({ reference: REF_1, status: 'failed' }),
+        listedRefund({ reference: 'feasty_rf_0b7f2a5222224c3e9d1a8f6e2a1b3c4d_1', status: 'processed' }),
+        // A refund on a different charge entirely.
+        listedRefund({ reference: 'someone-else', status: 'processed', transaction: 999 }),
+      ])
+    );
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'sent');
+    assertEquals(paystack.calls.length, 1);
+    assertEquals(paystack.listCalls[0].from, '2026-11-16', 'listed from the day before the payment');
+  });
+});
+
+Deno.test('an earlier attempt of this same order still alive at Paystack blocks a retry', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        payment: refundedPayment({ refundExecution: { amount: CAPTURED, attempt: 1, reference: REF_1, status: 'failed' } }),
+      })
+    );
+    const paystack = fakePaystack(accepted(), listing([listedRefund({ reference: REF_1, status: 'processing' })]));
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: `admin:${ADMIN_UID}` }, paystack.deps);
+    assertEquals(result.kind, 'blocked');
+    assertEquals(paystack.calls.length, 0);
+  });
+});
+
+Deno.test('when Paystack cannot be checked, nothing is sent', async () => {
+  const cases: Array<[string, Row, PaystackOutcome]> = [
+    ['lookup timed out', refundedPayment(), { kind: 'unknown', message: 'Paystack request to /refund timed out after 10000ms.' }],
+    ['lookup refused', refundedPayment(), { httpStatus: 401, kind: 'rejected', message: 'Invalid key' }],
+    ['unreadable list', refundedPayment(), { data: { not: 'an array' }, kind: 'ok' }],
+    ['no charge id stored', refundedPayment({ paystackResponse: { amount: CAPTURED * 100 } }), listing([])],
+    ['no payment date', refundedPayment({ paidAt: null, capturedAmount: CAPTURED }), listing([])],
+  ];
+  for (const [label, payment, list] of cases) {
+    await withHarness(async () => {
+      setup(makeOrder({ payment, needsAttention: false }));
+      const paystack = fakePaystack(accepted(), list);
+      const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+      assertEquals(result.kind, 'unconfirmed', label);
+      assertEquals(paystack.calls.length, 0, `${label}: no refund POST`);
+      assertEquals(execution()?.status, 'needs_attention', label);
+      assertEquals(String(execution()?.lastError).includes('Nothing was sent'), true, label);
+      assertEquals(order().needsAttention, true, label);
+    });
+  }
+});
+
+Deno.test('the lookup pages through every page of refunds since the payment', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    let page = 0;
+    const paystack = fakePaystack(accepted(), () => {
+      page += 1;
+      return {
+        data: (page === 2 ? [listedRefund({ reference: 'dashboard-ref', status: 'processed' })] : []) as unknown as Row,
+        kind: 'ok',
+        meta: { pageCount: 3 },
+      };
+    });
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'blocked', 'the hand refund on page 2 was found');
+    assertEquals(paystack.calls.length, 0);
+  });
+});
+
+// ───────────────────── marked refunded by hand ─────────────────────
+
+Deno.test('mark_manual: processed + manual, flag cleared, audited, no Paystack call and no customer push', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    db.OperationalAlert.push({ alertType: 'manual_refund_required', dedupeKey: `ops:manual_refund_required:${ORDER_ID}`, resolvedAt: null });
+    const response = await callRpc('admin', { mode: 'mark_manual', note: 'Refunded from the Paystack dashboard on Monday' });
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.data.outcome, 'marked_manual');
+    assertEquals(execution()?.status, 'processed');
+    assertEquals(execution()?.manual, true);
+    assertEquals(execution()?.requestedBy, `admin:${ADMIN_UID}`);
+    assertEquals(typeof execution()?.processedAt, 'string');
+    assertEquals(order().needsAttention, false);
+    assertEquals(typeof alerts('manual_refund_required')[0].resolvedAt, 'string');
+    assertEquals(paystackRefundCalls().length, 0);
+    assertEquals(customerPushes().length, 0);
+    const audit = db.AdminAuditLog.filter((entry) => entry.action === 'order_refund_marked_manual');
+    assertEquals(audit.length, 1);
+    assertEquals(audit[0].details.note, 'Refunded from the Paystack dashboard on Monday');
+
+    // Afterwards a Paystack refund is refused for good.
+    const again = await rpcFailure(() => callRpc('admin', { note: 'send it' }));
+    assertEquals(again.status, 412);
+    assertEquals(paystackRefundCalls().length, 0);
+  });
+});
+
+Deno.test('mark_manual is refused while a Paystack refund is in flight, and needs a note', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: { attempt: 1, reference: REF_1, status: 'pending' } }) }));
+    const error = await rpcFailure(() => callRpc('admin', { mode: 'mark_manual', note: 'paid' }));
+    assertEquals(error.status, 412);
+    assertEquals(execution()?.status, 'pending');
+    const noNote = await rpcFailure(() => callRpc('admin', { mode: 'mark_manual', note: '' }));
+    assertEquals(noNote.status, 400);
+  });
+});
+
+Deno.test('mark_manual works on a legacy refund flagged by the backfill, which is never sent through Paystack', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        payment: refundedPayment({
+          refundExecution: { status: 'needs_attention', requestedBy: 'legacy', lastError: 'Refunded before Paystack refunds existed' },
+        }),
+      })
+    );
+    const send = await rpcFailure(() => callRpc('admin', { note: 'send' }));
+    assertEquals(send.status, 412);
+    const response = await callRpc('admin', { mode: 'mark_manual', note: 'checked Paystack, already refunded' });
+    assertEquals(response.status, 200);
+    assertEquals(execution()?.manual, true);
+  });
+});
+
+Deno.test('a Paystack refund event on an order marked refunded by hand raises a paid-twice alert', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: { ...pendingExecution(), status: 'processed', manual: true } }) }));
+    await applyRefundWebhook(event('processed'));
+    assertEquals(db.OperationalAlert.filter((alert) => alert.dedupeKey === `ops:refund_paid_twice:${ORDER_ID}`).length, 1);
+    assertEquals(customerPushes().length, 0);
   });
 });

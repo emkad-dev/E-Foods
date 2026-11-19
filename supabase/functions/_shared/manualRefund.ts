@@ -112,12 +112,12 @@ export const announceManualRefund = async (input: {
       : refundRecorded
         ? `Order ${order.id} ${closure.verb} after payment. A refund of ${formatNairaAmount(
             refundAmount
-          )} is recorded on the order but no money has moved: send it with "Refund via Paystack" on the order, or return it to the customer by hand.`
+          )} is recorded on the order but no money has moved. Use "Refund via Paystack" on the order page, or mark it refunded by hand there.`
         : `Order ${order.id} ${closure.verb} after payment. No refund could be recorded automatically: check the payment and return the money to the customer by hand.`;
     const adminBody = autoRefund
       ? `Order ${code} ${closure.verb} after payment. The refund is being sent through Paystack automatically.`
       : refundRecorded
-        ? `Order ${code} ${closure.verb} after payment. The refund is recorded: send it with "Refund via Paystack" or pay it back by hand.`
+        ? `Order ${code} ${closure.verb} after payment. The refund is recorded: use "Refund via Paystack" on the order page, or mark it refunded by hand there.`
         : `Order ${code} ${closure.verb} after payment. No refund could be recorded automatically; check the payment by hand.`;
 
     await recordOperationalAlert({

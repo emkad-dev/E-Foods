@@ -9,6 +9,7 @@ import {
 import { hasCapturedPayment } from '../../../../packages/domain/src/orders';
 import {
   assessPaystackRefund,
+  canMarkRefundedManually,
   describeRefundExecutionStatus,
   readRefundExecution,
 } from '../../../../packages/domain/src/refundExecution';
@@ -48,7 +49,7 @@ import { getOrderTone, getPaymentTone } from '../theme/tones';
  * dialog before anything is sent.
  */
 
-type InterventionKind = 'cancel' | 'complete' | 'resolve' | 'refund';
+type InterventionKind = 'cancel' | 'complete' | 'resolve' | 'refund' | 'mark_manual';
 
 const INTERVENTION_COPY: Record<
   InterventionKind,
@@ -83,7 +84,20 @@ const INTERVENTION_COPY: Record<
     fieldLabel: 'Note',
     title: 'Refund via Paystack?',
   },
+  mark_manual: {
+    busyLabel: 'Saving…',
+    buttonLabel: 'I refunded this by hand',
+    confirmLabel: 'Mark refunded',
+    fieldLabel: 'How it was refunded',
+    title: 'Mark this refund as paid by hand?',
+  },
 };
+
+/** The server's mark_manual rule: a recorded, captured refund with nothing in flight at Paystack. */
+const canMarkManual = (order: AdminOrderDetail) =>
+  order.payment?.status === 'refunded' &&
+  hasCapturedPayment(order.payment) &&
+  canMarkRefundedManually(readRefundExecution(order.payment));
 
 /** The refund the server would send now, or null when the button must not show. */
 const sendableRefund = (order: AdminOrderDetail) => {
@@ -110,6 +124,10 @@ const describeIntervention = (kind: InterventionKind, order: AdminOrderDetail, c
         ? ` The last attempt failed${lastAttempt.lastError ? `: ${lastAttempt.lastError}` : ''}. Nothing left FEASTY for it.`
         : '';
     return `${amount} goes back to ${customer} through Paystack. It is paid from FEASTY's Paystack balance (pending payouts first), not by the restaurant, and it cannot be undone once sent. Paystack keeps its original transaction fee.${retryNote}`;
+  }
+  if (kind === 'mark_manual') {
+    const amount = formatCurrency(Number(order.payment?.refundAmount ?? 0), currency);
+    return `Use this only when ${amount} has already reached the customer outside FEASTY (from the Paystack dashboard or by bank transfer). FEASTY will never send a Paystack refund for this order afterwards, the attention flag is cleared, and the customer gets no message. Check Paystack first.`;
   }
   if (kind === 'complete') {
     return 'The order is marked delivered. The customer gets 3 hours to confirm they received it or report a problem, and the restaurant is told FEASTY support completed it.';
@@ -206,8 +224,13 @@ export default function OrderDetailPage() {
             ? `Refund sent to Paystack (${describeRefundExecutionStatus(execution?.status ?? 'requested').toLowerCase()}). The customer is told when Paystack finishes it.`
             : result.outcome === 'failed'
               ? `Paystack refused the refund${execution?.lastError ? `: ${execution.lastError}` : ''}. Nothing was sent, so you can try again.`
-              : 'Paystack did not confirm the refund. Check the Paystack dashboard before trying again or refunding by hand.'
+              : result.outcome === 'blocked'
+                ? 'Paystack already holds a refund on this payment that FEASTY did not send, so nothing was sent. Check Paystack; if the customer was refunded, mark it refunded by hand.'
+                : 'Paystack did not confirm the refund. Check the Paystack dashboard before trying again or marking it refunded by hand.'
         );
+      } else if (pendingAction === 'mark_manual') {
+        await sendAdminOrderRefund({ mode: 'mark_manual', orderId: order.id, note });
+        setActionNotice('Marked refunded by hand. FEASTY will not send a Paystack refund for this order.');
       } else if (pendingAction === 'complete') {
         await forceCompleteAdminOrder({ orderId: order.id, reason: note });
         setActionNotice('Order marked completed. The customer has 3 hours to confirm it or report a problem.');
@@ -255,6 +278,7 @@ export default function OrderDetailPage() {
         ...(canAdminForceCompleteOrder(order) ? (['complete'] as const) : []),
         ...(canAdminResolveOrderReport(order) ? (['resolve'] as const) : []),
         ...(sendableRefund(order) !== null ? (['refund'] as const) : []),
+        ...(canMarkManual(order) ? (['mark_manual'] as const) : []),
         ...(canAdminForceCancelOrder(order) ? (['cancel'] as const) : []),
       ]
     : [];
@@ -483,6 +507,7 @@ export default function OrderDetailPage() {
                 ) : null}
                 {refundExecution.failedAt ? <Field label="Failed">{formatDateTime(refundExecution.failedAt)}</Field> : null}
                 {refundExecution.lastError ? <Field label="Reason">{refundExecution.lastError}</Field> : null}
+                {refundExecution.manual ? <Field label="Refunded">By hand, outside FEASTY</Field> : null}
                 <Field label="Refund reference">{refundExecution.reference}</Field>
               </dl>
             ) : null}

@@ -708,6 +708,9 @@ const PAYSTACK_REFUND_URL = 'https://api.paystack.co/refund';
 const stubPaystack = (paystack: () => Response) => {
   const refundBodies: Row[] = [];
   globalThis.fetch = ((input: Request | URL | string, init?: RequestInit) => {
+    if (String(input).startsWith('https://api.paystack.co/refund?')) {
+      return Promise.resolve(new Response(JSON.stringify({ status: true, data: [], meta: { pageCount: 1 } }), { status: 200 }));
+    }
     if (String(input) === PAYSTACK_REFUND_URL) {
       refundBodies.push(JSON.parse(String(init?.body ?? '{}')));
       return Promise.resolve(paystack());
@@ -721,6 +724,8 @@ const paystackAccepts = () => new Response(JSON.stringify({ status: true, data: 
 
 const autoRefundsOn = () => {
   db.FeatureFlag = [{ key: 'auto_refunds', enabled: true }];
+  // What the payment verification stores, which the existing-refund check reads.
+  order().payment = { ...order().payment, paidAt: new Date().toISOString(), paystackResponse: { amount: CAPTURED * 100, id: 7001 } };
 };
 
 Deno.test('auto_refunds off (the default): a paid rejection records the refund and sends nothing to Paystack', async () => {

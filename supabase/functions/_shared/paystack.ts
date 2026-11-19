@@ -252,7 +252,7 @@ export const resolvePaystackBankAccount = async ({
 //   unknown   - timeout, network failure, 5xx, unparsable body. The transfer
 //               MAY exist. Callers must never treat this as "not sent".
 export type PaystackCallOutcome =
-  | { data: JsonObject | null; kind: 'ok' }
+  | { data: JsonObject | null; kind: 'ok'; meta?: JsonObject | null }
   | { httpStatus: number; kind: 'rejected'; message: string }
   | { kind: 'unknown'; message: string };
 
@@ -290,11 +290,11 @@ export const callPaystack = async ({
   }
 
   const payload = (await response.json().catch(() => null)) as
-    | { data?: JsonObject | null; message?: string; status?: boolean }
+    | { data?: JsonObject | null; message?: string; meta?: JsonObject | null; status?: boolean }
     | null;
 
   if (response.ok && payload?.status === true) {
-    return { data: (payload.data ?? null) as JsonObject | null, kind: 'ok' };
+    return { data: (payload.data ?? null) as JsonObject | null, kind: 'ok', meta: payload.meta ?? null };
   }
   if (response.status >= 400 && response.status < 500 && payload && payload.status === false) {
     return {
@@ -430,6 +430,27 @@ export const initiatePaystackRefund = ({
     },
   });
 };
+
+/**
+ * One page of GET /refund (https://paystack.com/docs/api/refund/#list). The
+ * docs disagree on what `reference` filters by (the API reference: the
+ * transaction; the refunds guide: the refund's own reference), so callers do
+ * not rely on it: they list by date (`from`, documented) and match the
+ * transaction themselves. `data` is the refunds array.
+ */
+export const listPaystackRefunds = ({
+  from,
+  page,
+  perPage,
+}: {
+  from: string;
+  page: number;
+  perPage: number;
+}): Promise<PaystackCallOutcome> =>
+  callPaystack({
+    method: 'GET',
+    path: `/refund?from=${encodeURIComponent(from)}&perPage=${perPage}&page=${page}`,
+  });
 
 export const verifyPaystackTransaction = async (reference: string) =>
   (await fetchPaystackJson({

@@ -30,14 +30,22 @@ export type RefundExecution = {
   attempt: number;
   failedAt: string | null;
   lastError: string | null;
+  /** An admin marked it refunded by hand: no Paystack refund was sent. */
+  manual: boolean;
   paystackRefundId: string | null;
   processedAt: string | null;
   /** Our refund reference at Paystack, unique per attempt (Paystack refuses a reused one). */
   reference: string | null;
   requestedAt: string | null;
-  /** 'admin:<uid>' or 'auto'. */
+  /** 'admin:<uid>', 'auto', or 'legacy' (refunded before Paystack refunds existed). */
   requestedBy: string | null;
   status: RefundExecutionStatus;
+  /**
+   * needs_attention because Paystack gave no readable answer (timeout, 5xx,
+   * 409): the refund may or may not exist. Only this kind may be resent, and
+   * only with the SAME reference, so Paystack itself refuses a duplicate.
+   */
+  unconfirmed: boolean;
 };
 
 type PaymentLike = Record<string, unknown> | null | undefined;
@@ -69,21 +77,53 @@ export const readRefundExecution = (payment: PaymentLike): RefundExecution | nul
     attempt,
     failedAt: text(record.failedAt),
     lastError: text(record.lastError),
+    manual: record.manual === true,
     paystackRefundId,
     processedAt: text(record.processedAt),
     reference: text(record.reference),
     requestedAt: text(record.requestedAt),
     requestedBy: text(record.requestedBy),
     status: isExecutionStatus(record.status) ? record.status : 'needs_attention',
+    unconfirmed: record.unconfirmed === true,
   };
 };
+
+/** A 'requested' claim older than this never got as far as recording Paystack's answer. */
+export const STALE_REQUESTED_MS = 10 * 60 * 1000;
+
+/**
+ * Whether an existing execution may be RESENT with its own reference: a claim
+ * stuck in 'requested' for longer than STALE_REQUESTED_MS (the function died
+ * between the claim and the answer), or, for an admin, an unconfirmed
+ * needs_attention. Paystack refuses a reused reference (409), so a resend can
+ * never create a second refund.
+ */
+export const canResumeRefundExecution = (
+  execution: RefundExecution | null,
+  options: { allowUnconfirmed: boolean; nowMs: number }
+): boolean => {
+  if (!execution || !execution.reference || execution.manual) return false;
+  if (execution.status === 'requested') {
+    const requestedMs = execution.requestedAt ? Date.parse(execution.requestedAt) : NaN;
+    return Number.isFinite(requestedMs) && options.nowMs - requestedMs > STALE_REQUESTED_MS;
+  }
+  return options.allowUnconfirmed && execution.status === 'needs_attention' && execution.unconfirmed;
+};
+
+/**
+ * Whether an admin may mark the refund as paid by hand: nothing is in flight at
+ * Paystack (no execution, a failed one, or one that needs attention).
+ */
+export const canMarkRefundedManually = (execution: RefundExecution | null): boolean =>
+  execution === null || execution.status === 'failed' || execution.status === 'needs_attention';
 
 /** A new Paystack refund may start only when none exists or the last one failed. */
 export const canStartRefundExecution = (execution: RefundExecution | null): boolean =>
   execution === null || execution.status === 'failed';
 
 export type RefundEligibility =
-  | { amount: number; ok: true; transactionReference: string }
+  /** resume: resend the existing execution with its own reference. */
+  | { amount: number; ok: true; resume: boolean; transactionReference: string }
   | {
       ok: false;
       reason: 'already_started' | 'no_amount' | 'no_reference' | 'not_captured' | 'not_paystack' | 'not_recorded' | 'over_cap';
@@ -104,7 +144,11 @@ const PAYSTACK_METHODS = ['card', 'bank_transfer'];
  * The amount is ALWAYS the recorded refundAmount, never more than what this
  * order captured, and never a payment whose refund was not recorded first.
  */
-export const assessPaystackRefund = (payment: PaymentLike, captured: boolean): RefundEligibility => {
+export const assessPaystackRefund = (
+  payment: PaymentLike,
+  captured: boolean,
+  options: { allowUnconfirmed?: boolean; nowMs?: number } = {}
+): RefundEligibility => {
   const stored = payment ?? {};
   if (stored.status !== 'refunded') return { ok: false, reason: 'not_recorded' };
   if (!captured) return { ok: false, reason: 'not_captured' };
@@ -115,7 +159,12 @@ export const assessPaystackRefund = (payment: PaymentLike, captured: boolean): R
   }
   const transactionReference = text(stored.reference);
   if (!transactionReference) return { ok: false, reason: 'no_reference' };
-  if (!canStartRefundExecution(readRefundExecution(stored))) return { ok: false, reason: 'already_started' };
+  const execution = readRefundExecution(stored);
+  const resume = canResumeRefundExecution(execution, {
+    allowUnconfirmed: options.allowUnconfirmed === true,
+    nowMs: options.nowMs ?? Date.now(),
+  });
+  if (!resume && !canStartRefundExecution(execution)) return { ok: false, reason: 'already_started' };
 
   const amount = toAmount(stored.refundAmount);
   if (amount === null || amount <= 0) return { ok: false, reason: 'no_amount' };
@@ -125,7 +174,11 @@ export const assessPaystackRefund = (payment: PaymentLike, captured: boolean): R
   if (capturedAmount === null || capturedAmount <= 0 || amount > capturedAmount) {
     return { ok: false, reason: 'over_cap' };
   }
-  return { amount, ok: true, transactionReference };
+  // A resend carries exactly the amount the first send claimed.
+  if (resume && execution?.amount !== null && execution?.amount !== undefined && execution.amount !== amount) {
+    return { ok: false, reason: 'over_cap' };
+  }
+  return { amount, ok: true, resume, transactionReference };
 };
 
 /** Paystack's refund statuses (webhook event suffixes and API `status`) mapped to ours. */

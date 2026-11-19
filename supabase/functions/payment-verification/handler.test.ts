@@ -419,6 +419,9 @@ Deno.test('auto_refunds on: money on a cancelled order is recorded as a refund a
     const refundBodies: Row[] = [];
     const verifyFetch = globalThis.fetch;
     globalThis.fetch = ((input: unknown, init?: RequestInit) => {
+      if (String(input).startsWith('https://api.paystack.co/refund?')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: true, data: [], meta: { pageCount: 1 } }), { status: 200 }));
+      }
       if (String(input) === 'https://api.paystack.co/refund') {
         refundBodies.push(JSON.parse(String(init?.body ?? '{}')) as Row);
         return Promise.resolve(

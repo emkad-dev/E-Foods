@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assessPaystackRefund,
+  canMarkRefundedManually,
+  canResumeRefundExecution,
   canStartRefundExecution,
   isRefundOnItsWay,
   mapPaystackRefundStatus,
@@ -34,10 +36,11 @@ test('a corrupt execution reads as needs_attention, never as absent', () => {
 });
 
 test('assessPaystackRefund returns the recorded amount, capped by what was captured', () => {
-  assert.deepEqual(assessPaystackRefund(payment(), true), { amount: 4300, ok: true, transactionReference: 'FEASTY-CRD-1' });
+  assert.deepEqual(assessPaystackRefund(payment(), true), { amount: 4300, ok: true, resume: false, transactionReference: 'FEASTY-CRD-1' });
   assert.deepEqual(assessPaystackRefund(payment({ refundAmount: 2150 }), true), {
     amount: 2150,
     ok: true,
+    resume: false,
     transactionReference: 'FEASTY-CRD-1',
   });
   assert.deepEqual(assessPaystackRefund(payment({ refundAmount: 4300.01 }), true), { ok: false, reason: 'over_cap' });
@@ -81,4 +84,31 @@ test('"on its way" only once Paystack is processing or done', () => {
   assert.equal(isRefundOnItsWay(payment({ refundExecution: { status: 'pending' } })), false);
   assert.equal(isRefundOnItsWay(payment({ refundExecution: { status: 'processing' } })), true);
   assert.equal(isRefundOnItsWay(payment({ refundExecution: { status: 'processed' } })), true);
+});
+
+test('a stale requested claim, or an unconfirmed needs_attention for an admin, is resumed with its own reference', () => {
+  const now = Date.parse('2026-11-17T12:00:00.000Z');
+  const exec = (fields: Record<string, unknown>) => readRefundExecution({ refundExecution: { reference: 'feasty_rf_x_1', ...fields } });
+  assert.equal(canResumeRefundExecution(exec({ status: 'requested', requestedAt: '2026-11-17T11:49:00.000Z' }), { allowUnconfirmed: false, nowMs: now }), true);
+  assert.equal(canResumeRefundExecution(exec({ status: 'requested', requestedAt: '2026-11-17T11:55:00.000Z' }), { allowUnconfirmed: false, nowMs: now }), false);
+  assert.equal(canResumeRefundExecution(exec({ status: 'needs_attention', unconfirmed: true }), { allowUnconfirmed: true, nowMs: now }), true);
+  assert.equal(canResumeRefundExecution(exec({ status: 'needs_attention', unconfirmed: true }), { allowUnconfirmed: false, nowMs: now }), false);
+  assert.equal(canResumeRefundExecution(exec({ status: 'needs_attention' }), { allowUnconfirmed: true, nowMs: now }), false, 'Paystack needs bank details');
+  assert.equal(canResumeRefundExecution(readRefundExecution({ refundExecution: { status: 'needs_attention', unconfirmed: true } }), { allowUnconfirmed: true, nowMs: now }), false, 'no reference to reuse');
+  const resumed = assessPaystackRefund(
+    payment({ refundExecution: { amount: 4300, reference: 'feasty_rf_x_1', requestedAt: '2026-11-17T11:00:00.000Z', status: 'requested' } }),
+    true,
+    { nowMs: now }
+  );
+  assert.deepEqual(resumed, { amount: 4300, ok: true, resume: true, transactionReference: 'FEASTY-CRD-1' });
+});
+
+test('marking refunded by hand is allowed only when nothing is in flight at Paystack', () => {
+  assert.equal(canMarkRefundedManually(null), true);
+  for (const status of ['failed', 'needs_attention']) {
+    assert.equal(canMarkRefundedManually(readRefundExecution({ refundExecution: { status } })), true, status);
+  }
+  for (const status of ['requested', 'pending', 'processing', 'processed']) {
+    assert.equal(canMarkRefundedManually(readRefundExecution({ refundExecution: { status } })), false, status);
+  }
 });

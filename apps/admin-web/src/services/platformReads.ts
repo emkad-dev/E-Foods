@@ -206,10 +206,11 @@ export const forceCompleteAdminOrder = (input: { orderId: string; reason: string
  * refused it (nothing sent, a retry is allowed); 'unconfirmed' means no
  * readable answer (check the Paystack dashboard first).
  */
-export const sendAdminOrderRefund = (input: { note: string; orderId: string }) =>
+export const sendAdminOrderRefund = (input: { mode?: 'paystack' | 'mark_manual'; note: string; orderId: string }) =>
   callAdminRpc<{
     orderId: string;
-    outcome: 'sent' | 'failed' | 'unconfirmed';
+    /** blocked: Paystack already holds a refund on this charge that FEASTY did not send. */
+    outcome: 'sent' | 'failed' | 'unconfirmed' | 'blocked' | 'marked_manual';
     refundExecution: Record<string, unknown> | null;
   }>('adminSendOrderRefund', input, { write: true });
 
