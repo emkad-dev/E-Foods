@@ -348,14 +348,16 @@ Deno.test('refresh: money captured on a cancelled order is recorded, flagged and
     const { status, body } = await refresh();
 
     assertEquals(status, 200);
-    assertEquals(body.data.paymentStatus, 'paid');
+    assertEquals(body.data.paymentStatus, 'refunded', 'the refund record is what the order now says');
     assertEquals(body.data.status, 'cancelled');
     assertEquals(order().status, 'cancelled');
-    assertEquals(order().payment.status, 'paid');
+    // Recorded as paid, then its full refund recorded (not sent: auto_refunds is off).
+    assertEquals(order().payment.status, 'refunded');
+    assertEquals(order().payment.refundAmount, 2500);
+    assertEquals(order().payment.refundExecution, undefined);
     assertEquals(order().needsAttention, true);
     assertEquals(typeof order().timeline.latePaymentAt, 'string');
     assertEquals(order().timeline.cancelledAt, '2026-11-09T10:15:00.000Z');
-    assertEquals('refundAmount' in order().payment, false);
     assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_on_closed_order']);
     assertEquals(events('payment_received_on_closed_order').length, 1);
     assertEquals(events('payment_confirmed').length, 0);
@@ -420,8 +422,10 @@ const cancelledOrder = (payment: Row) =>
 const assertFlaggedLatePayment = () => {
   assertEquals(order().status, 'cancelled', 'never reopened');
   assertEquals(order().timeline.cancelledAt, '2026-11-09T10:05:00.000Z');
-  assertEquals(order().payment.status, 'paid');
+  // The money is recorded, then its full refund (auto_refunds off: not sent).
+  assertEquals(order().payment.status, 'refunded');
   assertEquals(order().payment.capturedAmount, 2500);
+  assertEquals(order().payment.refundAmount, 2500);
   assertEquals(order().needsAttention, true);
   assertEquals(typeof order().timeline.latePaymentAt, 'string');
   assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_on_closed_order']);
@@ -441,8 +445,8 @@ Deno.test('webhook: a late success on a legacy refunded-but-never-captured cance
     const result = await webhook();
     assertEquals(result.paymentStatus, 'paid');
     assertFlaggedLatePayment();
-    assertEquals(order().payment.refundAmount, 0, 'the phantom refund is not carried onto the paid payment');
-    assertEquals(order().payment.refundedAt, null);
+    assertEquals(order().payment.lastEvent, 'payment_on_closed_order_full_refund', 'a real refund record, not the phantom');
+    assertEquals(order().payment.refundedAt === '2026-11-09T10:05:00.000Z', false, 'not the phantom refund time');
 
     // A redelivery (past the idempotency record) now finds real money: settled.
     db.IdempotencyRecord = [];
@@ -457,7 +461,7 @@ Deno.test('refresh: the same late success on a legacy phantom refund goes down t
     paystackVerifyData = charge('success', { channel: 'bank_transfer' });
 
     const { body } = await refresh();
-    assertEquals(body.data.paymentStatus, 'paid');
+    assertEquals(body.data.paymentStatus, 'refunded', 'the refund record is what the order now says');
     assertEquals(body.data.status, 'cancelled');
     assertFlaggedLatePayment();
   });
@@ -498,7 +502,8 @@ Deno.test('webhook: a late success after a new-style unpaid customer cancel is f
     await webhook();
     assertEquals(order().status, 'cancelled', 'never reopened');
     assertEquals(order().timeline.cancelledAt, cancelledAt);
-    assertEquals(order().payment.status, 'paid');
+    assertEquals(order().payment.status, 'refunded', 'paid, then its refund recorded');
+    assertEquals(order().payment.refundAmount, 2500);
     assertEquals(order().needsAttention, true);
     assertEquals(typeof order().timeline.latePaymentAt, 'string');
     assertEquals(db.OperationalAlert.map((alert) => alert.alertType), ['payment_on_closed_order']);
