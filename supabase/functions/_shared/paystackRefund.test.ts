@@ -1304,3 +1304,42 @@ Deno.test('order reads for the apps reduce the refund execution to status and am
   const plain = toOrderSnapshotResponse(makeOrder() as any, [], null) as Row;
   assertEquals(plain.payment.refundExecution, undefined, 'no execution, nothing added');
 });
+
+// ───────────────────── other payment changes are never overwritten ─────────────────────
+
+Deno.test('recording Paystack answer never overwrites a payment change made meanwhile', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    const paystack = fakePaystack(accepted('processing'));
+    // Just before the outcome write lands, another writer changes a payment field.
+    updateHook = {
+      when: (table, payload) => table === 'CustomerOrder' && payload.payment?.refundExecution?.status === 'processing',
+      run: () => {
+        order().payment.lastEvent = 'reconciled_by_ops';
+        order().updatedAt = '2026-11-17T12:34:56.000Z';
+      },
+    };
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'sent');
+    assertEquals(execution()?.status, 'processing', 're-applied after the lost guard');
+    assertEquals(order().payment.lastEvent, 'reconciled_by_ops', 'the other change survives');
+  });
+});
+
+Deno.test('a refund webhook never overwrites a payment change made meanwhile', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution() }) }));
+    updateHook = {
+      when: (table, payload) => table === 'CustomerOrder' && payload.payment?.refundExecution?.status === 'processed',
+      run: () => {
+        order().payment.lastEvent = 'reconciled_by_ops';
+        order().updatedAt = '2026-11-17T12:34:56.000Z';
+      },
+    };
+    const result = await applyRefundWebhook(event('processed'));
+    assertEquals(result, { changed: true, ignored: false, orderId: ORDER_ID, status: 'processed' });
+    assertEquals(order().payment.lastEvent, 'reconciled_by_ops');
+    assertEquals(execution()?.status, 'processed');
+    assertEquals(customerPushes().length, 1, 'still told once');
+  });
+});

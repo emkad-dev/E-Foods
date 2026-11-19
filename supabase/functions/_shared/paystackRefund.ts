@@ -416,67 +416,77 @@ export const sendOrderRefund = async (
 
 /**
  * Writes `next` over the execution this call last saw, as a compare-and-set on
- * that execution (same reference and status). A refund webhook can land
- * between Paystack's answer and this write; when it already moved the
- * execution, its state stands (it is at least as new) and only a missing
- * Paystack refund id is filled in. Runs the transition's side effects only when
- * THIS write applied, so each one happens once. Returns the stored execution.
+ * that execution (same reference and status) AND on the order's updatedAt, so
+ * a concurrent change to another payment field is never overwritten by the
+ * payment object this call read. On a lost guard it re-reads once and
+ * re-applies. A refund webhook can land between Paystack's answer and this
+ * write; when it already moved the execution, its state stands (it is at least
+ * as new) and only a missing Paystack refund id is filled in. Runs the
+ * transition's side effects only when THIS write applied, so each one happens
+ * once. Returns the stored execution.
  */
 const recordExecutionTransition = async (
   orderId: string,
   current: RefundExecution,
   next: RefundExecution
 ): Promise<RefundExecution | null> => {
-  const order = await loadOrder(orderId);
-  if (!order) return null;
-  const payment = paymentOf(order);
-  const stored = readRefundExecution(payment);
-  if (!stored || stored.reference !== current.reference) {
-    return stored;
-  }
-
-  if (stored.status !== current.status) {
-    if (!stored.paystackRefundId && next.paystackRefundId) {
-      const filled = { ...stored, paystackRefundId: next.paystackRefundId };
-      let fill = serviceClient
-        .from('CustomerOrder')
-        .update({ payment: { ...payment, refundExecution: toStoredExecution(filled) } })
-        .eq('id', orderId);
-      fill = whereExecutionIs(fill, stored);
-      const { error } = await fill.select('id');
-      if (error) {
-        logEdgeEvent('error', 'refund id fill failed', { error: error.message, orderId });
-      }
-      return filled;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const order = await loadOrder(orderId);
+    if (!order) return null;
+    const payment = paymentOf(order);
+    const stored = readRefundExecution(payment);
+    if (!stored || stored.reference !== current.reference) {
+      return stored;
     }
-    return stored;
-  }
 
-  const raisesAttention = next.status === 'failed' || next.status === 'needs_attention';
-  let write = serviceClient
-    .from('CustomerOrder')
-    .update({
-      payment: { ...payment, refundExecution: toStoredExecution(next) },
-      ...(raisesAttention ? { needsAttention: true } : {}),
-      updatedAt: nowIso(),
-    })
-    .eq('id', orderId);
-  write = whereExecutionIs(write, stored);
-  const { data: written, error } = await write.select('id');
-  if (error) {
-    // The refund request already went out: log loudly and leave the claim
-    // ('requested') standing. The webhook will move it on.
-    logEdgeEvent('error', 'refund outcome write failed', { error: error.message, orderId, status: next.status });
-    return stored;
-  }
-  if (!Array.isArray(written) || written.length === 0) {
-    // Changed under us: report what is stored now.
-    const fresh = await loadOrder(orderId);
-    return fresh ? readRefundExecution(paymentOf(fresh)) : null;
-  }
+    if (stored.status !== current.status) {
+      if (!stored.paystackRefundId && next.paystackRefundId) {
+        const filled = { ...stored, paystackRefundId: next.paystackRefundId };
+        let fill = serviceClient
+          .from('CustomerOrder')
+          .update({ payment: { ...payment, refundExecution: toStoredExecution(filled) } })
+          .eq('id', orderId);
+        fill = whereExecutionIs(fill, stored);
+        if (typeof order.updatedAt === 'string') {
+          fill = fill.eq('updatedAt', order.updatedAt);
+        }
+        const { error } = await fill.select('id');
+        if (error) {
+          logEdgeEvent('error', 'refund id fill failed', { error: error.message, orderId });
+        }
+        return filled;
+      }
+      return stored;
+    }
 
-  await runTransitionSideEffects(order, next);
-  return next;
+    const raisesAttention = next.status === 'failed' || next.status === 'needs_attention';
+    let write = serviceClient
+      .from('CustomerOrder')
+      .update({
+        payment: { ...payment, refundExecution: toStoredExecution(next) },
+        ...(raisesAttention ? { needsAttention: true } : {}),
+        updatedAt: nowIso(),
+      })
+      .eq('id', orderId);
+    write = whereExecutionIs(write, stored);
+    if (typeof order.updatedAt === 'string') {
+      write = write.eq('updatedAt', order.updatedAt);
+    }
+    const { data: written, error } = await write.select('id');
+    if (error) {
+      // The refund request already went out: log loudly and leave the claim
+      // ('requested') standing. The webhook, or a resume, moves it on.
+      logEdgeEvent('error', 'refund outcome write failed', { error: error.message, orderId, status: next.status });
+      return stored;
+    }
+    if (Array.isArray(written) && written.length > 0) {
+      await runTransitionSideEffects(order, next);
+      return next;
+    }
+    // Lost the guard: read again and re-apply once.
+  }
+  const fresh = await loadOrder(orderId);
+  return fresh ? readRefundExecution(paymentOf(fresh)) : null;
 };
 
 /**
@@ -897,6 +907,11 @@ export const applyRefundWebhook = async (input: RefundWebhookInput): Promise<Ref
       })
       .eq('id', order.id);
     write = whereExecutionIs(write, current);
+    // And on updatedAt: the payment object written back is the one read here,
+    // so any other payment change since must win (re-read below, re-applied).
+    if (typeof order.updatedAt === 'string') {
+      write = write.eq('updatedAt', order.updatedAt);
+    }
     const { data: written, error } = await write.select('id');
     if (error) {
       throw new Error(error.message);
