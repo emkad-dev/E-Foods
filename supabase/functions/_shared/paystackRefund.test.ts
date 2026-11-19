@@ -1343,3 +1343,21 @@ Deno.test('a refund webhook never overwrites a payment change made meanwhile', a
     assertEquals(customerPushes().length, 1, 'still told once');
   });
 });
+
+Deno.test('a live listed refund that names no charge is a lookup error: nothing is sent', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    const paystack = fakePaystack(accepted(), listing([{ id: 9, reference: 'mystery', status: 'processed' }]));
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'unconfirmed');
+    assertEquals(paystack.calls.length, 0);
+    assertEquals(execution()?.status, 'needs_attention');
+  });
+  await withHarness(async () => {
+    // The same row, failed, credits the money back and is ignored.
+    setup(makeOrder());
+    const paystack = fakePaystack(accepted(), listing([{ id: 9, reference: 'mystery', status: 'failed' }]));
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'sent');
+  });
+});

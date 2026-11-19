@@ -142,6 +142,10 @@ export const findPaystackRefundsForCharge = async (
       const rowTransactionReference = (
         sanitizeText(transactionObject?.reference) || sanitizeText(row.transaction_reference)
       ).toLowerCase();
+      // A live refund that names no charge cannot be ruled out as this one's.
+      if (!rowTransactionId && !rowTransactionReference && sanitizeText(row.status).toLowerCase() !== 'failed') {
+        return { kind: 'error', message: 'Paystack listed a refund without its transaction, so it cannot be ruled out.' };
+      }
       if (rowTransactionId !== input.transactionId && rowTransactionReference !== reference) continue;
       refunds.push({
         id: idText(row.id),
