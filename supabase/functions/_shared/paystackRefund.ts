@@ -749,13 +749,16 @@ const sameReference = (a: string | null, b: string | null) =>
 export const REFUND_WEBHOOK_UNMATCHED_ALERT_TYPE = 'refund_webhook_unmatched';
 
 type RefundMatch = {
-  /** The orders of this charge that have a refund in flight (not processed or failed). */
+  /** The orders of this charge that have a refund in flight (requested, pending, processing). */
   openOnCharge: CustomerOrderRow[];
   /** The matched order and the reference of the attempt it was matched to. */
   match: { matchedReference: string | null; row: CustomerOrderRow } | null;
 };
 
-const isOpenExecution = (execution: RefundExecution) => execution.status !== 'processed' && execution.status !== 'failed';
+// A refund FEASTY has in flight at Paystack. needs_attention is not counted:
+// legacy rows (the backfill) sit there forever and would raise false alerts.
+const isOpenExecution = (execution: RefundExecution) =>
+  execution.status === 'requested' || execution.status === 'pending' || execution.status === 'processing';
 
 /**
  * The order (of possibly several sharing one charge) this refund event is
@@ -804,7 +807,7 @@ const findRefundOrder = async (input: RefundWebhookInput): Promise<RefundMatch> 
     // A needs_attention attempt of the same amount is never attached by amount
     // (it may be a hand refund from the dashboard): a human must look.
     const attention = sameAmount
-      .filter((entry) => entry.execution.status === 'needs_attention')
+      .filter((entry) => entry.execution.status === 'needs_attention' && entry.execution.requestedBy !== 'legacy')
       .map((entry) => entry.row)
       .filter((row) => !openOnCharge.includes(row));
     return { match: null, openOnCharge: [...openOnCharge, ...attention] };

@@ -1430,3 +1430,27 @@ Deno.test('a resend claim keeps a Paystack id already learned', async () => {
     assertEquals(execution()?.paystackRefundId, '7070');
   });
 });
+
+Deno.test('legacy and needs_attention refunds do not count as in flight for the unmatched alert', async () => {
+  const legacy = { status: 'needs_attention', requestedBy: 'legacy', lastError: 'Refunded before Paystack refunds existed' };
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: legacy }) }));
+    // The owner's own dashboard refund of a legacy order: no false alert.
+    await applyRefundWebhook(event('processed', { paystackRefundId: '5151', refundReference: 'dashboard-ref' }));
+    await applyRefundWebhook(event('processed', { paystackRefundId: '5152', refundReference: null }));
+    assertEquals(alerts('refund_webhook_unmatched').length, 0);
+    assertEquals(execution()?.status, 'needs_attention');
+  });
+  await withHarness(async () => {
+    // A blocked (needs_attention) attempt with a dashboard-referenced event: not in flight, no alert.
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ status: 'needs_attention' }) }) }));
+    await applyRefundWebhook(event('processed', { paystackRefundId: '5153', refundReference: 'dashboard-ref' }));
+    assertEquals(alerts('refund_webhook_unmatched').length, 0);
+  });
+  await withHarness(async () => {
+    // processing still counts.
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ status: 'processing' }) }) }));
+    await applyRefundWebhook(event('processed', { paystackRefundId: '5154', refundReference: 'dashboard-ref' }));
+    assertEquals(alerts('refund_webhook_unmatched').length, 1);
+  });
+});
