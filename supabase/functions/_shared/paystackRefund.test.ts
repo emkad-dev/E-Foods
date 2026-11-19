@@ -1375,3 +1375,58 @@ Deno.test('a same-amount hand refund never attaches to a needs_attention attempt
     });
   }
 });
+
+Deno.test('timeout, then processing, then needs-attention: Paystack has the refund, so it is never resent', async () => {
+  await withHarness(async () => {
+    setup(makeOrder());
+    const timedOut = fakePaystack({ kind: 'unknown', message: 'Paystack request to /refund timed out after 10000ms.' });
+    await sendOrderRefund({ orderId: ORDER_ID, requestedBy: `admin:${ADMIN_UID}` }, timedOut.deps);
+    assertEquals(execution()?.unconfirmed, true);
+
+    await applyRefundWebhook(event('processing', { paystackRefundId: '6060' }));
+    assertEquals(execution()?.status, 'processing');
+    assertEquals(execution()?.unconfirmed, false);
+    assertEquals(execution()?.paystackRefundId, '6060');
+
+    await applyRefundWebhook(event('needs-attention', { paystackRefundId: '6060' }));
+    assertEquals(execution()?.status, 'needs_attention');
+    assertEquals(execution()?.unconfirmed, false, 'Paystack needs bank details: not a resendable timeout');
+    assertEquals(execution()?.paystackRefundId, '6060');
+
+    const resend = fakePaystack(accepted());
+    const result = await sendOrderRefund(
+      { allowUnconfirmed: true, orderId: ORDER_ID, requestedBy: `admin:${ADMIN_UID}` },
+      resend.deps
+    );
+    assertEquals(result, { kind: 'refused', reason: 'already_started' });
+    assertEquals(resend.calls.length, 0);
+  });
+});
+
+Deno.test('a resend claim keeps a Paystack id already learned', async () => {
+  await withHarness(async () => {
+    setup(
+      makeOrder({
+        payment: refundedPayment({
+          refundExecution: {
+            amount: CAPTURED,
+            attempt: 1,
+            paystackRefundId: '7070',
+            reference: REF_1,
+            requestedAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+            requestedBy: 'auto',
+            status: 'requested',
+          },
+        }),
+      })
+    );
+    let idDuringSend: unknown = 'unset';
+    const paystack = fakePaystack(() => {
+      idDuringSend = execution()?.paystackRefundId;
+      return { httpStatus: 409, kind: 'rejected', message: 'A refund with reference already exists' };
+    });
+    await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(idDuringSend, '7070', 'the claim did not wipe it');
+    assertEquals(execution()?.paystackRefundId, '7070');
+  });
+});

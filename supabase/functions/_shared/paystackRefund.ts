@@ -279,7 +279,8 @@ export const sendOrderRefund = async (
     failedAt: null,
     lastError: null,
     manual: false,
-    paystackRefundId: null,
+    // A resend keeps any Paystack id a webhook already taught us.
+    paystackRefundId: resume ? previous.paystackRefundId : null,
     processedAt: null,
     reference,
     requestedAt,
@@ -904,6 +905,9 @@ export const applyRefundWebhook = async (input: RefundWebhookInput): Promise<Ref
       ...current,
       paystackRefundId: current.paystackRefundId ?? input.paystackRefundId,
       status: nextStatus,
+      // Paystack has now spoken about this refund: it exists, so it is no
+      // longer "unconfirmed" and can never be resent.
+      unconfirmed: false,
       ...(nextStatus === 'processed' ? { lastError: null, processedAt: at } : {}),
       ...(nextStatus === 'failed'
         ? { failedAt: at, lastError: input.reason ?? 'Paystack could not process the refund.' }
