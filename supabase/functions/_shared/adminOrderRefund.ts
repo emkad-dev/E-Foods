@@ -70,7 +70,7 @@ export const adminSendOrderRefund: Handler = async ({ context, data }) => {
     return json(200, { data: { orderId, outcome: 'marked_manual', refundExecution: execution } });
   }
 
-  const result = await sendOrderRefund({ orderId, requestedBy: `admin:${context.uid}` });
+  const result = await sendOrderRefund({ allowUnconfirmed: true, orderId, requestedBy: `admin:${context.uid}` });
 
   if (result.kind === 'not_found') {
     fail(404, 'Order not found.');

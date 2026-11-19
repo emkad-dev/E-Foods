@@ -1158,3 +1158,122 @@ Deno.test('an unmatched refund on a charge with nothing in flight is ignored qui
     assertEquals(unmatchedAlerts().length, 0);
   });
 });
+
+// ───────────────────── resuming a stuck or unconfirmed attempt ─────────────────────
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+const stuck = (overrides: Row = {}) => ({
+  amount: CAPTURED,
+  attempt: 1,
+  reference: REF_1,
+  requestedAt: minutesAgo(11),
+  requestedBy: 'auto',
+  status: 'requested',
+  ...overrides,
+});
+
+Deno.test('a requested claim older than 10 minutes is resent with the SAME reference', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: stuck() }) }));
+    const paystack = fakePaystack(accepted());
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'sent');
+    assertEquals(paystack.calls.length, 1);
+    assertEquals(paystack.calls[0].reference, REF_1, 'same reference, never a new one');
+    assertEquals(execution()?.attempt, 1);
+    assertEquals(execution()?.status, 'pending');
+  });
+});
+
+Deno.test('a requested claim under 10 minutes old is refused', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: stuck({ requestedAt: minutesAgo(9) }) }) }));
+    const paystack = fakePaystack(accepted());
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: `admin:${ADMIN_UID}`, allowUnconfirmed: true }, paystack.deps);
+    assertEquals(result, { kind: 'refused', reason: 'already_started' });
+    assertEquals(paystack.calls.length, 0);
+  });
+});
+
+Deno.test('two concurrent resumes of the same stale claim send once', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: stuck() }) }));
+    const paystack = fakePaystack(accepted());
+    const results = await Promise.all([
+      sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps),
+      sendOrderRefund({ orderId: ORDER_ID, requestedBy: `admin:${ADMIN_UID}`, allowUnconfirmed: true }, paystack.deps),
+    ]);
+    assertEquals(paystack.calls.length, 1);
+    assertEquals(results.map((result) => result.kind).sort(), ['changed', 'sent']);
+  });
+});
+
+Deno.test('concurrent resumes that both pass the status check are separated by requestedAt', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: stuck() }) }));
+    const paystack = fakePaystack(accepted());
+    // Another resume's claim lands first: still 'requested', same reference, new requestedAt.
+    updateHook = {
+      when: (table, payload) => table === 'CustomerOrder' && payload.payment?.refundExecution?.status === 'requested',
+      run: () => {
+        order().payment.refundExecution = stuck({ requestedAt: new Date().toISOString(), requestedBy: 'admin:other' });
+      },
+    };
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'changed');
+    assertEquals(paystack.calls.length, 0);
+  });
+});
+
+Deno.test('a resend that finds its own reference at Paystack adopts it instead of posting', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: stuck() }) }));
+    const paystack = fakePaystack(accepted(), listing([listedRefund({ id: 4242, reference: REF_1, status: 'processing' })]));
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'sent');
+    assertEquals(paystack.calls.length, 0, 'no second POST');
+    assertEquals(execution()?.status, 'processing');
+    assertEquals(execution()?.paystackRefundId, '4242');
+  });
+});
+
+Deno.test('a resend answered 409 stays needs_attention (unconfirmed)', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: stuck() }) }));
+    const paystack = fakePaystack({ httpStatus: 409, kind: 'rejected', message: 'A refund with reference already exists' });
+    const result = await sendOrderRefund({ orderId: ORDER_ID, requestedBy: 'auto' }, paystack.deps);
+    assertEquals(result.kind, 'unconfirmed');
+    assertEquals(execution()?.status, 'needs_attention');
+    assertEquals(execution()?.unconfirmed, true);
+    assertEquals(execution()?.reference, REF_1);
+  });
+});
+
+Deno.test('an unconfirmed needs_attention is resent by an admin with the same reference, never by the automatic path', async () => {
+  const unconfirmed = () =>
+    makeOrder({
+      payment: refundedPayment({
+        refundExecution: stuck({ requestedAt: minutesAgo(1), status: 'needs_attention', unconfirmed: true, lastError: 'timed out' }),
+      }),
+    });
+  await withHarness(async () => {
+    setup(unconfirmed());
+    const paystack = fakePaystack(accepted());
+    assertEquals(await startAutomaticRefund(ORDER_ID, paystack.deps), { kind: 'refused', reason: 'already_started' });
+    assertEquals(paystack.calls.length, 0);
+  });
+  await withHarness(async () => {
+    setup(unconfirmed());
+    const response = await callRpc('admin', { note: 'checked Paystack, nothing there' });
+    const body = await response.json();
+    assertEquals(body.data.outcome, 'sent');
+    assertEquals(JSON.parse(paystackRefundCalls()[0].body).reference, REF_1);
+    assertEquals(execution()?.attempt, 1);
+  });
+  await withHarness(async () => {
+    // Paystack's own needs-attention (bank details missing) is never resent.
+    setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ status: 'needs_attention' }) }) }));
+    const error = await rpcFailure(() => callRpc('admin', { note: 'resend' }));
+    assertEquals(error.status, 412);
+  });
+});

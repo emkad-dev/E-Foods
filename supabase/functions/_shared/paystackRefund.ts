@@ -233,7 +233,12 @@ const toStoredExecution = (execution: RefundExecution): JsonObject => ({ ...exec
  * the claim is written every outcome is recorded on the order and returned.
  */
 export const sendOrderRefund = async (
-  input: { orderId: string; requestedBy: RefundRequester },
+  input: {
+    /** An admin may resend an unconfirmed attempt (same reference); the automatic path may not. */
+    allowUnconfirmed?: boolean;
+    orderId: string;
+    requestedBy: RefundRequester;
+  },
   deps: PaystackRefundDeps = defaultDeps
 ): Promise<SendOrderRefundResult> => {
   const order = await loadOrder(input.orderId);
@@ -242,13 +247,12 @@ export const sendOrderRefund = async (
   }
 
   const payment = paymentOf(order);
-  const eligibility = assessPaystackRefund(payment, isPaymentCaptured(payment));
+  const eligibility = assessPaystackRefund(payment, isPaymentCaptured(payment), {
+    allowUnconfirmed: input.allowUnconfirmed === true,
+    nowMs: Date.now(),
+  });
   if (!eligibility.ok) {
     return { kind: 'refused', reason: eligibility.reason };
-  }
-  if (eligibility.resume) {
-    // Resuming a stuck attempt is not supported yet: nothing is sent.
-    return { kind: 'refused', reason: 'already_started' };
   }
 
   const amountKobo = toKoboAmount(eligibility.amount);
@@ -258,8 +262,12 @@ export const sendOrderRefund = async (
   }
 
   const previous = readRefundExecution(payment);
-  const attempt = (previous?.attempt ?? 0) + 1;
-  const reference = buildRefundReference(order.id, attempt);
+  // RESUME: a claim stuck in 'requested' past STALE_REQUESTED_MS, or (admin) an
+  // unconfirmed attempt. Same attempt, SAME reference: if the first request did
+  // reach Paystack, the lookup below adopts it, and a resend is refused 409.
+  const resume = eligibility.resume && previous !== null && previous.reference !== null;
+  const attempt = resume ? previous.attempt : (previous?.attempt ?? 0) + 1;
+  const reference = resume ? (previous.reference as string) : buildRefundReference(order.id, attempt);
   const requestedAt = nowIso();
   const claimed: RefundExecution = {
     amount: eligibility.amount,
@@ -284,6 +292,13 @@ export const sendOrderRefund = async (
     .eq('id', order.id)
     .eq('payment->>status', 'refunded');
   claim = whereExecutionIs(claim, previous);
+  if (resume) {
+    // Two concurrent resumes see the same stale claim: only the one that
+    // replaces this exact requestedAt goes on.
+    claim = previous.requestedAt
+      ? claim.eq('payment->refundExecution->>requestedAt', previous.requestedAt)
+      : claim.is('payment->refundExecution->>requestedAt', null);
+  }
   if (typeof order.updatedAt === 'string') {
     claim = claim.eq('updatedAt', order.updatedAt);
   }

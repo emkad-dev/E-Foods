@@ -99,11 +99,18 @@ const canMarkManual = (order: AdminOrderDetail) =>
   hasCapturedPayment(order.payment) &&
   canMarkRefundedManually(readRefundExecution(order.payment));
 
-/** The refund the server would send now, or null when the button must not show. */
-const sendableRefund = (order: AdminOrderDetail) => {
-  const eligibility = assessPaystackRefund(order.payment, hasCapturedPayment(order.payment));
-  return eligibility.ok ? eligibility.amount : null;
+/**
+ * The refund the server would send now, or null when the button must not show.
+ * resume: a stale or unconfirmed attempt resent with its own reference.
+ */
+const sendableRefundOf = (order: AdminOrderDetail) => {
+  const eligibility = assessPaystackRefund(order.payment, hasCapturedPayment(order.payment), {
+    allowUnconfirmed: true,
+    nowMs: Date.now(),
+  });
+  return eligibility.ok ? { amount: eligibility.amount, resume: eligibility.resume } : null;
 };
+const sendableRefund = (order: AdminOrderDetail) => sendableRefundOf(order)?.amount ?? null;
 
 /** What the dialog says will happen, before the admin commits. */
 const describeIntervention = (kind: InterventionKind, order: AdminOrderDetail, currency: string) => {
@@ -122,7 +129,9 @@ const describeIntervention = (kind: InterventionKind, order: AdminOrderDetail, c
     const retryNote =
       lastAttempt?.status === 'failed'
         ? ` The last attempt failed${lastAttempt.lastError ? `: ${lastAttempt.lastError}` : ''}. Nothing left FEASTY for it.`
-        : '';
+        : sendableRefundOf(order)?.resume
+          ? ' The last attempt was never confirmed. It is resent with the same Paystack reference, so Paystack refuses it if the first one already went through.'
+          : '';
     return `${amount} goes back to ${customer} through Paystack. It is paid from FEASTY's Paystack balance (pending payouts first), not by the restaurant, and it cannot be undone once sent. Paystack keeps its original transaction fee.${retryNote}`;
   }
   if (kind === 'mark_manual') {
@@ -371,7 +380,7 @@ export default function OrderDetailPage() {
                     onClick={() => openAction(kind)}
                   >
                     {kind === 'refund' && refundAmount !== null
-                      ? `${INTERVENTION_COPY.refund.buttonLabel} (${formatCurrency(refundAmount, currency)})`
+                      ? `${order && sendableRefundOf(order)?.resume ? 'Resend via Paystack' : INTERVENTION_COPY.refund.buttonLabel} (${formatCurrency(refundAmount, currency)})`
                       : INTERVENTION_COPY[kind].buttonLabel}
                   </button>
                 ))}
