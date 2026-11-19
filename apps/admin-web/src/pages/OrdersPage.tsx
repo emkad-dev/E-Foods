@@ -7,6 +7,7 @@ import RangePicker from '../components/RangePicker';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { getOrderDate, type RangeDays } from '../lib/analytics';
+import { describeClosure } from '../lib/closedOrders';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import { getOrderTone, getPaymentTone } from '../theme/tones';
@@ -125,6 +126,23 @@ export default function OrdersPage() {
       ),
     [snapshot.attentionOrders]
   );
+
+  // Cancelled and rejected orders in the selected period. They follow the date
+  // range but not the status and payment filters, which are built from the
+  // reporting feed and never list a closed status. `undefined` means the server
+  // does not send the list yet, which hides the section rather than claiming
+  // there were none.
+  const closedAvailable = snapshot.closedOrders !== undefined;
+  const closedOrders = useMemo(() => {
+    const start = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+
+    return [...(snapshot.closedOrders ?? [])]
+      .filter((order) => {
+        const created = getOrderDate(order);
+        return created !== null && created.getTime() >= start;
+      })
+      .sort((left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0));
+  }, [snapshot.closedOrders, rangeDays]);
 
   // The `hasData &&` guards below stopped the console *claiming* "no orders"
   // after a failed fetch, but the other half of the claim was never closed:
@@ -389,6 +407,71 @@ export default function OrdersPage() {
           ) : null}
         </div>
       </section>
+
+      {hasData && closedAvailable ? (
+        <section className="dash-section" aria-labelledby="orders-closed">
+          <div className="section-head">
+            <div>
+              <h2 id="orders-closed" className="section-title">
+                Cancelled and rejected ({formatNumber(closedOrders.length)})
+              </h2>
+              <p className="section-note">
+                In the selected period, whatever the status and payment filters. Not counted in the totals: these
+                orders were never paid or never served.
+              </p>
+            </div>
+          </div>
+          <div className="card">
+            {closedOrders.length === 0 ? (
+              <EmptyState
+                title={`No cancelled or rejected orders in the last ${rangeDays} days`}
+                body="Widen the range to look further back. This list covers up to 90 days."
+              />
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Order id</th>
+                      <th>Restaurant</th>
+                      <th>Status</th>
+                      <th>Why</th>
+                      <th>By</th>
+                      <th>Date &amp; time</th>
+                      <th className="num">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closedOrders.map((order) => {
+                      const closure = describeClosure(order);
+
+                      return (
+                        <tr key={order.id}>
+                          <td className="cell-strong">
+                            <Link to={`/orders/${encodeURIComponent(order.id)}`}>
+                              #{String(order.id).slice(-8).toUpperCase()}
+                            </Link>
+                          </td>
+                          <td>{order.restaurantName || 'Unknown restaurant'}</td>
+                          <td>
+                            <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
+                          </td>
+                          <td>{closure.why}</td>
+                          <td className="muted">{closure.by}</td>
+                          <td className="muted">{formatDateTime(order.createdAt)}</td>
+                          <td className="cell-amount">
+                            {formatCurrency(order.pricing?.total ?? 0, order.pricing?.currency ?? currency)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

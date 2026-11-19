@@ -18,6 +18,7 @@ import {
   getOrderDate,
   type RangeDays,
 } from '../lib/analytics';
+import { describeCancelledBreakdown, summarizeClosedOrders } from '../lib/closedOrders';
 import { formatCurrency, formatDateTime, formatNumber, parseTimestamp } from '../lib/format';
 import {
   buildPeriodWindows,
@@ -88,6 +89,20 @@ export default function OverviewPage() {
 
   const problemCounts = windowComparison.problems;
 
+  // Cancelled and rejected orders in the selected period, from the snapshot's
+  // closedOrders list (kept out of revenue). null when the server does not send
+  // the list yet, so the tiles show "—" instead of a confident zero.
+  const closedSummary = useMemo(() => {
+    if (snapshot.closedOrders === undefined) {
+      return null;
+    }
+
+    const windows = buildPeriodWindows(rangeDays);
+    return summarizeClosedOrders(
+      filterWithin(snapshot.closedOrders, getOrderDate, windows.currentStart, windows.currentEnd)
+    );
+  }, [snapshot.closedOrders, rangeDays]);
+
   // The three windowed cards ask the same question of the same two windows, so
   // it is asked once here.
   const compare = (current: number, previous: number) =>
@@ -150,7 +165,9 @@ export default function OverviewPage() {
               <RangePicker value={rangeDays} onChange={setRangeDays} />
             </div>
 
-            <div className="kpi-grid">
+            {/* Six figures, three across: the money and growth row, then the
+                problem row (pending cash, cancelled, rejected). */}
+            <div className="kpi-grid kpi-grid-3">
               <KpiCard
                 label={`Revenue (${rangeDays}d)`}
                 value={formatCurrency(kpis.revenue.current, kpis.currency)}
@@ -180,27 +197,22 @@ export default function OverviewPage() {
                 value={formatNumber(problemCounts.pendingPayments)}
                 caption="Uncollected cash in window"
               />
+              {/* These two used to read "not in this feed": the snapshot dropped
+                  every closed order. It now sends them as closedOrders, kept out
+                  of revenue. The caption says what "Cancelled" is made of, so 59
+                  abandoned checkouts are never read as 59 unhappy customers. */}
+              <KpiCard
+                label={`Cancelled orders (${rangeDays}d)`}
+                value={closedSummary ? formatNumber(closedSummary.cancelled) : '—'}
+                caption={closedSummary ? describeCancelledBreakdown(closedSummary) : 'Not sent by the server yet'}
+              />
+              <KpiCard
+                label={`Rejected (${rangeDays}d)`}
+                value={closedSummary ? formatNumber(closedSummary.rejected) : '—'}
+                caption={closedSummary ? 'Turned down by restaurants' : 'Not sent by the server yet'}
+              />
             </div>
 
-            {/* Failed payments and cancelled orders cannot be measured from
-                this feed AT ALL. The snapshot RPC runs every order through
-                `isOrderCleanForReporting` (supabase/functions/_shared/orders.ts),
-                which drops cancelled/rejected/failed-delivery orders outright
-                and drops prepaid orders that are not paid. Every path that
-                writes `payment.status = 'failed'` is a Paystack one and also
-                cancels the order, so it is excluded twice over. Both counts are
-                therefore structurally, permanently zero, and a confident
-                "0 cancelled orders" on an operations dashboard is a worse lie
-                than a missing figure.
-
-                They used to be two KPI cards showing an em dash, which kept
-                them honest but spent two headline slots on figures that do
-                not exist. One sentence says the same thing truthfully without
-                competing with the numbers that do. Bring them back as cards
-                when the feed carries the rows. */}
-            <p className="kpi-unavailable">
-              Failed payments and cancelled orders are not in this feed yet, so they are not shown here.
-            </p>
           </section>
 
           {/* RIGHT NOW: live counts, unaffected by the date range. */}

@@ -9,6 +9,18 @@ import type {
 import type { AuditLogEntry } from '../lib/auditLog';
 import { callAdminRpc } from '../lib/rpc';
 
+/**
+ * A cancelled, rejected or failed-delivery order. The backend sends the
+ * cancellation `reason` (payment_timeout, admin_force_cancel...), which the
+ * shared OrderDocument type does not declare; it is added here rather than in
+ * packages/domain, so the other apps' types are untouched.
+ */
+// An intersection, not Omit<OrderDocument, ...>: OrderDocument carries an index
+// signature, and Omit over one collapses every named field into `unknown`.
+export type ClosedOrderDocument = OrderDocument & {
+  cancellation?: { actor?: string | null; reason?: string | null; refundRate?: number | null } | null;
+};
+
 export type AdminDashboardSnapshot = {
   /**
    * Every order flagged needsAttention, whatever its status (cancelled and
@@ -17,6 +29,12 @@ export type AdminDashboardSnapshot = {
    * invisible. Absent on older backends.
    */
   attentionOrders?: OrderDocument[];
+  /**
+   * Cancelled, rejected and failed-delivery orders from the last 90 days. Kept
+   * out of `orders` so they never count as revenue, but sent so the admin can
+   * see them. Absent on backends older than this field.
+   */
+  closedOrders?: ClosedOrderDocument[];
   dispatchProfiles: DispatchProfileDocument[];
   featureFlags: Record<string, boolean>;
   orders: OrderDocument[];

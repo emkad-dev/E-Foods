@@ -13,6 +13,7 @@ import LoadingBlock from '../components/LoadingBlock';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatCurrency, formatDateTime, humanizeStatus } from '../lib/format';
+import { buildProgressSteps } from '../lib/orderProgress';
 import { resolveViewState } from '../lib/viewState';
 import { describeWriteFailure } from '../lib/writeOutcome';
 import {
@@ -336,6 +337,8 @@ export default function OrderDetailPage() {
             </dl>
           </div>
 
+          <ProgressCard timeline={order.timeline} />
+
           <div className="card">
             <div className="card-title-row">
               <h3 className="card-title">Customer and courier</h3>
@@ -497,6 +500,36 @@ export default function OrderDetailPage() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * When each step happened. Every status change stamps a time on the order
+ * (placedAt, acceptedAt, readyAt, deliveredAt...) and the order-detail read
+ * already returns it, but this page never showed it. The event log further
+ * down says who did what; this says when, in order.
+ */
+function ProgressCard({ timeline }: { timeline: Record<string, unknown> | null }) {
+  const steps = buildProgressSteps(timeline);
+
+  return (
+    <div className="card">
+      <div className="card-title-row">
+        <h3 className="card-title">Progress</h3>
+      </div>
+      {steps.length === 0 ? (
+        <EmptyState title="No step times recorded" body="This order has no step times on record." />
+      ) : (
+        <div>
+          {steps.map((step) => (
+            <div key={step.key} className="list-row">
+              <span>{step.label}</span>
+              <span className="muted">{step.due ? `Due ${formatDateTime(step.at)}` : formatDateTime(step.at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
