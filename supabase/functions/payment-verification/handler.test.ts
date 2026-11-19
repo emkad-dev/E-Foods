@@ -353,7 +353,7 @@ Deno.test('scheduled order that is paid stays scheduled (not released into the k
   });
 });
 
-Deno.test('cancelled order that receives a payment: recorded as paid, NOT revived, NOT refunded, flagged for attention', async () => {
+Deno.test('cancelled order that receives a payment (auto_refunds off): NOT revived, the refund RECORDED but not sent, flagged for attention', async () => {
   await withHarness(async () => {
     setup([
       makeOrder({
@@ -377,10 +377,11 @@ Deno.test('cancelled order that receives a payment: recorded as paid, NOT revive
     assertEquals(result, { success: true, orderId: 'order-1', paymentStatus: 'paid' });
     const order = orderById('order-1');
     assertEquals(order.status, 'cancelled'); // not marked placed
-    assertEquals(order.payment.status, 'paid'); // money recorded
+    assertEquals(order.payment.status, 'refunded'); // the money is recorded, then its refund is recorded
     assertEquals(order.payment.capturedAmount, 2500);
-    assertEquals('refundAmount' in order.payment, false); // no auto-refund
-    assertEquals('refundedAt' in order.payment, false);
+    assertEquals(order.payment.refundAmount, 2500); // full refund recorded
+    assertEquals(order.payment.lastEvent, 'payment_on_closed_order_full_refund');
+    assertEquals(order.payment.refundExecution, undefined); // flag off: nothing sent
     assertEquals(order.needsAttention, true);
     assertEquals(order.cancellation, { actor: 'system', reason: 'payment_timeout' });
     assertEquals(order.timeline.cancelledAt, '2026-10-19T10:15:00.000Z'); // history preserved
@@ -394,6 +395,11 @@ Deno.test('cancelled order that receives a payment: recorded as paid, NOT revive
     assertEquals(db.OperationalAlert[0].alertType, 'payment_on_closed_order');
     assertEquals(db.OperationalAlert[0].severity, 'high');
     assertEquals(db.OperationalAlert[0].dedupeKey, 'ops:payment_on_closed_order:order-1');
+    assertEquals(
+      String(db.OperationalAlert[0].details).includes('Use Refund via Paystack on the order page, or mark it refunded by hand there.'),
+      true,
+      'the alert points at the order page'
+    );
 
     // The restaurant must not be told a cancelled order is "paid and ready for confirmation".
     assertEquals(db.queue_notifications.length, 0);
@@ -498,7 +504,8 @@ Deno.test('multi-order group: awaiting order is placed, cancelled order is only 
     assertEquals(first.needsAttention, false);
 
     assertEquals(second.status, 'cancelled');
-    assertEquals(second.payment.status, 'paid');
+    assertEquals(second.payment.status, 'refunded', 'its own share is recorded as refunded');
+    assertEquals(second.payment.refundAmount, 8500);
     assertEquals(second.payment.capturedAmount, 8500);
     assertEquals(second.payment.settlement, settlement2);
     assertEquals(second.needsAttention, true);
@@ -555,7 +562,7 @@ Deno.test('an order cancelled between the initial read and the write is not over
 
     const order = orderById('order-1');
     assertEquals(order.status, 'cancelled');
-    assertEquals(order.payment.status, 'paid');
+    assertEquals(order.payment.status, 'refunded', 'recorded as paid, then its refund recorded');
     assertEquals(order.needsAttention, true);
     assertEquals(db.OperationalAlert.length, 1);
   });

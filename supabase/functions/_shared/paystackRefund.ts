@@ -1037,14 +1037,24 @@ export const runAfterResponse = (task: () => Promise<unknown>, context: Record<s
 export const refundPaymentOnClosedOrder = async (
   orderId: string,
   deps: PaystackRefundDeps = defaultDeps
-): Promise<SendOrderRefundResult | null> => {
+): Promise<SendOrderRefundResult | null> =>
+  (await recordRefundOnClosedOrder(orderId)) ? await startAutomaticRefund(orderId, deps) : null;
+
+/**
+ * The refund RECORD for money that landed on a closed order (buildRefundUpdate,
+ * full rate), as a compare-and-set on the payment still being 'paid' on that
+ * closed order. Written whatever the auto_refunds flag says, so the admin's
+ * "Refund via Paystack" / "mark refunded by hand" apply; only the SEND waits on
+ * the flag. Never throws; true when this call wrote it.
+ */
+export const recordRefundOnClosedOrder = async (orderId: string): Promise<boolean> => {
   try {
     const order = await loadOrder(orderId);
-    if (!order) return null;
+    if (!order) return false;
     const observedStatus = sanitizeText(order.status);
     const payment = paymentOf(order);
     if (!CLOSED_UNSERVED_STATUSES.has(observedStatus) || payment.status !== 'paid' || !isPaymentCaptured(payment)) {
-      return null;
+      return false;
     }
     const recorded = buildRefundUpdate({
       order,
@@ -1052,7 +1062,7 @@ export const refundPaymentOnClosedOrder = async (
       reason: 'payment_on_closed_order_full_refund',
     }) as JsonObject;
     if (recorded.status !== 'refunded') {
-      return null;
+      return false;
     }
 
     let write = serviceClient
@@ -1069,15 +1079,15 @@ export const refundPaymentOnClosedOrder = async (
       throw new Error(error.message);
     }
     if (!Array.isArray(written) || written.length === 0) {
-      logEdgeEvent('warn', 'closed-order refund record lost a race; not sending', { orderId });
-      return null;
+      logEdgeEvent('warn', 'closed-order refund record lost a race', { orderId });
+      return false;
     }
-    return await startAutomaticRefund(orderId, deps);
+    return true;
   } catch (error) {
-    logEdgeEvent('error', 'closed-order automatic refund failed', {
+    logEdgeEvent('error', 'closed-order refund record failed', {
       error: error instanceof Error ? error.message : String(error),
       orderId,
     });
-    return null;
+    return false;
   }
 };

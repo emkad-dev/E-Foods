@@ -13,7 +13,7 @@ import { broadcastOrderChanged } from '../_shared/realtime.ts';
 import { logEdgeEvent } from '../_shared/observability.ts';
 import { capturePaymentOnClosedOrderAlert, recordOperationalAlert } from '../_shared/operationalAlerts.ts';
 import { isPaymentCaptured, storedPaymentStatus, TERMINAL_ORDER_STATUSES } from '../_shared/orders.ts';
-import { isAutoRefundEnabled, refundPaymentOnClosedOrder } from '../_shared/paystackRefund.ts';
+import { isAutoRefundEnabled, recordRefundOnClosedOrder, startAutomaticRefund } from '../_shared/paystackRefund.ts';
 import {
   buildTransactionalEmailHtml,
   formatNairaAmount,
@@ -289,9 +289,10 @@ const loadChargeOrders = async (order: CustomerOrderRow) => {
 
 /**
  * A successful payment landed on an order that is already closed. We do NOT
- * revive it. It is NOT refunded automatically unless the auto_refunds flag is
- * on (then the caller sends it right after this, see refundPaymentOnClosedOrder):
- * the payment is recorded, and a human is pointed at it via the order's needsAttention flag (set by the
+ * revive it. The caller has already written the full refund RECORD
+ * (recordRefundOnClosedOrder); the money is SENT automatically only when the
+ * auto_refunds flag is on (the caller, right after this), otherwise by an admin
+ * from the order page. A human is pointed at it via the order's needsAttention flag (set by the
  * caller), a DeliveryEvent on the order timeline and a high-severity
  * OperationalAlert. Best-effort - a failure here must never fail the
  * verification, because the money is already captured and recorded.
@@ -302,6 +303,8 @@ const flagPaymentOnClosedOrder = async (input: {
   /** The caller will refund it through Paystack automatically right after. */
   autoRefund: boolean;
   orderId: string;
+  /** The caller wrote the refund record (false: a lost race or nothing captured). */
+  refundRecorded: boolean;
   orderStatus: string;
   paymentReference: string;
   restaurantId: string;
@@ -328,7 +331,13 @@ const flagPaymentOnClosedOrder = async (input: {
     console.error(`Failed to record closed-order payment event for ${input.orderId}`, error);
   }
 
+  const nextStep = !input.refundRecorded
+    ? undefined
+    : input.autoRefund
+      ? 'A full refund is recorded and FEASTY is sending it through Paystack automatically: do not refund by hand unless a refund alert follows.'
+      : 'A full refund is recorded. Use Refund via Paystack on the order page, or mark it refunded by hand there.';
   await capturePaymentOnClosedOrderAlert({
+    nextStep,
     orderId: input.orderId,
     orderStatus: input.orderStatus,
     paymentReference: input.paymentReference,
@@ -344,10 +353,8 @@ const flagPaymentOnClosedOrder = async (input: {
       title: 'Payment received on a closed order',
       body: `A payment of ${formatNairaAmount(input.amount)} arrived for order ${shortOrderCode(
         input.orderId
-      )}, which was already closed (${(input.orderStatus || 'closed').replace(/_/g, ' ')}). The order was not reopened: ${
-        input.autoRefund
-          ? 'FEASTY is refunding it through Paystack automatically, so do not refund by hand unless a refund alert follows.'
-          : 'return the money to the customer by hand.'
+      )}, which was already closed (${(input.orderStatus || 'closed').replace(/_/g, ' ')}). The order was not reopened. ${
+        nextStep ?? 'Return the money to the customer by hand.'
       }`,
       data: buildNotificationData({
         app: 'admin',
@@ -554,18 +561,20 @@ const markOrderPaymentState = async (
 
   for (const claim of claims) {
     if (claim.closed) {
+      // The refund record first, whatever the flag (never throws), then the
+      // flag and alert, then - only with auto_refunds on - the send.
+      const refundRecorded = await recordRefundOnClosedOrder(claim.orderId);
       await flagPaymentOnClosedOrder({
         amount: claim.capturedAmount,
         autoRefund,
         orderId: claim.orderId,
         orderStatus: claim.orderStatus,
         paymentReference,
+        refundRecorded,
         restaurantId: claim.restaurantId,
       });
-      if (autoRefund) {
-        // Records the refund, then sends it. Never throws: the payment is
-        // already recorded and the flag above stays as the fallback.
-        await refundPaymentOnClosedOrder(claim.orderId);
+      if (autoRefund && refundRecorded) {
+        await startAutomaticRefund(claim.orderId);
       }
     } else {
       await recordPaymentConfirmedEvent({

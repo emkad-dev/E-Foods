@@ -430,6 +430,8 @@ export const evaluateManualSettlementFallbackAlert = (input: {
  * order is NOT revived or refunded automatically - a human decides.
  */
 export const evaluatePaymentOnClosedOrderAlert = (input: {
+  /** What the admin should do; defaults to the old "refund or reinstate manually". */
+  nextStep?: string;
   orderId: string;
   orderStatus: string;
   paymentReference: string;
@@ -439,7 +441,9 @@ export const evaluatePaymentOnClosedOrderAlert = (input: {
     buildAlert({
       alertType: 'payment_on_closed_order',
       dedupeKey: `ops:payment_on_closed_order:${sanitizeText(input.orderId)}`,
-      details: `A successful payment (${sanitizeText(input.paymentReference)}) was received for order ${sanitizeText(input.orderId)}, which is already ${sanitizeText(input.orderStatus)}. The order was not revived and no refund was issued; review and refund or reinstate manually.`,
+      details: `A successful payment (${sanitizeText(input.paymentReference)}) was received for order ${sanitizeText(input.orderId)}, which is already ${sanitizeText(input.orderStatus)}. The order was not revived. ${
+        sanitizeText(input.nextStep) || 'No refund was issued; review and refund or reinstate manually.'
+      }`,
       metadata: {
         orderStatus: sanitizeText(input.orderStatus),
         paymentReference: sanitizeText(input.paymentReference),

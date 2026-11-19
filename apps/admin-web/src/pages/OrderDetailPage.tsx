@@ -119,7 +119,7 @@ const describeIntervention = (kind: InterventionKind, order: AdminOrderDetail, c
       ? `The customer paid. A full refund of ${formatCurrency(
           Number(order.payment.capturedAmount ?? order.total),
           currency
-        )} will be recorded on the order and it will be flagged for attention. No money moves yet: send it afterwards with Refund via Paystack, or return it by hand. The customer and the restaurant are told the order was cancelled.`
+        )} will be recorded on the order and it will be flagged for attention. No money moves yet. Use Refund via Paystack on the order page, or mark it refunded by hand there. The customer and the restaurant are told the order was cancelled.`
       : 'No payment was captured, so nothing is refunded. The customer and the restaurant are told the order was cancelled.';
   }
   if (kind === 'refund') {
@@ -222,7 +222,7 @@ export default function OrderDetailPage() {
         const result = await forceCancelAdminOrder({ orderId: order.id, reason: note });
         setActionNotice(
           result.refundRecorded
-            ? 'Order cancelled. A full refund is recorded and the order is flagged: no money has moved yet. Send it with Refund via Paystack below, or return it by hand.'
+            ? 'Order cancelled. A full refund is recorded and the order is flagged: no money has moved yet. Use Refund via Paystack on the order page, or mark it refunded by hand there.'
             : 'Order cancelled. No payment was captured, so nothing was refunded.'
         );
       } else if (pendingAction === 'refund') {
