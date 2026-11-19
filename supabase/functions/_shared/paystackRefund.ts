@@ -789,14 +789,24 @@ const findRefundOrder = async (input: RefundWebhookInput): Promise<RefundMatch> 
     if (byId) return found(byId);
   }
   if (!input.refundReference && input.amountKobo !== null) {
-    const byAmount = withExecution.filter(
+    const sameAmount = withExecution.filter(
       (entry) =>
-        isOpenExecution(entry.execution) &&
         !entry.execution.paystackRefundId &&
         entry.execution.amount !== null &&
         toKoboAmount(entry.execution.amount) === input.amountKobo
     );
+    // Only an attempt still waiting on Paystack may be identified by amount.
+    const byAmount = sameAmount.filter(
+      (entry) => entry.execution.status === 'requested' || entry.execution.status === 'pending'
+    );
     if (byAmount.length === 1) return found(byAmount[0]);
+    // A needs_attention attempt of the same amount is never attached by amount
+    // (it may be a hand refund from the dashboard): a human must look.
+    const attention = sameAmount
+      .filter((entry) => entry.execution.status === 'needs_attention')
+      .map((entry) => entry.row)
+      .filter((row) => !openOnCharge.includes(row));
+    return { match: null, openOnCharge: [...openOnCharge, ...attention] };
   }
   return found(undefined);
 };

@@ -1361,3 +1361,17 @@ Deno.test('a live listed refund that names no charge is a lookup error: nothing 
     assertEquals(result.kind, 'sent');
   });
 });
+
+Deno.test('a same-amount hand refund never attaches to a needs_attention attempt: it raises refund_webhook_unmatched', async () => {
+  for (const fields of [{ status: 'needs_attention' }, { status: 'needs_attention', unconfirmed: true }]) {
+    await withHarness(async () => {
+      setup(makeOrder({ payment: refundedPayment({ refundExecution: pendingExecution({ paystackRefundId: null, ...fields }) }) }));
+      const result = await applyRefundWebhook(event('processed', { paystackRefundId: '8888', refundReference: null }));
+      assertEquals(result, { ignored: true, reason: 'not_our_refund' }, JSON.stringify(fields));
+      assertEquals(execution()?.status, 'needs_attention', 'not attached');
+      assertEquals(execution()?.paystackRefundId, null);
+      assertEquals(alerts('refund_webhook_unmatched').length, 1);
+      assertEquals(customerPushes().length, 0);
+    });
+  }
+});
