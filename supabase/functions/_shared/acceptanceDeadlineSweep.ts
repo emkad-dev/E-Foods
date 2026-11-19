@@ -411,7 +411,7 @@ const autoCancelOrder = async (order: CustomerOrderRow, result: AcceptanceDeadli
   }
 
   await notifyUsers([order.customerId], {
-    title: 'Order cancelled and refunded',
+    title: 'Order cancelled',
     body: `Order ${order.id.slice(-6).toUpperCase()} was cancelled because the restaurant did not accept it in time. Your full refund is being arranged.`,
     data: buildNotificationData({
       app: 'customer',
