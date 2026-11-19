@@ -981,6 +981,34 @@ export const startAutomaticRefund = async (
 };
 
 /**
+ * Runs `task` after the response: handed to the Edge Runtime's
+ * EdgeRuntime.waitUntil when the runtime provides it (the isolate then stays
+ * alive until it settles), otherwise left running on its own. Never rejects:
+ * a failure is logged with `context`. Returns the promise for tests.
+ */
+export const runAfterResponse = (task: () => Promise<unknown>, context: Record<string, unknown>): Promise<void> => {
+  const promise = (async () => {
+    try {
+      await task();
+    } catch (error) {
+      logEdgeEvent('error', 'background task failed', {
+        ...context,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (pending: Promise<unknown>) => void } }).EdgeRuntime;
+  if (typeof runtime?.waitUntil === 'function') {
+    try {
+      runtime.waitUntil(promise);
+    } catch {
+      // Still running on its own.
+    }
+  }
+  return promise;
+};
+
+/**
  * Money that landed on an order that was already closed (the payment
  * verification's closed-order path, which records it 'paid' and flags it).
  * With auto_refunds on, the caller calls this: it first writes the refund

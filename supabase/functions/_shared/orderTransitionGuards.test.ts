@@ -722,7 +722,22 @@ const stubPaystack = (paystack: () => Response) => {
 
 const paystackAccepts = () => new Response(JSON.stringify({ status: true, data: { id: 501, status: 'pending' } }), { status: 200 });
 
+/** Work handed to EdgeRuntime.waitUntil (the automatic refund runs after the response). */
+let backgroundWork: Promise<unknown>[] = [];
+const installEdgeRuntime = () => {
+  backgroundWork = [];
+  (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime = {
+    waitUntil: (pending: Promise<unknown>) => {
+      backgroundWork.push(pending);
+    },
+  };
+};
+const settleBackground = async () => {
+  await Promise.all(backgroundWork);
+};
+
 const autoRefundsOn = () => {
+  installEdgeRuntime();
   db.FeatureFlag = [{ key: 'auto_refunds', enabled: true }];
   // What the payment verification stores, which the existing-refund check reads.
   order().payment = { ...order().payment, paidAt: new Date().toISOString(), paystackResponse: { amount: CAPTURED * 100, id: 7001 } };
@@ -735,6 +750,7 @@ Deno.test('auto_refunds off (the default): a paid rejection records the refund a
     Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
     const refundBodies = stubPaystack(paystackAccepts);
     const response = await partnerAction('reject');
+    await settleBackground();
     assertEquals(response.status, 200);
     assertEquals(order().payment.status, 'refunded');
     assertEquals(refundBodies.length, 0, 'no Paystack call with the flag off');
@@ -751,6 +767,7 @@ Deno.test('auto_refunds on: a paid rejection is refunded through Paystack once, 
     Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
     const refundBodies = stubPaystack(paystackAccepts);
     const response = await partnerAction('reject');
+    await settleBackground();
     assertEquals(response.status, 200);
     assertEquals(order().status, 'rejected');
     assertEquals(refundBodies.length, 1);
@@ -774,6 +791,7 @@ Deno.test('auto_refunds on but Paystack refuses: the rejection still succeeds an
       Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
       stubPaystack(paystack);
       const response = await partnerAction('reject');
+      await settleBackground();
       assertEquals(response.status, 200, 'the reject is never turned into an error');
       assertEquals(order().status, 'rejected');
       assertEquals(order().payment.status, 'refunded', 'the refund record stands');
@@ -793,7 +811,37 @@ Deno.test('auto_refunds on: an unpaid (cash) rejection never reaches Paystack', 
     autoRefundsOn();
     const refundBodies = stubPaystack(paystackAccepts);
     const response = await partnerAction('reject');
+    await settleBackground();
     assertEquals(response.status, 200);
     assertEquals(refundBodies.length, 0);
+  });
+});
+
+Deno.test('auto_refunds on: the partner gets the reject answer without waiting on Paystack', async () => {
+  await withHarness(async () => {
+    setup(makeOrder({ status: 'accepted' }));
+    autoRefundsOn();
+    Deno.env.set('PAYSTACK_SECRET_KEY', 'sk_test_not_real');
+    Deno.env.set('PAYSTACK_PUBLIC_KEY', 'pk_test_not_real');
+    let releasePaystack: () => void = () => {};
+    const paystackAnswered = new Promise<void>((resolve) => {
+      releasePaystack = resolve;
+    });
+    const refundBodies = stubPaystack(paystackAccepts);
+    const answeringFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
+      if (String(input) === PAYSTACK_REFUND_URL) await paystackAnswered;
+      return answeringFetch(input, init);
+    }) as typeof fetch;
+
+    const response = await partnerAction('reject');
+    assertEquals(response.status, 200, 'answered while Paystack is still pending');
+    assertEquals(order().status, 'rejected');
+    assertEquals(backgroundWork.length, 1, 'the refund was handed to EdgeRuntime.waitUntil');
+
+    releasePaystack();
+    await settleBackground();
+    assertEquals(refundBodies.length, 1);
+    assertEquals(order().payment.refundExecution.status, 'pending');
   });
 });

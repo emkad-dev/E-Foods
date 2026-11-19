@@ -19,7 +19,7 @@ import { serviceClient } from '../client.ts';
 import { readOrderDeliveryProvider } from '../deliveryProvider.ts';
 import { releaseDispatchAssignmentLoad, runAutomaticDispatchAssignment } from '../dispatchSelection.ts';
 import { announceManualRefund, buildManualRefundWrite } from '../manualRefund.ts';
-import { isAutoRefundEnabled, startAutomaticRefund } from '../paystackRefund.ts';
+import { isAutoRefundEnabled, runAfterResponse, startAutomaticRefund } from '../paystackRefund.ts';
 import { buildNotificationData, customerOrderStatusCopy, notifyAdmins, notifyUsers } from '../notifications.ts';
 import { logEdgeEvent } from '../observability.ts';
 import {
@@ -1380,9 +1380,10 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
 
   if (manualRefund) {
     // A paid rejection is a clear-cut refund: with auto_refunds on (default
-    // off, unreadable = off) it is sent through Paystack right after the alert,
-    // best-effort - startAutomaticRefund never throws, so the reject stands
-    // whatever Paystack says, and the manual alert is the fallback.
+    // off, unreadable = off) it is sent through Paystack after the response
+    // (the partner never waits on Paystack), best-effort - it never throws, so
+    // the reject stands whatever Paystack says, and the manual alert is the
+    // fallback.
     const autoRefund = await isAutoRefundEnabled();
     await announceManualRefund({
       actorUid: context.uid,
@@ -1392,7 +1393,7 @@ const partnerUpdateOrderStatus: Handler = async ({ context, data }) => {
       payment,
     });
     if (autoRefund) {
-      await startAutomaticRefund(orderId);
+      void runAfterResponse(() => startAutomaticRefund(orderId), { orderId, task: 'automatic refund' });
     }
   }
 
