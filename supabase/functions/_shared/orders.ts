@@ -242,6 +242,26 @@ export const normalizeOrderStatus = (value: unknown) => {
   }
 };
 
+/**
+ * The order payment as the apps (customer, partner, dispatch) read it: the
+ * Paystack refund's progress is reduced to its status and amount. Who asked for
+ * it (an admin uid), Paystack's error text and refund ids stay server-side;
+ * the admin console reads them through its own projection (adminGetOrderDetail).
+ */
+export const redactPaymentForApps = (payment: JsonObject | null | undefined): JsonObject | null => {
+  if (!payment) return null;
+  const execution = payment.refundExecution;
+  if (execution === undefined || execution === null) return payment;
+  const record = (typeof execution === 'object' && !Array.isArray(execution) ? execution : {}) as JsonObject;
+  return {
+    ...payment,
+    refundExecution: {
+      amount: typeof record.amount === 'number' ? record.amount : null,
+      status: typeof record.status === 'string' ? record.status : null,
+    },
+  };
+};
+
 export const toOrderSnapshotResponse = (
   order: CustomerOrderRow,
   items: OrderItemRow[],
@@ -300,7 +320,7 @@ export const toOrderSnapshotResponse = (
     restaurantName: item.restaurantName,
     selectedOptions: (item.selectedOptions as JsonObject[] | null | undefined) ?? [],
   })),
-  payment: order.payment ?? null,
+  payment: redactPaymentForApps(order.payment),
   pricing: order.pricing ?? null,
   restaurantId: order.restaurantId,
   restaurantName: order.restaurantName,

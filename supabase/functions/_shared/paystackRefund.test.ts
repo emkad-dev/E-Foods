@@ -1277,3 +1277,30 @@ Deno.test('an unconfirmed needs_attention is resent by an admin with the same re
     assertEquals(error.status, 412);
   });
 });
+
+// ───────────────────── what the apps read ─────────────────────
+
+Deno.test('order reads for the apps reduce the refund execution to status and amount', async () => {
+  const { toOrderSnapshotResponse } = await import('./orders.ts');
+  const row = makeOrder({
+    payment: refundedPayment({
+      refundExecution: {
+        ...pendingExecution(),
+        lastError: 'Insufficient balance',
+        requestedBy: `admin:${ADMIN_UID}`,
+        status: 'failed',
+      },
+    }),
+  });
+  // deno-lint-ignore no-explicit-any
+  const snapshot = toOrderSnapshotResponse(row as any, [], null) as Row;
+  assertEquals(snapshot.payment.refundExecution, { amount: CAPTURED, status: 'failed' });
+  assertEquals(snapshot.payment.refundAmount, CAPTURED, 'the rest of the payment is kept');
+  assertEquals(JSON.stringify(snapshot).includes(ADMIN_UID), false, 'no admin uid');
+  assertEquals(JSON.stringify(snapshot).includes('Insufficient balance'), false, 'no Paystack error text');
+  assertEquals(JSON.stringify(snapshot).includes(REF_1), false, 'no refund reference');
+
+  // deno-lint-ignore no-explicit-any
+  const plain = toOrderSnapshotResponse(makeOrder() as any, [], null) as Row;
+  assertEquals(plain.payment.refundExecution, undefined, 'no execution, nothing added');
+});
