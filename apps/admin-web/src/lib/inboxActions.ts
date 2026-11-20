@@ -6,7 +6,7 @@ export interface InboxStatusAction {
 }
 
 const STATUS_ACTIONS: InboxStatusAction[] = [
-  { status: 'pending', label: 'Pending' },
+  { status: 'pending', label: 'Mark waiting on customer' },
   { status: 'closed', label: 'Close' },
   { status: 'open', label: 'Reopen' },
 ];

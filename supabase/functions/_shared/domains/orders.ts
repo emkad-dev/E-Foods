@@ -119,7 +119,12 @@ import {
 import { ensureRole, type AuthenticatedRequestContext } from '../rpc/context.ts';
 import { defineRpcDomain, type RpcHandler } from '../rpc/registry.ts';
 import { fail, json } from '../rpc/respond.ts';
-import { appendSupportMessage, type SupportConversationRow, type SupportMessageRow } from '../support.ts';
+import {
+  appendSupportMessage,
+  shouldReopenOnCustomerMessage,
+  type SupportConversationRow,
+  type SupportMessageRow,
+} from '../support.ts';
 
 type Handler = RpcHandler<AuthenticatedRequestContext>;
 
@@ -2204,7 +2209,7 @@ const cancelCustomerOrder: Handler = async ({ context, data }) => {
 };
 
 // Appends a customer message to their single support thread: find, create, or
-// reopen if previously closed, then notify inbox/thread subscribers. Shared by
+// reopen if not already open, then notify inbox/thread subscribers. Shared by
 // customerSendSupportMessage and customerReportOrderProblem so a reported
 // order problem lands in exactly the same thread, the same way.
 const postCustomerSupportMessage = async (customerId: string, body: string) => {
@@ -2228,7 +2233,7 @@ const postCustomerSupportMessage = async (customerId: string, body: string) => {
       throw new Error(createError?.message ?? 'Failed to create the conversation.');
     }
     conversation = created;
-  } else if (existing.status === 'closed') {
+  } else if (shouldReopenOnCustomerMessage(existing.status)) {
     const { data: reopened, error: reopenError } = await serviceClient
       .from('SupportConversation')
       .update({ status: 'open', updatedAt: new Date().toISOString() })

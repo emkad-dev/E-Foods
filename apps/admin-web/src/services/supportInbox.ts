@@ -29,10 +29,23 @@ export const getSupportTone = (status: SupportStatus): AdminTone => {
     case 'closed':
       return 'neutral';
     case 'pending':
-      return 'warning';
+      return 'info';
     case 'open':
     default:
-      return 'success';
+      return 'warning';
+  }
+};
+
+/** What the admin reads for each stored status; the stored values never change. */
+export const supportStatusLabel = (status: SupportStatus): string => {
+  switch (status) {
+    case 'pending':
+      return 'Waiting on customer';
+    case 'closed':
+      return 'Closed';
+    case 'open':
+    default:
+      return 'Open';
   }
 };
 

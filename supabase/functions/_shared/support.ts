@@ -31,6 +31,12 @@ const SUPPORT_STATUSES = ['open', 'pending', 'closed'] as const;
 export const isSupportStatus = (value: unknown): value is (typeof SUPPORT_STATUSES)[number] =>
   typeof value === 'string' && (SUPPORT_STATUSES as readonly string[]).includes(value);
 
+/**
+ * Open means "a customer is waiting on us", so a customer message moves any
+ * thread that is not already open (pending or closed) back to open.
+ */
+export const shouldReopenOnCustomerMessage = (status: string): boolean => status !== 'open';
+
 /** Appends a message and bumps the conversation's activity timestamps. */
 export const appendSupportMessage = async (input: {
   conversationId: string;

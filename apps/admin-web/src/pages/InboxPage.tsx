@@ -4,6 +4,7 @@ import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
+import WinLabel from '../components/WinLabel';
 import { useAuth } from '../contexts/AuthContext';
 import { useRefreshNavCounts } from '../contexts/NavCountsContext';
 import { formatDateTime } from '../lib/format';
@@ -22,6 +23,7 @@ import {
   setStatus,
   type InboxConversation,
   type SupportMessage,
+  supportStatusLabel,
   type SupportStatus,
 } from '../services/supportInbox';
 
@@ -76,7 +78,7 @@ const emptyInboxCopy = (statusFilter: SupportStatus | 'all'): { title: string; b
   if (statusFilter === 'open') {
     return {
       title: "You're caught up",
-      body: 'Nothing is open. A new customer message opens a conversation here automatically, so this is the cleared state rather than a filtered-out one.',
+      body: 'No customer is waiting on a reply. A new message, or a reply to a conversation waiting on the customer or closed, moves it back here.',
     };
   }
 
@@ -87,9 +89,10 @@ const emptyInboxCopy = (statusFilter: SupportStatus | 'all'): { title: string; b
     };
   }
 
+  const label = supportStatusLabel(statusFilter);
   return {
-    title: `Nothing is ${statusFilter}`,
-    body: `No conversation currently has the ${statusFilter} status. Other conversations may exist under a different one — switch the filter above to see them.`,
+    title: statusFilter === 'pending' ? 'Nothing is waiting on the customer' : `Nothing is ${label.toLowerCase()}`,
+    body: `No conversation is currently marked ${label.toLowerCase()}. Other conversations may exist under a different one — switch the filter above to see them.`,
   };
 };
 
@@ -320,7 +323,7 @@ export default function InboxPage() {
               aria-pressed={statusFilter === filter}
               onClick={() => setStatusFilter(filter)}
             >
-              {filter}
+              {filter === 'all' ? 'All' : supportStatusLabel(filter)}
             </button>
           ))}
         </div>
@@ -358,7 +361,7 @@ export default function InboxPage() {
               >
                 <div className="inbox-item-head">
                   <span className="inbox-item-name">{conversation.customerName}</span>
-                  <StatusBadge label={conversation.status} tone={getSupportTone(conversation.status)} />
+                  <StatusBadge label={supportStatusLabel(conversation.status)} tone={getSupportTone(conversation.status)} />
                 </div>
                 <div className="muted">
                   {describeOwner(conversation.assignedTo, myUid)} ·{' '}
@@ -390,7 +393,7 @@ export default function InboxPage() {
             <header className="inbox-thread-head">
               <div>
                 <h3>{selected.customerName}</h3>
-                <StatusBadge label={selected.status} tone={getSupportTone(selected.status)} />
+                <StatusBadge label={supportStatusLabel(selected.status)} tone={getSupportTone(selected.status)} />
                 <div className="muted">Owner: {describeOwner(selected.assignedTo, myUid)}</div>
               </div>
               <div className="inbox-actions">
@@ -418,7 +421,13 @@ export default function InboxPage() {
                     disabled={busyAction !== null}
                     onClick={() => void onStatus(action.status)}
                   >
-                    {busyAction === `status:${action.status}` ? 'Saving…' : action.label}
+                    {busyAction === `status:${action.status}` ? (
+                      'Saving…'
+                    ) : action.status === 'closed' ? (
+                      <WinLabel idle={action.label} win="Case closed" />
+                    ) : (
+                      action.label
+                    )}
                   </button>
                 ))}
               </div>
@@ -436,7 +445,7 @@ export default function InboxPage() {
               {messages.map((message) => (
                 <div key={message.id} className={`bubble bubble-${message.senderType}`}>
                   <p>{message.body}</p>
-                  <span className="muted">{new Date(message.createdAt).toLocaleTimeString()}</span>
+                  <span className="muted">{formatDateTime(message.createdAt)}</span>
                 </div>
               ))}
             </div>
