@@ -594,6 +594,14 @@ textarea {
   }
 }
 
+/* Order detail pairs a narrow card with a wide table (payments, events).
+   Grid items default to min-width: auto, so a wide table would push its
+   column past its share and scroll the page; 0 makes the table scroll
+   inside its own card instead. */
+.order-detail-grid > * {
+  min-width: 0;
+}
+
 /* ---------- Tables ---------- */
 
 .table-wrap {

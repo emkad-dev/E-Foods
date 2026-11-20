@@ -21,6 +21,8 @@ import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { formatCurrency, formatDateTime, humanizeStatus } from '../lib/format';
 import { buildProgressSteps } from '../lib/orderProgress';
+import { describeClosure } from '../lib/closedOrders';
+import { describeDelivery } from '../lib/orderDelivery';
 import { resolveViewState } from '../lib/viewState';
 import { describeWriteFailure } from '../lib/writeOutcome';
 import {
@@ -295,6 +297,9 @@ export default function OrderDetailPage() {
   const refundAmount = order ? sendableRefund(order) : null;
   const refundExecution = order ? readRefundExecution(order.payment) : null;
 
+  // Who delivers this order, in words (see lib/orderDelivery.ts).
+  const delivery = order ? describeDelivery(order) : null;
+
   return (
     <div className="page">
       <div className="page-header">
@@ -352,11 +357,24 @@ export default function OrderDetailPage() {
       ) : null}
 
       {order ? (
-        <div className="section-stack">
+        <>
+          {/*
+            Grouped by what each part answers, money first: the order and what
+            you can do to it; its money; why it closed, when it did; the basket;
+            the customer and who delivers; and its history. The full id sits
+            once, under the short code -- it is what the Orders lookup takes --
+            where it used to appear twice. Every field this page showed before
+            is still here; each moved to the group it belongs to.
+          */}
           <div className="card">
             <div className="card-title-row">
-              <h3 className="card-title">Order #{order.id.slice(-8).toUpperCase()}</h3>
-              <span>
+              <div>
+                <h3 className="card-title">Order #{order.id.slice(-8).toUpperCase()}</h3>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {order.id}
+                </span>
+              </div>
+              <span className="flex items-center gap-2">
                 <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
                 {order.needsAttention ? (
                   <span className="badge badge-warning" title="Flagged for an admin. The timeline and alerts say why.">
@@ -388,229 +406,288 @@ export default function OrderDetailPage() {
               </div>
             ) : null}
             <dl className="audit-detail-grid">
-              <Field label="Order id">{order.id}</Field>
               <Field label="Restaurant">{order.restaurantName}</Field>
               <Field label="Fulfillment">{humanizeStatus(order.fulfillmentType)}</Field>
               <Field label="Placed">{formatDateTime(order.createdAt)}</Field>
               <Field label="Last updated">{formatDateTime(order.updatedAt)}</Field>
               {order.scheduledFor ? <Field label="Scheduled for">{formatDateTime(order.scheduledFor)}</Field> : null}
-              <Field label="Delivery address">{order.deliveryAddress}</Field>
               <Field label="Order group">{order.orderGroupId}</Field>
-              {order.customerIssueReportedAt ? (
-                <Field label="Problem reported">{formatDateTime(order.customerIssueReportedAt)}</Field>
-              ) : null}
-              {order.customerConfirmDueAt ? (
-                <Field label="Customer confirmation">
-                  {order.customerConfirmedAt
-                    ? `${order.customerConfirmationSource === 'auto' ? 'Closed' : 'Confirmed'} ${formatDateTime(
-                        order.customerConfirmedAt
-                      )}`
-                    : `Waiting until ${formatDateTime(order.customerConfirmDueAt)}`}
-                </Field>
-              ) : null}
-              <Field label="Delivery code verified">
-                {order.deliveryCodeVerifiedAt
-                  ? formatDateTime(order.deliveryCodeVerifiedAt)
-                  : `No (${order.deliveryCodeAttempts} failed attempts)`}
-              </Field>
             </dl>
           </div>
 
-          <ProgressCard timeline={order.timeline} />
-
-          <div className="card">
-            <div className="card-title-row">
-              <h3 className="card-title">Customer and courier</h3>
+          {/* MONEY: the amounts beside the payment that settles them. */}
+          <section className="dash-section" aria-labelledby="order-money">
+            <div className="section-head">
+              <h2 id="order-money" className="section-title">
+                Money
+              </h2>
             </div>
-            <dl className="audit-detail-grid">
-              <Field label="Customer">{order.customer.displayName}</Field>
-              <Field label="Email">{order.customer.email}</Field>
-              <Field label="Phone">{order.customer.phoneNumber}</Field>
-              <Field label="Customer uid">{order.customer.uid}</Field>
-              <Field label="Courier">{order.assignment?.courierName}</Field>
-              <Field label="Courier uid">{order.assignment?.courierId}</Field>
-            </dl>
-          </div>
-
-          <div className="card">
-            <div className="card-title-row">
-              <h3 className="card-title">Items</h3>
-            </div>
-            {order.items.length === 0 ? (
-              <EmptyState title="No line items" body="This order has no item rows recorded." />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Item</th>
-                      <th>Options</th>
-                      <th>Qty</th>
-                      <th>Unit price</th>
-                      <th>Line total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {order.items.map((item, index) => (
-                      <tr key={`${item.id}-${index}`}>
-                        <td className="cell-strong">{item.name}</td>
-                        <td className="muted">
-                          {item.selectedOptions.length > 0
-                            ? item.selectedOptions
-                                .map((option) => stringify(option.name ?? option.label ?? option))
-                                .join(', ')
-                            : '—'}
-                        </td>
-                        <td>{item.quantity}</td>
-                        <td>{formatCurrency(item.price + item.optionDelta, currency)}</td>
-                        <td className="cell-amount">
-                          {formatCurrency((item.price + item.optionDelta) * item.quantity, currency)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="grid-2 order-detail-grid">
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Amounts</h3>
+                </div>
+                {/* A receipt: the lines, then the total. */}
+                <div>
+                  <div className="list-row">
+                    <span className="muted">Subtotal</span>
+                    <span>{formatCurrency(order.pricing?.subtotal ?? 0, currency)}</span>
+                  </div>
+                  <div className="list-row">
+                    <span className="muted">Delivery fee</span>
+                    <span>{formatCurrency(order.pricing?.deliveryFee ?? 0, currency)}</span>
+                  </div>
+                  <div className="list-row">
+                    <span className="muted">Service fee</span>
+                    <span>{formatCurrency(order.pricing?.serviceFee ?? 0, currency)}</span>
+                  </div>
+                  <div className="list-row">
+                    <span className="muted">Tip</span>
+                    <span>{formatCurrency(order.pricing?.tip ?? 0, currency)}</span>
+                  </div>
+                  <div className="list-row">
+                    <span className="muted">Discount</span>
+                    <span>{formatCurrency(order.pricing?.discount ?? 0, currency)}</span>
+                  </div>
+                  <div className="list-row">
+                    <span className="list-row-title">Total</span>
+                    <span className="cell-amount">{formatCurrency(order.total, currency)}</span>
+                  </div>
+                </div>
               </div>
-            )}
-            <dl className="audit-detail-grid" style={{ marginTop: 14 }}>
-              <Field label="Subtotal">{formatCurrency(order.pricing?.subtotal ?? 0, currency)}</Field>
-              <Field label="Delivery fee">{formatCurrency(order.pricing?.deliveryFee ?? 0, currency)}</Field>
-              <Field label="Service fee">{formatCurrency(order.pricing?.serviceFee ?? 0, currency)}</Field>
-              <Field label="Tip">{formatCurrency(order.pricing?.tip ?? 0, currency)}</Field>
-              <Field label="Discount">{formatCurrency(order.pricing?.discount ?? 0, currency)}</Field>
-              <Field label="Total">{formatCurrency(order.total, currency)}</Field>
-            </dl>
-          </div>
 
-          <div className="card">
-            <div className="card-title-row">
-              <h3 className="card-title">Payments</h3>
-              <span className="muted">
-                Order payment: {humanizeStatus(stringify(order.payment.method))} ·{' '}
-                {humanizeStatus(stringify(order.payment.status))}
-              </span>
-            </div>
-            {refundExecution ? (
-              <dl className="audit-detail-grid" style={{ marginBottom: 14 }}>
-                <Field label="Paystack refund">
-                  <StatusBadge
-                    label={describeRefundExecutionStatus(refundExecution.status)}
-                    tone={
-                      refundExecution.status === 'processed'
-                        ? 'success'
-                        : refundExecution.status === 'failed' || refundExecution.status === 'needs_attention'
-                          ? 'danger'
-                          : 'warning'
-                    }
-                  />
-                </Field>
-                <Field label="Refund amount sent">
-                  {refundExecution.amount !== null ? formatCurrency(refundExecution.amount, currency) : null}
-                </Field>
-                <Field label="Requested">
-                  {refundExecution.requestedAt
-                    ? `${formatDateTime(refundExecution.requestedAt)} by ${
-                        refundExecution.requestedBy === 'auto' ? 'automatic refund' : 'an admin'
-                      } (attempt ${refundExecution.attempt})`
-                    : null}
-                </Field>
-                {refundExecution.processedAt ? (
-                  <Field label="Processed">{formatDateTime(refundExecution.processedAt)}</Field>
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Payment</h3>
+                  <span className="flex items-center gap-2">
+                    <span className="muted">{humanizeStatus(stringify(order.payment.method))}</span>
+                    <StatusBadge
+                      label={stringify(order.payment.status)}
+                      tone={getPaymentTone(stringify(order.payment.status))}
+                    />
+                  </span>
+                </div>
+                {refundExecution ? (
+                  <dl className="audit-detail-grid" style={{ marginBottom: 14 }}>
+                    <Field label="Paystack refund">
+                      <StatusBadge
+                        label={describeRefundExecutionStatus(refundExecution.status)}
+                        tone={
+                          refundExecution.status === 'processed'
+                            ? 'success'
+                            : refundExecution.status === 'failed' || refundExecution.status === 'needs_attention'
+                              ? 'danger'
+                              : 'warning'
+                        }
+                      />
+                    </Field>
+                    <Field label="Refund amount sent">
+                      {refundExecution.amount !== null ? formatCurrency(refundExecution.amount, currency) : null}
+                    </Field>
+                    <Field label="Requested">
+                      {refundExecution.requestedAt
+                        ? `${formatDateTime(refundExecution.requestedAt)} by ${
+                            refundExecution.requestedBy === 'auto' ? 'automatic refund' : 'an admin'
+                          } (attempt ${refundExecution.attempt})`
+                        : null}
+                    </Field>
+                    {refundExecution.processedAt ? (
+                      <Field label="Processed">{formatDateTime(refundExecution.processedAt)}</Field>
+                    ) : null}
+                    {refundExecution.failedAt ? <Field label="Failed">{formatDateTime(refundExecution.failedAt)}</Field> : null}
+                    {refundExecution.lastError ? <Field label="Reason">{refundExecution.lastError}</Field> : null}
+                    {refundExecution.manual ? <Field label="Refunded">By hand, outside FEASTY</Field> : null}
+                    <Field label="Refund reference">{refundExecution.reference}</Field>
+                  </dl>
                 ) : null}
-                {refundExecution.failedAt ? <Field label="Failed">{formatDateTime(refundExecution.failedAt)}</Field> : null}
-                {refundExecution.lastError ? <Field label="Reason">{refundExecution.lastError}</Field> : null}
-                {refundExecution.manual ? <Field label="Refunded">By hand, outside FEASTY</Field> : null}
-                <Field label="Refund reference">{refundExecution.reference}</Field>
-              </dl>
-            ) : null}
-            {order.payments.length === 0 ? (
-              <EmptyState
-                title="No payment transactions"
-                body="No gateway transaction was recorded for this order (for example cash on delivery, or a checkout that never reached the gateway)."
-              />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Reference</th>
-                      <th>Status</th>
-                      <th>Amount</th>
-                      <th>Settlement</th>
-                      <th>Channel</th>
-                      <th>Created</th>
-                      <th>Last error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {order.payments.map((payment) => (
-                      <tr key={payment.id}>
-                        <td className="cell-strong">{payment.reference}</td>
-                        <td>
-                          <StatusBadge label={payment.status} tone={getPaymentTone(payment.status)} />
-                        </td>
-                        <td className="cell-amount">{formatCurrency(payment.amount, payment.currency ?? currency)}</td>
-                        <td className="muted">{payment.settlementMode ? humanizeStatus(payment.settlementMode) : '—'}</td>
-                        <td className="muted">{payment.channel ? humanizeStatus(payment.channel) : '—'}</td>
-                        <td className="muted">{formatDateTime(payment.createdAt)}</td>
-                        <td className="muted">{payment.lastError ?? '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {order.payments.length === 0 ? (
+                  <EmptyState
+                    title="No payment transactions"
+                    body="No gateway transaction was recorded for this order (for example cash on delivery, or a checkout that never reached the gateway)."
+                  />
+                ) : (
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Reference</th>
+                          <th>Status</th>
+                          <th className="num">Amount</th>
+                          <th>Settlement</th>
+                          <th>Channel</th>
+                          <th>Created</th>
+                          <th>Last error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.payments.map((payment) => (
+                          <tr key={payment.id}>
+                            <td className="cell-strong">{payment.reference}</td>
+                            <td>
+                              <StatusBadge label={payment.status} tone={getPaymentTone(payment.status)} />
+                            </td>
+                            <td className="cell-amount">{formatCurrency(payment.amount, payment.currency ?? currency)}</td>
+                            <td className="muted">{payment.settlementMode ? humanizeStatus(payment.settlementMode) : '—'}</td>
+                            <td className="muted">{payment.channel ? humanizeStatus(payment.channel) : '—'}</td>
+                            <td className="muted">{formatDateTime(payment.createdAt)}</td>
+                            <td className="muted">{payment.lastError ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          </section>
 
-          {order.cancellation && Object.keys(order.cancellation).length > 0 ? (
+          <CancellationCard status={order.status} cancellation={order.cancellation} />
+
+          <section className="dash-section" aria-labelledby="order-items">
+            <div className="section-head">
+              <h2 id="order-items" className="section-title">
+                Items
+              </h2>
+            </div>
             <div className="card">
-              <div className="card-title-row">
-                <h3 className="card-title">Cancellation</h3>
-              </div>
-              <dl className="audit-detail-grid">
-                {Object.entries(order.cancellation).map(([key, value]) => (
-                  <Field key={key} label={humanizeStatus(key)}>
-                    {stringify(value)}
-                  </Field>
-                ))}
-              </dl>
-            </div>
-          ) : null}
-
-          <div className="card">
-            <div className="card-title-row">
-              <h3 className="card-title">Event timeline</h3>
-            </div>
-            {order.events.length === 0 ? (
-              <EmptyState title="No events recorded" body="No delivery events have been logged for this order." />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Event</th>
-                      <th>Actor</th>
-                      <th>Note</th>
-                      <th>Details</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {order.events.map((event) => (
-                      <tr key={event.id}>
-                        <td className="muted">{formatDateTime(event.createdAt)}</td>
-                        <td className="cell-strong">{humanizeStatus(event.eventType)}</td>
-                        <td className="muted">{event.actorUid ?? 'System'}</td>
-                        <td>{event.note ?? '—'}</td>
-                        <td className="muted">{event.details ? stringify(event.details) : '—'}</td>
+              {order.items.length === 0 ? (
+                <EmptyState title="No line items" body="This order has no item rows recorded." />
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Options</th>
+                        <th>Qty</th>
+                        <th className="num">Unit price</th>
+                        <th className="num">Line total</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {order.items.map((item, index) => (
+                        <tr key={`${item.id}-${index}`}>
+                          <td className="cell-strong">{item.name}</td>
+                          <td className="muted">
+                            {item.selectedOptions.length > 0
+                              ? item.selectedOptions
+                                  .map((option) => stringify(option.name ?? option.label ?? option))
+                                  .join(', ')
+                              : '—'}
+                          </td>
+                          <td>{item.quantity}</td>
+                          <td className="num">{formatCurrency(item.price + item.optionDelta, currency)}</td>
+                          <td className="cell-amount">
+                            {formatCurrency((item.price + item.optionDelta) * item.quantity, currency)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* The customer beside who gets the order to them. "Courier" used to
+              sit blank for every pickup and every restaurant-run delivery;
+              describeDelivery says which it is. */}
+          <section className="dash-section" aria-labelledby="order-people">
+            <div className="section-head">
+              <h2 id="order-people" className="section-title">
+                Customer and delivery
+              </h2>
+            </div>
+            <div className="grid-even">
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Customer</h3>
+                </div>
+                <dl className="audit-detail-grid">
+                  <Field label="Customer">{order.customer.displayName}</Field>
+                  <Field label="Email">{order.customer.email}</Field>
+                  <Field label="Phone">{order.customer.phoneNumber}</Field>
+                  <Field label="Customer uid">{order.customer.uid}</Field>
+                  {order.customerIssueReportedAt ? (
+                    <Field label="Problem reported">{formatDateTime(order.customerIssueReportedAt)}</Field>
+                  ) : null}
+                  {order.customerConfirmDueAt ? (
+                    <Field label="Customer confirmation">
+                      {order.customerConfirmedAt
+                        ? `${order.customerConfirmationSource === 'auto' ? 'Closed' : 'Confirmed'} ${formatDateTime(
+                            order.customerConfirmedAt
+                          )}`
+                        : `Waiting until ${formatDateTime(order.customerConfirmDueAt)}`}
+                    </Field>
+                  ) : null}
+                </dl>
               </div>
-            )}
-          </div>
-        </div>
+
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Delivery</h3>
+                </div>
+                <dl className="audit-detail-grid">
+                  <Field label="Delivered by">{delivery?.deliveredBy}</Field>
+                  {delivery?.mode === 'platform' ? <Field label="Courier">{delivery.courier}</Field> : null}
+                  {order.assignment?.courierId ? <Field label="Courier uid">{order.assignment.courierId}</Field> : null}
+                  <Field label="Delivery address">{order.deliveryAddress}</Field>
+                  <Field label="Delivery code verified">
+                    {order.deliveryCodeVerifiedAt
+                      ? formatDateTime(order.deliveryCodeVerifiedAt)
+                      : `No (${order.deliveryCodeAttempts} failed attempts)`}
+                  </Field>
+                </dl>
+              </div>
+            </div>
+          </section>
+
+          {/* HISTORY: when each step happened, beside who did what. */}
+          <section className="dash-section" aria-labelledby="order-history">
+            <div className="section-head">
+              <h2 id="order-history" className="section-title">
+                History
+              </h2>
+            </div>
+            <div className="grid-2 order-detail-grid">
+              <ProgressCard timeline={order.timeline} />
+
+              <div className="card">
+                <div className="card-title-row">
+                  <h3 className="card-title">Event timeline</h3>
+                </div>
+                {order.events.length === 0 ? (
+                  <EmptyState title="No events recorded" body="No delivery events have been logged for this order." />
+                ) : (
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>When</th>
+                          <th>Event</th>
+                          <th>Actor</th>
+                          <th>Note</th>
+                          <th>Details</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.events.map((event) => (
+                          <tr key={event.id}>
+                            <td className="muted">{formatDateTime(event.createdAt)}</td>
+                            <td className="cell-strong">{humanizeStatus(event.eventType)}</td>
+                            <td className="muted">{event.actorUid ?? 'System'}</td>
+                            <td>{event.note ?? '—'}</td>
+                            <td className="muted">{event.details ? stringify(event.details) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </>
       ) : null}
     </div>
   );
@@ -643,5 +720,49 @@ function ProgressCard({ timeline }: { timeline: Record<string, unknown> | null }
         </div>
       )}
     </div>
+  );
+}
+
+const CLOSED_ORDER_STATUSES = new Set(['cancelled', 'rejected', 'failed_delivery']);
+
+/**
+ * Why a closed order closed, and who closed it, in plain words (lib/closedOrders),
+ * then any other detail the cancellation record carries. It used to list the raw
+ * keys only, and appeared only when a cancellation record existed -- so a
+ * rejected order, which never gets one, said nothing about why.
+ */
+function CancellationCard({ status, cancellation }: { status: string; cancellation: Record<string, unknown> | null }) {
+  const hasRecord = cancellation !== null && Object.keys(cancellation).length > 0;
+
+  if (!hasRecord && !CLOSED_ORDER_STATUSES.has(status.toLowerCase())) {
+    return null;
+  }
+
+  const text = (value: unknown) => (typeof value === 'string' ? value : null);
+  const closure = describeClosure({
+    status,
+    cancellation: { actor: text(cancellation?.actor), reason: text(cancellation?.reason) },
+  });
+  const otherDetails = Object.entries(cancellation ?? {}).filter(([key]) => key !== 'actor' && key !== 'reason');
+
+  return (
+    <section className="dash-section" aria-labelledby="order-closure">
+      <div className="section-head">
+        <h2 id="order-closure" className="section-title">
+          {status.toLowerCase() === 'rejected' ? 'Rejection' : 'Cancellation'}
+        </h2>
+      </div>
+      <div className="card">
+        <dl className="audit-detail-grid">
+          <Field label="Why">{closure.why}</Field>
+          <Field label="By">{closure.by}</Field>
+          {otherDetails.map(([key, value]) => (
+            <Field key={key} label={humanizeStatus(key)}>
+              {stringify(value)}
+            </Field>
+          ))}
+        </dl>
+      </div>
+    </section>
   );
 }
