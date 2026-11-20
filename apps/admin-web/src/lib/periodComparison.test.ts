@@ -193,3 +193,12 @@ test('inline figures get the same coverage gate as cards', () => {
     'the figure exists but the comparison does not'
   );
 });
+
+test('the new ranges caption themselves, and the old ones read exactly as before', () => {
+  assert.equal(windowTotalCaption(30), 'Window total · no prior 30d');
+  assert.equal(windowTotalCaption(182), 'Window total · no prior 6mo');
+  assert.equal(windowTotalCaption(365), 'Window total · no prior 1y');
+  assert.equal(windowTotalCaption('all'), 'All time · nothing earlier to compare');
+  assert.equal(noPriorWindowNote(7), 'no prior 7d on record');
+  assert.equal(noPriorWindowNote('all'), 'nothing earlier on record');
+});

@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavCounts } from '../contexts/NavCountsContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
-import { describeNavCount, formatNavCount, type NavCountKey } from '../lib/navCounts';
+import { describeNavCount, formatNavCount, NAV_COUNT_CAP, type NavCountKey } from '../lib/navCounts';
 import { resolveViewState } from '../lib/viewState';
 
 /**
@@ -41,7 +41,8 @@ const ADMIN_NAV: NavGroup[] = [
     items: [
       { to: '/', label: 'Dashboard', end: true },
       { to: '/orders', label: 'Orders' },
-      { to: '/dispatch', label: 'Dispatch' },
+      // Badged with rider SOS alerts (last 24h), in red, on every page.
+      { to: '/dispatch', label: 'Dispatch', countKey: 'sos' },
       { to: '/restaurants', label: 'Restaurants' },
     ],
   },
@@ -88,6 +89,15 @@ const SUPPORT_NAV: NavGroup[] = [{ items: [{ to: '/inbox', label: 'Inbox', end: 
  */
 const BADGE_CLASS =
   'ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-ink px-1.5 py-0.5 text-xs font-bold tabular-nums text-white';
+
+/**
+ * The SOS count is the one badge that IS a state -- a rider asking for help --
+ * so it takes the danger fill rather than ink. White on --danger measures
+ * 4.74:1. The number still carries the message, and the link's accessible
+ * name says it in words.
+ */
+const SOS_BADGE_CLASS =
+  'ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-[var(--danger)] px-1.5 py-0.5 text-xs font-bold tabular-nums text-white';
 
 /**
  * The section the operator is currently in, for the topbar heading.
@@ -152,7 +162,10 @@ export default function AppLayout() {
                 // which would state that a queue is clear on the strength of a
                 // read that failed. See lib/navCounts.ts.
                 const badge = formatNavCount(count);
-                const accessibleName = describeNavCount(item.label, count);
+                const accessibleName =
+                  item.countKey === 'sos'
+                    ? describeNavCount(item.label, count, NAV_COUNT_CAP, 'SOS alerts in the last 24 hours')
+                    : describeNavCount(item.label, count);
 
                 return (
                   <NavLink key={item.to} to={item.to} end={item.end} className="nav-link" aria-label={accessibleName}>
@@ -165,7 +178,7 @@ export default function AppLayout() {
                       badge is never the only carrier of the information.
                     */}
                     {badge === null ? null : (
-                      <span className={BADGE_CLASS} aria-hidden="true">
+                      <span className={item.countKey === 'sos' ? SOS_BADGE_CLASS : BADGE_CLASS} aria-hidden="true">
                         {badge}
                       </span>
                     )}

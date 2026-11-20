@@ -7,6 +7,9 @@ import RangePicker from '../components/RangePicker';
 import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { getOrderDate, type RangeDays } from '../lib/analytics';
+import { describeClosure } from '../lib/closedOrders';
+import { earlierOf, earliestDateIn } from '../lib/periodComparison';
+import { rangePhrase, resolveRangeDays } from '../lib/ranges';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import { getOrderTone, getPaymentTone } from '../theme/tones';
@@ -67,8 +70,19 @@ export default function OrdersPage() {
     return [...statuses].sort();
   }, [snapshot.orders]);
 
+  // "All time" has no fixed length: resolve it against the oldest order this
+  // page can see, in the reporting feed or the closed list.
+  const spanDays = useMemo(
+    () =>
+      resolveRangeDays(
+        rangeDays,
+        earlierOf(earliestDateIn(snapshot.orders, getOrderDate), earliestDateIn(snapshot.closedOrders ?? [], getOrderDate))
+      ),
+    [rangeDays, snapshot.orders, snapshot.closedOrders]
+  );
+
   const filteredOrders = useMemo(() => {
-    const start = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    const start = new Date(Date.now() - spanDays * 24 * 60 * 60 * 1000);
 
     return [...snapshot.orders]
       .filter((order) => {
@@ -92,7 +106,7 @@ export default function OrdersPage() {
         return true;
       })
       .sort((left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0));
-  }, [snapshot.orders, rangeDays, statusFilter, paymentFilter]);
+  }, [snapshot.orders, spanDays, statusFilter, paymentFilter]);
 
   const totalValue = useMemo(
     () => filteredOrders.reduce((total, order) => total + (order.pricing?.total ?? 0), 0),
@@ -126,6 +140,23 @@ export default function OrdersPage() {
     [snapshot.attentionOrders]
   );
 
+  // Cancelled and rejected orders in the selected period. They follow the date
+  // range but not the status and payment filters, which are built from the
+  // reporting feed and never list a closed status. `undefined` means the server
+  // does not send the list yet, which hides the section rather than claiming
+  // there were none.
+  const closedAvailable = snapshot.closedOrders !== undefined;
+  const closedOrders = useMemo(() => {
+    const start = Date.now() - spanDays * 24 * 60 * 60 * 1000;
+
+    return [...(snapshot.closedOrders ?? [])]
+      .filter((order) => {
+        const created = getOrderDate(order);
+        return created !== null && created.getTime() >= start;
+      })
+      .sort((left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0));
+  }, [snapshot.closedOrders, spanDays]);
+
   // The `hasData &&` guards below stopped the console *claiming* "no orders"
   // after a failed fetch, but the other half of the claim was never closed:
   // both false branches fell through to the table, so a failed fetch drew a
@@ -155,10 +186,10 @@ export default function OrdersPage() {
     activeFilters.length > 0
       ? {
           title: 'No orders match these filters',
-          body: `Nothing in the last ${rangeDays} days has ${activeFilters.join(' and ')}. Orders may exist outside this window or under another status, so clear the filters or widen the range.`,
+          body: `Nothing in ${rangePhrase(rangeDays)} has ${activeFilters.join(' and ')}. Orders may exist outside this window or under another status, so clear the filters or widen the range.`,
         }
       : {
-          title: `No orders in the last ${rangeDays} days`,
+          title: `No orders in ${rangePhrase(rangeDays)}`,
           body: 'No status or payment filter is applied, so this is every order in the window. Widen the range to look further back.',
         };
 
@@ -230,7 +261,7 @@ export default function OrdersPage() {
             as much as the trend. */}
         {hasData ? (
           <div className="kpi-grid kpi-grid-3">
-            <KpiCard label="Orders" value={formatNumber(filteredOrders.length)} caption={`In the last ${rangeDays} days`} />
+            <KpiCard label="Orders" value={formatNumber(filteredOrders.length)} caption={`In ${rangePhrase(rangeDays)}`} />
             <KpiCard
               label="Order value"
               value={formatCurrency(totalValue, currency)}
@@ -389,6 +420,71 @@ export default function OrdersPage() {
           ) : null}
         </div>
       </section>
+
+      {hasData && closedAvailable ? (
+        <section className="dash-section" aria-labelledby="orders-closed">
+          <div className="section-head">
+            <div>
+              <h2 id="orders-closed" className="section-title">
+                Cancelled and rejected ({formatNumber(closedOrders.length)})
+              </h2>
+              <p className="section-note">
+                In the selected period, whatever the status and payment filters. Not counted in the totals: these
+                orders were never paid or never served.
+              </p>
+            </div>
+          </div>
+          <div className="card">
+            {closedOrders.length === 0 ? (
+              <EmptyState
+                title={`No cancelled or rejected orders in ${rangePhrase(rangeDays)}`}
+                body="Widen the range to look further back."
+              />
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Order id</th>
+                      <th>Restaurant</th>
+                      <th>Status</th>
+                      <th>Why</th>
+                      <th>By</th>
+                      <th>Date &amp; time</th>
+                      <th className="num">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closedOrders.map((order) => {
+                      const closure = describeClosure(order);
+
+                      return (
+                        <tr key={order.id}>
+                          <td className="cell-strong">
+                            <Link to={`/orders/${encodeURIComponent(order.id)}`}>
+                              #{String(order.id).slice(-8).toUpperCase()}
+                            </Link>
+                          </td>
+                          <td>{order.restaurantName || 'Unknown restaurant'}</td>
+                          <td>
+                            <StatusBadge label={order.status} tone={getOrderTone(order.status)} />
+                          </td>
+                          <td>{closure.why}</td>
+                          <td className="muted">{closure.by}</td>
+                          <td className="muted">{formatDateTime(order.createdAt)}</td>
+                          <td className="cell-amount">
+                            {formatCurrency(order.pricing?.total ?? 0, order.pricing?.currency ?? currency)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

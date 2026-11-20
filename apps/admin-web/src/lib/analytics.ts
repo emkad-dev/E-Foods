@@ -1,13 +1,10 @@
 import type { DispatchProfileDocument, OrderDocument, RestaurantDocument, UserDocument } from '../../../../packages/domain/src';
 import { parseTimestamp } from './format.ts';
+import { bucketKey, buildBuckets, seriesBucket } from './ranges.ts';
 
-export type RangeDays = 7 | 30 | 90;
-
-export const RANGE_OPTIONS: { label: string; value: RangeDays }[] = [
-  { label: 'Last 7 days', value: 7 },
-  { label: 'Last 30 days', value: 30 },
-  { label: 'Last 90 days', value: 90 },
-];
+// The range type and options live in ranges.ts: they include "All time",
+// which has no fixed length. Re-exported so existing imports keep working.
+export { RANGE_OPTIONS, type RangeDays } from './ranges.ts';
 
 const CLOSED_STATUSES = ['cancelled', 'delivered', 'rejected', 'failed_delivery'];
 const VOID_STATUSES = ['cancelled', 'rejected', 'failed_delivery'];
@@ -51,7 +48,9 @@ export const computeDashboardKpis = (
   users: UserDocument[],
   restaurants: RestaurantDocument[],
   dispatchProfiles: DispatchProfileDocument[],
-  rangeDays: RangeDays,
+  // A resolved day count: "All time" arrives already turned into days by
+  // resolveRangeDays.
+  rangeDays: number,
   now = new Date()
 ): DashboardKpis => {
   const currentStart = new Date(now.getTime() - rangeDays * 24 * 60 * 60 * 1000);
@@ -88,15 +87,20 @@ export interface DailyPoint {
   revenue: number;
 }
 
-export const buildDailySeries = (orders: OrderDocument[], rangeDays: RangeDays, now = new Date()): DailyPoint[] => {
+/**
+ * One point per day for ranges up to four months, one per week beyond that:
+ * a year of daily bars is 365 hair-thin columns. Weekly points are labelled
+ * with the Monday that starts the week. Up to 120 days the keys and labels are
+ * exactly what this function produced before.
+ */
+export const buildDailySeries = (orders: OrderDocument[], rangeDays: number, now = new Date()): DailyPoint[] => {
   const points = new Map<string, DailyPoint>();
+  const bucket = seriesBucket(rangeDays);
 
-  for (let dayOffset = rangeDays - 1; dayOffset >= 0; dayOffset -= 1) {
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOffset);
-    const key = day.toISOString().slice(0, 10);
+  for (const { key, start } of buildBuckets(rangeDays, now)) {
     points.set(key, {
       key,
-      label: day.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
+      label: start.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
       orders: 0,
       revenue: 0,
     });
@@ -109,7 +113,7 @@ export const buildDailySeries = (orders: OrderDocument[], rangeDays: RangeDays, 
       continue;
     }
 
-    const key = new Date(created.getFullYear(), created.getMonth(), created.getDate()).toISOString().slice(0, 10);
+    const key = bucketKey(created, bucket);
     const point = points.get(key);
 
     if (!point) {
@@ -225,17 +229,16 @@ export interface ProblemDailyPoint {
 
 export const buildProblemDailySeries = (
   orders: OrderDocument[],
-  rangeDays: RangeDays,
+  rangeDays: number,
   now = new Date()
 ): ProblemDailyPoint[] => {
   const points = new Map<string, ProblemDailyPoint>();
+  const bucket = seriesBucket(rangeDays);
 
-  for (let dayOffset = rangeDays - 1; dayOffset >= 0; dayOffset -= 1) {
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOffset);
-    const key = day.toISOString().slice(0, 10);
+  for (const { key, start } of buildBuckets(rangeDays, now)) {
     points.set(key, {
       key,
-      label: day.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
+      label: start.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }),
       failed: 0,
       pending: 0,
       cancelled: 0,
@@ -249,7 +252,7 @@ export const buildProblemDailySeries = (
       continue;
     }
 
-    const key = new Date(created.getFullYear(), created.getMonth(), created.getDate()).toISOString().slice(0, 10);
+    const key = bucketKey(created, bucket);
     const point = points.get(key);
 
     if (!point) {

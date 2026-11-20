@@ -2,14 +2,16 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useVisiblePolling } from '../../../../packages/runtime/src';
 import { countOpenConversations, countPendingApplications, type NavCounts } from '../lib/navCounts';
 import { useDocumentVisibility } from '../lib/useDocumentVisibility';
-import { getAdminApprovalQueue } from '../services/platformReads';
+import { getAdminApprovalQueue, getAdminDispatchOpsView } from '../services/platformReads';
 import { getInbox } from '../services/supportInbox';
 import { useAuth } from './AuthContext';
 
 /**
- * How many items are waiting in the two queues a human has to work:
- * Approvals and Inbox. Nothing else in the console needs this, and nothing
- * else in the sidebar gets a badge.
+ * How many items are waiting in the two queues a human has to work --
+ * Approvals and Inbox -- plus the rider SOS alerts of the last 24 hours,
+ * badged on Dispatch. SOS used to be visible only to someone who happened to
+ * open Dispatch; a rider in trouble now shows on every page. Nothing else in
+ * the sidebar gets a badge.
  *
  * WHY THIS IS NOT PART OF SnapshotContext: that context's header states what
  * its aggregate covers and why it is a slow safety-net poll rather than a
@@ -31,8 +33,11 @@ import { useAuth } from './AuthContext';
  *     has no Approvals link and no permission for that RPC -- badging a link
  *     that role cannot see is not worth a 403 every two minutes.
  *
- * That is 2 requests per 120s for an admin and 1 per 120s for support, both
- * only while someone is looking at the tab.
+ * That is 3 requests per 120s for an admin (approvals, inbox and the SOS
+ * read, which reuses the existing adminGetDispatchOpsView action, so no new
+ * RPC action exists for it) and 1 per 120s for support, all only while
+ * someone is looking at the tab. The Dashboard's SOS tile reads this same
+ * count, so it costs nothing extra.
  *
  * These reads deliberately duplicate the ones on ApprovalsPage and
  * InboxPage rather than reaching into them: the counts must be current on
@@ -51,7 +56,7 @@ const POLL_INTERVAL_MS = 120000;
  * into a confident `0` badge -- the same rule resolveViewState() enforces
  * for the dashboards' empty states.
  */
-const EMPTY_COUNTS: NavCounts = { approvals: null, inbox: null };
+const EMPTY_COUNTS: NavCounts = { approvals: null, inbox: null, sos: null };
 
 const NavCountsContext = createContext<NavCounts>(EMPTY_COUNTS);
 
@@ -69,6 +74,7 @@ export function NavCountsProvider({ children }: { children: ReactNode }) {
   const isVisible = useDocumentVisibility();
   const [approvals, setApprovals] = useState<number | null>(null);
   const [inbox, setInbox] = useState<number | null>(null);
+  const [sos, setSos] = useState<number | null>(null);
   const activeRef = useRef(true);
 
   // `support` sees only the Inbox link (SUPPORT_NAV in AppLayout) and is not
@@ -103,6 +109,23 @@ export function NavCountsProvider({ children }: { children: ReactNode }) {
         }
       })(),
       (async () => {
+        // Rider SOS alerts are admin-only data, like the approval queue.
+        if (!canReadApprovals) {
+          return;
+        }
+
+        try {
+          const ops = await getAdminDispatchOpsView();
+
+          if (activeRef.current) {
+            setSos(ops.sosEvents.length);
+          }
+        } catch {
+          // Same rule as the approvals badge: keep a count already on screen,
+          // and never turn "we could not ask" into a confident zero.
+        }
+      })(),
+      (async () => {
         try {
           const { conversations } = await getInbox({ status: 'open', scope: 'all' });
 
@@ -130,8 +153,8 @@ export function NavCountsProvider({ children }: { children: ReactNode }) {
   useVisiblePolling(() => void refresh(), POLL_INTERVAL_MS, isVisible);
 
   const value = useMemo<NavCounts>(
-    () => ({ approvals: canReadApprovals ? approvals : null, inbox }),
-    [approvals, canReadApprovals, inbox]
+    () => ({ approvals: canReadApprovals ? approvals : null, inbox, sos: canReadApprovals ? sos : null }),
+    [approvals, canReadApprovals, inbox, sos]
   );
 
   return (

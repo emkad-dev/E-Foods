@@ -416,7 +416,7 @@ export default function AccessPage() {
                           ) : (
                             <button
                               type="button"
-                              className="btn btn-danger btn-sm"
+                              className="btn btn-danger-now btn-sm"
                               disabled={busy || isSelf}
                               onClick={() => void runAction(user.uid, () => disableUserAccess(user.uid))}
                             >

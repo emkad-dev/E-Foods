@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import EmptyState from '../components/EmptyState';
 import ErrorBanner from '../components/ErrorBanner';
 import { SkeletonRows } from '../components/Skeleton';
@@ -9,6 +10,14 @@ import { getAdminDispatchOpsView, getAdminRiderPayouts, getAdminRiderRoster } fr
 import type { AdminTone } from '../theme/tones';
 
 const ID_STYLE: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px' };
+
+// SOS coordinates arrive in an untyped details bag. A value counts only if it
+// is a finite number inside the valid range; anything else is "no location",
+// never a map link to 0,0.
+const toCoordinate = (value: unknown, limit: number): number | null => {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
+};
 
 export default function DispatchPage() {
   const { data, error, refresh, refreshing } = usePolledRpc(getAdminDispatchOpsView);
@@ -23,12 +32,86 @@ export default function DispatchPage() {
     <div className="page">
       {error && <ErrorBanner message={error} onRetry={refresh} />}
 
+      {/* SOS first. A rider asking for help is the most urgent thing on this
+          page, and each row now says who, where and on which order, with the
+          map and the order one click away. It used to be the second card, with
+          a 6-character rider code, bare coordinates and a plain-text order id.
+          The Refresh button moved up with it: it reloads both cards. */}
       <div className="card">
         <div className="card-title-row">
-          <h3 className="card-title">Active assignments</h3>
+          <h3 className="card-title">SOS events (last 24h)</h3>
           <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={refreshing}>
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
+        </div>
+
+        {viewState === 'loading' ? (
+          <SkeletonRows count={3} />
+        ) : viewState === 'empty' || (viewState === 'ready' && data!.sosEvents.length === 0) ? (
+          <EmptyState title="No SOS events" body="No rider SOS alerts in the last 24 hours." />
+        ) : viewState === 'ready' ? (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Rider</th>
+                  <th>Location</th>
+                  <th>Triggered at</th>
+                  <th>Order</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data!.sosEvents.map((row) => {
+                  // The roster carries names but no phone numbers, so a name
+                  // is the most this row can say about who; it falls back to
+                  // the short code until the roster has loaded.
+                  const rider = roster.data?.riders.find((entry) => entry.id === row.actorUid) ?? null;
+                  const riderLabel = rider?.displayName ?? row.actorUid?.slice(-6).toUpperCase() ?? 'Unknown rider';
+                  const lat = toCoordinate(row.details?.latitude, 90);
+                  const lng = toCoordinate(row.details?.longitude, 180);
+
+                  return (
+                    <tr key={row.id}>
+                      <td className="cell-strong">
+                        {rider ? riderLabel : <span style={ID_STYLE}>{riderLabel}</span>}
+                      </td>
+                      <td>
+                        {lat !== null && lng !== null ? (
+                          <>
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${riderLabel}'s SOS location in Google Maps`}
+                            >
+                              Open map
+                            </a>{' '}
+                            <span className="muted" style={ID_STYLE}>
+                              {lat.toFixed(5)}, {lng.toFixed(5)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="muted">No location sent</span>
+                        )}
+                      </td>
+                      <td>{formatDateTime(row.createdAt)}</td>
+                      <td>
+                        <Link to={`/orders/${encodeURIComponent(row.orderId)}`} style={ID_STYLE}>
+                          #{row.orderId.slice(-8).toUpperCase()}
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title-row">
+          <h3 className="card-title">Active assignments</h3>
         </div>
 
         {viewState === 'loading' ? (
@@ -53,43 +136,6 @@ export default function DispatchPage() {
                     <td>{row.courierName ?? row.courierId?.slice(-6).toUpperCase() ?? '—'}</td>
                     <td style={ID_STYLE}>{row.dispatchOwnerId?.slice(-6).toUpperCase() ?? '—'}</td>
                     <td>{formatDateTime(row.assignedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-title-row">
-          <h3 className="card-title">SOS events (last 24h)</h3>
-        </div>
-
-        {viewState === 'loading' ? (
-          <SkeletonRows count={3} />
-        ) : viewState === 'empty' || (viewState === 'ready' && data!.sosEvents.length === 0) ? (
-          <EmptyState title="No SOS events" body="No rider SOS alerts in the last 24 hours." />
-        ) : viewState === 'ready' ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Order</th>
-                  <th>Rider</th>
-                  <th>Lat</th>
-                  <th>Lng</th>
-                  <th>Triggered at</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data!.sosEvents.map((row) => (
-                  <tr key={row.id}>
-                    <td style={ID_STYLE}>{row.orderId.slice(-8).toUpperCase()}</td>
-                    <td style={ID_STYLE}>{row.actorUid?.slice(-6).toUpperCase() ?? '—'}</td>
-                    <td>{(row.details?.latitude as number | null | undefined) ?? '—'}</td>
-                    <td>{(row.details?.longitude as number | null | undefined) ?? '—'}</td>
-                    <td>{formatDateTime(row.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -8,6 +8,7 @@ import { SkeletonRows } from '../components/Skeleton';
 import RangePicker from '../components/RangePicker';
 import RestaurantRating from '../components/RestaurantRating';
 import StatusBadge from '../components/StatusBadge';
+import { useNavCounts } from '../contexts/NavCountsContext';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import {
   buildPaymentBreakdown,
@@ -17,6 +18,8 @@ import {
   getOrderDate,
   type RangeDays,
 } from '../lib/analytics';
+import { describeCancelledBreakdown, summarizeClosedOrders } from '../lib/closedOrders';
+import { rangeShortLabel, resolveRangeDays } from '../lib/ranges';
 import { formatCurrency, formatDateTime, formatNumber, parseTimestamp } from '../lib/format';
 import {
   buildPeriodWindows,
@@ -32,12 +35,32 @@ import { getApprovalTone, getOrderTone, getPaymentChartColor, getStatusChartColo
 
 export default function OverviewPage() {
   const { snapshot, error, hasData, refresh } = useSnapshot();
+  // The sidebar's SOS count, read once for the whole console: the tile costs
+  // no extra request. null means "not known", never "none".
+  const { sos: sosCount } = useNavCounts();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
+
+  // "All time" has no fixed length: it reaches back to the oldest record this
+  // page can see. Every window below is built from this resolved span, so all
+  // time is simply the longest window -- and the window before it, which
+  // predates the first record, honestly has nothing to compare against.
+  const recordsHorizon = useMemo(
+    () =>
+      earlierOf(
+        earlierOf(
+          earliestDateIn(snapshot.orders, getOrderDate),
+          earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
+        ),
+        earliestDateIn(snapshot.closedOrders ?? [], getOrderDate)
+      ),
+    [snapshot.orders, snapshot.users, snapshot.closedOrders]
+  );
+  const spanDays = resolveRangeDays(rangeDays, recordsHorizon);
 
   const kpis = useMemo(
     () =>
-      computeDashboardKpis(snapshot.orders, snapshot.users, snapshot.restaurants, snapshot.dispatchProfiles, rangeDays),
-    [snapshot, rangeDays]
+      computeDashboardKpis(snapshot.orders, snapshot.users, snapshot.restaurants, snapshot.dispatchProfiles, spanDays),
+    [snapshot, spanDays]
   );
 
   const recentOrders = useMemo(
@@ -68,7 +91,7 @@ export default function OverviewPage() {
    * filter this replaces -- which let a future-dated row inflate the count.
    */
   const windowComparison = useMemo(() => {
-    const windows = buildPeriodWindows(rangeDays);
+    const windows = buildPeriodWindows(spanDays);
     const dataHorizon = earlierOf(
       earliestDateIn(snapshot.orders, getOrderDate),
       earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
@@ -80,9 +103,23 @@ export default function OverviewPage() {
         filterWithin(snapshot.orders, getOrderDate, windows.currentStart, windows.currentEnd)
       ),
     };
-  }, [snapshot.orders, snapshot.users, rangeDays]);
+  }, [snapshot.orders, snapshot.users, spanDays]);
 
   const problemCounts = windowComparison.problems;
+
+  // Cancelled and rejected orders in the selected period, from the snapshot's
+  // closedOrders list (kept out of revenue). null when the server does not send
+  // the list yet, so the tiles show "—" instead of a confident zero.
+  const closedSummary = useMemo(() => {
+    if (snapshot.closedOrders === undefined) {
+      return null;
+    }
+
+    const windows = buildPeriodWindows(spanDays);
+    return summarizeClosedOrders(
+      filterWithin(snapshot.closedOrders, getOrderDate, windows.currentStart, windows.currentEnd)
+    );
+  }, [snapshot.closedOrders, spanDays]);
 
   // The three windowed cards ask the same question of the same two windows, so
   // it is asked once here.
@@ -146,19 +183,21 @@ export default function OverviewPage() {
               <RangePicker value={rangeDays} onChange={setRangeDays} />
             </div>
 
-            <div className="kpi-grid">
+            {/* Six figures, three across: the money and growth row, then the
+                problem row (pending cash, cancelled, rejected). */}
+            <div className="kpi-grid kpi-grid-3">
               <KpiCard
-                label={`Revenue (${rangeDays}d)`}
+                label={`Revenue (${rangeShortLabel(rangeDays)})`}
                 value={formatCurrency(kpis.revenue.current, kpis.currency)}
                 {...compare(kpis.revenue.current, kpis.revenue.previous)}
               />
               <KpiCard
-                label={`Orders (${rangeDays}d)`}
+                label={`Orders (${rangeShortLabel(rangeDays)})`}
                 value={formatNumber(kpis.orders.current)}
                 {...compare(kpis.orders.current, kpis.orders.previous)}
               />
               <KpiCard
-                label={`New users (${rangeDays}d)`}
+                label={`New users (${rangeShortLabel(rangeDays)})`}
                 value={formatNumber(kpis.newUsers.current)}
                 {...compare(kpis.newUsers.current, kpis.newUsers.previous)}
               />
@@ -172,31 +211,26 @@ export default function OverviewPage() {
                   previous window's are ones that never resolved, so a delta
                   between the two would be measuring two different things. */}
               <KpiCard
-                label={`Pending payments (${rangeDays}d)`}
+                label={`Pending payments (${rangeShortLabel(rangeDays)})`}
                 value={formatNumber(problemCounts.pendingPayments)}
                 caption="Uncollected cash in window"
               />
+              {/* These two used to read "not in this feed": the snapshot dropped
+                  every closed order. It now sends them as closedOrders, kept out
+                  of revenue. The caption says what "Cancelled" is made of, so 59
+                  abandoned checkouts are never read as 59 unhappy customers. */}
+              <KpiCard
+                label={`Cancelled orders (${rangeShortLabel(rangeDays)})`}
+                value={closedSummary ? formatNumber(closedSummary.cancelled) : '—'}
+                caption={closedSummary ? describeCancelledBreakdown(closedSummary) : 'Not sent by the server yet'}
+              />
+              <KpiCard
+                label={`Rejected (${rangeShortLabel(rangeDays)})`}
+                value={closedSummary ? formatNumber(closedSummary.rejected) : '—'}
+                caption={closedSummary ? 'Turned down by restaurants' : 'Not sent by the server yet'}
+              />
             </div>
 
-            {/* Failed payments and cancelled orders cannot be measured from
-                this feed AT ALL. The snapshot RPC runs every order through
-                `isOrderCleanForReporting` (supabase/functions/_shared/orders.ts),
-                which drops cancelled/rejected/failed-delivery orders outright
-                and drops prepaid orders that are not paid. Every path that
-                writes `payment.status = 'failed'` is a Paystack one and also
-                cancels the order, so it is excluded twice over. Both counts are
-                therefore structurally, permanently zero, and a confident
-                "0 cancelled orders" on an operations dashboard is a worse lie
-                than a missing figure.
-
-                They used to be two KPI cards showing an em dash, which kept
-                them honest but spent two headline slots on figures that do
-                not exist. One sentence says the same thing truthfully without
-                competing with the numbers that do. Bring them back as cards
-                when the feed carries the rows. */}
-            <p className="kpi-unavailable">
-              Failed payments and cancelled orders are not in this feed yet, so they are not shown here.
-            </p>
           </section>
 
           {/* RIGHT NOW: live counts, unaffected by the date range. */}
@@ -208,16 +242,34 @@ export default function OverviewPage() {
             </div>
 
             {/* caption={null}: the section heading already says these figures
-                are live, so a "Live count" line under each repeated it three
-                times. */}
-            <div className="kpi-grid kpi-grid-3">
-              <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} caption={null} />
-              <KpiCard label="Dispatch online" value={formatNumber(kpis.dispatchOnline)} caption={null} />
+                are live, so a "Live count" line under each repeated it.
+
+                Every tile is a link to the page where you act on it. SOS is
+                last in the row but the loudest when it fires: the danger tint
+                and a red figure whenever any rider has raised one in the last
+                24 hours. An unknown count reads "—" with a caption, never 0,
+                because a zero here would claim no rider is in trouble. */}
+            <div className="kpi-grid">
+              <KpiCard label="Live orders" value={formatNumber(kpis.liveOrders)} caption={null} href="/orders" />
+              <KpiCard
+                label="Dispatch online"
+                value={formatNumber(kpis.dispatchOnline)}
+                caption={null}
+                href="/dispatch"
+              />
               <KpiCard
                 label="Pending approvals"
                 value={formatNumber(kpis.pendingApprovals)}
                 caption={null}
                 attention={kpis.pendingApprovals > 0}
+                href="/approvals"
+              />
+              <KpiCard
+                label="SOS (24h)"
+                value={sosCount === null ? '—' : formatNumber(sosCount)}
+                caption={sosCount === null ? 'Count unavailable' : null}
+                alert={sosCount !== null && sosCount > 0}
+                href="/dispatch"
               />
             </div>
           </section>

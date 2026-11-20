@@ -41,6 +41,7 @@ import {
 } from '../lib/periodComparison';
 import { resolveViewState } from '../lib/viewState';
 import { getPaymentChartColor, getStatusChartColor } from '../theme/tones';
+import { resolveRangeDays, seriesBucket } from '../lib/ranges';
 
 /**
  * How many settlement rows the table renders. It was an inline `.slice(0, 12)`
@@ -83,8 +84,23 @@ export default function StatisticsPage() {
    * longer be counted in the header while being absent from every chart below
    * it -- `buildDailySeries` only buckets days up to today.
    */
+  // "All time" resolved against the oldest record; also decides whether the
+  // charts below draw a bar per day or per week.
+  const spanDays = useMemo(
+    () =>
+      resolveRangeDays(
+        rangeDays,
+        earlierOf(
+          earliestDateIn(snapshot.orders, getOrderDate),
+          earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
+        )
+      ),
+    [rangeDays, snapshot.orders, snapshot.users]
+  );
+  const bucket = seriesBucket(spanDays);
+
   const orderWindows = useMemo(() => {
-    const windows = buildPeriodWindows(rangeDays);
+    const windows = buildPeriodWindows(spanDays);
     const dataHorizon = earlierOf(
       earliestDateIn(snapshot.orders, getOrderDate),
       earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
@@ -95,14 +111,14 @@ export default function StatisticsPage() {
       previousCount: filterWithin(snapshot.orders, getOrderDate, windows.previousStart, windows.previousEnd).length,
       previousWindowCovered: coversPreviousWindow(dataHorizon, windows),
     };
-  }, [snapshot.orders, snapshot.users, rangeDays]);
+  }, [snapshot.orders, snapshot.users, spanDays]);
 
   const windowedOrders = orderWindows.current;
 
-  const dailySeries = useMemo(() => buildDailySeries(windowedOrders, rangeDays), [windowedOrders, rangeDays]);
+  const dailySeries = useMemo(() => buildDailySeries(windowedOrders, spanDays), [windowedOrders, spanDays]);
   const statusBreakdown = useMemo(() => buildStatusBreakdown(windowedOrders), [windowedOrders]);
   const paymentBreakdown = useMemo(() => buildPaymentBreakdown(windowedOrders), [windowedOrders]);
-  const problemSeries = useMemo(() => buildProblemDailySeries(windowedOrders, rangeDays), [windowedOrders, rangeDays]);
+  const problemSeries = useMemo(() => buildProblemDailySeries(windowedOrders, spanDays), [windowedOrders, spanDays]);
   const settlementBreakdown = useMemo(() => buildSettlementBreakdown(windowedOrders), [windowedOrders]);
   // The settlement table renders only the first SETTLEMENT_ROW_CAP rows. The
   // full breakdown is computed here in the client, so unlike the alert queue
@@ -183,13 +199,13 @@ export default function StatisticsPage() {
           <section className="dash-section" aria-labelledby="stats-trends">
             <div className="section-head">
               <h2 id="stats-trends" className="section-title">
-                Daily trends
+                {bucket === 'week' ? 'Weekly trends' : 'Daily trends'}
               </h2>
             </div>
             <div className="grid-even">
               <div className="card">
                 <div className="card-title-row">
-                  <h3 className="card-title">Orders per day</h3>
+                  <h3 className="card-title">Orders per {bucket}</h3>
                 </div>
                 {!hasOrders ? (
                   <EmptyState title="No orders" body="Daily volume appears once orders exist in this window." />
@@ -208,7 +224,7 @@ export default function StatisticsPage() {
 
               <div className="card">
                 <div className="card-title-row">
-                  <h3 className="card-title">Problem transactions per day</h3>
+                  <h3 className="card-title">Problem transactions per {bucket}</h3>
                   {/* Two of this chart's three series can never plot a bar. The
                       snapshot RPC filters every order through
                       `isOrderCleanForReporting`, which drops cancelled orders and
