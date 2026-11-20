@@ -1,0 +1,57 @@
+-- 20261120_revoke_rls_auto_enable.sql
+--
+-- Revoke EXECUTE on public.rls_auto_enable() from public, anon and
+-- authenticated. Supabase security advisor flags it as a SECURITY DEFINER
+-- function that anyone can call at /rest/v1/rpc/rls_auto_enable.
+--
+-- Why: the function is not defined in any repo migration. It is almost
+-- certainly the dashboard's "auto-enable RLS on new tables" event-trigger
+-- helper, which runs as the event trigger owner. Nothing in the app calls it
+-- over RPC, so no client role needs EXECUTE. 20261020c_security_hardening.sql
+-- lists it under DELIBERATELY NOT CHANGED; this migration closes that gap.
+-- ebuy_account_pending_deletion() is NOT touched: `authenticated` needs it
+-- inside RLS policies.
+--
+-- Apply in the Supabase SQL editor as `postgres`. Wrapped in one transaction
+-- and re-runnable (REVOKE is idempotent). Run the BEFORE checks first and keep
+-- the output; run the VERIFY checks after.
+--
+-- BEFORE (read-only; expect one row with prosecdef = true and proacl that
+-- includes =X and anon/authenticated grants before this runs):
+--
+--   select p.oid::regprocedure, pg_get_function_result(p.oid), p.prosecdef, p.proacl
+--   from pg_proc p
+--   join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname = 'rls_auto_enable';
+--
+--   select evtname, evtevent, evtfoid::regprocedure from pg_event_trigger;
+--
+-- VERIFY (after the migration; both must be false):
+--
+--   select
+--     has_function_privilege('anon', 'public.rls_auto_enable()', 'EXECUTE') as anon_can,
+--     has_function_privilege('authenticated', 'public.rls_auto_enable()', 'EXECUTE') as auth_can;
+--
+-- CONFIRM the event trigger still enables RLS on a new table. Run as one
+-- block; expect relrowsecurity = true if the auto-enable trigger is installed.
+-- If it was already false BEFORE this migration, the trigger is not installed
+-- and this check says nothing about the revoke.
+--
+--   create table public.zz_rls_probe (id int);
+--   select relrowsecurity from pg_class where oid = 'public.zz_rls_probe'::regclass;
+--   drop table public.zz_rls_probe;
+--
+-- OPTIONAL: confirm 20261020c landed (expect false):
+--
+--   select has_function_privilege('anon', 'public.auth_rl_hit(text,integer,integer,integer)', 'EXECUTE');
+--
+-- ADVISOR: re-check the Supabase security advisor afterwards. Toggling the
+-- dashboard "auto-enable RLS" setting may re-grant EXECUTE; if the advisor
+-- flags it again after a toggle, re-run the revoke below.
+--
+-- REVERSE STEPS (run in one transaction if this has to be rolled back):
+--   grant execute on function public.rls_auto_enable() to public, anon, authenticated;
+
+begin;
+revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
+commit;
