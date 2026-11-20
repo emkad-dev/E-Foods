@@ -57,6 +57,14 @@
   --surface-muted: #efedea;
   --border: #e4e1dc;
   --border-strong: #cfcac2;
+  /*
+   * The edge of a text field. WCAG 1.4.11 asks 3:1 for the boundary a person
+   * needs in order to find a control; --border-strong is 1.63:1 on white and
+   * 1.42:1 on the canvas, so it cannot be the field edge. #8a8580 measures
+   * 3.65:1 on #ffffff and 3.18:1 on #f1efeb. Dividers keep --border-strong;
+   * only text-entry controls use this (see the shared rule above .field).
+   */
+  --field-edge: #8a8580;
   --text: #15171a;
   /*
    * ONE secondary grey, not two. These were #5b6978 and #6a7d76, and both
@@ -939,6 +947,29 @@ textarea {
   color: var(--text-muted);
 }
 
+/* THE text-field edge, defined once: every text-entry control in the console
+   names itself here and nowhere else sets a border, so the 3:1 colour
+   (--field-edge) cannot drift per page. The Orders lookup is deliberately not
+   in this list: it is a .select-pill in a row of pills, not a form field.
+   Checkboxes are excluded; they draw their own native box. */
+.field input:not([type='checkbox']),
+.field select,
+.field textarea,
+.inbox-composer textarea,
+.broadcast-compose textarea,
+.audit-input,
+.row-input {
+  border: 1px solid var(--field-edge);
+}
+
+/* The inline id box in an Access table row (was an inline style). */
+.row-input {
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  width: 140px;
+}
+
 /* textarea belongs in this list. Without it the only styled textareas in the
    app were the two reached by .inbox-composer/.broadcast-compose descendant
    rules, and every other one -- all three promo composer fields, the access
@@ -948,7 +979,6 @@ textarea {
 .field input,
 .field select,
 .field textarea {
-  border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 9px 12px;
   font-size: 13px;
@@ -1331,7 +1361,6 @@ textarea {
 .inbox-composer textarea {
   flex: 1;
   resize: vertical;
-  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px;
   font: inherit;
@@ -1367,7 +1396,6 @@ textarea {
 }
 
 .broadcast-compose textarea {
-  border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 9px 12px;
   font: inherit;
@@ -1384,11 +1412,14 @@ textarea {
 }
 
 /*
- * The broadcast audience checkboxes: two channels (Email, Push) and three
- * roles (customer, restaurant, dispatch). Between them they decide WHO
- * RECEIVES A MASS SEND, which makes them the highest-consequence controls in
- * the console -- a mis-tick changes the recipient list of a message that
- * cannot be recalled once the runner has handed it to the provider.
+ * Every checkbox in the console, starting with the broadcast audience ones: two
+ * channels (Email, Push) and three roles (customer, restaurant, dispatch).
+ * Between them they decide WHO RECEIVES A MASS SEND, which makes them the
+ * highest-consequence controls in the console -- a mis-tick changes the
+ * recipient list of a message that cannot be recalled once the runner has
+ * handed it to the provider. The rule is global (not .check-row-scoped) so the
+ * Promo codes "apply automatically" box, which sits in its own flex label and
+ * measured 13x13, meets the same floor.
  *
  * At the browser default they rendered 13x13. The <label> wrapper made the
  * effective hit area 54x19, which is still under WCAG 2.5.8 Target Size
@@ -1411,7 +1442,7 @@ textarea {
   min-height: 24px;
 }
 
-.check-row input[type='checkbox'] {
+input[type='checkbox'] {
   width: 24px;
   height: 24px;
   margin: 0;
@@ -1917,7 +1948,6 @@ textarea {
 
 .audit-input {
   background: var(--surface);
-  border: 1px solid var(--border-strong);
   border-radius: 10px;
   color: var(--text);
   font-size: 13px;

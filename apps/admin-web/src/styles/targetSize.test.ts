@@ -47,11 +47,13 @@ const pxValue = (declarations: string, property: string): number => {
   return Number(match![1]);
 };
 
-test('the broadcast audience checkboxes meet the 24px target floor', () => {
-  // These five decide who receives a mass send. They were 13x13 (browser
+test('every checkbox meets the 24px target floor', () => {
+  // The rule is global: it covers the five broadcast audience boxes and the
+  // Promo codes automatic box. The broadcast five decide who receives a mass
+  // send. They were 13x13 (browser
   // default) inside a label giving a 54x19 effective hit area.
   const css = stripComments(fs.readFileSync(cssPath, 'utf8'));
-  const box = declarationsOf(css, ".check-row input[type='checkbox']");
+  const box = declarationsOf(css, "input[type='checkbox']");
 
   assert.ok(pxValue(box, 'width') >= MIN_TARGET_PX, 'the checkbox itself must be at least 24px wide');
   assert.ok(pxValue(box, 'height') >= MIN_TARGET_PX, 'the checkbox itself must be at least 24px tall');

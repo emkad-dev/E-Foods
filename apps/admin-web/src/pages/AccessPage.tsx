@@ -356,13 +356,7 @@ export default function AccessPage() {
                         {user.role === 'restaurant' ? (
                           <div className="row-actions">
                             <input
-                              style={{
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: 8,
-                                padding: '6px 10px',
-                                fontSize: 12,
-                                width: 140,
-                              }}
+                              className="row-input"
                               value={restaurantDraft}
                               disabled={busy}
                               placeholder="Restaurant ID"
