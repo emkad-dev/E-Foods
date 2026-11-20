@@ -374,6 +374,8 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   margin-bottom: 14px;
 }
 
@@ -589,8 +591,11 @@ textarea {
 }
 
 @media (max-width: 1100px) {
+  /* minmax(0, ...), not 1fr: a bare 1fr track is at least as wide as its
+     widest content, so on a phone the Dashboard's latest-orders table pushed
+     the column, and the page, 120px past the screen. */
   .grid-2 {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -603,6 +608,17 @@ textarea {
 }
 
 /* ---------- Tables ---------- */
+
+/*
+ * A link alone in a table cell (an order code) is a target, not a word in a
+ * sentence, so it gets the 24px floor (WCAG 2.5.8): measured 78x18 on Orders.
+ * The negative margin cancels the padding, so rows keep their height.
+ */
+.data-table td a:not(.btn) {
+  display: inline-block;
+  padding-block: 3px;
+  margin-block: -3px;
+}
 
 .table-wrap {
   overflow-x: auto;
@@ -2039,7 +2055,9 @@ textarea {
  */
 .audit-detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  /* min(): a column never asks for more than the space there is. A bare 320px
+     minimum pushed the field grid off the side of a phone screen. */
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: 6px 18px;
   margin: 0;
 }
@@ -2127,4 +2145,83 @@ textarea {
   color: var(--text-muted);
   font-size: 13px;
   font-style: italic;
+}
+
+/* ---------- Phone layout ---------- */
+
+/*
+ * Phone layout. The console had none: under 760px the 224px sidebar stayed,
+ * leaving 151px for the page at 375px, and every page scrolled sideways. Here
+ * the sidebar becomes a strip across the top -- logo, the links in one row
+ * that scrolls sideways on its own, then Sign out -- and the page takes the
+ * full width. Group labels are dropped in the strip; the order of the links
+ * still follows the groups.
+ */
+@media (max-width: 760px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: auto;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    z-index: 20;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .sidebar-logo {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  .sidebar nav,
+  .sidebar nav > div {
+    display: flex;
+    gap: 2px;
+  }
+
+  .sidebar .nav-section-label {
+    display: none;
+  }
+
+  .sidebar .nav-link {
+    white-space: nowrap;
+    margin-bottom: 0;
+  }
+
+  .sidebar-footer {
+    margin-top: 0;
+    flex-shrink: 0;
+  }
+
+  .sidebar-footer .btn {
+    white-space: nowrap;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    gap: 6px 12px;
+  }
+
+  .topbar-meta {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .topbar-meta .badge {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .page {
+    padding: 16px 16px 40px;
+  }
 }

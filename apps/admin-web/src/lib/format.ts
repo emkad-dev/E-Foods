@@ -1,22 +1,31 @@
 const currencyFormatters = new Map<string, Intl.NumberFormat>();
 
+/**
+ * Whole amounts show no kobo (₦9,500); any other amount shows both kobo
+ * digits (₦6,938.40). The single formatter this replaced allowed 0 to 2
+ * fraction digits, so a sum of marked-up prices rendered as "₦6,938.4" --
+ * read in the running console on the Orders totals.
+ */
 export const formatCurrency = (amount: number, currency = 'NGN') => {
   const code = currency?.trim().toUpperCase() || 'NGN';
-  let formatter = currencyFormatters.get(code);
+  const whole = Number.isInteger(Math.round(amount * 100) / 100);
+  const key = `${code}:${whole ? 0 : 2}`;
+  let formatter = currencyFormatters.get(key);
 
   if (!formatter) {
+    const digits = whole ? 0 : 2;
     try {
       formatter = new Intl.NumberFormat('en-NG', {
         style: 'currency',
         currency: code,
-        maximumFractionDigits: 2,
-        minimumFractionDigits: 0,
+        maximumFractionDigits: digits,
+        minimumFractionDigits: digits,
       });
     } catch {
-      formatter = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 });
+      formatter = new Intl.NumberFormat('en-NG', { maximumFractionDigits: digits, minimumFractionDigits: digits });
     }
 
-    currencyFormatters.set(code, formatter);
+    currencyFormatters.set(key, formatter);
   }
 
   return formatter.format(amount);
