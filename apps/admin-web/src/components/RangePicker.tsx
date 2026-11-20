@@ -5,7 +5,10 @@ export default function RangePicker({ value, onChange }: { value: RangeDays; onC
     <select
       className="select-pill"
       value={value}
-      onChange={(event) => onChange(Number(event.target.value) as RangeDays)}
+      // "all" is the one non-numeric option.
+      onChange={(event) =>
+        onChange(event.target.value === 'all' ? 'all' : (Number(event.target.value) as RangeDays))
+      }
       aria-label="Date range"
     >
       {RANGE_OPTIONS.map((option) => (

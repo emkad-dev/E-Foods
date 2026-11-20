@@ -897,24 +897,15 @@ const adminGetDashboardSnapshot: Handler = async ({ context }) => {
   const attentionOrders = selectAttentionOrders(
     ((attentionResult.data ?? []) as CustomerOrderRow[]).map((order) => settledById.get(order.id) ?? order)
   );
-  // Cancelled, rejected and failed-delivery orders from the last 90 days -- the
-  // longest range the console offers. `orders` above leaves them out on purpose
+  // Every cancelled, rejected and failed-delivery order the snapshot loaded, with
+  // no cut-off: the console's longest range is "All time". `orders` above leaves them out on purpose
   // (never paid or never served, so never revenue), but leaving them out
   // ENTIRELY made 119 of 132 production orders invisible (2026-11-17): a
   // customer's cancellation or a restaurant's rejection could only be found by
   // typing its exact id. They travel as their own list so the money figures stay
   // clean. No items or courier are loaded for them: a closed order's row needs
   // its status, reason, restaurant and amount, not its basket.
-  const CLOSED_ORDER_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
-  const closedSince = Date.now() - CLOSED_ORDER_WINDOW_MS;
-  const closedOrders = allOrders.filter((order) => {
-    if (!FAILED_ORDER_STATUSES.has(normalizeOrderStatus(order.status))) {
-      return false;
-    }
-
-    const createdMs = Date.parse(String(order.createdAt ?? ''));
-    return Number.isFinite(createdMs) && createdMs >= closedSince;
-  });
+  const closedOrders = allOrders.filter((order) => FAILED_ORDER_STATUSES.has(normalizeOrderStatus(order.status)));
   const riders = (ridersResult.data ?? []) as DispatchRiderRow[];
   const orderRelations = await loadOrderRelations([
     ...new Set([...orders, ...attentionOrders].map((order) => order.id)),

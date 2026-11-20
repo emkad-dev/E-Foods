@@ -30,7 +30,7 @@ export type AdminDashboardSnapshot = {
    */
   attentionOrders?: OrderDocument[];
   /**
-   * Cancelled, rejected and failed-delivery orders from the last 90 days. Kept
+   * Every cancelled, rejected and failed-delivery order, with no cut-off. Kept
    * out of `orders` so they never count as revenue, but sent so the admin can
    * see them. Absent on backends older than this field.
    */

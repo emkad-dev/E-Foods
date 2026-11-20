@@ -19,6 +19,7 @@ import {
   type RangeDays,
 } from '../lib/analytics';
 import { describeCancelledBreakdown, summarizeClosedOrders } from '../lib/closedOrders';
+import { rangeShortLabel, resolveRangeDays } from '../lib/ranges';
 import { formatCurrency, formatDateTime, formatNumber, parseTimestamp } from '../lib/format';
 import {
   buildPeriodWindows,
@@ -39,10 +40,27 @@ export default function OverviewPage() {
   const { sos: sosCount } = useNavCounts();
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
 
+  // "All time" has no fixed length: it reaches back to the oldest record this
+  // page can see. Every window below is built from this resolved span, so all
+  // time is simply the longest window -- and the window before it, which
+  // predates the first record, honestly has nothing to compare against.
+  const recordsHorizon = useMemo(
+    () =>
+      earlierOf(
+        earlierOf(
+          earliestDateIn(snapshot.orders, getOrderDate),
+          earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
+        ),
+        earliestDateIn(snapshot.closedOrders ?? [], getOrderDate)
+      ),
+    [snapshot.orders, snapshot.users, snapshot.closedOrders]
+  );
+  const spanDays = resolveRangeDays(rangeDays, recordsHorizon);
+
   const kpis = useMemo(
     () =>
-      computeDashboardKpis(snapshot.orders, snapshot.users, snapshot.restaurants, snapshot.dispatchProfiles, rangeDays),
-    [snapshot, rangeDays]
+      computeDashboardKpis(snapshot.orders, snapshot.users, snapshot.restaurants, snapshot.dispatchProfiles, spanDays),
+    [snapshot, spanDays]
   );
 
   const recentOrders = useMemo(
@@ -73,7 +91,7 @@ export default function OverviewPage() {
    * filter this replaces -- which let a future-dated row inflate the count.
    */
   const windowComparison = useMemo(() => {
-    const windows = buildPeriodWindows(rangeDays);
+    const windows = buildPeriodWindows(spanDays);
     const dataHorizon = earlierOf(
       earliestDateIn(snapshot.orders, getOrderDate),
       earliestDateIn(snapshot.users, (user) => parseTimestamp(user.createdAt))
@@ -85,7 +103,7 @@ export default function OverviewPage() {
         filterWithin(snapshot.orders, getOrderDate, windows.currentStart, windows.currentEnd)
       ),
     };
-  }, [snapshot.orders, snapshot.users, rangeDays]);
+  }, [snapshot.orders, snapshot.users, spanDays]);
 
   const problemCounts = windowComparison.problems;
 
@@ -97,11 +115,11 @@ export default function OverviewPage() {
       return null;
     }
 
-    const windows = buildPeriodWindows(rangeDays);
+    const windows = buildPeriodWindows(spanDays);
     return summarizeClosedOrders(
       filterWithin(snapshot.closedOrders, getOrderDate, windows.currentStart, windows.currentEnd)
     );
-  }, [snapshot.closedOrders, rangeDays]);
+  }, [snapshot.closedOrders, spanDays]);
 
   // The three windowed cards ask the same question of the same two windows, so
   // it is asked once here.
@@ -169,17 +187,17 @@ export default function OverviewPage() {
                 problem row (pending cash, cancelled, rejected). */}
             <div className="kpi-grid kpi-grid-3">
               <KpiCard
-                label={`Revenue (${rangeDays}d)`}
+                label={`Revenue (${rangeShortLabel(rangeDays)})`}
                 value={formatCurrency(kpis.revenue.current, kpis.currency)}
                 {...compare(kpis.revenue.current, kpis.revenue.previous)}
               />
               <KpiCard
-                label={`Orders (${rangeDays}d)`}
+                label={`Orders (${rangeShortLabel(rangeDays)})`}
                 value={formatNumber(kpis.orders.current)}
                 {...compare(kpis.orders.current, kpis.orders.previous)}
               />
               <KpiCard
-                label={`New users (${rangeDays}d)`}
+                label={`New users (${rangeShortLabel(rangeDays)})`}
                 value={formatNumber(kpis.newUsers.current)}
                 {...compare(kpis.newUsers.current, kpis.newUsers.previous)}
               />
@@ -193,7 +211,7 @@ export default function OverviewPage() {
                   previous window's are ones that never resolved, so a delta
                   between the two would be measuring two different things. */}
               <KpiCard
-                label={`Pending payments (${rangeDays}d)`}
+                label={`Pending payments (${rangeShortLabel(rangeDays)})`}
                 value={formatNumber(problemCounts.pendingPayments)}
                 caption="Uncollected cash in window"
               />
@@ -202,12 +220,12 @@ export default function OverviewPage() {
                   of revenue. The caption says what "Cancelled" is made of, so 59
                   abandoned checkouts are never read as 59 unhappy customers. */}
               <KpiCard
-                label={`Cancelled orders (${rangeDays}d)`}
+                label={`Cancelled orders (${rangeShortLabel(rangeDays)})`}
                 value={closedSummary ? formatNumber(closedSummary.cancelled) : '—'}
                 caption={closedSummary ? describeCancelledBreakdown(closedSummary) : 'Not sent by the server yet'}
               />
               <KpiCard
-                label={`Rejected (${rangeDays}d)`}
+                label={`Rejected (${rangeShortLabel(rangeDays)})`}
                 value={closedSummary ? formatNumber(closedSummary.rejected) : '—'}
                 caption={closedSummary ? 'Turned down by restaurants' : 'Not sent by the server yet'}
               />

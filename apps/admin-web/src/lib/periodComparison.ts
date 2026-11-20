@@ -1,4 +1,5 @@
 import { formatDeltaPercent } from './format.ts';
+import { rangeShortLabel, type RangeDays } from './ranges.ts';
 
 /**
  * Prior-period comparison for the range-filtered figures on Overview and
@@ -40,7 +41,7 @@ export interface PeriodWindows {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Callers pass `RangeDays` (7 | 30 | 90), so this only guards against a value
+ * Callers pass a resolved day count (resolveRangeDays turns "All time" into days), so this only guards against a value
  * arriving from outside that union -- a parsed query param, say. Zero or NaN
  * would otherwise collapse both windows onto the same instant and make every
  * comparison read "No change", which is a false statement rather than a
@@ -145,10 +146,14 @@ export const kpiComparison = (input: {
  * both facts: the number is a total over the window (not, as KpiCard's default
  * would claim, a live count) and there is no earlier window to read it against.
  */
-export const windowTotalCaption = (rangeDays: number) => `Window total · no prior ${rangeDays}d`;
+// Old ranges keep their wording ("no prior 30d"); the new ones read "6mo" and
+// "1y", and all time has nothing before it by definition.
+export const windowTotalCaption = (range: RangeDays | number) =>
+  range === 'all' ? 'All time · nothing earlier to compare' : `Window total · no prior ${rangeShortLabel(range)}`;
 
 /** The same statement as a sentence fragment, for figures that are plain text. */
-export const noPriorWindowNote = (rangeDays: number) => `no prior ${rangeDays}d on record`;
+export const noPriorWindowNote = (range: RangeDays | number) =>
+  range === 'all' ? 'nothing earlier on record' : `no prior ${rangeShortLabel(range)} on record`;
 
 const ARROWS = { up: '▲ ', down: '▼ ', flat: '' } as const;
 

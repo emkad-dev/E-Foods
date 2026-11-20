@@ -8,6 +8,8 @@ import StatusBadge from '../components/StatusBadge';
 import { useSnapshot } from '../contexts/SnapshotContext';
 import { getOrderDate, type RangeDays } from '../lib/analytics';
 import { describeClosure } from '../lib/closedOrders';
+import { earlierOf, earliestDateIn } from '../lib/periodComparison';
+import { rangePhrase, resolveRangeDays } from '../lib/ranges';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
 import { resolveViewState } from '../lib/viewState';
 import { getOrderTone, getPaymentTone } from '../theme/tones';
@@ -68,8 +70,19 @@ export default function OrdersPage() {
     return [...statuses].sort();
   }, [snapshot.orders]);
 
+  // "All time" has no fixed length: resolve it against the oldest order this
+  // page can see, in the reporting feed or the closed list.
+  const spanDays = useMemo(
+    () =>
+      resolveRangeDays(
+        rangeDays,
+        earlierOf(earliestDateIn(snapshot.orders, getOrderDate), earliestDateIn(snapshot.closedOrders ?? [], getOrderDate))
+      ),
+    [rangeDays, snapshot.orders, snapshot.closedOrders]
+  );
+
   const filteredOrders = useMemo(() => {
-    const start = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    const start = new Date(Date.now() - spanDays * 24 * 60 * 60 * 1000);
 
     return [...snapshot.orders]
       .filter((order) => {
@@ -93,7 +106,7 @@ export default function OrdersPage() {
         return true;
       })
       .sort((left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0));
-  }, [snapshot.orders, rangeDays, statusFilter, paymentFilter]);
+  }, [snapshot.orders, spanDays, statusFilter, paymentFilter]);
 
   const totalValue = useMemo(
     () => filteredOrders.reduce((total, order) => total + (order.pricing?.total ?? 0), 0),
@@ -134,7 +147,7 @@ export default function OrdersPage() {
   // there were none.
   const closedAvailable = snapshot.closedOrders !== undefined;
   const closedOrders = useMemo(() => {
-    const start = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const start = Date.now() - spanDays * 24 * 60 * 60 * 1000;
 
     return [...(snapshot.closedOrders ?? [])]
       .filter((order) => {
@@ -142,7 +155,7 @@ export default function OrdersPage() {
         return created !== null && created.getTime() >= start;
       })
       .sort((left, right) => (getOrderDate(right)?.getTime() ?? 0) - (getOrderDate(left)?.getTime() ?? 0));
-  }, [snapshot.closedOrders, rangeDays]);
+  }, [snapshot.closedOrders, spanDays]);
 
   // The `hasData &&` guards below stopped the console *claiming* "no orders"
   // after a failed fetch, but the other half of the claim was never closed:
@@ -173,10 +186,10 @@ export default function OrdersPage() {
     activeFilters.length > 0
       ? {
           title: 'No orders match these filters',
-          body: `Nothing in the last ${rangeDays} days has ${activeFilters.join(' and ')}. Orders may exist outside this window or under another status, so clear the filters or widen the range.`,
+          body: `Nothing in ${rangePhrase(rangeDays)} has ${activeFilters.join(' and ')}. Orders may exist outside this window or under another status, so clear the filters or widen the range.`,
         }
       : {
-          title: `No orders in the last ${rangeDays} days`,
+          title: `No orders in ${rangePhrase(rangeDays)}`,
           body: 'No status or payment filter is applied, so this is every order in the window. Widen the range to look further back.',
         };
 
@@ -248,7 +261,7 @@ export default function OrdersPage() {
             as much as the trend. */}
         {hasData ? (
           <div className="kpi-grid kpi-grid-3">
-            <KpiCard label="Orders" value={formatNumber(filteredOrders.length)} caption={`In the last ${rangeDays} days`} />
+            <KpiCard label="Orders" value={formatNumber(filteredOrders.length)} caption={`In ${rangePhrase(rangeDays)}`} />
             <KpiCard
               label="Order value"
               value={formatCurrency(totalValue, currency)}
@@ -424,8 +437,8 @@ export default function OrdersPage() {
           <div className="card">
             {closedOrders.length === 0 ? (
               <EmptyState
-                title={`No cancelled or rejected orders in the last ${rangeDays} days`}
-                body="Widen the range to look further back. This list covers up to 90 days."
+                title={`No cancelled or rejected orders in ${rangePhrase(rangeDays)}`}
+                body="Widen the range to look further back."
               />
             ) : (
               <div className="table-wrap">
