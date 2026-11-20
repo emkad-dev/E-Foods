@@ -9,7 +9,7 @@ import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '..
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
 import { getAdminDispatchOpsView, getAdminRiderPayouts, getAdminRiderRoster } from '../services/platformReads';
-import type { AdminTone } from '../theme/tones';
+import { getOrderTone, type AdminTone } from '../theme/tones';
 
 const ID_STYLE: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px' };
 
@@ -354,6 +354,56 @@ export default function DispatchPage() {
               </table>
             </div>
           )}
+        </div>
+
+        {/* Every delivery still with a rider, oldest assignment first (the
+            longest on the road is the likeliest to be stuck). `inProgress` is
+            missing from an older server during a deploy, in which case the
+            card says so instead of claiming there are none. */}
+        <div className="card">
+          <div className="card-title-row">
+            <h3 className="card-title">On the road now</h3>
+            <span className="muted">Oldest assignment first</span>
+          </div>
+
+          {opsState === 'loading' ? (
+            <SkeletonRows count={3} />
+          ) : opsState === 'ready' && ops.data!.inProgress === undefined ? (
+            <p className="muted">Not available yet</p>
+          ) : opsState === 'empty' || (opsState === 'ready' && ops.data!.inProgress!.length === 0) ? (
+            <EmptyState title="No deliveries in progress" body="No order is with a FEASTY rider right now." />
+          ) : opsState === 'ready' ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Restaurant</th>
+                    <th>Courier</th>
+                    <th>Assigned at</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ops.data!.inProgress!.map((row) => (
+                    <tr key={row.orderId}>
+                      <td>
+                        <Link to={`/orders/${encodeURIComponent(row.orderId)}`} style={ID_STYLE}>
+                          #{row.orderId.slice(-8).toUpperCase()}
+                        </Link>
+                      </td>
+                      <td>
+                        <StatusBadge label={row.status} tone={getOrderTone(row.status)} />
+                      </td>
+                      <td>{row.restaurantName ?? '—'}</td>
+                      <td>{row.courierName ?? row.courierId?.slice(-6).toUpperCase() ?? '—'}</td>
+                      <td className="muted">{formatDateTime(row.assignedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
 
         {/* Titled "Active assignments" before, but the read is the 50 most

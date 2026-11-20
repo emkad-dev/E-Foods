@@ -106,8 +106,20 @@ export type DispatchSosEventRecord = {
   createdAt: string | null;
 };
 
+export type InProgressDeliveryRecord = {
+  orderId: string;
+  status: string;
+  restaurantName: string | null;
+  courierId: string | null;
+  courierName: string | null;
+  assignedAt: string | null;
+  updatedAt: string | null;
+};
+
 export type AdminDispatchOpsView = {
   activeAssignments: DispatchAssignmentRecord[];
+  // Optional: an older server (deploy window) does not send it.
+  inProgress?: InProgressDeliveryRecord[];
   sosEvents: DispatchSosEventRecord[];
 };
 

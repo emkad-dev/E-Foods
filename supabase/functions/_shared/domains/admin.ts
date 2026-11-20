@@ -71,9 +71,15 @@ import {
   loadOrderRelations,
   maybeExpireUnpaidOrder,
   normalizeOrderStatus,
+  TERMINAL_ORDER_STATUSES,
   toOrderSnapshotResponse,
   type CustomerOrderRow,
 } from '../orders.ts';
+import {
+  buildInProgressDeliveries,
+  type InProgressAssignmentInput,
+  type InProgressOrderInput,
+} from '../dispatchInProgress.ts';
 import { resolvePayoutActivationPlan } from '../partnerPayoutActivation.ts';
 import { createPaystackSubaccount, resolvePaystackBankAccount } from '../paystack.ts';
 import { loadRiskEvents, type RiskEventRow } from '../riskEvents.ts';
@@ -2256,9 +2262,36 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
     throw new Error(sosResult.error.message);
   }
 
+  // Every delivery still in progress that has a rider assignment. Filtered on
+  // the server (not "latest 50 then filter") so an old stuck delivery never
+  // falls off. Coarse SQL filter on raw terminal values, then the exact
+  // normalized filter + join in buildInProgressDeliveries.
+  const openOrdersResult = await serviceClient
+    .from('CustomerOrder')
+    .select('id,status,restaurantName,updatedAt')
+    .not('status', 'in', `(${[...TERMINAL_ORDER_STATUSES].join(',')})`)
+    .order('updatedAt', { ascending: true })
+    .limit(500);
+  if (openOrdersResult.error) {
+    throw new Error(openOrdersResult.error.message);
+  }
+  const openOrders = (openOrdersResult.data ?? []) as InProgressOrderInput[];
+  let inProgressAssignments: InProgressAssignmentInput[] = [];
+  if (openOrders.length > 0) {
+    const inProgressAssignmentsResult = await serviceClient
+      .from('DeliveryAssignment')
+      .select('orderId,courierId,courierName,assignedAt')
+      .in('orderId', openOrders.map((order) => order.id));
+    if (inProgressAssignmentsResult.error) {
+      throw new Error(inProgressAssignmentsResult.error.message);
+    }
+    inProgressAssignments = (inProgressAssignmentsResult.data ?? []) as InProgressAssignmentInput[];
+  }
+
   return json(200, {
     data: {
       activeAssignments: assignmentsResult.data ?? [],
+      inProgress: buildInProgressDeliveries(openOrders, inProgressAssignments),
       sosEvents: sosResult.data ?? [],
     },
   });
