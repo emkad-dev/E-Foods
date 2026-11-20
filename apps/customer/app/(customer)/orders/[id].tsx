@@ -328,10 +328,14 @@ export default function OrderTracking() {
       setRefreshingPayment(true);
       const result = await refreshCustomerPaymentStatus(order.id);
       setPaymentNotice(
-        `Payment status updated. Current payment state: ${formatPaymentStatusLabel(
-          result.paymentStatus,
-          order.payment?.method
-        )}.`
+        // A refund is only recorded at this point, not yet sent, so it reads
+        // the same as the order's own refund line.
+        result.paymentStatus === 'refunded'
+          ? 'Payment status updated. Refund being arranged.'
+          : `Payment status updated. Current payment state: ${formatPaymentStatusLabel(
+              result.paymentStatus,
+              order.payment?.method
+            )}.`
       );
     } catch (nextError) {
       setPaymentError(toUserMessage(nextError, 'We could not verify this payment right now.'));

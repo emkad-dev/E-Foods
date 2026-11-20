@@ -175,6 +175,17 @@ export default function PaymentCallbackScreen() {
           return;
         }
 
+        // Money that landed after the order was closed: the server records a
+        // refund at once, so the payment comes back 'refunded'. That is final:
+        // send the customer to the order, which says "Refund being arranged",
+        // instead of leaving them on "Confirming payment" with an offer to pay
+        // again. The cart is kept so they can reorder.
+        if (result.paymentStatus === 'refunded') {
+          forgetPaymentHandoff(getSessionStorage());
+          router.replace(`/orders/${targetOrderId}`);
+          return;
+        }
+
         if (result.paymentStatus === 'failed') {
           forgetPaymentHandoff(getSessionStorage());
           setRefreshError('The payment was not completed successfully.');
