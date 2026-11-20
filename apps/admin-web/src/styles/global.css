@@ -958,7 +958,8 @@ textarea {
 .inbox-composer textarea,
 .broadcast-compose textarea,
 .audit-input,
-.row-input {
+.row-input,
+.broadcast-send input[type='datetime-local'] {
   border: 1px solid var(--field-edge);
 }
 

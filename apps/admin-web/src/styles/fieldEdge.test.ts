@@ -33,7 +33,7 @@ test('--field-edge is defined and reaches 3:1 on white and on the canvas', () =>
 test('every text-entry control takes its border from the one shared --field-edge rule', () => {
   const rule = css.match(/([^{}]+)\{\s*border:\s*1px solid var\(--field-edge\);\s*\}/);
   assert.ok(rule, 'expected a single rule drawing border: 1px solid var(--field-edge)');
-  for (const selector of ['.field select', '.field textarea', '.inbox-composer textarea', '.broadcast-compose textarea', '.audit-input', '.row-input']) {
+  for (const selector of ['.field select', '.field textarea', '.inbox-composer textarea', '.broadcast-compose textarea', '.audit-input', '.row-input', ".broadcast-send input[type='datetime-local']"]) {
     assert.ok(rule![1].includes(selector), `${selector} must be in the shared field-edge rule`);
   }
   assert.match(rule![1], /\.field input/);
