@@ -7,7 +7,7 @@ Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
-const { buildInProgressDeliveries } = await import('./dispatchInProgress.ts');
+const { buildInProgressDeliveries, RIDER_HELD_ORDER_STATUSES } = await import('./dispatchInProgress.ts');
 
 function assertEquals(actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
@@ -88,4 +88,25 @@ Deno.test('legacy status spellings are normalized and kept when not terminal', (
   const assignments = orders.map((o) => assignment(o.id, '2026-11-20T09:00:00.000Z'));
   const result = buildInProgressDeliveries(orders, assignments);
   assertEquals(result.map((r) => r.status), ['placed', 'ready_for_pickup', 'placed']);
+});
+
+Deno.test('assignments with a null or blank courierId are not on the road', () => {
+  const orders = [order('n', 'picked_up'), order('b', 'picked_up'), order('ok', 'picked_up')];
+  const assignments = [
+    assignment('n', '2026-11-20T09:00:00.000Z', null),
+    assignment('b', '2026-11-20T09:00:00.000Z', '  '),
+    assignment('ok', '2026-11-20T09:00:00.000Z'),
+  ];
+  assertEquals(buildInProgressDeliveries(orders, assignments).map((r) => r.orderId), ['ok']);
+});
+
+// normalizeOrderStatus only maps pending/confirmed -> placed and ready ->
+// ready_for_pickup; no non-canonical spelling normalizes to a terminal status,
+// so there is no normalization-to-terminal case to test (the terminal test
+// above covers the canonical terminal values).
+Deno.test('rider-held status list excludes terminal and pre-kitchen statuses', () => {
+  for (const s of ['delivered', 'cancelled', 'rejected', 'failed_delivery', 'placed', 'draft', 'scheduled']) {
+    if (RIDER_HELD_ORDER_STATUSES.includes(s)) throw new Error(`${s} must not be rider-held`);
+  }
+  if (!RIDER_HELD_ORDER_STATUSES.includes('on_the_way')) throw new Error('on_the_way missing');
 });

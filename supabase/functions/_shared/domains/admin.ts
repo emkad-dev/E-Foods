@@ -71,12 +71,12 @@ import {
   loadOrderRelations,
   maybeExpireUnpaidOrder,
   normalizeOrderStatus,
-  TERMINAL_ORDER_STATUSES,
   toOrderSnapshotResponse,
   type CustomerOrderRow,
 } from '../orders.ts';
 import {
   buildInProgressDeliveries,
+  RIDER_HELD_ORDER_STATUSES,
   type InProgressAssignmentInput,
   type InProgressOrderInput,
 } from '../dispatchInProgress.ts';
@@ -2264,13 +2264,16 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
 
   // Every delivery still in progress that has a rider assignment. Filtered on
   // the server (not "latest 50 then filter") so an old stuck delivery never
-  // falls off. Coarse SQL filter on raw terminal values, then the exact
-  // normalized filter + join in buildInProgressDeliveries.
+  // falls off. SQL narrows to rider-held statuses; the exact normalized
+  // terminal filter + join happen in buildInProgressDeliveries.
   const openOrdersResult = await serviceClient
     .from('CustomerOrder')
     .select('id,status,restaurantName,updatedAt')
-    .not('status', 'in', `(${[...TERMINAL_ORDER_STATUSES].join(',')})`)
+    .in('status', [...RIDER_HELD_ORDER_STATUSES])
     .order('updatedAt', { ascending: true })
+    // Safety net only: restricted to rider-held statuses this is far above any
+    // realistic number of simultaneous deliveries, and oldest-updated (the
+    // likeliest stuck) rows are kept first.
     .limit(500);
   if (openOrdersResult.error) {
     throw new Error(openOrdersResult.error.message);

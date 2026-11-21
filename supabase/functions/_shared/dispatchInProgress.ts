@@ -1,4 +1,21 @@
-import { normalizeOrderStatus, TERMINAL_ORDER_STATUSES } from './orders.ts';
+import { normalizeOrderStatus, ORDER_STATUS, TERMINAL_ORDER_STATUSES } from './orders.ts';
+
+// Statuses at which a FEASTY rider can hold an order: dispatch assigns from
+// accepted/preparing/ready_for_pickup (UNOWNED_DISPATCHABLE_STATUSES in
+// domains/dispatch.ts, AUTO_DISPATCH_ELIGIBLE_STATUSES in dispatchSelection.ts),
+// the rider then moves it to picked_up -> on_the_way, and an escalated order
+// can still carry its rider. 'ready' is the legacy raw spelling that
+// normalizeOrderStatus maps to ready_for_pickup. draft/unpaid/placed/scheduled
+// never hold a rider, so they stay out of the query.
+export const RIDER_HELD_ORDER_STATUSES: readonly string[] = [
+  ORDER_STATUS.ACCEPTED,
+  ORDER_STATUS.PREPARING,
+  ORDER_STATUS.READY_FOR_PICKUP,
+  'ready',
+  ORDER_STATUS.PICKED_UP,
+  ORDER_STATUS.ON_THE_WAY,
+  ORDER_STATUS.ESCALATED,
+];
 
 export type InProgressOrderInput = {
   id: string;
@@ -34,6 +51,8 @@ export function buildInProgressDeliveries(
 ): InProgressDelivery[] {
   const byOrderId = new Map<string, InProgressAssignmentInput>();
   for (const assignment of assignments) {
+    // An assignment row with no rider (null/blank courierId) is unassigned.
+    if (!assignment.courierId || assignment.courierId.trim() === '') continue;
     byOrderId.set(assignment.orderId, assignment);
   }
 

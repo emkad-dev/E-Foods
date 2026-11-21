@@ -393,7 +393,7 @@ export default function DispatchPage() {
                         </Link>
                       </td>
                       <td>
-                        <StatusBadge label={row.status} tone={getOrderTone(row.status)} />
+                        <StatusBadge label={humanizeStatus(row.status)} tone={getOrderTone(row.status)} />
                       </td>
                       <td>{row.restaurantName ?? '—'}</td>
                       <td>{row.courierName ?? row.courierId?.slice(-6).toUpperCase() ?? '—'}</td>
