@@ -17,6 +17,18 @@ export const RIDER_HELD_ORDER_STATUSES: readonly string[] = [
   ORDER_STATUS.ESCALATED,
 ];
 
+// How many rider-held orders the ops view looks at, and how many order ids go
+// into one DeliveryAssignment `.in()` read (keeps the request URL short).
+export const IN_PROGRESS_ORDER_LIMIT = 500;
+export const IN_PROGRESS_ASSIGNMENT_CHUNK = 100;
+
+export function chunk<T>(items: readonly T[], size: number): T[][] {
+  const step = Math.max(1, Math.floor(size));
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += step) out.push(items.slice(i, i + step));
+  return out;
+}
+
 export type InProgressOrderInput = {
   id: string;
   status: string;

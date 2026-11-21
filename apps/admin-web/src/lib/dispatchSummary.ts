@@ -49,3 +49,19 @@ export const distinctOwner = (assignment: { courierId: string | null; dispatchOw
   const owner = assignment.dispatchOwnerId?.trim() || null;
   return owner && owner !== (assignment.courierId?.trim() || null) ? owner : null;
 };
+
+/**
+ * The name to show for a courier: their name if it has any text, else the last
+ * six characters of their id, else a dash. A blank or whitespace-only name must
+ * never render as an empty cell.
+ */
+export const courierLabel = (
+  name: string | null | undefined,
+  id: string | null | undefined,
+): string => {
+  const trimmedName = name?.trim();
+  if (trimmedName) return trimmedName;
+  const trimmedId = id?.trim();
+  if (trimmedId) return trimmedId.slice(-6).toUpperCase();
+  return '—';
+};

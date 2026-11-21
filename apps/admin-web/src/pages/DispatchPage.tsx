@@ -4,12 +4,16 @@ import ErrorBanner from '../components/ErrorBanner';
 import KpiCard from '../components/KpiCard';
 import { SkeletonRows } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
-import { distinctOwner, summarizeRoster } from '../lib/dispatchSummary';
+import { courierLabel, distinctOwner, summarizeRoster } from '../lib/dispatchSummary';
 import { formatCurrency, formatDateTime, formatNumber, humanizeStatus } from '../lib/format';
 import { usePolledRpc } from '../lib/usePolledRpc';
 import { resolveViewState } from '../lib/viewState';
 import { getAdminDispatchOpsView, getAdminRiderPayouts, getAdminRiderRoster } from '../services/platformReads';
 import { getOrderTone, type AdminTone } from '../theme/tones';
+
+// Orders the server looks at for "On the road now" (IN_PROGRESS_ORDER_LIMIT in
+// supabase/functions/_shared/dispatchInProgress.ts).
+const IN_PROGRESS_ORDER_LIMIT = 500;
 
 const ID_STYLE: React.CSSProperties = { fontFamily: 'monospace', fontSize: '12px' };
 
@@ -53,7 +57,7 @@ export default function DispatchPage() {
 
   const riderLabelFor = (uid: string | null) => {
     const rider = uid ? (roster.data?.riders.find((entry) => entry.id === uid) ?? null) : null;
-    return { rider, label: rider?.displayName ?? uid?.slice(-6).toUpperCase() ?? 'Unknown rider' };
+    return { rider, label: uid ? courierLabel(rider?.displayName, uid) : 'Unknown rider' };
   };
 
   return (
@@ -365,6 +369,15 @@ export default function DispatchPage() {
             <h3 className="card-title">On the road now</h3>
             <span className="muted">Rider assigned, not yet delivered · oldest first</span>
           </div>
+          {opsState === 'ready' &&
+          ops.data!.inProgress !== undefined &&
+          typeof ops.data!.inProgressTotal === 'number' &&
+          ops.data!.inProgressTotal > IN_PROGRESS_ORDER_LIMIT ? (
+            <p className="muted">
+              Showing the {IN_PROGRESS_ORDER_LIMIT} most recently updated of{' '}
+              {formatNumber(ops.data!.inProgressTotal)} open rider orders.
+            </p>
+          ) : null}
 
           {opsState === 'loading' ? (
             <SkeletonRows count={3} />
@@ -396,7 +409,7 @@ export default function DispatchPage() {
                         <StatusBadge label={humanizeStatus(row.status)} tone={getOrderTone(row.status)} />
                       </td>
                       <td>{row.restaurantName ?? '—'}</td>
-                      <td>{row.courierName ?? row.courierId?.slice(-6).toUpperCase() ?? '—'}</td>
+                      <td>{courierLabel(row.courierName, row.courierId)}</td>
                       <td className="muted">{formatDateTime(row.assignedAt)}</td>
                     </tr>
                   ))}
@@ -442,7 +455,7 @@ export default function DispatchPage() {
                           </Link>
                         </td>
                         <td>
-                          {row.courierName ?? row.courierId?.slice(-6).toUpperCase() ?? '—'}
+                          {courierLabel(row.courierName, row.courierId)}
                           {owner ? (
                             <div className="muted">Owner: {riderLabelFor(owner).label}</div>
                           ) : null}

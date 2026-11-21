@@ -7,7 +7,7 @@ Deno.env.set('SUPABASE_URL', 'http://localhost:54321');
 Deno.env.set('SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key-not-real');
 
-const { buildInProgressDeliveries, RIDER_HELD_ORDER_STATUSES } = await import('./dispatchInProgress.ts');
+const { buildInProgressDeliveries, chunk, RIDER_HELD_ORDER_STATUSES } = await import('./dispatchInProgress.ts');
 
 function assertEquals(actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
@@ -109,4 +109,11 @@ Deno.test('rider-held status list excludes terminal and pre-kitchen statuses', (
     if (RIDER_HELD_ORDER_STATUSES.includes(s)) throw new Error(`${s} must not be rider-held`);
   }
   if (!RIDER_HELD_ORDER_STATUSES.includes('on_the_way')) throw new Error('on_the_way missing');
+});
+
+Deno.test('chunk splits ids into fixed-size batches', () => {
+  assertEquals(chunk([], 100), []);
+  assertEquals(chunk([1, 2, 3, 4], 2), [[1, 2], [3, 4]]);
+  assertEquals(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  assertEquals(chunk([1, 2, 3], 100), [[1, 2, 3]]);
 });

@@ -120,6 +120,8 @@ export type AdminDispatchOpsView = {
   activeAssignments: DispatchAssignmentRecord[];
   // Optional: an older server (deploy window) does not send it.
   inProgress?: InProgressDeliveryRecord[];
+  // Optional: exact count of open rider orders, sent only with `inProgress`.
+  inProgressTotal?: number;
   sosEvents: DispatchSosEventRecord[];
 };
 

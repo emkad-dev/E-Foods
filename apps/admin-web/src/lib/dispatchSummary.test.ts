@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { distinctOwner, summarizeRoster } from './dispatchSummary.ts';
+import { courierLabel, distinctOwner, summarizeRoster } from './dispatchSummary.ts';
 
 test('counts riders online, carrying orders, and waiting for approval', () => {
   const summary = summarizeRoster([
@@ -23,4 +23,15 @@ test('the owner shows only when it differs from the courier', () => {
   assert.equal(distinctOwner({ courierId: null, dispatchOwnerId: null }), null);
   assert.equal(distinctOwner({ courierId: 'rider-2', dispatchOwnerId: 'rider-1' }), 'rider-1');
   assert.equal(distinctOwner({ courierId: null, dispatchOwnerId: 'rider-1' }), 'rider-1');
+});
+
+test('a courier label never comes out blank', () => {
+  assert.equal(courierLabel('Tunde', 'rider-abc123'), 'Tunde');
+  assert.equal(courierLabel('  Tunde  ', null), 'Tunde');
+  assert.equal(courierLabel('   ', 'rider-abc123'), 'ABC123');
+  assert.equal(courierLabel('', 'rider-abc123'), 'ABC123');
+  assert.equal(courierLabel(null, 'rider-abc123'), 'ABC123');
+  assert.equal(courierLabel(undefined, ' rider-xyz789 '), 'XYZ789');
+  assert.equal(courierLabel(null, null), '—');
+  assert.equal(courierLabel('  ', '  '), '—');
 });

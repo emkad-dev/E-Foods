@@ -76,6 +76,9 @@ import {
 } from '../orders.ts';
 import {
   buildInProgressDeliveries,
+  chunk,
+  IN_PROGRESS_ASSIGNMENT_CHUNK,
+  IN_PROGRESS_ORDER_LIMIT,
   RIDER_HELD_ORDER_STATUSES,
   type InProgressAssignmentInput,
   type InProgressOrderInput,
@@ -2260,14 +2263,15 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
       .limit(50),
     serviceClient
       .from('CustomerOrder')
-      .select('id,status,restaurantName,updatedAt')
+      .select('id,status,restaurantName,updatedAt', { count: 'exact' })
       .eq('fulfillmentType', 'delivery')
       .in('status', [...RIDER_HELD_ORDER_STATUSES])
-      .order('updatedAt', { ascending: true })
-      // Safety net only: restricted to rider-held statuses this is far above any
-      // realistic number of simultaneous deliveries, and oldest-updated (the
-      // likeliest stuck) rows are kept first.
-      .limit(500),
+      .order('updatedAt', { ascending: false })
+      // Safety net only: far above any realistic number of simultaneous
+      // deliveries. If it is ever exceeded, keep the most recently updated
+      // (live) rows rather than long-stale ones; the exact total is returned
+      // as inProgressTotal so the page can say rows were left out.
+      .limit(IN_PROGRESS_ORDER_LIMIT),
   ]);
 
   if (assignmentsResult.error) {
@@ -2282,23 +2286,26 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
   // rather than failing the RPC, which would also take down the SOS card and
   // the nav SOS badge.
   let inProgress: ReturnType<typeof buildInProgressDeliveries> | undefined;
+  let inProgressTotal: number | undefined;
   try {
     if (openOrdersResult.error) {
       throw new Error(openOrdersResult.error.message);
     }
     const openOrders = (openOrdersResult.data ?? []) as InProgressOrderInput[];
     let inProgressAssignments: InProgressAssignmentInput[] = [];
-    if (openOrders.length > 0) {
+    // Batched so 500 uuids never build one very long request URL.
+    for (const ids of chunk(openOrders.map((order) => order.id), IN_PROGRESS_ASSIGNMENT_CHUNK)) {
       const inProgressAssignmentsResult = await serviceClient
         .from('DeliveryAssignment')
         .select('orderId,courierId,courierName,assignedAt')
-        .in('orderId', openOrders.map((order) => order.id));
+        .in('orderId', ids);
       if (inProgressAssignmentsResult.error) {
         throw new Error(inProgressAssignmentsResult.error.message);
       }
-      inProgressAssignments = (inProgressAssignmentsResult.data ?? []) as InProgressAssignmentInput[];
+      inProgressAssignments.push(...((inProgressAssignmentsResult.data ?? []) as InProgressAssignmentInput[]));
     }
     inProgress = buildInProgressDeliveries(openOrders, inProgressAssignments);
+    if (typeof openOrdersResult.count === 'number') inProgressTotal = openOrdersResult.count;
   } catch (error) {
     console.error('Dispatch in-progress lookup failed; omitting inProgress.', error);
   }
@@ -2307,6 +2314,7 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
     data: {
       activeAssignments: assignmentsResult.data ?? [],
       ...(inProgress ? { inProgress } : {}),
+      ...(inProgress && inProgressTotal !== undefined ? { inProgressTotal } : {}),
       sosEvents: sosResult.data ?? [],
     },
   });
