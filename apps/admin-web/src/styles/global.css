@@ -1051,6 +1051,14 @@ textarea {
   cursor: pointer;
 }
 
+/* The Orders lookup uses .select-pill as a text input. The browser default
+   placeholder measured 3.56:1; --text-muted is >= 4.5:1 on the pill fill over
+   both white (#f1f1f1) and the canvas (#e4e2de). Guarded by fieldEdge.test.ts. */
+.select-pill::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
 /* ---------- States ---------- */
 
 .error-banner {

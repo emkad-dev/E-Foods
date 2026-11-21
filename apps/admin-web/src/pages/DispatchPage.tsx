@@ -363,7 +363,7 @@ export default function DispatchPage() {
         <div className="card">
           <div className="card-title-row">
             <h3 className="card-title">On the road now</h3>
-            <span className="muted">Oldest assignment first</span>
+            <span className="muted">Rider assigned, not yet delivered · oldest first</span>
           </div>
 
           {opsState === 'loading' ? (

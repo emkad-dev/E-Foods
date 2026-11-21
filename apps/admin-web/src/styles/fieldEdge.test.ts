@@ -38,3 +38,23 @@ test('every text-entry control takes its border from the one shared --field-edge
   }
   assert.match(rule![1], /\.field input/);
 });
+
+test('the .select-pill placeholder colour reaches 4.5:1 on the pill fill over white and over the canvas', () => {
+  const rule = css.match(/\.select-pill::placeholder\s*\{([^}]*)\}/);
+  assert.ok(rule, 'global.css must style .select-pill::placeholder');
+  const ref = rule![1].match(/color:\s*var\((--[a-z-]+)\)/);
+  assert.ok(ref, 'placeholder colour must be a design token');
+  const token = css.match(new RegExp(String.raw`${ref![1]}:\s*(#[0-9a-fA-F]{6})\s*;`));
+  assert.ok(token, `${ref![1]} must be a hex token`);
+  // Pill fill is rgba(21,23,26,0.06): composite it over each surface.
+  const pill = css.match(/\.select-pill\s*\{[^}]*background:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+  assert.ok(pill, 'expected the .select-pill rgba background');
+  const [pr, pg, pb] = [pill![1], pill![2], pill![3]].map(Number);
+  const alpha = Number(pill![4]);
+  for (const surface of ['#ffffff', '#f1efeb']) {
+    const under = [1, 3, 5].map((i) => parseInt(surface.slice(i, i + 2), 16));
+    const mixed = [pr, pg, pb].map((c, i) => Math.round(c * alpha + under[i] * (1 - alpha)));
+    const hex = `#${mixed.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+    assert.ok(contrast(token![1], hex) >= 4.5, `placeholder must be >= 4.5:1 on the pill over ${surface} (${hex})`);
+  }
+});

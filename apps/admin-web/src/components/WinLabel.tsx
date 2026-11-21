@@ -22,9 +22,10 @@
  *
  * Where it is used (each an owner decision): Approve a partner and Approve a
  * rider ("Welcome aboard"), Publish a restaurant ("Go live"), Send promo
- * ("Reach customers"), Send now on a broadcast ("Get the word out") and Mark
- * resolved on an alert ("Case closed"). The broadcast send goes to every user
- * and cannot be undone, so its confirm dialog keeps the plain "Send now".
+ * ("Reach customers"), Send now on a broadcast ("Get the word out"), Mark
+ * resolved on an alert ("Case closed") and Close on an Inbox conversation
+ * ("Case closed"). The broadcast send goes to every user and cannot be
+ * undone, so its confirm dialog keeps the plain "Send now".
  *
  * Never use it on a destructive action -- Reject, Delete, Disable -- or on
  * Enable, which restores a suspended account. A cheerful hover line on those

@@ -16,8 +16,9 @@
 -- and re-runnable (REVOKE is idempotent). Run the BEFORE checks first and keep
 -- the output; run the VERIFY checks after.
 --
--- BEFORE (read-only; expect one row with prosecdef = true and proacl that
--- includes =X and anon/authenticated grants before this runs):
+-- BEFORE (read-only; expect one row with prosecdef = true and proacl either
+-- null (default privileges: PUBLIC can execute) or including =X, i.e. a PUBLIC
+-- grant, before this runs):
 --
 --   select p.oid::regprocedure, pg_get_function_result(p.oid), p.prosecdef, p.proacl
 --   from pg_proc p
@@ -33,13 +34,15 @@
 --     has_function_privilege('authenticated', 'public.rls_auto_enable()', 'EXECUTE') as auth_can;
 --
 -- CONFIRM the event trigger still enables RLS on a new table. Run as one
--- block; expect relrowsecurity = true if the auto-enable trigger is installed.
--- If it was already false BEFORE this migration, the trigger is not installed
--- and this check says nothing about the revoke.
+-- block; it is wrapped in a transaction that ROLLS BACK, so the probe table
+-- can never be left behind. Expect relrowsecurity = true if the auto-enable
+-- trigger is installed. If it was already false BEFORE this migration, the
+-- trigger is not installed and this check says nothing about the revoke.
 --
+--   begin;
 --   create table public.zz_rls_probe (id int);
 --   select relrowsecurity from pg_class where oid = 'public.zz_rls_probe'::regclass;
---   drop table public.zz_rls_probe;
+--   rollback;
 --
 -- OPTIONAL: confirm 20261020c landed (expect false):
 --
@@ -50,7 +53,9 @@
 -- flags it again after a toggle, re-run the revoke below.
 --
 -- REVERSE STEPS (run in one transaction if this has to be rolled back):
+--   begin;
 --   grant execute on function public.rls_auto_enable() to public, anon, authenticated;
+--   commit;
 
 begin;
 revoke execute on function public.rls_auto_enable() from public, anon, authenticated;

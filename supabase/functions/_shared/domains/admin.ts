@@ -2240,7 +2240,12 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
 
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const [assignmentsResult, sosResult] = await Promise.all([
+  // Open delivery orders for the "On the road now" list. Started inside the
+  // same Promise.all as the SOS reads (no added latency on the nav poll) and
+  // restricted to delivery orders: pickup orders never hold a rider. SQL narrows
+  // to rider-held statuses; the exact normalized terminal filter + join happen
+  // in buildInProgressDeliveries.
+  const [assignmentsResult, sosResult, openOrdersResult] = await Promise.all([
     serviceClient
       .from('DeliveryAssignment')
       .select('orderId,courierId,courierName,assignedAt,dispatchOwnerId')
@@ -2253,6 +2258,16 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
       .gte('createdAt', since24h)
       .order('createdAt', { ascending: false })
       .limit(50),
+    serviceClient
+      .from('CustomerOrder')
+      .select('id,status,restaurantName,updatedAt')
+      .eq('fulfillmentType', 'delivery')
+      .in('status', [...RIDER_HELD_ORDER_STATUSES])
+      .order('updatedAt', { ascending: true })
+      // Safety net only: restricted to rider-held statuses this is far above any
+      // realistic number of simultaneous deliveries, and oldest-updated (the
+      // likeliest stuck) rows are kept first.
+      .limit(500),
   ]);
 
   if (assignmentsResult.error) {
@@ -2262,39 +2277,36 @@ const adminGetDispatchOpsView: Handler = async ({ context }) => {
     throw new Error(sosResult.error.message);
   }
 
-  // Every delivery still in progress that has a rider assignment. Filtered on
-  // the server (not "latest 50 then filter") so an old stuck delivery never
-  // falls off. SQL narrows to rider-held statuses; the exact normalized
-  // terminal filter + join happen in buildInProgressDeliveries.
-  const openOrdersResult = await serviceClient
-    .from('CustomerOrder')
-    .select('id,status,restaurantName,updatedAt')
-    .in('status', [...RIDER_HELD_ORDER_STATUSES])
-    .order('updatedAt', { ascending: true })
-    // Safety net only: restricted to rider-held statuses this is far above any
-    // realistic number of simultaneous deliveries, and oldest-updated (the
-    // likeliest stuck) rows are kept first.
-    .limit(500);
-  if (openOrdersResult.error) {
-    throw new Error(openOrdersResult.error.message);
-  }
-  const openOrders = (openOrdersResult.data ?? []) as InProgressOrderInput[];
-  let inProgressAssignments: InProgressAssignmentInput[] = [];
-  if (openOrders.length > 0) {
-    const inProgressAssignmentsResult = await serviceClient
-      .from('DeliveryAssignment')
-      .select('orderId,courierId,courierName,assignedAt')
-      .in('orderId', openOrders.map((order) => order.id));
-    if (inProgressAssignmentsResult.error) {
-      throw new Error(inProgressAssignmentsResult.error.message);
+  // The in-progress list is an add-on: if any of its reads fail, log it
+  // server-side and OMIT `inProgress` (the page shows "Not available yet")
+  // rather than failing the RPC, which would also take down the SOS card and
+  // the nav SOS badge.
+  let inProgress: ReturnType<typeof buildInProgressDeliveries> | undefined;
+  try {
+    if (openOrdersResult.error) {
+      throw new Error(openOrdersResult.error.message);
     }
-    inProgressAssignments = (inProgressAssignmentsResult.data ?? []) as InProgressAssignmentInput[];
+    const openOrders = (openOrdersResult.data ?? []) as InProgressOrderInput[];
+    let inProgressAssignments: InProgressAssignmentInput[] = [];
+    if (openOrders.length > 0) {
+      const inProgressAssignmentsResult = await serviceClient
+        .from('DeliveryAssignment')
+        .select('orderId,courierId,courierName,assignedAt')
+        .in('orderId', openOrders.map((order) => order.id));
+      if (inProgressAssignmentsResult.error) {
+        throw new Error(inProgressAssignmentsResult.error.message);
+      }
+      inProgressAssignments = (inProgressAssignmentsResult.data ?? []) as InProgressAssignmentInput[];
+    }
+    inProgress = buildInProgressDeliveries(openOrders, inProgressAssignments);
+  } catch (error) {
+    console.error('Dispatch in-progress lookup failed; omitting inProgress.', error);
   }
 
   return json(200, {
     data: {
       activeAssignments: assignmentsResult.data ?? [],
-      inProgress: buildInProgressDeliveries(openOrders, inProgressAssignments),
+      ...(inProgress ? { inProgress } : {}),
       sosEvents: sosResult.data ?? [],
     },
   });
